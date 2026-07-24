@@ -39,14 +39,14 @@ test("context attachment image tool reads selected local image as ephemeral mode
     const permission = {
       callerAgentId: TOOL_CONTEXT.callerAgentId,
       allowedTools: [
-        "attachment_list",
-        "attachment_read_image",
+        "AttachmentList",
+        "AttachmentReadImage",
       ],
     };
     const listed = await center.execute(
       {
         callId: "call:list-image",
-        toolName: "attachment_list",
+        toolName: "AttachmentList",
         input: {},
       },
       TOOL_CONTEXT,
@@ -55,7 +55,7 @@ test("context attachment image tool reads selected local image as ephemeral mode
     const read = await center.execute(
       {
         callId: "call:read-image",
-        toolName: "attachment_read_image",
+        toolName: "AttachmentReadImage",
         input: { attachmentId: "ctx_screenshot", detail: "high" },
       },
       TOOL_CONTEXT,
@@ -115,13 +115,13 @@ test("context attachment image tool reads image inside selected local project by
     const result = await center.execute(
       {
         callId: "call:read-project-image",
-        toolName: "attachment_read_image",
+        toolName: "AttachmentReadImage",
         input: { attachmentId: "ctx_project", path: "assets/screen.jpg" },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["attachment_read_image"],
+        allowedTools: ["AttachmentReadImage"],
       }
     );
     const modelVisible = JSON.stringify(result.output);
@@ -168,13 +168,13 @@ test("context attachment image tool reports unsupported when model lacks vision 
     const result = await center.execute(
       {
         callId: "call:no-vision",
-        toolName: "attachment_read_image",
+        toolName: "AttachmentReadImage",
         input: { attachmentId: "ctx_diagram" },
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["attachment_read_image"],
+        allowedTools: ["AttachmentReadImage"],
       }
     );
     const modelVisible = JSON.stringify(result.output);

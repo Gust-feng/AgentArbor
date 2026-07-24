@@ -35,7 +35,7 @@ import { createReadSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { CodedExecutionError } from "../execution-errors/index.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 
-const AGENT_TOOL_NAMES = ["agent_call", "agent_spawn"];
+const AGENT_TOOL_NAMES = ["Agent", "AgentSpawn"];
 
 test("Ordinary Host resources preserve canonical context and expose mechanical, MCP, Skill, and native Sub-Agent capabilities", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-run-resources-"));
@@ -144,26 +144,26 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   assert.equal(acquired.resolvedMessages.at(-1)?.attachments?.[0]?.attachmentId, "screen");
   assert.equal(acquired.resolvedMessages.at(-1)?.content.includes("Review Skill"), true);
   assert.equal(acquired.resolvedMessages.at(-1)?.content.includes("review the image"), true);
-  assert.equal(acquired.tools.permission.allowedTools.includes("read"), true);
+  assert.equal(acquired.tools.permission.allowedTools.includes("Read"), true);
   assert.equal(acquired.tools.permission.allowedTools.includes("mcp_lookup"), true);
-  assert.equal(acquired.tools.permission.allowedTools.includes("skill_read"), true);
+  assert.equal(acquired.tools.permission.allowedTools.includes("SkillRead"), true);
   assert.equal(acquired.tools.context.confirmationPolicy, "prompt");
   assert.equal(acquired.tools.permission.confirmationPolicy, "prompt");
   assert.equal(acquired.capabilityResolution?.snapshotId, snapshot.snapshotId);
   assert.deepEqual(acquired.capabilityResolution?.allowedTools, [
     ...acquired.tools.permission.allowedTools,
-    "agent_call",
-    "agent_spawn",
+    "Agent",
+    "AgentSpawn",
   ]);
   assert.equal(acquired.capabilityResolution?.runMode, "agent");
   assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
-  assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["agent_call", "agent_spawn"]);
+  assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["Agent", "AgentSpawn"]);
   assert.equal(loopConfig?.toolDefinitionTokenCounter?.("visible definition"), "visible definition".length);
   loopConfig?.onProviderToolDefinitionMetrics?.({
     toolCount: 2,
     totalTokens: 19,
     tools: [{
-      toolName: "read",
+      toolName: "Read",
       operationType: "read-only",
       definitionHash: "definition-hash",
       definitionTokens: 11,
@@ -178,10 +178,10 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   const deniedSpawn = await acquirer.acquire(executionInput(
     snapshot,
     {
-      permissionBoundaryRefs: ["deny:tool:agent_spawn"],
+    permissionBoundaryRefs: ["deny:tool:AgentSpawn"],
     },
   ));
-  assert.deepEqual(deniedSpawn.agentTools?.map((tool) => tool.toolName), ["agent_call"]);
+  assert.deepEqual(deniedSpawn.agentTools?.map((tool) => tool.toolName), ["Agent"]);
 
   await acquired.release();
   await acquired.release();
@@ -282,7 +282,7 @@ test("Ordinary Host resources run retained Skill evidence and confirmation throu
   const snapshot = capabilitySnapshot(root, [], [outputReader.definition, confirmed.definition]);
   const model = fauxProvider();
   model.setResponses([
-    fauxAssistantMessage(fauxToolCall("skill_read", {
+    fauxAssistantMessage(fauxToolCall("SkillRead", {
       skillId: "review-skill",
       path: "references/guide.md",
       type: "reference",
@@ -292,7 +292,7 @@ test("Ordinary Host resources run retained Skill evidence and confirmation throu
       const visible = JSON.stringify(context.messages.at(-1));
       assert.match(visible, /tool-output:\/\/vertical-skill-evidence/u);
       assert.equal(visible.includes("SKILL_EVIDENCE_END"), false);
-      return fauxAssistantMessage(fauxToolCall("read_output", {
+      return fauxAssistantMessage(fauxToolCall("ReadOutput", {
         ref: "tool-output://vertical-skill-evidence",
         startChar: 0,
         maxChars: 20_000,
@@ -398,8 +398,8 @@ test("Ordinary Host resources run retained Skill evidence and confirmation throu
   assert.equal(model.state.callCount, 4);
   assert.equal(confirmedExecutions, 1);
   assert.deepEqual(accepted, [
-    { toolName: "skill_read", status: "completed" },
-    { toolName: "read_output", status: "completed" },
+    { toolName: "SkillRead", status: "completed" },
+    { toolName: "ReadOutput", status: "completed" },
     { toolName: "confirmed_fixture", status: "approval_required" },
     { toolName: "confirmed_fixture", status: "completed" },
   ]);
@@ -582,7 +582,7 @@ test("Ordinary run release cleans run resources without discarding retained outp
   const retained = await outputStore.retain({
     mediaType: "text/plain",
     content: "continue reading this result",
-    sourceToolName: "shell",
+    sourceToolName: "Shell",
     sourceCallId: "call-retained-output",
     ownerId: "run-cleanup",
   });
@@ -895,7 +895,7 @@ async function createSubAgentRoot(root: string): Promise<string> {
     "---",
     'name: "reviewer"',
     'description: "Review implementation facts."',
-    'allowed-tools: ["read"]',
+    'allowed-tools: ["Read"]',
     "---",
     "",
     "Review carefully and report complete evidence.",

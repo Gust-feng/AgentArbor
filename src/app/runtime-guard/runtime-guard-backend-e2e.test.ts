@@ -11,7 +11,10 @@ import { normalizeToolFactValue } from "../../domain/tools/index.js";
 import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
 import { closePanelServer } from "../panel-server/request-handler.js";
 import { createPanelRuntime } from "../panel-server/runtime.js";
-import { createLocalShellCommandTool } from "../tool-center/adapters/local-workspace-command-tools.js";
+import {
+  createDefaultCommandShellConfig,
+  createLocalShellCommandTool,
+} from "../tool-center/adapters/local-workspace-command-tools.js";
 import { ensurePidExited } from "../tool-center/adapters/background-process-test-utils.js";
 import {
   createPlatformProcessTerminator,
@@ -25,16 +28,26 @@ const context = {
   goalId: "goal-runtime-guard-e2e",
 };
 
-test("runtime guard workflow creates a demo project, serves it, reads command logs, and releases the port on cleanup", async () => {
+function commandForArgs(args: readonly string[], syntax: "cmd" | "powershell" | "posix"): string {
+  return args.map((argument) => {
+    if (syntax === "cmd") return `"${argument.replace(/"/g, '""')}"`;
+    if (syntax === "powershell") return `'${argument.replace(/'/g, "''")}'`;
+    return `'${argument.replace(/'/g, "'\\''")}'`;
+  }).join(" ");
+}
+
+test("runtime guard workflow creates a demo project, serves it, reads command logs, and releases the port on registry cleanup", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-runtime-guard-workflow-"));
   const runId = "run-runtime-guard-workflow";
   const registry = new InMemoryProcessRegistry();
+  const commandShell = createDefaultCommandShellConfig(process.platform, {});
   const toolRegistry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: root,
     playwrightAvailable: false,
     processRegistry: registry,
-    toolCatalogNames: ["create", "write", "read", "shell", "http_request"],
+    commandShell,
+    toolCatalogNames: ["Write", "ResearchRead", "Shell", "HttpRequest"],
   });
   const center = toolRegistry.createToolCenter("desktop-basic");
   const allowedTools = center.list().map((tool) => tool.name);
@@ -42,15 +55,15 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
   let cleaned = false;
 
   try {
-    assert.deepEqual(allowedTools, ["read", "create", "write", "shell", "http_request"]);
+    assert.deepEqual(allowedTools, ["ResearchRead", "Write", "Shell", "HttpRequest"]);
 
-    const createPackage = await executeTool("call-create-package", "create", {
+    const createPackage = await executeTool("call-create-package", "Write", {
       path: "demo/package.json",
       content: JSON.stringify({ type: "module", scripts: { dev: "node server.mjs" } }, null, 2),
     });
     assert.equal(createPackage.status, "completed");
 
-    const writeHtml = await executeTool("call-write-index", "write", {
+    const writeHtml = await executeTool("call-write-index", "Write", {
       path: "demo/public/index.html",
       content: [
         "<!doctype html>",
@@ -63,22 +76,17 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     });
     assert.equal(writeHtml.status, "completed");
 
-    const writeServer = await executeTool("call-write-server", "write", {
+    const writeServer = await executeTool("call-write-server", "Write", {
       path: "demo/server.mjs",
       content: demoServerSource(),
     });
     assert.equal(writeServer.status, "completed");
 
     const port = await unusedLocalPort();
-    const startServer = await executeTool("call-start-demo-server", "shell", {
-      command: process.execPath,
-      args: ["server.mjs", String(port)],
+    const startServer = await executeTool("call-start-demo-server", "Shell", {
+      command: commandForArgs([process.execPath, "server.mjs", String(port)], commandShell.syntax),
       cwd: "demo",
       background: true,
-      lifetime: "run",
-      backgroundWaitMs: 500,
-      waitForPort: port,
-      waitForPortTimeoutMs: 5_000,
     });
     assert.equal(
       startServer.status,
@@ -91,8 +99,6 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
 
     assert.equal(startResult.exitCode, null);
     assert.equal(startResult.background, true);
-    assert.equal(startResult.waitForPort, port);
-    assert.equal(startResult.portReady, true);
     assert.equal(typeof serverPid, "number");
     assert.match(logRef ?? "", /^command-log:\/\/[^\\/]+$/);
     assert.equal((stringField(startResult.stopCommand)?.length ?? 0) > 0, true);
@@ -102,10 +108,10 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     assert.equal(record.toolCallId, "call-start-demo-server");
     assert.equal(record.status, "running");
     assert.equal(record.logRef, logRef);
-    assert.equal(record.ports[0]?.port, port);
-    assert.equal(record.ports[0]?.ready, true);
+    assert.deepEqual(record.ports, []);
+    assert.equal((await waitForLocalPort({ port, timeoutMs: 5_000 })).ready, true);
 
-    const httpIndex = await executeTool("call-http-index", "http_request", {
+    const httpIndex = await executeTool("call-http-index", "HttpRequest", {
       url: `http://127.0.0.1:${port}/`,
       timeoutMs: 2_000,
     });
@@ -114,7 +120,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     assert.equal(httpIndexResult.statusCode, 200);
     assert.match(String(httpIndexResult.body), /runtime-guard-demo-ready/);
 
-    const httpStatus = await executeTool("call-http-status", "http_request", {
+    const httpStatus = await executeTool("call-http-status", "HttpRequest", {
       url: `http://127.0.0.1:${port}/api/status`,
       timeoutMs: 2_000,
     });
@@ -125,7 +131,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     assert.match(String(httpStatusResult.body), /"project":"runtime-guard-demo"/);
 
     const logRead = await waitForCommandLogContent(logRef!, /DEMO_SERVER_READY:/, async (callId) =>
-      executeTool(callId, "read", { ref: logRef, maxLength: 30_000 })
+      executeTool(callId, "ResearchRead", { ref: logRef, maxLength: 30_000 })
     );
     const logReadResult = asRecord(logRead.output);
     assert.equal(logRead.status, "completed");
@@ -134,7 +140,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     assert.match(String(logReadResult.contentPreview), new RegExp(`DEMO_SERVER_READY:${port}`));
     assert.equal(JSON.stringify(logReadResult.metadata).includes(String(startResult.logPath)), false);
 
-    const cleanup = await registry.cleanupByRun(runId, createPlatformProcessTerminator(), { reason: "cancel" });
+    const cleanup = await registry.cleanupOwnedBackgroundProcesses(createPlatformProcessTerminator(), { reason: "cancel" });
     cleaned = true;
 
     assert.deepEqual(cleanup.skipped, []);
@@ -147,7 +153,7 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     assert.equal(await waitForLocalPortRelease(port, 3_000), true);
   } finally {
     if (!cleaned) {
-      await registry.cleanupByRun(runId, createPlatformProcessTerminator()).catch(() => undefined);
+      await registry.cleanupOwnedBackgroundProcesses(createPlatformProcessTerminator()).catch(() => undefined);
     }
     await ensurePidExited(serverPid, 5_000).catch(() => undefined);
     await removeTempTree(root);

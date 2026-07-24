@@ -16,14 +16,14 @@ test("Sub-Agent contributions resolve a frozen definition and narrow inherited m
   const root = await subAgentRoot(t, [{
     name: "review-expert",
     description: "Review implementation facts.",
-    allowedTools: ["read", "shell", "agent_spawn"],
+    allowedTools: ["Read", "Shell", "AgentSpawn"],
     body: "Review carefully and report concrete evidence.",
   }]);
   const registry = new SubAgentRegistry({ roots: [root] });
   const tools = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read", "write", "agent_spawn"],
-    executableTools: ["read", "write", "agent_spawn"],
+    parentAllowedTools: ["Read", "Write", "AgentSpawn"],
+    executableTools: ["Read", "Write", "AgentSpawn"],
     exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME, SPAWN_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: true,
   });
@@ -41,7 +41,7 @@ test("Sub-Agent contributions resolve a frozen definition and narrow inherited m
 
   assert.equal(invocation.agentName, "review-expert");
   assert.equal(invocation.callerAgentId, "sub-agent:review-expert");
-  assert.deepEqual(invocation.allowedTools, ["read"]);
+  assert.deepEqual(invocation.allowedTools, ["Read"]);
   assert.match(invocation.instructions, /Review carefully/u);
   assert.match(invocation.input, /Review the patch/u);
   assert.match(invocation.input, /Focus on cancellation/u);
@@ -56,8 +56,8 @@ test("agent_spawn distinguishes inheritance, no tools, explicit narrowing, and p
   const root = await subAgentRoot(t, []);
   const [spawn] = await createSubAgentAgentTools({
     registry: new SubAgentRegistry({ roots: [root] }),
-    parentAllowedTools: ["read", "shell", "agent_call"],
-    executableTools: ["read", "shell", "agent_call"],
+    parentAllowedTools: ["Read", "Shell", "Agent"],
+    executableTools: ["Read", "Shell", "Agent"],
     exposedToolNames: [SPAWN_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: true,
   });
@@ -70,24 +70,24 @@ test("agent_spawn distinguishes inheritance, no tools, explicit narrowing, and p
     context: null,
   } as const;
   assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: null })).allowedTools, [
-    "read",
-    "shell",
+    "Read",
+    "Shell",
   ]);
   assert.deepEqual((await spawn!.resolve({
     role: base.role,
     instructions: base.instructions,
     task: base.task,
-  })).allowedTools, ["read", "shell"]);
+  })).allowedTools, ["Read", "Shell"]);
   assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: [] })).allowedTools, []);
-  assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: ["read"] })).allowedTools, ["read"]);
+  assert.deepEqual((await spawn!.resolve({ ...base, allowed_tools: ["Read"] })).allowedTools, ["Read"]);
   // Duplicate requests are normalized without changing the granted tool identity.
   assert.deepEqual(
-    (await spawn!.resolve({ ...base, allowed_tools: ["read", "read"] })).allowedTools,
-    ["read"],
+    (await spawn!.resolve({ ...base, allowed_tools: ["Read", "Read"] })).allowedTools,
+    ["Read"],
   );
   await assert.rejects(
-    spawn!.resolve({ ...base, allowed_tools: ["write"] }),
-    /requested unavailable tools: write/u,
+    spawn!.resolve({ ...base, allowed_tools: ["Write"] }),
+    /requested unavailable tools: Write/u,
   );
 });
 
@@ -140,22 +140,22 @@ test("Sub-Agent AgentTools only materialize names allowed by the frozen run boun
 
   const callOnly = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read"],
-    executableTools: ["read"],
+    parentAllowedTools: ["Read"],
+    executableTools: ["Read"],
     exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: true,
   });
   const none = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read"],
-    executableTools: ["read"],
+    parentAllowedTools: ["Read"],
+    executableTools: ["Read"],
     exposedToolNames: [],
     dynamicSpawnAvailable: true,
   });
   const unavailableSpawn = await createSubAgentAgentTools({
     registry,
-    parentAllowedTools: ["read"],
-    executableTools: ["read"],
+    parentAllowedTools: ["Read"],
+    executableTools: ["Read"],
     exposedToolNames: [SPAWN_SUB_AGENT_TOOL_NAME],
     dynamicSpawnAvailable: false,
   });

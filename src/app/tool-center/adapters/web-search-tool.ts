@@ -91,7 +91,7 @@ async function executeWebSearch(
       searched: false,
       query: "",
       results: [],
-      message: "web_search was cancelled.",
+      message: "WebSearch was cancelled.",
     };
   }
   if (query === undefined) {
@@ -101,7 +101,7 @@ async function executeWebSearch(
       searched: false,
       query: "",
       results: [],
-      message: "web_search requires a non-empty string query.",
+      message: "WebSearch requires a non-empty string query.",
     };
   }
 

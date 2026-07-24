@@ -297,9 +297,9 @@ test("read_output fits the final model projection while preserving its actual in
   const factId = "reader-fact-actual";
 
   const result = await center.execute(
-    { callId: "call-reader-actual", factId, toolName: "read_output", input },
+    { callId: "call-reader-actual", factId, toolName: "ReadOutput", input },
     TOOL_CONTEXT,
-    { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["read_output"] },
+    { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["ReadOutput"] },
   );
   const message = canonicalToolResultMessage(result);
   const output = result.output as ReadToolOutput;
@@ -351,7 +351,7 @@ test("independent ToolCenters share the configured store and rebuild large read-
   const store = deterministicStore();
   const producerRegistry = createAgentToolRegistry({
     toolOutputStore: store,
-    toolCatalogNames: ["read_output"],
+    toolCatalogNames: ["ReadOutput"],
   });
   const fixtures = [
     {
@@ -393,7 +393,7 @@ test("independent ToolCenters share the configured store and rebuild large read-
   const producerCenter = producerRegistry.createToolCenter("agent-basic");
   const readerCenter = createAgentToolRegistry({
     toolOutputStore: store,
-    toolCatalogNames: ["read_output"],
+    toolCatalogNames: ["ReadOutput"],
   }).createToolCenter("agent-basic");
 
   for (const fixture of fixtures) {
@@ -402,7 +402,7 @@ test("independent ToolCenters share the configured store and rebuild large read-
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: [fixture.toolName, "read_output"],
+        allowedTools: [fixture.toolName, "ReadOutput"],
       },
     );
     const delivery = result.output as {
@@ -483,13 +483,13 @@ async function readAllRetainedContent(
     const result = await center.execute(
       {
         callId: `read-shared-output-${segments.length + 1}`,
-        toolName: "read_output",
+        toolName: "ReadOutput",
         input,
       },
       TOOL_CONTEXT,
       {
         callerAgentId: TOOL_CONTEXT.callerAgentId,
-        allowedTools: ["read_output"],
+        allowedTools: ["ReadOutput"],
       },
     );
     assert.equal(result.status, "completed");

@@ -242,7 +242,7 @@ test("runDeepChildAgent inherits read_output as a transport companion without ex
   const childRun = makeChildRun(childSpec);
   const channel = new SequenceChannel([
     toolCallResponse("call-large-output", sourceToolName, {}),
-    toolCallResponse("call-read-output", "read_output", {
+    toolCallResponse("call-read-output", "ReadOutput", {
       ref: retainedRef,
       startChar: 0,
       maxChars: MAX_TOOL_OUTPUT_READ_CHARS,
@@ -286,7 +286,7 @@ test("runDeepChildAgent inherits read_output as a transport companion without ex
     capabilitySnapshot: capabilitySnapshotWithTools([
       sourceToolName,
       forbiddenToolName,
-      "read_output",
+      "ReadOutput",
     ]),
   });
 
@@ -296,16 +296,16 @@ test("runDeepChildAgent inherits read_output as a transport companion without ex
   assert.deepEqual(
     channel.requests.map((request) => request.tools?.map((tool) => tool.name)),
     [
-      [sourceToolName, "read_output"],
-      [sourceToolName, "read_output"],
-      [sourceToolName, "read_output"],
+      [sourceToolName, "ReadOutput"],
+      [sourceToolName, "ReadOutput"],
+      [sourceToolName, "ReadOutput"],
     ],
   );
   assert.deepEqual(
     result.execution.toolCalls.map((toolCall) => [toolCall.toolName, toolCall.status]),
     [
       [sourceToolName, "completed"],
-      ["read_output", "completed"],
+      ["ReadOutput", "completed"],
     ],
   );
   assert.deepEqual(result.summary.spec.allowedTools, [sourceToolName]);

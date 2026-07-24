@@ -33,9 +33,9 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
-    { callId: "call-search", toolName: "research_search", input: { query: "AgentArbor", sources: ["web"] } },
+    { callId: "call-search", toolName: "ResearchSearch", input: { query: "AgentArbor", sources: ["web"] } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    { callerAgentId: "agent-test", allowedTools: ["research_search", "research_read"] }
+    { callerAgentId: "agent-test", allowedTools: ["ResearchSearch", "ResearchRead"] }
   );
   const output = search.output as { readonly researchStatus?: string };
 
@@ -393,14 +393,14 @@ test("ToolCenter records in-flight research batch cancellation as cancelled", as
   const center = new ToolCenter();
   center.register(createResearchReadTool(runtime));
   const executing = center.execute(
-    { callId: "call-cancel-batch", toolName: "research_read", input: { ref: ["a.md", "b.md"] } },
+    { callId: "call-cancel-batch", toolName: "ResearchRead", input: { ref: ["a.md", "b.md"] } },
     {
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
       abortSignal: controller.signal,
     },
-    { callerAgentId: "agent-test", allowedTools: ["research_read"] },
+    { callerAgentId: "agent-test", allowedTools: ["ResearchRead"] },
   );
 
   await started;
@@ -588,13 +588,13 @@ test("ToolCenter read direct bad HTTP URL preserves page error facts through out
     env: {},
     fetch: pageFetch as unknown as FetchLike,
     playwrightAvailable: false,
-    toolCatalogNames: ["research_read"],
+    toolCatalogNames: ["ResearchRead"],
   });
 
   const result = await center.execute(
-    { callId: "call-read-refused-url", toolName: "research_read", input: { ref: "http://127.0.0.1:43210/status" } },
+    { callId: "call-read-refused-url", toolName: "ResearchRead", input: { ref: "http://127.0.0.1:43210/status" } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    { callerAgentId: "agent-test", allowedTools: ["research_read"] }
+    { callerAgentId: "agent-test", allowedTools: ["ResearchRead"] }
   );
   const output = result.output as {
     readonly researchStatus?: string;
@@ -634,13 +634,13 @@ test("ToolCenter search empty query is invalid-input instead of empty results", 
   const center = createResearchEnabledToolCenter({
     env: {},
     playwrightAvailable: false,
-    toolCatalogNames: ["research_search"],
+    toolCatalogNames: ["ResearchSearch"],
   });
 
   const result = await center.execute(
-    { callId: "call-search-empty-query", toolName: "research_search", input: { query: "   " } },
+    { callId: "call-search-empty-query", toolName: "ResearchSearch", input: { query: "   " } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    { callerAgentId: "agent-test", allowedTools: ["research_search"] }
+    { callerAgentId: "agent-test", allowedTools: ["ResearchSearch"] }
   );
   const output = result.output as {
     readonly researchStatus?: string;
@@ -719,9 +719,9 @@ test("default ToolCenter passes configured Tavily max results into ResearchRunti
   });
 
   const search = await center.execute(
-    { callId: "call-search", toolName: "research_search", input: { query: "AgentArbor", sources: ["web"] } },
+    { callId: "call-search", toolName: "ResearchSearch", input: { query: "AgentArbor", sources: ["web"] } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    { callerAgentId: "agent-test", allowedTools: ["research_search"] }
+    { callerAgentId: "agent-test", allowedTools: ["ResearchSearch"] }
   );
   const output = search.output as { results?: readonly unknown[] };
 
@@ -752,9 +752,9 @@ test("default ToolCenter folds search site into provider query without exposing 
   });
 
   const search = await center.execute(
-    { callId: "call-search-site", toolName: "research_search", input: { query: "AgentArbor", site: "https://Example.TEST/docs", sources: ["web"] } },
+    { callId: "call-search-site", toolName: "ResearchSearch", input: { query: "AgentArbor", site: "https://Example.TEST/docs", sources: ["web"] } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    { callerAgentId: "agent-test", allowedTools: ["research_search"] }
+    { callerAgentId: "agent-test", allowedTools: ["ResearchSearch"] }
   );
   const output = search.output as {
     readonly site?: string;
@@ -795,9 +795,9 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
     const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const names = center.list().map((tool) => tool.name);
     const search = await center.execute(
-      { callId: "call-search", toolName: "research_search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callId: "call-search", toolName: "ResearchSearch", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-      { callerAgentId: "agent-test", allowedTools: ["research_search", "research_read"] }
+      { callerAgentId: "agent-test", allowedTools: ["ResearchSearch", "ResearchRead"] }
     );
 
     assertCoreDesktopToolNames(names);
@@ -838,9 +838,9 @@ test("configured ToolCenter reads Exa web search config and routes search throug
 
     const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const search = await center.execute(
-      { callId: "call-search-exa", toolName: "research_search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callId: "call-search-exa", toolName: "ResearchSearch", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-      { callerAgentId: "agent-test", allowedTools: ["research_search", "research_read"] }
+      { callerAgentId: "agent-test", allowedTools: ["ResearchSearch", "ResearchRead"] }
     );
     const output = search.output as {
       readonly results?: readonly { readonly metadata?: Readonly<Record<string, unknown>>; readonly snippet?: string }[];
@@ -898,9 +898,9 @@ test("configured ToolCenter reads Metaso web search config and routes search thr
 
     const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const search = await center.execute(
-      { callId: "call-search-metaso", toolName: "research_search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callId: "call-search-metaso", toolName: "ResearchSearch", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-      { callerAgentId: "agent-test", allowedTools: ["research_search", "research_read"] }
+      { callerAgentId: "agent-test", allowedTools: ["ResearchSearch", "ResearchRead"] }
     );
     const output = search.output as {
       readonly results?: readonly { readonly metadata?: Readonly<Record<string, unknown>>; readonly snippet?: string }[];
@@ -929,9 +929,9 @@ test("configured ToolCenter still registers search/read and degrades web search 
     const center = await createConfiguredResearchToolCenter(configCenter, { playwrightAvailable: true });
     const names = center.list().map((tool) => tool.name);
     const search = await center.execute(
-      { callId: "call-search", toolName: "research_search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callId: "call-search", toolName: "ResearchSearch", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-      { callerAgentId: "agent-test", allowedTools: ["research_search", "research_read"] }
+      { callerAgentId: "agent-test", allowedTools: ["ResearchSearch", "ResearchRead"] }
     );
 
     assertCoreDesktopToolNames(names);
@@ -954,9 +954,9 @@ test("configured ToolCenter uses workspaceRoot for local tools", async () => {
     });
     const center = await createConfiguredResearchToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
     const read = await center.execute(
-      { callId: "call-read-file", toolName: "read", input: { path: "note.txt" } },
+      { callId: "call-read-file", toolName: "Read", input: { path: "note.txt" } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-      { callerAgentId: "agent-test", allowedTools: ["read"] }
+      { callerAgentId: "agent-test", allowedTools: ["Read"] }
     );
 
     assert.equal(read.status, "completed");
@@ -980,9 +980,9 @@ test("configured ToolCenter uses workspaceRoot for codebase research search", as
     });
     const center = await createConfiguredResearchToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
     const search = await center.execute(
-      { callId: "call-search-codebase", toolName: "research_search", input: { query, sources: ["codebase"] } },
+      { callId: "call-search-codebase", toolName: "ResearchSearch", input: { query, sources: ["codebase"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-      { callerAgentId: "agent-test", allowedTools: ["research_search"] }
+      { callerAgentId: "agent-test", allowedTools: ["ResearchSearch"] }
     );
     const output = search.output as {
       readonly results?: readonly {
@@ -1021,9 +1021,9 @@ test("configured ToolCenter keeps web search disabled even when a historical Tav
 
     const center = await createConfiguredResearchToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const search = await center.execute(
-      { callId: "call-search", toolName: "research_search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callId: "call-search", toolName: "ResearchSearch", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-      { callerAgentId: "agent-test", allowedTools: ["research_search", "research_read"] }
+      { callerAgentId: "agent-test", allowedTools: ["ResearchSearch", "ResearchRead"] }
     );
 
     assert.equal(search.status, "completed");
@@ -1062,18 +1062,16 @@ function fixedResearchRuntime(overrides: {
 
 function assertCoreDesktopToolNames(names: readonly string[]): void {
   for (const expected of [
-    "research_search",
-    "research_read",
-    "read",
-    "list",
-    "grep",
-    "create",
-    "write",
-    "edit",
-    "delete",
-    "shell",
-    "http_request",
-    "web_fetch",
+    "ResearchSearch",
+    "ResearchRead",
+    "Read",
+    "Glob",
+    "Grep",
+    "Write",
+    "Edit",
+    "Shell",
+    "HttpRequest",
+    "WebFetch",
   ]) {
     assert.equal(names.includes(expected), true, `expected ToolCenter to include ${expected}`);
   }

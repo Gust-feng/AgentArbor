@@ -288,7 +288,7 @@ test("normalizeToolDisplayForOperation uses a concrete unknown tool name and req
 
 test("normalizeToolDisplayForOperation derives structured file search results ahead of generic attachment display", () => {
   const display = normalizeToolDisplayForOperation({
-    toolName: "attachment_search_files",
+    toolName: "AttachmentSearchFiles",
     input: {
       attachmentId: "ctx_project",
       query: "needle",

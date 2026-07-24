@@ -206,7 +206,7 @@ test("panel Ordinary completes a real tool round through the configured model tr
   await fs.mkdir(workspace, { recursive: true });
   await fs.writeFile(path.join(workspace, "README.md"), "native session tool evidence", "utf8");
   const modelProvider = await startPanelChatCompletionsProvider({
-    name: "read",
+    name: "Read",
     input: { path: "README.md" },
   });
   try {
@@ -234,7 +234,7 @@ test("panel Ordinary completes a real tool round through the configured model tr
       assert.equal(modelProvider.requestCount, 2);
       assert.equal(run.body.view.workView.answer.content, "The requested file was read successfully.");
       assert.equal(run.body.view.detail.toolResults.length, 1);
-      assert.equal(run.body.view.detail.toolResults[0].toolName, "read");
+      assert.equal(run.body.view.detail.toolResults[0].toolName, "Read");
       assert.equal(run.body.view.detail.toolResults[0].status, "completed");
       assert.match(JSON.stringify(run.body.view.detail.toolResults[0].output), /native session tool evidence/u);
     } finally {

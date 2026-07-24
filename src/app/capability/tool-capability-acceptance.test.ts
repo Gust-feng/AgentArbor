@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { modelVisibleToolDescription, normalizeToolFactValue, type ToolCallResul
 import { createDesktopBasicToolRegistryForTest as createDesktopBasicToolRegistry } from "../testing/desktop-basic-tool-registry.js";
 import { ensurePidExited } from "../tool-center/adapters/background-process-test-utils.js";
 import { projectToolDisplay } from "../tool-projection/tool-display-projection.js";
+import { createPlatformProcessTerminator, InMemoryProcessRegistry } from "../runtime-guard/index.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
@@ -20,69 +21,55 @@ function resultFact(result: ToolCallResult): Readonly<Record<string, unknown>> {
 
 test("tool capability acceptance supports a demo-building workflow without command micro-tools or hangs", async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-acceptance-"));
+  const processRegistry = new InMemoryProcessRegistry();
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: workspace,
     playwrightAvailable: false,
+    processRegistry,
+    processTerminator: createPlatformProcessTerminator(),
   });
   const center = registry.createToolCenter("desktop-basic");
   const toolNames = center.list().map((tool) => tool.name);
-  let backgroundStopCommand: string | undefined;
-  let backgroundPid: number | undefined;
-  let shellBackgroundStopCommand: string | undefined;
-  let shellBackgroundPid: number | undefined;
+  let backgroundProcessId: string | undefined;
   let serverPid: number | undefined;
 
   try {
     assert.deepEqual(toolNames, [
-      "search",
-      "read",
-      "read",
-      "list",
-      "grep",
-      "create",
-      "write",
-      "edit",
-      "delete",
-      "shell",
-      "process_start",
-      "process_inspect",
-      "process_stop",
-      "attachment_list",
-      "attachment_read_text",
-      "attachment_read_pdf",
-      "attachment_read_image",
-      "attachment_inspect_table",
-      "attachment_read_table",
-      "attachment_inspect_archive",
-      "attachment_list_files",
-      "attachment_search_files",
-      "http_request",
+      "ResearchSearch",
+      "ResearchRead",
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Shell",
+      "ProcessRead",
+      "ProcessStop",
+      "AttachmentList",
+      "AttachmentRead",
+      "AttachmentReadPdf",
+      "AttachmentReadImage",
+      "AttachmentInspectTable",
+      "AttachmentReadTable",
+      "AttachmentInspectArchive",
+      "AttachmentListFiles",
+      "AttachmentSearchFiles",
+      "HttpRequest",
     ]);
     assert.equal(toolNames.includes("create_directory"), false);
-    assert.equal(toolNames.includes("http_request"), true);
+    assert.equal(toolNames.includes("HttpRequest"), true);
     assert.equal(toolNames.includes("read_binary_file"), false);
 
-    const shellDefinition = center.list().find((tool) => tool.name === "shell");
+    const shellDefinition = center.list().find((tool) => tool.name === "Shell");
     assert.notEqual(shellDefinition, undefined);
     const shellSyntax = requireShellSyntax(
       shellDefinition!.metadata?.runtimeHints?.find((hint) => hint.kind === "command_shell")?.syntax,
     );
-    assert.equal("background" in shellDefinition!.inputSchema.properties, false);
+    assert.equal("background" in shellDefinition!.inputSchema.properties, true);
     assert.equal("backgroundWaitMs" in shellDefinition!.inputSchema.properties, false);
     assert.equal("cwd" in shellDefinition!.inputSchema.properties, true);
-    assert.match(modelVisibleToolDescription(shellDefinition!), /^Run one command in the current workspace and wait for its exit\./);
-    assert.doesNotMatch(modelVisibleToolDescription(shellDefinition!), /background=true|dev servers/);
-
-    const startDefinition = center.list().find((tool) => tool.name === "process_start");
-    assert.notEqual(startDefinition, undefined);
-    assert.equal("background" in startDefinition!.inputSchema.properties, false);
-    assert.equal("backgroundWaitMs" in startDefinition!.inputSchema.properties, true);
-    assert.equal("waitForPort" in startDefinition!.inputSchema.properties, true);
-
-    const mkdir = await executeTool("call-mkdir", "shell", { commandLine: platformMakeDirectoryCommand("demo") });
-    assert.equal(mkdir.status, "completed");
-    assert.equal((await stat(path.join(workspace, "demo"))).isDirectory(), true);
+    assert.match(modelVisibleToolDescription(shellDefinition!), /^Run a workspace command in the foreground or start it as an owned background process\./);
 
     const html = [
       "<!doctype html>",
@@ -92,28 +79,30 @@ test("tool capability acceptance supports a demo-building workflow without comma
       "</html>",
       "",
     ].join("\n");
-    const write = await executeTool("call-write", "write", { path: "demo/index.html", content: html });
+    const write = await executeTool("call-write", "Write", { path: "demo/index.html", content: html });
     assert.equal(write.status, "completed");
     assert.equal(resultFact(write).path, "demo/index.html");
+    assert.equal((await stat(path.join(workspace, "demo"))).isDirectory(), true);
     assert.equal(projectToolDisplay({ callId: write.callId, toolName: write.toolName, input: write.input }, write.output).kind, "file_change_summary");
 
-    const read = await executeTool("call-read", "read", { path: "demo/index.html" });
+    const read = await executeTool("call-read", "Read", { path: "demo/index.html" });
     assert.equal(read.status, "completed");
     assert.match(String(resultFact(read).content), /demo-ready/);
 
-    const validate = await executeTool("call-validate", "shell", {
-      commandLine: `${process.execPath} -e "const fs=require('fs'); console.log(fs.readFileSync('index.html','utf8').includes('demo-ready') ? 'validated' : 'missing')"`,
-      command: process.execPath,
-      args: ["-e", "const fs=require('fs'); console.log(fs.readFileSync('index.html','utf8').includes('demo-ready') ? 'validated' : 'missing')"],
+    const validate = await executeTool("call-validate", "Shell", {
+      command: commandForArgs([
+        process.execPath,
+        "-e",
+        "const fs=require('fs'); console.log(fs.readFileSync('index.html','utf8').includes('demo-ready') ? 'validated' : 'missing')",
+      ], shellSyntax),
       cwd: "demo",
     });
     assert.equal(validate.status, "completed");
     assert.equal(resultFact(validate).cwd, "demo");
     assert.match(String(resultFact(validate).stdout), /validated/);
 
-    const commandFailure = await executeTool("call-command-failure", "shell", {
-      command: process.execPath,
-      args: ["-e", "console.error('structured command failure'); process.exit(7);"],
+    const commandFailure = await executeTool("call-command-failure", "Shell", {
+      command: commandForArgs([process.execPath, "-e", "console.error('structured command failure'); process.exit(7);"], shellSyntax),
     });
     const commandFailureContent = resultFact(commandFailure) as {
       readonly exitCode?: number;
@@ -139,40 +128,34 @@ test("tool capability acceptance supports a demo-building workflow without comma
       "server.listen(port, '127.0.0.1', () => console.log(`HTTP_READY:${port}`));",
       "",
     ].join("\n");
-    const writeServer = await executeTool("call-write-server", "write", {
+    const writeServer = await executeTool("call-write-server", "Write", {
       path: "demo/server.mjs",
       content: serverSource,
     });
     assert.equal(writeServer.status, "completed");
 
-    const server = await executeTool("call-start-server", "shell", {
-      commandLine: `${process.execPath} server.mjs ${port}`,
-      command: process.execPath,
-      args: ["server.mjs", String(port)],
+    const server = await executeTool("call-start-server", "Shell", {
+      command: commandForArgs([process.execPath, "server.mjs", String(port)], shellSyntax),
       cwd: "demo",
       background: true,
-      backgroundWaitMs: 1_000,
-      waitForPort: port,
-      waitForPortTimeoutMs: 5_000,
     });
     const serverContent = resultFact(server) as {
       readonly background?: boolean;
-      readonly portReady?: boolean;
-      readonly waitForPort?: number;
-      readonly stopCommand?: string;
+      readonly processId?: string;
       readonly pid?: number;
-      readonly stdout?: string;
     };
-    backgroundStopCommand = serverContent.stopCommand;
+    backgroundProcessId = serverContent.processId;
     serverPid = serverContent.pid;
     assert.equal(server.status, "completed");
     assert.equal(serverContent.background, true);
-    assert.equal(serverContent.waitForPort, port);
-    assert.equal(serverContent.portReady, true);
-    assert.equal(typeof serverContent.stopCommand, "string");
-    assert.match(serverContent.stdout ?? "", new RegExp(`HTTP_READY:${port}|Port ${port} is ready`));
+    assert.equal(typeof serverContent.processId, "string");
+    await waitUntil(() => canConnectToLocalhostPort(port), 5_000);
 
-    const httpOk = await executeTool("call-http-ok", "http_request", {
+    const inspected = await executeTool("call-read-server", "ProcessRead", { processId: backgroundProcessId });
+    assert.equal(inspected.status, "completed");
+    assert.equal(resultFact(inspected).processId, backgroundProcessId);
+
+    const httpOk = await executeTool("call-http-ok", "HttpRequest", {
       url: `http://127.0.0.1:${port}/ready`,
       timeoutMs: 2_000,
     });
@@ -186,7 +169,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal(httpOkContent.statusCode, 200);
     assert.match(httpOkContent.body ?? "", /demo-ready/);
 
-    const httpNotFound = await executeTool("call-http-not-found", "http_request", {
+    const httpNotFound = await executeTool("call-http-not-found", "HttpRequest", {
       url: `http://127.0.0.1:${port}/missing`,
       timeoutMs: 2_000,
     });
@@ -198,19 +181,15 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal(httpNotFoundContent.statusCode, 404);
     assert.match(httpNotFoundContent.body ?? "", /demo-missing/);
 
-    const stoppedServer = await executeTool("call-stop-server", "shell", {
-      commandLine: backgroundStopCommand,
-      timeoutMs: 2_000,
-    });
-    backgroundStopCommand = undefined;
+    const stoppedServer = await executeTool("call-stop-server", "ProcessStop", { processId: backgroundProcessId });
+    backgroundProcessId = undefined;
     await ensurePidExited(serverPid, 5_000);
     serverPid = undefined;
     assert.equal(stoppedServer.status, "completed");
     await waitUntil(async () => !(await canConnectToLocalhostPort(port)), 5_000);
 
-    const largeOutput = await executeTool("call-large-output", "shell", {
-      command: process.execPath,
-      args: ["-e", "process.stdout.write('x'.repeat(140000));"],
+    const largeOutput = await executeTool("call-large-output", "Shell", {
+      command: commandForArgs([process.execPath, "-e", "process.stdout.write('x'.repeat(140000));"], shellSyntax),
     });
     const largeContent = resultFact(largeOutput) as {
       readonly truncated?: boolean;
@@ -221,10 +200,9 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal((largeContent.stdout?.length ?? 0) <= 16_000, true);
 
     const startedAt = Date.now();
-    const timedOut = await executeTool("call-timeout", "shell", {
-      command: process.execPath,
-      args: ["-e", "console.log('before-timeout'); setTimeout(() => {}, 5000);"],
-      timeoutMs: 200,
+    const timedOut = await executeTool("call-timeout", "Shell", {
+      command: commandForArgs([process.execPath, "-e", "console.log('before-timeout'); setTimeout(() => {}, 5000);"], shellSyntax),
+      timeoutMs: 1_000,
     });
     const timedOutContent = resultFact(timedOut) as {
       readonly timedOut?: boolean;
@@ -236,100 +214,13 @@ test("tool capability acceptance supports a demo-building workflow without comma
     assert.equal(timedOutContent.timedOut, true);
     assert.equal(timedOutContent.exitCode, 124);
     assert.match(timedOutContent.stdout ?? "", /before-timeout/);
-    assert.match(timedOutContent.stderr ?? "", /timed out after 200ms/);
+    assert.match(timedOutContent.stderr ?? "", /timed out after 1000ms/);
     assert.equal(Date.now() - startedAt < 4_000, true);
 
-    const background = await executeTool("call-background", "shell", {
-      command: process.execPath,
-      args: ["-e", "console.log('server-ready'); setTimeout(() => {}, 5000);"],
-      background: true,
-      backgroundWaitMs: 1_000,
-    });
-    const backgroundContent = resultFact(background) as {
-      readonly background?: boolean;
-      readonly pid?: number;
-      readonly logPath?: string;
-      readonly stopCommand?: string;
-      readonly stdout?: string;
-    };
-    backgroundStopCommand = backgroundContent.stopCommand;
-    backgroundPid = backgroundContent.pid;
-    assert.equal(background.status, "completed");
-    assert.equal(backgroundContent.background, true);
-    assert.equal(typeof backgroundContent.pid, "number");
-    assert.equal(typeof backgroundContent.logPath, "string");
-    assert.equal(typeof backgroundContent.stopCommand, "string");
-    assert.match(backgroundContent.stdout ?? "", /Started background process/);
-    await waitUntil(async () => {
-      try {
-        return (await readFile(backgroundContent.logPath!, "utf8")).includes("server-ready");
-      } catch {
-        return false;
-      }
-    });
-
-    const stopped = await executeTool("call-stop-background", "shell", {
-      commandLine: backgroundStopCommand,
-      timeoutMs: 2_000,
-    });
-    backgroundStopCommand = undefined;
-    await ensurePidExited(backgroundPid, 5_000);
-    backgroundPid = undefined;
-    assert.equal(stopped.status, "completed");
-    await delay(100);
-
-    const shellBackground = await executeTool("call-shell-native-background", "shell", {
-      commandLine: shellBackgroundLogCommand(shellSyntax),
-      background: true,
-      backgroundWaitMs: 1_000,
-    });
-    const shellBackgroundContent = resultFact(shellBackground) as {
-      readonly background?: boolean;
-      readonly pid?: number;
-      readonly logPath?: string;
-      readonly stopCommand?: string;
-      readonly stdout?: string;
-    };
-    shellBackgroundStopCommand = shellBackgroundContent.stopCommand;
-    shellBackgroundPid = shellBackgroundContent.pid;
-    assert.equal(shellBackground.status, "completed");
-    assert.equal(shellBackgroundContent.background, true);
-    assert.equal(typeof shellBackgroundContent.pid, "number");
-    assert.equal(typeof shellBackgroundContent.logPath, "string");
-    assert.equal(typeof shellBackgroundContent.stopCommand, "string");
-    assert.match(shellBackgroundContent.stdout ?? "", /Started background process/);
-    await waitUntil(async () => {
-      try {
-        return (await readFile(shellBackgroundContent.logPath!, "utf8")).includes("SHELL_BG_READY");
-      } catch {
-        return false;
-      }
-    });
-
-    const shellBackgroundStopped = await executeTool("call-stop-shell-native-background", "shell", {
-      commandLine: shellBackgroundStopCommand,
-      timeoutMs: 2_000,
-    });
-    shellBackgroundStopCommand = undefined;
-    await ensurePidExited(shellBackgroundPid, 5_000);
-    shellBackgroundPid = undefined;
-    assert.equal(shellBackgroundStopped.status, "completed");
-    await delay(100);
   } finally {
-    if (shellBackgroundStopCommand !== undefined) {
-      await executeTool("call-stop-shell-native-background-finally", "shell", {
-        commandLine: shellBackgroundStopCommand,
-        timeoutMs: 2_000,
-      }).catch(() => undefined);
-      await ensurePidExited(shellBackgroundPid, 5_000).catch(() => undefined);
-      await delay(50);
-    }
-    if (backgroundStopCommand !== undefined) {
-      await executeTool("call-stop-background-finally", "shell", {
-        commandLine: backgroundStopCommand,
-        timeoutMs: 2_000,
-      }).catch(() => undefined);
-      await ensurePidExited(backgroundPid ?? serverPid, 5_000).catch(() => undefined);
+    if (backgroundProcessId !== undefined) {
+      await executeTool("call-stop-background-finally", "ProcessStop", { processId: backgroundProcessId }).catch(() => undefined);
+      await ensurePidExited(serverPid, 5_000).catch(() => undefined);
       await delay(50);
     }
     await removeTempTree(workspace);
@@ -348,15 +239,8 @@ test("tool capability acceptance supports a demo-building workflow without comma
   }
 });
 
-function platformMakeDirectoryCommand(directory: string): string {
-  const normalized = process.platform === "win32" ? directory.split("/").join("\\") : directory;
-  return process.platform === "win32" ? `mkdir ${normalized}` : `mkdir -p ${quotePath(normalized)}`;
-}
-
-function shellBackgroundLogCommand(syntax: "cmd" | "powershell" | "posix"): string {
-  if (syntax === "cmd") return "echo SHELL_BG_READY && ping -n 6 127.0.0.1 >nul";
-  if (syntax === "powershell") return "Write-Output SHELL_BG_READY; Start-Sleep -Seconds 5";
-  return "printf 'SHELL_BG_READY\\n'; sleep 5";
+function commandForArgs(args: readonly string[], syntax: "cmd" | "powershell" | "posix"): string {
+  return args.map((argument) => quoteCommandArgument(argument, syntax)).join(" ");
 }
 
 function requireShellSyntax(value: unknown): "cmd" | "powershell" | "posix" {
@@ -366,10 +250,9 @@ function requireShellSyntax(value: unknown): "cmd" | "powershell" | "posix" {
   return value;
 }
 
-function quotePath(value: string): string {
-  if (process.platform === "win32") {
-    return `"${value.replace(/"/g, '\\"')}"`;
-  }
+function quoteCommandArgument(value: string, syntax: "cmd" | "powershell" | "posix"): string {
+  if (syntax === "cmd") return `"${value.replace(/"/g, '""')}"`;
+  if (syntax === "powershell") return `'${value.replace(/'/g, "''")}'`;
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 

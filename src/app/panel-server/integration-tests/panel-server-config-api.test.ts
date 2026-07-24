@@ -409,7 +409,7 @@ test("panel tools config routes return sanitized web search config and never ech
     assert.equal(initial.body.tools.webSearch.status, "no-provider");
     assert.equal(initial.body.tools.catalog.scope, "desktop-basic");
     assert.equal(
-      initial.body.tools.catalog.tools.some((tool: { name?: string; availability?: string }) => tool.name === "web_fetch" && (tool.availability === "available" || tool.availability === "unavailable")),
+      initial.body.tools.catalog.tools.some((tool: { name?: string; availability?: string }) => tool.name === "WebFetch" && (tool.availability === "available" || tool.availability === "unavailable")),
       true
     );
     assert.equal(update.status, 200);
@@ -834,7 +834,7 @@ test("panel tool state and MCP config APIs return catalogs without raw MCP secre
   try {
     const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
     try {
-      const toolState = await requestJson(server.url, "/api/config/tools/shell/state", {
+      const toolState = await requestJson(server.url, "/api/config/tools/Shell/state", {
         method: "POST",
         body: { enabled: false },
       });
@@ -854,7 +854,7 @@ test("panel tool state and MCP config APIs return catalogs without raw MCP secre
       const mcpList = await requestJson(server.url, "/api/config/mcp");
 
       assert.equal(toolState.status, 200);
-      assert.equal(toolState.body.tools.catalog.allowedTools.includes("shell"), false);
+      assert.equal(toolState.body.tools.catalog.allowedTools.includes("Shell"), false);
       assert.equal(mcp.status, 200);
       assert.equal(mcp.body.catalog[0].serverId, "docs");
       assert.equal(mcp.body.catalog[0].description, "Documentation MCP service.");

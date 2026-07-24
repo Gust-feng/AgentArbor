@@ -17,55 +17,49 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   const catalog = registry.catalog("desktop-basic");
 
   assert.deepEqual(catalog.allowedTools, [
-    "attachment_inspect_archive",
-    "attachment_inspect_table",
-    "attachment_list",
-    "attachment_list_files",
-    "attachment_read_image",
-    "attachment_read_pdf",
-    "attachment_read_table",
-    "attachment_read_text",
-    "attachment_search_files",
-    "create",
-    "delete",
-    "edit",
-    "grep",
-    "http_request",
-    "list",
-    "process_inspect",
-    "process_start",
-    "process_stop",
-    "read",
-    "research_read",
-    "research_search",
-    "shell",
-    "web_fetch",
-    "write",
+    "AttachmentInspectArchive",
+    "AttachmentInspectTable",
+    "AttachmentList",
+    "AttachmentListFiles",
+    "AttachmentRead",
+    "AttachmentReadImage",
+    "AttachmentReadPdf",
+    "AttachmentReadTable",
+    "AttachmentSearchFiles",
+    "Edit",
+    "Glob",
+    "Grep",
+    "HttpRequest",
+    "ProcessRead",
+    "ProcessStop",
+    "Read",
+    "ResearchRead",
+    "ResearchSearch",
+    "Shell",
+    "WebFetch",
+    "Write",
   ]);
-  assert.equal(catalog.tools.find((tool) => tool.name === "shell")?.requiresConfirmation, true);
-  assert.equal(catalog.tools.find((tool) => tool.name === "write")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "create")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "edit")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "delete")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "delete")?.fileOperation, "delete");
-  assert.equal(catalog.tools.find((tool) => tool.name === "write")?.fileOperation, undefined);
-  assert.equal(catalog.tools.find((tool) => tool.name === "shell")?.enabledByDefault, true);
-  assert.equal(registry.createToolCenter("desktop-basic").has("shell"), true);
-  assert.equal(catalog.tools.find((tool) => tool.name === "web_fetch")?.operationType, "read-only");
-  assert.equal(catalog.tools.find((tool) => tool.name === "http_request")?.operationType, "external-submit");
-  assert.equal(catalog.tools.find((tool) => tool.name === "http_request")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "http_request")?.displayName, "HTTP 请求");
-  assert.equal(catalog.tools.find((tool) => tool.name === "web_fetch")?.availability, "available");
-  assert.equal(catalog.tools.find((tool) => tool.name === "read")?.displayName, "读取文件");
-  assert.equal(catalog.tools.find((tool) => tool.name === "shell")?.confirmationLabel, "需确认");
+  assert.equal(catalog.tools.find((tool) => tool.name === "Shell")?.requiresConfirmation, true);
+  assert.equal(catalog.tools.find((tool) => tool.name === "Write")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "Edit")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "Write")?.fileOperation, undefined);
+  assert.equal(catalog.tools.find((tool) => tool.name === "Shell")?.enabledByDefault, true);
+  assert.equal(registry.createToolCenter("desktop-basic").has("Shell"), true);
+  assert.equal(catalog.tools.find((tool) => tool.name === "WebFetch")?.operationType, "read-only");
+  assert.equal(catalog.tools.find((tool) => tool.name === "HttpRequest")?.operationType, "external-submit");
+  assert.equal(catalog.tools.find((tool) => tool.name === "HttpRequest")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "HttpRequest")?.displayName, "HTTP 请求");
+  assert.equal(catalog.tools.find((tool) => tool.name === "WebFetch")?.availability, "available");
+  assert.equal(catalog.tools.find((tool) => tool.name === "Read")?.displayName, "读取文件");
+  assert.equal(catalog.tools.find((tool) => tool.name === "Shell")?.confirmationLabel, "需确认");
   assert.equal(catalog.tools.every((tool) => tool.displayName !== tool.name), true);
   assert.equal(catalog.tools.every((tool) => tool.categoryLabel.length > 0 && tool.operationLabel.length > 0), true);
   assert.equal(JSON.stringify(catalog).includes("api_key"), false);
 
-  const shellCommand = catalog.tools.find((tool) => tool.name === "shell");
+  const shellCommand = catalog.tools.find((tool) => tool.name === "Shell");
   assert.equal(shellCommand?.displayDescription, "在当前会话 Shell 中运行命令，适合构建、测试、脚本和通用 CLI 工作流。");
-  assert.match(shellCommand?.description ?? "", /current workspace/);
-  assert.match(shellCommand?.description ?? "", /commandLine is shell-parsed/);
+  assert.match(shellCommand?.description ?? "", /workspace command/);
+  assert.match(shellCommand?.description ?? "", /ProcessRead and ProcessStop/);
   assert.doesNotMatch(shellCommand?.description ?? "", /HTTP requests/);
   assert.equal(shellCommand?.runtimeHints?.[0]?.kind, "command_shell");
 });
@@ -76,30 +70,27 @@ test("desktop-basic model-visible tools satisfy the executable factual contract"
   const modelVisibleTools = center.list();
 
   assert.deepEqual(modelVisibleTools.map((tool) => tool.name), [
-    "research_search",
-    "research_read",
-    "read",
-    "list",
-    "grep",
-    "create",
-    "write",
-    "edit",
-    "delete",
-    "shell",
-    "process_start",
-    "process_inspect",
-    "process_stop",
-    "attachment_list",
-    "attachment_read_text",
-    "attachment_read_pdf",
-    "attachment_read_image",
-    "attachment_inspect_table",
-    "attachment_read_table",
-    "attachment_inspect_archive",
-    "attachment_list_files",
-    "attachment_search_files",
-    "http_request",
-    "web_fetch",
+    "ResearchSearch",
+    "ResearchRead",
+    "Read",
+    "Glob",
+    "Grep",
+    "Write",
+    "Edit",
+    "Shell",
+    "ProcessRead",
+    "ProcessStop",
+    "AttachmentList",
+    "AttachmentRead",
+    "AttachmentReadPdf",
+    "AttachmentReadImage",
+    "AttachmentInspectTable",
+    "AttachmentReadTable",
+    "AttachmentInspectArchive",
+    "AttachmentListFiles",
+    "AttachmentSearchFiles",
+    "HttpRequest",
+    "WebFetch",
   ]);
 
   for (const tool of modelVisibleTools) {
@@ -116,40 +107,33 @@ test("core workspace schemas reject unknown fields and express numeric constrain
   }).createToolCenter("desktop-basic");
   const byName = new Map(center.list().map((tool) => [tool.name, tool] as const));
 
-  for (const name of ["read", "list", "grep", "create", "write", "edit", "delete", "shell", "process_start", "process_inspect", "process_stop"]) {
+  for (const name of ["Read", "Glob", "Grep", "Write", "Edit", "Shell", "ProcessRead", "ProcessStop"]) {
     assert.equal(byName.get(name)?.inputSchema.additionalProperties, false, name);
   }
 
-  const editsSchema = schemaRecord(byName.get("edit")?.inputSchema.properties.edits);
+  const editsSchema = schemaRecord(byName.get("Edit")?.inputSchema.properties.edits);
   const editItems = schemaRecord(editsSchema.items);
   assert.equal(editItems.additionalProperties, false);
-  assert.deepEqual(schemaRecord(editItems.properties).occurrence, {
-    type: "integer",
-    minimum: 1,
-    description: "Optional 1-based occurrence of oldText in the file.",
-  });
+  assert.equal("occurrence" in schemaRecord(editItems.properties), false);
 
-  const shell = byName.get("shell")!;
-  const start = byName.get("process_start")!;
-  const read = byName.get("read")!;
-  const list = byName.get("list")!;
-  const grep = byName.get("grep")!;
-  const http = byName.get("http_request")!;
-  const browser = byName.get("web_fetch")!;
-  assert.deepEqual(shell.inputSchema.anyOf, [
-    { required: ["commandLine"] },
-    { required: ["command"] },
-  ]);
-  assert.equal("background" in shell.inputSchema.properties, false);
+  const shell = byName.get("Shell")!;
+  const processRead = byName.get("ProcessRead")!;
+  const processStop = byName.get("ProcessStop")!;
+  const read = byName.get("Read")!;
+  const glob = byName.get("Glob")!;
+  const grep = byName.get("Grep")!;
+  const http = byName.get("HttpRequest")!;
+  const browser = byName.get("WebFetch")!;
+  assert.deepEqual(shell.inputSchema.required, ["command"]);
+  assert.equal("background" in shell.inputSchema.properties, true);
   assert.equal("waitForPort" in shell.inputSchema.properties, false);
-  assert.equal(schemaRecord(start.inputSchema.properties.waitForPort).type, "integer");
-  assert.equal(schemaRecord(start.inputSchema.properties.waitForPort).minimum, 1);
-  assert.equal(schemaRecord(start.inputSchema.properties.waitForPort).maximum, 65_535);
+  assert.equal(processRead.inputSchema.required, undefined);
+  assert.deepEqual(processStop.inputSchema.required, ["processId"]);
   assert.equal(schemaRecord(read.inputSchema.properties.startLine).type, "integer");
   assert.equal(schemaRecord(read.inputSchema.properties.startLine).minimum, 1);
   assert.equal(Array.isArray(read.inputSchema.allOf) ? read.inputSchema.allOf.length : 0, 4);
-  assert.equal(schemaRecord(list.inputSchema.properties.limit).type, "integer");
-  assert.equal(schemaRecord(list.inputSchema.properties.limit).maximum, 200);
+  assert.equal(schemaRecord(glob.inputSchema.properties.limit).type, "integer");
+  assert.equal(schemaRecord(glob.inputSchema.properties.limit).maximum, 200);
   assert.equal(schemaRecord(grep.inputSchema.properties.offset).type, "integer");
   assert.equal(schemaRecord(grep.inputSchema.properties.offset).maximum, 10_000);
   assert.equal(Array.isArray(http.inputSchema.oneOf), true);
@@ -164,14 +148,14 @@ test("model-visible tool description is a concise objective capability summary",
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolCatalogNames: ["shell"],
+    toolCatalogNames: ["Shell"],
   });
   const shellCommand = registry.createToolCenter("desktop-basic").list()[0];
   assert.notEqual(shellCommand, undefined);
   const description = modelVisibleToolDescription(shellCommand!);
 
-  assert.match(description, /^Run one command in the current workspace and wait for its exit\./);
-  assert.match(description, /commandLine is shell-parsed/);
+  assert.match(description, /^Run a workspace command in the foreground or start it as an owned background process\./);
+  assert.match(description, /ProcessRead and ProcessStop/);
   assert.doesNotMatch(description, /stdout|Runtime:|continuation|package manager|dev servers/);
   assert.equal(description.length <= MODEL_VISIBLE_TOOL_DESCRIPTION_MAX_CHARS, true);
   assert.equal(description.includes("When to use"), false);
@@ -184,11 +168,11 @@ test("web tool descriptions clearly separate raw HTTP from rendered browser read
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolCatalogNames: ["http_request", "web_fetch"],
+    toolCatalogNames: ["HttpRequest", "WebFetch"],
   });
   const center = registry.createToolCenter("desktop-basic");
-  const httpRequest = center.list().find((tool) => tool.name === "http_request");
-  const browserSnapshot = center.list().find((tool) => tool.name === "web_fetch");
+  const httpRequest = center.list().find((tool) => tool.name === "HttpRequest");
+  const browserSnapshot = center.list().find((tool) => tool.name === "WebFetch");
   assert.notEqual(httpRequest, undefined);
   assert.notEqual(browserSnapshot, undefined);
 
@@ -226,10 +210,10 @@ test("desktop-basic tool registry keeps unavailable browser tools out of allowed
   const registry = createDesktopBasicToolRegistry({ env: {}, workspaceRoot: process.cwd(), playwrightAvailable: false });
   const catalog = registry.catalog("desktop-basic");
 
-  const browser = catalog.tools.find((tool) => tool.name === "web_fetch");
+  const browser = catalog.tools.find((tool) => tool.name === "WebFetch");
   assert.equal(browser?.availability, "unavailable");
-  assert.equal(catalog.allowedTools.includes("web_fetch"), false);
-  assert.equal(registry.createToolCenter("desktop-basic").has("web_fetch"), false);
+  assert.equal(catalog.allowedTools.includes("WebFetch"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("WebFetch"), false);
 });
 
 test("desktop-basic tool registry keeps image attachment tool unavailable when model lacks vision input", () => {
@@ -240,12 +224,12 @@ test("desktop-basic tool registry keeps image attachment tool unavailable when m
     modelCapabilities: modelCapabilities({ supportsVisionInput: false }),
   });
   const catalog = registry.catalog("desktop-basic");
-  const imageTool = catalog.tools.find((tool) => tool.name === "attachment_read_image");
+  const imageTool = catalog.tools.find((tool) => tool.name === "AttachmentReadImage");
 
   assert.equal(imageTool?.availability, "unavailable");
   assert.equal(imageTool?.disabledReason, "Current model does not support vision input.");
-  assert.equal(catalog.allowedTools.includes("attachment_read_image"), false);
-  assert.equal(registry.createToolCenter("desktop-basic").has("attachment_read_image"), false);
+  assert.equal(catalog.allowedTools.includes("AttachmentReadImage"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("AttachmentReadImage"), false);
 });
 
 test("run-scoped registry hides context attachment executors when Task Soil has no attachments", () => {
@@ -260,8 +244,7 @@ test("run-scoped registry hides context attachment executors when Task Soil has 
     .createToolCenter("desktop-basic")
     .list()
     .map((tool) => tool.name)
-    .filter((name) => name.startsWith("list_context_") || name.startsWith("read_context_") ||
-      name.startsWith("inspect_context_") || name.startsWith("search_context_"));
+    .filter((name) => name.startsWith("Attachment"));
   assert.deepEqual(contextToolNames, []);
 });
 
@@ -283,11 +266,11 @@ test("run-scoped registry keeps context attachment executors when Task Soil cont
   });
 
   const center = registry.createToolCenter("desktop-basic");
-  assert.equal(center.has("attachment_list"), true);
-  assert.equal(center.has("attachment_read_text"), true);
+  assert.equal(center.has("AttachmentList"), true);
+  assert.equal(center.has("AttachmentRead"), true);
 });
 
-test("run-scoped registry does not expose managed process tools without Host process capabilities", () => {
+test("run-scoped registry omits managed process tools without Host process capabilities", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: process.cwd(),
@@ -296,10 +279,10 @@ test("run-scoped registry does not expose managed process tools without Host pro
   });
   const center = registry.createToolCenter("desktop-basic");
 
-  assert.equal(center.has("shell"), true);
-  assert.equal(center.has("process_start"), false);
-  assert.equal(center.has("process_inspect"), false);
-  assert.equal(center.has("process_stop"), false);
+  assert.equal(center.has("Shell"), true);
+  assert.equal(center.has("ProcessRead"), false);
+  assert.equal(center.has("ProcessStop"), false);
+  assert.equal(center.has("ProcessStart"), false);
 });
 
 test("desktop-basic tool registry prefers frozen tool availability over current environment", () => {
@@ -307,23 +290,23 @@ test("desktop-basic tool registry prefers frozen tool availability over current 
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolCatalogNames: ["web_fetch"],
+    toolCatalogNames: ["WebFetch"],
     toolCatalogAvailability: [
       {
-        name: "web_fetch",
+        name: "WebFetch",
         availability: "unavailable",
         disabledReason: "Unavailable when the run started.",
       },
     ],
   });
   const catalog = registry.catalog("desktop-basic");
-  const browser = catalog.tools.find((tool) => tool.name === "web_fetch");
+  const browser = catalog.tools.find((tool) => tool.name === "WebFetch");
 
-  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["web_fetch"]);
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["WebFetch"]);
   assert.equal(browser?.availability, "unavailable");
   assert.equal(browser?.disabledReason, "Unavailable when the run started.");
   assert.deepEqual(catalog.allowedTools, []);
-  assert.equal(registry.createToolCenter("desktop-basic").has("web_fetch"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("WebFetch"), false);
 });
 
 test("desktop-basic tool registry applies configured tool disabled state", () => {
@@ -331,13 +314,13 @@ test("desktop-basic tool registry applies configured tool disabled state", () =>
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolStates: [{ name: "shell", enabled: false, updatedAt: "2026-05-12T00:00:00.000Z" }],
+    toolStates: [{ name: "Shell", enabled: false, updatedAt: "2026-05-12T00:00:00.000Z" }],
   });
   const catalog = registry.catalog("desktop-basic");
 
-  assert.equal(catalog.tools.find((tool) => tool.name === "shell")?.enabledByDefault, false);
-  assert.equal(catalog.allowedTools.includes("shell"), false);
-  assert.equal(registry.createToolCenter("desktop-basic").has("shell"), false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "Shell")?.enabledByDefault, false);
+  assert.equal(catalog.allowedTools.includes("Shell"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("Shell"), false);
 });
 
 test("desktop-basic tool registry can restrict executors to a frozen tool catalog", () => {
@@ -345,23 +328,23 @@ test("desktop-basic tool registry can restrict executors to a frozen tool catalo
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolCatalogNames: ["read"],
+    toolCatalogNames: ["Read"],
   });
   const catalog = registry.catalog("desktop-basic");
   const center = registry.createToolCenter("desktop-basic");
 
-  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["read"]);
-  assert.deepEqual(catalog.allowedTools, ["read"]);
-  assert.equal(center.has("read"), true);
-  assert.equal(center.has("search"), false);
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["Read"]);
+  assert.deepEqual(catalog.allowedTools, ["Read"]);
+  assert.equal(center.has("Read"), true);
+  assert.equal(center.has("ResearchSearch"), false);
 });
 
-test("desktop-basic tool registry registers skill_read for frozen skill resources", () => {
+test("desktop-basic tool registry registers SkillRead for frozen skill resources", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolCatalogNames: ["skill_read"],
+    toolCatalogNames: ["SkillRead"],
   });
   registerSkillResourceTool(registry, [{
       skill: {
@@ -387,19 +370,19 @@ test("desktop-basic tool registry registers skill_read for frozen skill resource
   const catalog = registry.catalog("desktop-basic");
   const center = registry.createToolCenter("desktop-basic");
 
-  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["skill_read"]);
-  assert.deepEqual(catalog.allowedTools, ["skill_read"]);
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["SkillRead"]);
+  assert.deepEqual(catalog.allowedTools, ["SkillRead"]);
   assert.equal(catalog.tools[0]?.displayName, "读取技能资源");
   assert.equal(catalog.tools[0]?.displayDescription, "按本轮已选中技能读取参考资源或查看资源元数据。");
-  assert.equal(center.has("skill_read"), true);
+  assert.equal(center.has("SkillRead"), true);
 });
 
-test("desktop-basic tool registry does not register skill_read for omitted skill resources", () => {
+test("desktop-basic tool registry does not register SkillRead for omitted skill resources", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolCatalogNames: ["skill_read"],
+    toolCatalogNames: ["SkillRead"],
   });
   registerSkillResourceTool(registry, [{
       skill: {
@@ -421,7 +404,7 @@ test("desktop-basic tool registry does not register skill_read for omitted skill
     }]);
 
   assert.deepEqual(registry.catalog("desktop-basic").tools, []);
-  assert.equal(registry.createToolCenter("desktop-basic").has("skill_read"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("SkillRead"), false);
 });
 
 test("desktop-basic tool registry keeps MCP tools in the dedicated mcp scope", () => {
@@ -448,7 +431,7 @@ test("desktop-basic tool registry applies the frozen tool catalog to MCP executo
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolCatalogNames: ["read"],
+    toolCatalogNames: ["Read"],
     mcpManager: {
       getToolsForRegistry: () => [mcpToolExecutor()],
     } as never,

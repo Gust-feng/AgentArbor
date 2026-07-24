@@ -242,7 +242,7 @@ test("model request activity is visible as quiet workflow progress", () => {
         durability: "durable",
         result: {
           callId: "call-read",
-          toolName: "read",
+          toolName: "Read",
           input: { path: "package.json" },
           output: { path: "package.json", content: "{}" },
           status: "completed",
@@ -352,7 +352,7 @@ test("failed tool transcript nodes retain failure attribution and raw error", ()
     durability: "durable",
     result: {
       callId: "call-invalid",
-      toolName: "read",
+      toolName: "Read",
       input: { path: "" },
       output: undefined,
       status: "failed",
@@ -387,7 +387,7 @@ test("delegated tool transcript nodes retain execution measurement", () => {
     durability: "durable",
     result: {
       callId: "delegate",
-      toolName: "agent_call",
+      toolName: "Agent",
       input: { task: "inspect" },
       output: "review complete",
       status: "completed",
@@ -418,7 +418,7 @@ test("live tool progress projects one executing command row with bounded output 
   const request = {
     callId: "call-command",
     parentToolCallFactId: "delegate-fact",
-    toolName: "shell",
+    toolName: "Shell",
     input: { commandLine: "pnpm test" },
   } as const;
   const activity: OrdinaryRunActivity = {
@@ -475,7 +475,7 @@ test("approval projection keeps the complete confirmation and canonical tool res
     },
     toolCalls: [{
       callId: "call-approval",
-      toolName: "shell",
+      toolName: "Shell",
       input: { command: "pnpm test" },
       output: undefined,
       status: "approval_required",
@@ -521,7 +521,7 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
     },
     toolCalls: [{
       callId: "call-read",
-      toolName: "read",
+      toolName: "Read",
       input: { path: "Z:/workspace/a.txt" },
       output: { content: "完整工具输出 <raw>", byteLength: 24 },
       status: "completed",
@@ -570,7 +570,7 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
   assert.equal(view.workView.workSummary.toolResultCount, 1);
   assert.equal(view.workView.visibleEvents.some((event) => event.type === "tool.completed"), true);
   const toolNode = view.workView.transcriptNodes.find((node) => node.eventType === "tool.completed");
-  assert.equal(toolNode?.toolName, "read");
+  assert.equal(toolNode?.toolName, "Read");
   assert.equal(toolNode?.display?.kind, "read_result");
 });
 

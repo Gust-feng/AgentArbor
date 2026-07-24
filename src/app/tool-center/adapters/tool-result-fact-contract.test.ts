@@ -70,13 +70,13 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
       env: {},
       workspaceRoot: root,
       playwrightAvailable: false,
-      toolCatalogNames: ["shell"],
+      toolCatalogNames: ["Shell"],
     });
     const center = registry.createToolCenter("desktop-basic");
     const result = await center.execute(
       {
         callId: "call-shell-log-ref",
-        toolName: "shell",
+        toolName: "Shell",
         input: {
           command: process.execPath,
           args: ["-e", "process.stdout.write('z'.repeat(20000));"],
@@ -85,7 +85,7 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell"],
+        allowedTools: ["Shell"],
         approvedConfirmationIds: ["confirmation-call-shell-log-ref"],
       }
     );
@@ -112,13 +112,13 @@ test("ToolCenter read can consume shell command-log refs", async () => {
       env: {},
       workspaceRoot: root,
       playwrightAvailable: false,
-      toolCatalogNames: ["shell", "read"],
+      toolCatalogNames: ["Shell", "ResearchRead"],
     });
     const center = registry.createToolCenter("desktop-basic");
     const shellResult = await center.execute(
       {
         callId: "call-shell-log-readable",
-        toolName: "shell",
+        toolName: "Shell",
         input: {
           command: process.execPath,
           args: ["-e", "process.stdout.write('readable-log-start\\n' + 'q'.repeat(20000) + '\\nreadable-log-end');"],
@@ -127,7 +127,7 @@ test("ToolCenter read can consume shell command-log refs", async () => {
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell", "read"],
+        allowedTools: ["Shell", "ResearchRead"],
         approvedConfirmationIds: ["confirmation-call-shell-log-readable"],
       }
     );
@@ -135,11 +135,11 @@ test("ToolCenter read can consume shell command-log refs", async () => {
     const logRef = String(shellFacts.logRef);
 
     const readResult = await center.execute(
-      { callId: "call-read-command-log", toolName: "read", input: { ref: logRef, maxLength: 30_000 } },
+      { callId: "call-read-command-log", toolName: "ResearchRead", input: { ref: logRef, maxLength: 30_000 } },
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell", "read"],
+        allowedTools: ["Shell", "ResearchRead"],
       }
     );
     const readContent = asDirectToolFacts(readResult.output);
@@ -165,14 +165,14 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
       env: {},
       workspaceRoot: root,
       playwrightAvailable: false,
-      toolCatalogNames: ["shell"],
+      toolCatalogNames: ["Shell"],
     });
     const center = registry.createToolCenter("desktop-basic");
     const stdout = `start-${"x".repeat(4_000)}-end`;
     const result = await center.execute(
       {
         callId: "call-shell-projection",
-        toolName: "shell",
+        toolName: "Shell",
         input: {
           command: process.execPath,
           args: ["-e", `process.stdout.write(${JSON.stringify(stdout)});`],
@@ -181,7 +181,7 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
       context,
       {
         callerAgentId: context.callerAgentId,
-        allowedTools: ["shell"],
+        allowedTools: ["Shell"],
         approvedConfirmationIds: ["confirmation-call-shell-projection"],
       }
     );
@@ -411,9 +411,9 @@ test("grep forwards AbortSignal to the search runner and preserves cancellation"
     const center = new ToolCenter();
     center.register(grep);
     const resultPromise = center.execute(
-      { callId: "call-cancel-rg", toolName: "grep", input: { path: ".", query: "needle" } },
+      { callId: "call-cancel-rg", toolName: "Grep", input: { path: ".", query: "needle" } },
       { ...context, abortSignal: controller.signal },
-      { callerAgentId: context.callerAgentId, allowedTools: ["grep"] },
+      { callerAgentId: context.callerAgentId, allowedTools: ["Grep"] },
     );
 
     await started;
@@ -480,9 +480,9 @@ test("ToolCenter http_request failures preserve network facts in the execution r
   center.register(createHttpRequestTool({ fetch: rejectingFetch(fetchFailureWithCause(cause)) }));
 
   const result = await center.execute(
-    { callId: "call-http-refused", toolName: "http_request", input: { url: "http://127.0.0.1:43210/status" } },
+    { callId: "call-http-refused", toolName: "HttpRequest", input: { url: "http://127.0.0.1:43210/status" } },
     context,
-    { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
+    { callerAgentId: context.callerAgentId, allowedTools: ["HttpRequest"] }
   );
   const errorFacts = asRecord(result.errorFacts);
 

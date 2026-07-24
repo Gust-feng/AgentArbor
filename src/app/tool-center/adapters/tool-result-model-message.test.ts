@@ -25,9 +25,9 @@ test("real read results from 110k through 128k reach the model once and in full"
       const filename = `source-${size}.txt`;
       await writeFile(path.join(root, filename), content, "utf8");
       const result = await center.execute(
-        { callId: `call-read-${size}`, toolName: "read", input: { path: filename } },
+        { callId: `call-read-${size}`, toolName: "Read", input: { path: filename } },
         context,
-        { callerAgentId: context.callerAgentId, allowedTools: ["read"] }
+        { callerAgentId: context.callerAgentId, allowedTools: ["Read"] }
       );
 
       const message = toolResultMessage(result);
@@ -66,9 +66,9 @@ test("escaped read content stays model-visible through repeated character-range 
     let reconstructed = "";
     for (let index = 0; index < 10 && nextInput !== undefined; index += 1) {
       const result = await center.execute(
-        { callId: `call-read-escaped-${index}`, toolName: "read", input: nextInput },
+        { callId: `call-read-escaped-${index}`, toolName: "Read", input: nextInput },
         context,
-        { callerAgentId: context.callerAgentId, allowedTools: ["read"] }
+        { callerAgentId: context.callerAgentId, allowedTools: ["Read"] }
       );
       const message = toolResultMessage(result);
       const payload = JSON.parse(message.content) as {
@@ -116,9 +116,9 @@ test("escaped 110k through 128k GET bodies stay model-visible through executable
     let chunks = 0;
     while (nextInput !== undefined && chunks < 10) {
       const result = await center.execute(
-        { callId: `call-http-escaped-${size}-${chunks}`, toolName: "http_request", input: nextInput },
+        { callId: `call-http-escaped-${size}-${chunks}`, toolName: "HttpRequest", input: nextInput },
         context,
-        { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
+        { callerAgentId: context.callerAgentId, allowedTools: ["HttpRequest"] }
       );
       const message = toolResultMessage(result);
       const payload = JSON.parse(message.content) as {

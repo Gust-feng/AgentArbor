@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { toolPresentationForDefinition } from "../../../domain/tools/index.js";
 import { createWebSearchTool, type FetchLike, type WebSearchToolOutput } from "./web-search-tool.js";
 
-test("web_search maps Tavily results through injected fetch", async () => {
+test("WebSearch maps Tavily results through injected fetch", async () => {
   const calls: { url: string; body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (url, init) => {
     calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
@@ -18,6 +19,7 @@ test("web_search maps Tavily results through injected fetch", async () => {
     };
   };
   const tool = createWebSearchTool({ apiKey: "tvly-test-secret", maxResults: 1, fetch });
+  assert.equal(toolPresentationForDefinition(tool.definition).displayName, "网页搜索");
 
   const output = await tool.execute(
     { query: "AgentArbor ToolCenter" },
@@ -35,7 +37,7 @@ test("web_search maps Tavily results through injected fetch", async () => {
   assert.equal(calls[0]?.body.api_key, "tvly-test-secret");
 });
 
-test("web_search returns no_search_provider without API key", async () => {
+test("WebSearch returns no_search_provider without API key", async () => {
   const tool = createWebSearchTool();
 
   const output = await tool.execute(
@@ -53,7 +55,7 @@ test("web_search returns no_search_provider without API key", async () => {
   });
 });
 
-test("web_search maps Exa search results and authenticates with x-api-key", async () => {
+test("WebSearch maps Exa search results and authenticates with x-api-key", async () => {
   const calls: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (url, init) => {
     calls.push({
@@ -94,7 +96,7 @@ test("web_search maps Exa search results and authenticates with x-api-key", asyn
   assert.equal(calls[0]?.body.numResults, 3);
 });
 
-test("web_search maps Z.AI web search results", async () => {
+test("WebSearch maps Z.AI web search results", async () => {
   const calls: { headers: Record<string, string>; body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
     calls.push({
@@ -136,7 +138,7 @@ test("web_search maps Z.AI web search results", async () => {
   assert.equal(calls[0]?.body.search_query, "AgentArbor ZAI");
 });
 
-test("web_search maps Metaso search references and authenticates with bearer token", async () => {
+test("WebSearch maps Metaso search references and authenticates with bearer token", async () => {
   const calls: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (url, init) => {
     calls.push({
@@ -183,7 +185,7 @@ test("web_search maps Metaso search references and authenticates with bearer tok
   assert.equal(calls[0]?.body.lang, "zh");
 });
 
-test("web_search maps Google Custom Search results and requires cx", async () => {
+test("WebSearch maps Google Custom Search results and requires cx", async () => {
   const urls: string[] = [];
   const fetch: FetchLike = async (url, init) => {
     urls.push(url);
@@ -234,7 +236,7 @@ test("web_search maps Google Custom Search results and requires cx", async () =>
   assert.equal(url.searchParams.get("num"), "10");
 });
 
-test("web_search maps legacy Bing Web Search results", async () => {
+test("WebSearch maps legacy Bing Web Search results", async () => {
   const urls: string[] = [];
   const headers: Record<string, string>[] = [];
   const fetch: FetchLike = async (url, init) => {

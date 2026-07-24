@@ -5,7 +5,7 @@ import { inheritToolOutputReader } from "./tool-output-reader-capability.js";
 test("inheritToolOutputReader cannot bypass frozen parent authority or executable availability", () => {
   assert.deepEqual(
     inheritToolOutputReader({
-      businessAllowedTools: ["read", "read_output"],
+      businessAllowedTools: ["read", "ReadOutput"],
       parentAllowedTools: ["read"],
       readerExecutable: true,
     }),
@@ -13,8 +13,8 @@ test("inheritToolOutputReader cannot bypass frozen parent authority or executabl
   );
   assert.deepEqual(
     inheritToolOutputReader({
-      businessAllowedTools: ["read", "read_output"],
-      parentAllowedTools: ["read", "read_output"],
+      businessAllowedTools: ["read", "ReadOutput"],
+      parentAllowedTools: ["read", "ReadOutput"],
       readerExecutable: false,
     }),
     ["read"],
@@ -24,10 +24,10 @@ test("inheritToolOutputReader cannot bypass frozen parent authority or executabl
 test("inheritToolOutputReader adds one transport companion only when both gates pass", () => {
   assert.deepEqual(
     inheritToolOutputReader({
-      businessAllowedTools: ["read", "read_output", "read"],
-      parentAllowedTools: ["read", "read_output"],
+      businessAllowedTools: ["read", "ReadOutput", "read"],
+      parentAllowedTools: ["read", "ReadOutput"],
       readerExecutable: true,
     }),
-    ["read", "read_output"],
+    ["read", "ReadOutput"],
   );
 });

@@ -22,8 +22,8 @@ test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary c
     });
 
     const ordinarySnapshot = await runtime.capabilityCenter.snapshot();
-    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "agent_call")?.catalogOnly, true);
-    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "agent_spawn")?.catalogOnly, true);
+    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "Agent")?.catalogOnly, true);
+    assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "AgentSpawn")?.catalogOnly, true);
 
   } finally {
     await runtime?.ordinaryAgentFeature.release();

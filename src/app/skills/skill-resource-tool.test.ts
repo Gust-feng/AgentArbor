@@ -49,10 +49,10 @@ test("skill_read continues beyond the former startChar ceiling without repeating
   try {
     const center = new ToolCenter();
     center.register(createReadSkillResourceTool([fixture.skillContext()]));
-    const permission = { callerAgentId: "agent", allowedTools: ["skill_read"] };
+    const permission = { callerAgentId: "agent", allowedTools: ["SkillRead"] };
     const first = await center.execute({
       callId: "call-skill-before-ceiling",
-      toolName: "skill_read",
+      toolName: "SkillRead",
       input: {
         skillId: "sample-skill",
         type: "reference",
@@ -73,7 +73,7 @@ test("skill_read continues beyond the former startChar ceiling without repeating
 
     const second = await center.execute({
       callId: "call-skill-former-ceiling",
-      toolName: "skill_read",
+      toolName: "SkillRead",
       input: nextInput as ToolFactValue,
     }, executionContext(), permission);
     const secondOutput = asRecord(second.output);
@@ -87,7 +87,7 @@ test("skill_read continues beyond the former startChar ceiling without repeating
 
     const third = await center.execute({
       callId: "call-skill-beyond-former-ceiling",
-      toolName: "skill_read",
+      toolName: "SkillRead",
       input: thirdInput as ToolFactValue,
     }, executionContext(), permission);
     const thirdOutput = asRecord(third.output);

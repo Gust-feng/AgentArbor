@@ -284,11 +284,11 @@ test("http_request stops continuation at the startChar ceiling without hiding ov
   const result = await center.execute(
     {
       callId: "call-http-ceiling",
-      toolName: "http_request",
+      toolName: "HttpRequest",
       input: { url: "https://example.test/ceiling", startChar: 2_000_000 },
     },
     context,
-    { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
+    { callerAgentId: context.callerAgentId, allowedTools: ["HttpRequest"] }
   );
   const output = asIncompleteHttpOutput(result.output);
 
@@ -319,9 +319,9 @@ test("http_request fails explicitly when a GET exceeds the exact retained snapsh
   }));
 
   const result = await center.execute(
-    { callId: "call-http-snapshot-ceiling", toolName: "http_request", input: { url: "https://example.test/huge" } },
+    { callId: "call-http-snapshot-ceiling", toolName: "HttpRequest", input: { url: "https://example.test/huge" } },
     context,
-    { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] },
+    { callerAgentId: context.callerAgentId, allowedTools: ["HttpRequest"] },
   );
   const output = asIncompleteHttpOutput(result.output);
 
@@ -349,11 +349,11 @@ test("http_request fails partial side-effecting responses without a replay conti
     const result = await center.execute(
       {
         callId: `call-${method.toLowerCase()}-partial-response`,
-        toolName: "http_request",
+        toolName: "HttpRequest",
         input: { method, url: "https://example.test/items", body: { name: "demo" } },
       },
       context,
-      { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
+      { callerAgentId: context.callerAgentId, allowedTools: ["HttpRequest"] }
     );
     const output = asIncompleteHttpOutput(result.output);
     const errorFacts = result.errorFacts as Readonly<Record<string, unknown>> | undefined;

@@ -159,7 +159,7 @@ export function createOpenAiReadFileToolCallResponse(
   filePath = "README.md",
   callId = "call-panel-read-file"
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiToolCallResponse(protocol, "desktop-tool-detail-model", callId, "read", { path: filePath });
+  return createOpenAiToolCallResponse(protocol, "desktop-tool-detail-model", callId, "Read", { path: filePath });
 }
 
 export function createOpenAiDeleteFileToolCallResponse(
@@ -173,7 +173,7 @@ export function createOpenAiRunCommandToolCallResponse(
   protocol: ConfiguredModelProtocolKind,
   command: string,
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiToolCallResponse(protocol, "basic-command-confirmation-model", "call-panel-run-command", "shell", { commandLine: command });
+  return createOpenAiToolCallResponse(protocol, "basic-command-confirmation-model", "call-panel-run-command", "Shell", { command });
 }
 
 export function createOpenAiToolCallResponse(

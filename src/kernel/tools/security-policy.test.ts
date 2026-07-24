@@ -93,7 +93,7 @@ test("tool security policy allows normal external read-only URLs", () => {
 });
 
 test("tool security policy gates explicit confirmation tools unless exact confirmation is approved", () => {
-  const request = { callId: "call-shell", toolName: "shell", input: { commandLine: "pnpm test" } };
+  const request = { callId: "call-shell", toolName: "Shell", input: { command: "pnpm test" } };
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "terminal",
@@ -101,7 +101,7 @@ test("tool security policy gates explicit confirmation tools unless exact confir
     riskLevel: "high",
     requiresConfirmation: true,
   };
-  const definition = toolDefinition("shell", metadata);
+  const definition = toolDefinition("Shell", metadata);
   const pending = evaluateToolCallSecurity({
     request,
     definition,
@@ -143,7 +143,7 @@ test("tool security policy gates explicit confirmation tools unless exact confir
 });
 
 test("tool security policy lets full access mode skip confirmation-gated tools", () => {
-  const request = { callId: "call-shell-full-access", toolName: "shell", input: { commandLine: "pnpm test" } };
+  const request = { callId: "call-shell-full-access", toolName: "Shell", input: { command: "pnpm test" } };
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "terminal",
@@ -153,7 +153,7 @@ test("tool security policy lets full access mode skip confirmation-gated tools",
   };
   const decision = evaluateToolCallSecurity({
     request,
-    definition: toolDefinition("shell", metadata),
+    definition: toolDefinition("Shell", metadata),
     metadata,
     context: { platform: "win32", confirmationPolicy: "full_access" },
   });
@@ -164,7 +164,7 @@ test("tool security policy lets full access mode skip confirmation-gated tools",
 test("tool security policy uses full argv text for shell confirmations without commandLine", () => {
   const request = {
     callId: "call-python",
-    toolName: "shell",
+    toolName: "Shell",
     input: { command: "python", args: ["-c", "print('ok')"] },
   };
   const metadata: ToolDefinitionMetadata = {
@@ -176,7 +176,7 @@ test("tool security policy uses full argv text for shell confirmations without c
   };
   const pending = evaluateToolCallSecurity({
     request,
-    definition: toolDefinition("shell", metadata),
+    definition: toolDefinition("Shell", metadata),
     metadata,
     context: { platform: "win32" },
   });

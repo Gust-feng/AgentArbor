@@ -4,7 +4,7 @@ import { toolStreamDetail, toolSummary } from "./panel-stream-tool-projection.js
 
 test("requested tool summaries name the tool without manufacturing a status sentence", () => {
   assert.equal(toolSummary("tool.requested", {
-    toolName: "read",
+    toolName: "Read",
     input: { path: "src/app.ts" },
   }), "读取文件");
   assert.equal(toolSummary("tool.requested", {
@@ -15,7 +15,7 @@ test("requested tool summaries name the tool without manufacturing a status sent
 
 test("requested stream detail preserves concrete objects before completion", () => {
   const read = toolStreamDetail("tool.requested", {
-    toolName: "read",
+    toolName: "Read",
     input: { path: "src/app.ts" },
   });
   const directory = toolStreamDetail("tool.requested", {
@@ -31,7 +31,7 @@ test("requested stream detail preserves concrete objects before completion", () 
 
 test("tool stream projection passes string output through to the canonical display projector", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "agent_call",
+    toolName: "Agent",
     input: {
       sub_agent_name: "review-expert",
       task: "检查工具展示的信息层级",
@@ -68,7 +68,7 @@ test("tool stream projection passes array output through to the canonical displa
 test("tool stream projection keeps object output behavior while preserving canonical input", () => {
   const content = "Object outputs remain available to the display projector.";
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "read",
+    toolName: "Read",
     input: { path: "docs/tool-contracts.md" },
     output: { path: "docs/tool-contracts.md", content },
   });
@@ -80,7 +80,7 @@ test("tool stream projection keeps object output behavior while preserving canon
 
 test("requested skill resources keep their concrete path instead of a generic capability label", () => {
   const payload = {
-    toolName: "skill_read",
+    toolName: "SkillRead",
     input: {
       skillId: "workbench-interface-design",
       path: "references/principles.md",
@@ -100,7 +100,7 @@ test("requested skill resources keep their concrete path instead of a generic ca
 
 test("tool stream projection keeps command facts in display detail without promoting them to live copy", () => {
   const payload = {
-    toolName: "shell",
+    toolName: "Shell",
     input: { command: "pnpm", args: ["test"] },
     output: {
       command: "pnpm",
@@ -122,7 +122,7 @@ test("tool stream projection keeps command facts in display detail without promo
 test("tool stream projection preserves bounded read content for expanded detail", () => {
   const content = `content-start\n${"x".repeat(2_000)}\ncontent-end`;
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "read",
+    toolName: "Read",
     input: { path: "README.md" },
     output: { path: "README.md", content },
   });
@@ -134,7 +134,7 @@ test("tool stream projection preserves bounded read content for expanded detail"
 
 test("tool stream projection preserves failed execution error facts", () => {
   const detail = toolStreamDetail("tool.failed", {
-    toolName: "shell",
+    toolName: "Shell",
     input: { command: "pnpm", args: ["missing"] },
     error: "spawn pnpm ENOENT",
     errorDomain: "process_error",
@@ -163,7 +163,7 @@ test("tool stream projection keeps read HTTP failure facts in the structured err
     durationMs: 5,
   };
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "read",
+    toolName: "ResearchRead",
     input: { ref: "http://127.0.0.1:54321/status" },
     output: {
       error: "http_request failed: ECONNREFUSED 127.0.0.1:54321",
@@ -181,7 +181,7 @@ test("tool stream projection keeps read HTTP failure facts in the structured err
 
 test("tool stream projection reads flat HTTP failure facts", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "read",
+    toolName: "ResearchRead",
     input: { ref: "https://example.test/missing" },
     output: {
       ref: "https://example.test/missing",
@@ -205,7 +205,7 @@ test("tool stream projection reads flat HTTP failure facts", () => {
 
 test("tool stream projection surfaces search invalid-input messages", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "search",
+    toolName: "ResearchSearch",
     input: { query: "" },
     output: {
       query: "",
@@ -223,14 +223,14 @@ test("tool stream projection surfaces search invalid-input messages", () => {
 
 test("tool stream projection keeps ordinary tool copy free of diagnostic labels", () => {
   const requested = toolStreamDetail("tool.requested", {
-    toolName: "read",
+    toolName: "Read",
     input: {
       path: "README.md",
     },
     output: {},
   });
   const completedSummary = toolSummary("tool.completed", {
-    toolName: "shell",
+    toolName: "Shell",
     input: {
       command: "pnpm",
       args: ["test"],
@@ -251,7 +251,7 @@ test("tool stream projection keeps ordinary tool copy free of diagnostic labels"
 
 test("tool stream projection names failed tools as failed", () => {
   const summary = toolSummary("tool.failed", {
-    toolName: "shell",
+    toolName: "Shell",
     input: { command: "pnpm", args: ["test"] },
     output: { command: "pnpm", args: ["test"] },
   });
@@ -262,7 +262,7 @@ test("tool stream projection names failed tools as failed", () => {
 
 test("tool stream projection prefers commandLine over recombining argv text", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "shell",
+    toolName: "Shell",
     input: {
       commandLine: `node -e "console.log('fragile quoted shell')"`,
       command: "node",
@@ -291,7 +291,7 @@ test("tool stream projection prefers commandLine over recombining argv text", ()
 
 test("tool stream projection does not recreate a legacy top-level preview", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "shell",
+    toolName: "Shell",
     input: {
       command: "dir",
     },
@@ -306,7 +306,7 @@ test("tool stream projection does not recreate a legacy top-level preview", () =
 
 test("tool stream projection keeps command metadata out of the UI display contract", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "shell",
+    toolName: "Shell",
     input: {
       commandLine: "pnpm dev",
       cwd: "apps/web",
@@ -343,7 +343,7 @@ test("tool stream projection keeps command metadata out of the UI display contra
 
 test("tool stream projection carries edit diff preview in the file display", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "edit",
+    toolName: "Edit",
     input: {
       path: "src/app/example.ts",
       edits: [{ oldText: "INPUT OLD MUST STAY HIDDEN", newText: "INPUT NEW MUST STAY HIDDEN" }],
@@ -398,7 +398,7 @@ test("tool stream projection keeps multi-file output in one grouped display", ()
 
 test("tool stream projection uses the canonical file display for edit diffs", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "edit",
+    toolName: "Edit",
     input: {
       path: "src/app/example.ts",
       edits: [{ oldText: "old text", newText: "new text" }],
@@ -423,7 +423,7 @@ test("tool stream projection uses the canonical file display for edit diffs", ()
 
 test("tool stream projection does not fabricate a diff when canonical generation is unavailable", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "edit",
+    toolName: "Edit",
     input: {
       path: "src/app/example.ts",
       edits: [{ oldText: "same", newText: "updated", occurrence: 2, startLine: 4, endLine: 4 }],
@@ -450,7 +450,7 @@ test("tool stream projection does not fabricate a diff when canonical generation
 
 test("tool stream projection derives structured directory displays from attachment listings", () => {
   const detail = toolStreamDetail("tool.completed", {
-    toolName: "attachment_list_files",
+    toolName: "AttachmentListFiles",
     input: {
       attachmentId: "ctx-project",
       path: ".",
@@ -508,7 +508,7 @@ test("tool stream projection keeps MCP text in display items without raw media p
 
 test("tool stream projection does not leak raw stdout as an unbounded top-level field", () => {
   const payload = {
-    toolName: "shell",
+    toolName: "Shell",
     input: { commandLine: "pnpm test" },
     output: {
       commandLine: "pnpm test",

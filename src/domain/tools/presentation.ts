@@ -27,119 +27,107 @@ export type CommandTextLike = {
 };
 
 const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> = {
-  research_search: {
+  ResearchSearch: {
     displayName: "资料搜索",
     displayDescription: "在已配置的信息源中检索资料，返回可引用的资料摘要。",
   },
-  research_read: {
+  ResearchRead: {
     displayName: "资料读取",
     displayDescription: "读取检索结果或资料引用内容，用于补充上下文。",
   },
-  web_search: {
+  WebSearch: {
     displayName: "网页搜索",
     displayDescription: "通过已配置的搜索服务获取外部网页资料摘要。",
   },
-  web_fetch: {
+  WebFetch: {
     displayName: "浏览网页",
     displayDescription: "用独立浏览器会话打开网页并返回文本快照，不复用登录态。",
   },
-  http_request: {
+  HttpRequest: {
     displayName: "HTTP 请求",
     displayDescription: "发送无状态 HTTP/HTTPS 请求并返回状态、响应头和有上限的响应体。",
   },
-  read: {
+  Read: {
     displayName: "读取文件",
     displayDescription: "读取授权工作区内的文本文件，用于理解项目上下文。",
   },
-  read_output: {
+  ReadOutput: {
     displayName: "读取工具结果",
     displayDescription: "按引用继续读取已保存的大工具结果，不会重新执行原工具。",
   },
-  list: {
+  Glob: {
     displayName: "浏览目录",
     displayDescription: "查看工作区目录结构，帮助定位相关文件。",
   },
-  grep: {
+  Grep: {
     displayName: "搜索文件",
     displayDescription: "在本地工作区搜索文本，返回匹配文件、行号和片段。",
   },
-  attachment_list: {
+  AttachmentList: {
     displayName: "查看附件",
     displayDescription: "列出本轮用户提供的上下文附件引用和元数据。",
   },
-  attachment_read_text: {
+  AttachmentRead: {
     displayName: "读取附件文本",
     displayDescription: "按附件引用读取文本文件或附件项目中的文本文件。",
   },
-  attachment_read_pdf: {
+  AttachmentReadPdf: {
     displayName: "读取附件 PDF 文本",
     displayDescription: "按附件引用从文本型 PDF 中尽力抽取正文，不处理 OCR。",
   },
-  attachment_read_image: {
+  AttachmentReadImage: {
     displayName: "读取附件图片",
     displayDescription: "按附件引用把图片作为本轮模型视觉输入读取。",
   },
-  attachment_inspect_table: {
+  AttachmentInspectTable: {
     displayName: "检查附件表格",
     displayDescription: "按附件引用识别 CSV/TSV/XLSX 表格列、行数、sheet 和样例行。",
   },
-  attachment_read_table: {
+  AttachmentReadTable: {
     displayName: "读取附件表格",
     displayDescription: "按附件引用读取 CSV/TSV/XLSX 表格的指定行窗口。",
   },
-  attachment_inspect_archive: {
+  AttachmentInspectArchive: {
     displayName: "检查附件压缩包",
     displayDescription: "按附件引用列出 ZIP 压缩包内部条目，不解压文件。",
   },
-  attachment_list_files: {
+  AttachmentListFiles: {
     displayName: "浏览附件目录",
     displayDescription: "按附件引用浏览用户提供的项目文件夹结构。",
   },
-  attachment_search_files: {
+  AttachmentSearchFiles: {
     displayName: "搜索附件文件",
     displayDescription: "按附件引用在用户提供的文件或项目中搜索文本。",
   },
-  create: {
-    displayName: "创建文件",
-    displayDescription: "在当前工作区创建不存在的 UTF-8 文本文件，不覆盖已有文件。",
-  },
-  edit: {
+  Edit: {
     displayName: "编辑文件",
     displayDescription: "精确修改工作区文本文件，并返回变更摘要。",
   },
-  delete: {
-    displayName: "删除文件",
-    displayDescription: "删除工作区内指定文件。",
-  },
-  write: {
+  Write: {
     displayName: "写入文件",
     displayDescription: "写入工作区文本文件。",
   },
-  skill_read: {
+  SkillRead: {
     displayName: "读取技能资源",
     displayDescription: "按本轮已选中技能读取参考资源或查看资源元数据。",
   },
-  shell: {
+  Shell: {
     displayName: "Shell 命令",
     displayDescription: "在当前会话 Shell 中运行命令，适合构建、测试、脚本和通用 CLI 工作流。",
   },
-  process_start: {
-    displayName: "启动进程",
-    displayDescription: "启动跨本轮运行持续存在的工作区服务，并返回稳定进程标识和日志引用。",
-  },
-  process_inspect: {
+  ProcessRead: {
     displayName: "检查进程",
     displayDescription: "按稳定进程标识检查工作区受管进程的状态、端口和日志引用。",
   },
-  process_stop: {
+  ProcessStop: {
     displayName: "停止进程",
     displayDescription: "按稳定进程标识停止一个工作区受管进程。",
   },
-  agent_call: {
+  Agent: {
     displayName: "调用专家",
     displayDescription: "将一项边界清楚的任务交给已登记专家，并将结果返回当前 Agent。",
   },
-  agent_spawn: {
+  AgentSpawn: {
     displayName: "创建专家",
     displayDescription: "为当前任务创建一个受限的临时专家，并将结果返回当前 Agent。",
   },

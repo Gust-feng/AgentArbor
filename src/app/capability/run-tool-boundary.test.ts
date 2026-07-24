@@ -134,8 +134,8 @@ test("run tool boundary keeps MCP execution permission while deferring its model
     source: { kind: "mcp", id: "docs", label: "Documentation" },
     definitionHash,
   }]);
-  assert.equal(boundary.toolVisibilityPlan?.controls.search.name, "mcp_search");
-  assert.equal(boundary.toolVisibilityPlan?.controls.load.name, "mcp_load");
+  assert.equal(boundary.toolVisibilityPlan?.controls.search.name, "McpSearch");
+  assert.equal(boundary.toolVisibilityPlan?.controls.load.name, "McpLoad");
 });
 
 test("run tool boundary omits progressive controls when no eligible MCP tool remains", () => {
@@ -439,30 +439,30 @@ test("run tool boundary ignores failed or omitted skill contexts for tool restri
   assert.deepEqual(boundary.allowedTools, ["search", "read"]);
 });
 
-test("run tool boundary hides skill_read when no selected skill resource is readable", () => {
+test("run tool boundary hides SkillRead when no selected skill resource is readable", () => {
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,
     snapshot: capabilitySnapshot([
       tool("search", "read-only"),
-      tool("skill_read", "read-only"),
+      tool("SkillRead", "read-only"),
     ]),
     goal: "use skill resources",
     taskSoil: createTaskSoil({ rawGoal: "use skill resources" }),
-    toolCenter: executableToolBroker(["search", "skill_read"]),
+    toolCenter: executableToolBroker(["search", "SkillRead"]),
     skillContexts: [skillContext("repo-review")],
   });
 
   assert.deepEqual(boundary.allowedTools, ["search"]);
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "skill_read")?.modelVisible,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "SkillRead")?.modelVisible,
     false
   );
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "skill_read")?.reason,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "SkillRead")?.reason,
     "当前没有已选中且可读的技能资源。"
   );
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "skill_read")?.reasonCode,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "SkillRead")?.reasonCode,
     "selected_skill_resources_unavailable"
   );
   assert.equal(
@@ -471,17 +471,17 @@ test("run tool boundary hides skill_read when no selected skill resource is read
   );
 });
 
-test("run tool boundary keeps skill_read when selected skills expose readable resources", () => {
+test("run tool boundary keeps SkillRead when selected skills expose readable resources", () => {
   const selectedSkill = skillContext("repo-review");
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,
     snapshot: capabilitySnapshot([
       tool("search", "read-only"),
-      tool("skill_read", "read-only"),
+      tool("SkillRead", "read-only"),
     ]),
     goal: "use skill resources",
     taskSoil: createTaskSoil({ rawGoal: "use skill resources" }),
-    toolCenter: executableToolBroker(["search", "skill_read"]),
+    toolCenter: executableToolBroker(["search", "SkillRead"]),
     skillContexts: [{
       ...selectedSkill,
       skill: {
@@ -496,27 +496,27 @@ test("run tool boundary keeps skill_read when selected skills expose readable re
     }],
   });
 
-  assert.deepEqual(boundary.allowedTools, ["search", "skill_read"]);
+  assert.deepEqual(boundary.allowedTools, ["search", "SkillRead"]);
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "skill_read")?.modelVisible,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "SkillRead")?.modelVisible,
     true
   );
 });
 
-test("run tool boundary can activate latent skill_read after skill selection", () => {
+test("run tool boundary can activate latent SkillRead after skill selection", () => {
   const selectedSkill = skillContext("repo-review");
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,
     snapshot: capabilitySnapshot(
       [
         tool("search", "read-only"),
-        tool("skill_read", "read-only"),
+        tool("SkillRead", "read-only"),
       ],
       ["search"]
     ),
     goal: "use selected skill resources",
     taskSoil: createTaskSoil({ rawGoal: "use selected skill resources" }),
-    toolCenter: executableToolBroker(["search", "skill_read"]),
+    toolCenter: executableToolBroker(["search", "SkillRead"]),
     skillContexts: [{
       ...selectedSkill,
       skill: {
@@ -530,31 +530,31 @@ test("run tool boundary can activate latent skill_read after skill selection", (
     }],
   });
 
-  assert.deepEqual(boundary.allowedTools, ["search", "skill_read"]);
+  assert.deepEqual(boundary.allowedTools, ["search", "SkillRead"]);
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "skill_read")?.reason,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "SkillRead")?.reason,
     "当前已选中技能提供可读资源。"
   );
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "skill_read")?.reasonCode,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "SkillRead")?.reasonCode,
     "selected_skill_resources_available"
   );
   assert.equal(boundary.capabilityResolution?.warnings.includes("已隐藏 1 个不可用工具。"), false);
 });
 
-test("run tool boundary rejects a drifted latent skill_read executor", () => {
+test("run tool boundary rejects a drifted latent SkillRead executor", () => {
   const selectedSkill = skillContext("repo-review");
   const boundary = resolveRunToolBoundary({
     agentDefinition: DESKTOP_ROOT_AGENT,
     snapshot: capabilitySnapshot(
-      [tool("search", "read-only"), tool("skill_read", "read-only")],
+      [tool("search", "read-only"), tool("SkillRead", "read-only")],
       ["search"],
     ),
     goal: "use selected skill resources",
     taskSoil: createTaskSoil({ rawGoal: "use selected skill resources" }),
     toolCenter: executableToolBrokerFromDefinitions([
       toolDefinition("search"),
-      { ...toolDefinition("skill_read"), description: "Drifted skill resource executor." },
+      { ...toolDefinition("SkillRead"), description: "Drifted skill resource executor." },
     ]),
     skillContexts: [{
       ...selectedSkill,
@@ -567,14 +567,14 @@ test("run tool boundary rejects a drifted latent skill_read executor", () => {
 
   assert.deepEqual(boundary.allowedTools, ["search"]);
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "skill_read")?.reasonCode,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "SkillRead")?.reasonCode,
     "tool_contract_mismatch",
   );
 });
 
 test("run tool boundary exposes implemented Pi AgentTools without requiring ToolCenter executors", () => {
   const callAgentTool = {
-    ...toolDefinition("agent_call"),
+    ...toolDefinition("Agent"),
     description: "Call a frozen project-helper specialist.",
     inputSchema: {
       type: "object" as const,
@@ -583,14 +583,14 @@ test("run tool boundary exposes implemented Pi AgentTools without requiring Tool
       additionalProperties: false,
     },
   };
-  const frozenCallAgentTool = tool("agent_call", "read-write", {
+  const frozenCallAgentTool = tool("Agent", "read-write", {
     description: callAgentTool.description,
     inputSchema: callAgentTool.inputSchema,
     definitionHash: toolDefinitionContractHash(callAgentTool),
   });
   const snapshot = capabilitySnapshot(
     [frozenCallAgentTool],
-    ["agent_call"],
+    ["Agent"],
     [
       subAgentCatalogItem("project-helper", {
         description: "Project-specific helper from the frozen run catalog.",
@@ -612,8 +612,8 @@ test("run tool boundary exposes implemented Pi AgentTools without requiring Tool
   });
 
   assert.deepEqual(boundary.allowedTools, []);
-  assert.deepEqual(boundary.allowedAgentToolNames, ["agent_call"]);
-  assert.equal(boundary.toolDefinitions[0]?.name, "agent_call");
+  assert.deepEqual(boundary.allowedAgentToolNames, ["Agent"]);
+  assert.equal(boundary.toolDefinitions[0]?.name, "Agent");
   assert.equal(boundary.toolDefinitions[0]?.description, frozenCallAgentTool.description);
   assert.deepEqual(boundary.toolDefinitions[0]?.inputSchema, frozenCallAgentTool.inputSchema);
 });
@@ -621,10 +621,10 @@ test("run tool boundary exposes implemented Pi AgentTools without requiring Tool
 test("run tool boundary hides preset sub-agent call tools when no enabled sub-agents exist", () => {
   const snapshot = capabilitySnapshot(
     [
-      tool("agent_call", "read-write"),
-      tool("agent_spawn", "read-write"),
+      tool("Agent", "read-write"),
+      tool("AgentSpawn", "read-write"),
     ],
-    ["agent_call", "agent_spawn"],
+    ["Agent", "AgentSpawn"],
     [subAgentCatalogItem("disabled-helper", { enabled: false })],
   );
   const boundary = resolveRunToolBoundary({
@@ -633,27 +633,27 @@ test("run tool boundary hides preset sub-agent call tools when no enabled sub-ag
     subAgentCatalog: snapshot.subAgentCatalog,
     goal: "use sub-agent tools",
     taskSoil: createTaskSoil({ rawGoal: "use sub-agent tools" }),
-    agentToolDefinitions: [toolDefinition("agent_call"), toolDefinition("agent_spawn")],
+    agentToolDefinitions: [toolDefinition("Agent"), toolDefinition("AgentSpawn")],
   });
 
   assert.deepEqual(boundary.allowedTools, []);
-  assert.deepEqual(boundary.allowedAgentToolNames, ["agent_spawn"]);
-  assert.deepEqual(boundary.toolDefinitions.map((definition) => definition.name), ["agent_spawn"]);
+  assert.deepEqual(boundary.allowedAgentToolNames, ["AgentSpawn"]);
+  assert.deepEqual(boundary.toolDefinitions.map((definition) => definition.name), ["AgentSpawn"]);
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "agent_call")?.reasonCode,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "Agent")?.reasonCode,
     "no_enabled_sub_agents"
   );
   assert.equal(
-    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "agent_spawn")?.modelVisible,
+    boundary.capabilityResolution?.toolExposures.find((item) => item.name === "AgentSpawn")?.modelVisible,
     true
   );
 });
 
 test("run tool boundary applies permissions, profile, model, snapshot, and implementation gates to Pi AgentTools", () => {
-  const agentTools = [toolDefinition("agent_call"), toolDefinition("agent_spawn")];
+  const agentTools = [toolDefinition("Agent"), toolDefinition("AgentSpawn")];
   const snapshot = capabilitySnapshot(
-    [tool("agent_call", "read-write"), tool("agent_spawn", "read-write")],
-    ["agent_call", "agent_spawn"],
+    [tool("Agent", "read-write"), tool("AgentSpawn", "read-write")],
+    ["Agent", "AgentSpawn"],
     [subAgentCatalogItem("reviewer")],
   );
   const base = {
@@ -666,23 +666,23 @@ test("run tool boundary applies permissions, profile, model, snapshot, and imple
   };
 
   assert.deepEqual(resolveRunToolBoundary(base).allowedAgentToolNames, [
-    "agent_call",
-    "agent_spawn",
+    "Agent",
+    "AgentSpawn",
   ]);
   assert.deepEqual(resolveRunToolBoundary({
     ...base,
     taskSoil: createTaskSoil({
       rawGoal: "delegate",
-      permissionBoundaryRefs: ["deny:tool:agent_spawn"],
+      permissionBoundaryRefs: ["deny:tool:AgentSpawn"],
     }),
-  }).allowedAgentToolNames, ["agent_call"]);
+  }).allowedAgentToolNames, ["Agent"]);
   assert.deepEqual(resolveRunToolBoundary({
     ...base,
     agentDefinition: {
       ...DESKTOP_ROOT_AGENT,
       toolVisibilityProfile: {
         ...DESKTOP_ROOT_AGENT.toolVisibilityProfile,
-        hiddenToolNames: ["agent_call", "agent_spawn"],
+        hiddenToolNames: ["Agent", "AgentSpawn"],
       },
     },
   }).allowedAgentToolNames, []);
@@ -832,7 +832,7 @@ function tool(
   overrides: Partial<CapabilityToolCatalogItem> = {}
 ): CapabilityToolCatalogItem {
   const metadata = {
-    category: name === "skill_read"
+    category: name === "SkillRead"
       ? "other" as const
       : operationType === "execute"
         ? "terminal" as const
@@ -914,7 +914,7 @@ function executableToolBrokerFromDefinitions(
 
 function toolDefinition(name: string): ToolDefinition {
   const operationType = fixtureOperationType(name);
-  const category = name === "skill_read"
+  const category = name === "SkillRead"
     ? "other" as const
     : operationType === "execute"
       ? "terminal" as const
@@ -956,7 +956,7 @@ function toolDefinitionFromCatalogItem(tool: CapabilityToolCatalogItem): ToolDef
 
 function fixtureOperationType(name: string): CapabilityToolCatalogItem["operationType"] {
   if (name === "shell") return "execute";
-  if (name === "write" || name === "agent_call" || name === "agent_spawn") {
+  if (name === "write" || name === "Agent" || name === "AgentSpawn") {
     return "read-write";
   }
   return "read-only";

@@ -151,20 +151,26 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       if (!stat.isFile()) {
         throw new Error(`Read expects a file path: ${target.relativePath}`);
       }
-      await fileState?.remember(target.absolutePath);
-      const probe = Buffer.alloc(Math.min(stat.size, 8192));
-      const handle = await fs.open(target.absolutePath, "r");
-      try {
-        await handle.read(probe, 0, probe.length, 0);
-      } finally {
-        await handle.close();
+      const bytes = stat.size <= MAX_LOCAL_WORKSPACE_FILE_BYTES
+        ? await fs.readFile(target.absolutePath, { signal: context.abortSignal })
+        : undefined;
+      const observedSize = bytes?.length ?? stat.size;
+      if (bytes !== undefined) fileState?.rememberContent(target.absolutePath, bytes);
+      const probe = bytes?.subarray(0, Math.min(bytes.length, 8192)) ?? Buffer.alloc(Math.min(stat.size, 8192));
+      if (bytes === undefined) {
+        const handle = await fs.open(target.absolutePath, "r");
+        try {
+          await handle.read(probe, 0, probe.length, 0);
+        } finally {
+          await handle.close();
+        }
       }
       throwIfAborted(context.abortSignal);
       if (probe.includes(0)) {
         return {
           refId: `workspace:file:${target.relativePath}`,
           path: target.relativePath,
-          bytes: stat.size,
+          bytes: observedSize,
           binary: true,
         };
       }
@@ -195,10 +201,9 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
           throw error;
         }
       } else {
-        const bytes = await fs.readFile(target.absolutePath, { signal: context.abortSignal });
-        const raw = decodeUtf8Text(bytes);
+        const raw = decodeUtf8Text(bytes!);
         if (raw === undefined) {
-          return invalidUtf8ReadResult(target.relativePath, stat.size);
+          return invalidUtf8ReadResult(target.relativePath, observedSize);
         }
         content = lineRange === undefined
           ? charWindowContent(raw, startChar ?? 0)
@@ -222,7 +227,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       const output = {
         refId: `workspace:file:${target.relativePath}`,
         path: target.relativePath,
-        bytes: stat.size,
+        bytes: observedSize,
         content: returned.text,
         startLine: content.range?.startLine,
         endLine: content.range?.endLine,

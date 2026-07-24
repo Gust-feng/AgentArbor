@@ -13,6 +13,7 @@ import {
   createLocalShellCommandTool,
   createLocalWorkspaceSandboxPolicy,
   createLocalWriteFileTool,
+  InMemoryLocalWorkspaceMutationCoordinator,
 } from "./local-workspace-tools.js";
 import { ensurePidExited } from "./background-process-test-utils.js";
 import { createDefaultCommandShellConfig } from "./local-workspace-command-tools.js";
@@ -192,6 +193,100 @@ test("C05 requires Read before modifying an existing file and rejects stale read
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("same-run concurrent edits of one file compose in source order without losing changes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-same-file-edits-"));
+  try {
+    const target = path.join(root, "note.txt");
+    await writeFile(target, "alpha\nbeta\n", "utf8");
+    const fileState = new LocalWorkspaceFileState();
+    const mutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
+    const readTool = createLocalReadFileTool(root, { fileState });
+    const editTool = createLocalEditFileTool(root, { fileState, mutationCoordinator });
+    await readTool.execute({ path: "note.txt" }, context);
+
+    const results = await Promise.all([
+      editTool.execute({ path: "note.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] }, context),
+      editTool.execute({ path: "note.txt", edits: [{ oldText: "beta", newText: "BETA" }] }, context),
+    ]);
+
+    assert.equal(results.length, 2);
+    assert.equal(await readFile(target, "utf8"), "ALPHA\nBETA\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("same-run overlapping edits preserve the first change and reject the stale replacement", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-overlapping-edits-"));
+  try {
+    const target = path.join(root, "note.txt");
+    await writeFile(target, "alpha\n", "utf8");
+    const fileState = new LocalWorkspaceFileState();
+    const mutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
+    const readTool = createLocalReadFileTool(root, { fileState });
+    const editTool = createLocalEditFileTool(root, { fileState, mutationCoordinator });
+    await readTool.execute({ path: "note.txt" }, context);
+
+    const results = await Promise.allSettled([
+      editTool.execute({ path: "note.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] }, context),
+      editTool.execute({ path: "note.txt", edits: [{ oldText: "alpha", newText: "Alpha" }] }, context),
+    ]);
+
+    assert.equal(results[0]?.status, "fulfilled");
+    assert.equal(results[1]?.status, "rejected");
+    assert.match(String(results[1]?.status === "rejected" ? results[1].reason : ""), /must match exactly once.*matches=0/);
+    assert.equal(await readFile(target, "utf8"), "ALPHA\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("shared mutation coordination rejects a second run based on an older file observation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-cross-run-edits-"));
+  try {
+    const target = path.join(root, "note.txt");
+    await writeFile(target, "alpha\nbeta\n", "utf8");
+    const mutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
+    const firstState = new LocalWorkspaceFileState();
+    const secondState = new LocalWorkspaceFileState();
+    await createLocalReadFileTool(root, { fileState: firstState }).execute({ path: "note.txt" }, context);
+    await createLocalReadFileTool(root, { fileState: secondState }).execute({ path: "note.txt" }, context);
+    const firstEdit = createLocalEditFileTool(root, { fileState: firstState, mutationCoordinator });
+    const secondEdit = createLocalEditFileTool(root, { fileState: secondState, mutationCoordinator });
+
+    const results = await Promise.allSettled([
+      firstEdit.execute({ path: "note.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] }, context),
+      secondEdit.execute({ path: "note.txt", edits: [{ oldText: "beta", newText: "BETA" }] }, context),
+    ]);
+
+    assert.equal(results[0]?.status, "fulfilled");
+    assert.equal(results[1]?.status, "rejected");
+    assert.match(String(results[1]?.status === "rejected" ? results[1].reason : ""), /changed after it was read/);
+    assert.equal(await readFile(target, "utf8"), "ALPHA\nbeta\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("mutation coordination does not block independent file paths", async () => {
+  const mutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
+  let releaseFirst!: () => void;
+  let markFirstEntered!: () => void;
+  const firstEntered = new Promise<void>((resolve) => { markFirstEntered = resolve; });
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const first = mutationCoordinator.run("C:/workspace/first.txt", async () => {
+    markFirstEntered();
+    await firstGate;
+    return "first";
+  });
+  await firstEntered;
+
+  const second = mutationCoordinator.run("C:/workspace/second.txt", async () => "second");
+  assert.equal(await second, "second");
+  releaseFirst();
+  assert.equal(await first, "first");
 });
 
 test("local grep returns complete executable continuations", async () => {

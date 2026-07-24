@@ -5,6 +5,13 @@ export {
 export type { LocalWorkspaceSandboxPolicyOptions } from "./local-workspace-sandbox.js";
 
 export {
+  InMemoryLocalWorkspaceMutationCoordinator,
+} from "./local-workspace-mutation-coordinator.js";
+export type {
+  LocalWorkspaceMutationCoordinator,
+} from "./local-workspace-mutation-coordinator.js";
+
+export {
   createLocalGrepFilesTool,
   createLocalGlobTool,
   createLocalReadFileTool,

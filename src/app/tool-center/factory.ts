@@ -19,6 +19,7 @@ import type { ProcessTerminator } from "../runtime-guard/index.js";
 import type { ToolOutputStore } from "./tool-output-store.js";
 import type { ToolOutputTokenCounter } from "./tool-output-limits.js";
 import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
+import type { LocalWorkspaceMutationCoordinator } from "./adapters/local-workspace-mutation-coordinator.js";
 
 export type AgentToolRuntimeContext = {
   readonly constraints?: readonly Constraint[];
@@ -50,6 +51,7 @@ export type CreateAgentToolCenterOptions = {
   readonly toolOutputStore?: ToolOutputStore;
   readonly outputTokenCounter?: ToolOutputTokenCounter;
   readonly metricsSink?: ToolExecutionMetricsSink;
+  readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
 };
 
 export function createDefaultToolCenter(

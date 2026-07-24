@@ -163,7 +163,7 @@ Harness 要求注入 `ExecutionEnv`，但不会自动把 env 的 shell/filesyste
 - `execute()` 只调用一次 ToolCenter，并传递同一个 `AbortSignal`；不得把 Pi 工具 executor 变成绕过 ToolCenter 的第二执行入口。
 - ToolCenter 的 `ToolCallResult` 先持久化为 Ordinary canonical 工具事实，再转成 Pi `AgentToolResult`/`tool_result` patch。失败、取消、拒绝、delivery failure、`sourceExecutionStatus`、`doNotBlindlyRetry` 和 evidence ref 必须保留。
 - Pi `AgentTool.execute()` 的 thrown error 会被转成 text error 且 details 变为空对象。桥接层不应通过 throw 丢掉已知 ToolCenter 事实；应返回带稳定判别信息的 details，再由 Harness `tool_result` hook 设置 `isError`。
-- 只读工具保持 parallel；有副作用工具标记 `executionMode: "sequential"`。混合批次按 Pi 明确语义整批顺序执行；该行为已经由能力契约测试固定，AgentArbor 的重复调度器已经删除，只保留不参与排队的执行观察层。
+- Pi 支持 per-tool sequential，但 AgentArbor 的 Ordinary 统一把所有 AgentTool 标记为 `executionMode: "parallel"`。同一 assistant batch 并发执行，依赖通过后续模型 turn 表达；AgentArbor 的重复调度器已经删除，只保留不参与排队的执行观察层。
 
 ### 4.4 确认与 continuation
 
@@ -360,7 +360,7 @@ Pi 提供“一个 Agent 如何运行”，未来 Multi-Agent feature 仍决定�
 - [ ] 无工具 `stop` 才 completed；`length/error/aborted` 不 completed。
 - [ ] assistant 文本 + tool calls 保持一条真实消息，工具后继续模型。
 - [ ] 每个 tool call id 恰好一个 result；sequential/parallel 取消都不悬空。
-- [ ] read 并行、write 顺序、混合 batch 行为符合接受标准。
+- [ ] 同一 assistant batch 的 read、write、MCP visibility control 与 AgentTool 均并行，结果按 source order 回灌。
 - [ ] ToolCenter 每个调用恰好执行一次，事实先持久化再回模型。
 - [ ] approve/deny/guidance/cancel/重复 decision/continuation lost 都有真实 outcome。
 - [ ] oversized success/failure 保留 evidence ref 与可读 continuation。

@@ -10,6 +10,7 @@ export type LocalWorkspaceToolOptions = {
   readonly sandboxPolicy?: import("../../../domain/tools/index.js").SandboxPolicy;
   readonly commandShell?: import("../../../domain/config/index.js").SanitizedCommandShellConfig;
   readonly fileState?: import("./local-workspace-file-state.js").LocalWorkspaceFileState;
+  readonly mutationCoordinator?: import("./local-workspace-mutation-coordinator.js").LocalWorkspaceMutationCoordinator;
 };
 
 export function throwIfAborted(signal: AbortSignal | undefined): void {

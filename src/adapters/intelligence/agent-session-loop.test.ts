@@ -533,6 +533,56 @@ test("progressive MCP loading is atomic for invalid names and idempotent across 
   await loop.release();
 });
 
+test("concurrent MCP loads merge the active set without losing either definition", async (t) => {
+  const fixture = await createPayloadAwareFixture(t);
+  const definitions = [mcpToolDefinition("docs__one"), mcpToolDefinition("docs__two")];
+  fixture.faux.setResponses([
+    fauxAssistantMessage([
+      fauxToolCall("mcp_load", { tool_names: ["docs__one"] }, { id: "load-one" }),
+      fauxToolCall("mcp_load", { tool_names: ["docs__two"] }, { id: "load-two" }),
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage("both MCP tools are available"),
+  ]);
+  const observedTools: string[][] = [];
+  const gateway = gatewayForDefinitions(definitions, async (request) => ({
+    ...request,
+    output: "unexpected MCP execution",
+    status: "completed",
+    durationMs: 1,
+  }));
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    transformProviderPayload: ({ payload, tools }) => {
+      observedTools.push(tools.map((tool) => tool.name));
+      return payload;
+    },
+  });
+  const base = loopInput(gateway);
+
+  const result = await loop.execute({
+    ...base,
+    tools: {
+      ...base.tools,
+      permission: { ...base.tools.permission, allowedTools: definitions.map((definition) => definition.name) },
+    },
+    toolVisibilityPlan: progressivePlan({
+      initialNames: [],
+      deferred: [
+        { name: "docs__one", displayName: "One", description: "One", serverId: "docs" },
+        { name: "docs__two", displayName: "Two", description: "Two", serverId: "docs" },
+      ],
+    }),
+  });
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(observedTools, [
+    ["mcp_search", "mcp_load"],
+    ["docs__one", "docs__two"],
+  ]);
+  assert.deepEqual(result.toolResults.map((item) => item.callId), ["load-one", "load-two"]);
+  await loop.release();
+});
+
 test("a hallucinated unloaded MCP call never reaches its executor", async (t) => {
   const fixture = await createPayloadAwareFixture(t);
   const definition = mcpToolDefinition("docs__lookup");
@@ -1442,7 +1492,7 @@ test("agent session loop reads an oversized ToolCenter result through Pi continu
     }),
     () => {
       assert.ok(continuationInput, "ToolCenter did not provide a read_output continuation.");
-      return fauxAssistantMessage(fauxToolCall("read_output", continuationInput, { id: "report-read" }), {
+      return fauxAssistantMessage(fauxToolCall("ReadOutput", continuationInput, { id: "report-read" }), {
         stopReason: "toolUse",
       });
     },
@@ -1462,8 +1512,9 @@ test("agent session loop reads an oversized ToolCenter result through Pi continu
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
   assert.equal(result.status === "completed" ? result.finalText : undefined, "report recovered");
   assert.equal(producerExecutions, 1);
-  assert.deepEqual(accepted.map((item) => item.toolName), ["produce_report", "read_output"]);
+  assert.deepEqual(accepted.map((item) => item.toolName), ["produce_report", "ReadOutput"]);
   assert.equal(typeof (accepted[0]?.output as { readonly contentRef?: unknown })?.contentRef, "string");
+  assert.ok(accepted[1]?.output, JSON.stringify(accepted[1]));
   assert.match(JSON.stringify(accepted[1]?.output), /report-line/u);
   await loop.release();
 });
@@ -1689,6 +1740,107 @@ test("agent session loop keeps concurrent dynamic approvals pending until each i
   assert.equal(accepted.filter((result) => result.status === "approval_required").length, 2);
   assert.equal(accepted.filter((result) => result.status === "completed").length, 2);
   assert.equal(accepted.some((result) => result.status === "cancelled"), false);
+  await loop.release();
+});
+
+test("same-turn read-write calls run concurrently, isolate failures, and return to the model in source order", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage([
+      fauxToolCall("write", { path: "a.txt" }, { id: "write-a" }),
+      fauxToolCall("write", { path: "b.txt" }, { id: "write-b" }),
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage("the independent writes were handled"),
+  ]);
+  let active = 0;
+  let maxActive = 0;
+  let markSecondStarted!: () => void;
+  const secondStarted = new Promise<void>((resolve) => { markSecondStarted = resolve; });
+  const gateway = gatewayFor({
+    definition: toolDefinition("write", "read-write"),
+    execute: async (request) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      try {
+        if (request.callId === "write-a") {
+          await withDeadline(secondStarted, 1_000, "The second write did not start concurrently.");
+          return { ...request, output: "written:a", status: "completed", durationMs: 2 };
+        }
+        markSecondStarted();
+        return {
+          ...request,
+          output: undefined,
+          status: "failed",
+          error: "write b failed",
+          errorDomain: "tool_error",
+          errorFacts: { code: "write_failed" },
+          durationMs: 1,
+        };
+      } finally {
+        active -= 1;
+      }
+    },
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(maxActive, 2);
+  assert.equal(result.toolResults.find((item) => item.callId === "write-a")?.status, "completed");
+  assert.equal(result.toolResults.find((item) => item.callId === "write-b")?.status, "failed");
+  const modelToolResultIds = (await fixture.session.getBranch()).flatMap((entry) =>
+    entry.type === "message" && entry.message.role === "toolResult" ? [entry.message.toolCallId] : []);
+  assert.deepEqual(modelToolResultIds, ["write-a", "write-b"]);
+  await loop.release();
+});
+
+test("same-turn delegated Agent calls start concurrently", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage([
+      fauxToolCall("agent_call", { task: "inspect a" }, { id: "agent-a" }),
+      fauxToolCall("agent_call", { task: "inspect b" }, { id: "agent-b" }),
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage("child result"),
+    fauxAssistantMessage("child result"),
+    fauxAssistantMessage("both delegated results were reviewed"),
+  ]);
+  let activeResolutions = 0;
+  let maxActiveResolutions = 0;
+  let releaseResolutions!: () => void;
+  const bothResolving = new Promise<void>((resolve) => { releaseResolutions = resolve; });
+  const contribution: AgentLoopAgentTool = {
+    toolName: "agent_call",
+    resolve: async () => {
+      activeResolutions += 1;
+      maxActiveResolutions = Math.max(maxActiveResolutions, activeResolutions);
+      if (activeResolutions === 2) releaseResolutions();
+      await withDeadline(bothResolving, 1_000, "The second delegated Agent did not start concurrently.");
+      activeResolutions -= 1;
+      return {
+        agentName: "reviewer",
+        instructions: "Return the delegated result.",
+        input: "Inspect independently.",
+        callerAgentId: "sub-agent:reviewer",
+        allowedTools: [],
+      };
+    },
+  };
+  const gateway = gatewayFor({
+    definition: undefined,
+    execute: async () => { throw new Error("No mechanical tools are available."); },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, { agentTools: [contribution] }));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(maxActiveResolutions, 2);
+  const modelToolResultIds = (await fixture.session.getBranch()).flatMap((entry) =>
+    entry.type === "message" && entry.message.role === "toolResult" ? [entry.message.toolCallId] : []);
+  assert.deepEqual(modelToolResultIds, ["agent-a", "agent-b"]);
   await loop.release();
 });
 

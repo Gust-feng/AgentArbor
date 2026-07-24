@@ -377,6 +377,8 @@ type VisibilityControlExecutionResult = {
   readonly rollback?: () => Promise<void>;
 };
 
+type VisibilityStateMutation = <T>(operation: () => Promise<T>) => Promise<T>;
+
 type VisibilitySearchInput = {
   readonly query?: string;
   readonly serverId?: string;
@@ -406,6 +408,18 @@ function createHarnessToolBundle(input: {
   const visibilityPlan = input.visibilityPlan;
   assertVisibilityPlanPartition(visibilityPlan, baseTools);
   let harness: AgentHarness | undefined;
+  let visibilityMutationTail = Promise.resolve();
+  const mutateVisibilityState: VisibilityStateMutation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const previous = visibilityMutationTail;
+    let release!: () => void;
+    visibilityMutationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  };
   const allToolNames = [
     ...baseTools.map((tool) => tool.name),
     visibilityPlan.controls.search.name,
@@ -440,6 +454,7 @@ function createHarnessToolBundle(input: {
         visibilityPlan.controls.load.name,
       ],
       harness: requireBoundVisibilityHarness(harness),
+      mutateVisibilityState,
     }),
   });
   const tools = [...baseTools, searchTool, loadTool];
@@ -515,7 +530,7 @@ function createVisibilityControlTool(input: {
     label: input.definition.name,
     description: modelVisibleToolDescription(input.definition),
     parameters: Type.Unsafe(globalThis.structuredClone(input.definition.inputSchema)),
-    executionMode: "sequential",
+    executionMode: "parallel",
     async execute(callId, parameters, signal) {
       const startedAt = Date.now();
       let request: ToolCallRequest;
@@ -639,6 +654,7 @@ async function loadDeferredTools(input: {
   readonly deferredTools: AgentLoopToolVisibilityPlan["deferredTools"];
   readonly controlToolNames: readonly string[];
   readonly harness: AgentHarness;
+  readonly mutateVisibilityState: VisibilityStateMutation;
 }): Promise<VisibilityControlExecutionResult> {
   const startedAt = Date.now();
   let requestedNames: readonly string[];
@@ -667,40 +683,61 @@ async function loadDeferredTools(input: {
       ),
     };
   }
-  const activeBeforeNames = input.harness.getActiveTools().map((tool) => tool.name);
-  const activeBefore = new Set(activeBeforeNames);
-  const activatedToolNames = requestedNames.filter((name) => !activeBefore.has(name));
-  const alreadyLoaded = requestedNames.filter((name) => activeBefore.has(name));
-  if (activatedToolNames.length > 0) {
-    const withActivated = [...activeBeforeNames, ...activatedToolNames];
-    const activated = new Set(withActivated);
-    const remainingAfterActivation = input.deferredTools.filter((tool) => !activated.has(tool.name)).length;
-    const controls = new Set(input.controlToolNames);
-    const nextActiveToolNames = remainingAfterActivation === 0
-      ? withActivated.filter((name) => !controls.has(name))
-      : withActivated;
-    await input.harness.setActiveTools(nextActiveToolNames);
-  }
-  const activeAfter = new Set(input.harness.getActiveTools().map((tool) => tool.name));
-  const output: ToolFactValue = {
-    kind: TOOL_VISIBILITY_ACTIVATION_KIND,
-    activatedToolNames,
-    alreadyLoaded,
-    remainingDeferredToolCount: input.deferredTools.filter((tool) => !activeAfter.has(tool.name)).length,
-    availableFrom: "next_model_request",
-  };
-  return {
-    result: {
-      ...input.request,
-      output,
-      status: "completed",
-      durationMs: Math.max(0, Date.now() - startedAt),
-    },
-    ...(activatedToolNames.length === 0 ? {} : { addedToolNames: activatedToolNames }),
-    ...(activatedToolNames.length === 0
-      ? {}
-      : { rollback: () => input.harness.setActiveTools([...activeBeforeNames]) }),
-  };
+  return input.mutateVisibilityState(async () => {
+    const activeBeforeNames = input.harness.getActiveTools().map((tool) => tool.name);
+    const activeBefore = new Set(activeBeforeNames);
+    const activatedToolNames = requestedNames.filter((name) => !activeBefore.has(name));
+    const alreadyLoaded = requestedNames.filter((name) => activeBefore.has(name));
+    if (activatedToolNames.length > 0) {
+      await input.harness.setActiveTools(activeNamesAfterVisibilityChange({
+        activeNames: [...activeBeforeNames, ...activatedToolNames],
+        deferredTools: input.deferredTools,
+        controlToolNames: input.controlToolNames,
+      }));
+    }
+    const activeAfter = new Set(input.harness.getActiveTools().map((tool) => tool.name));
+    const output: ToolFactValue = {
+      kind: TOOL_VISIBILITY_ACTIVATION_KIND,
+      activatedToolNames,
+      alreadyLoaded,
+      remainingDeferredToolCount: input.deferredTools.filter((tool) => !activeAfter.has(tool.name)).length,
+      availableFrom: "next_model_request",
+    };
+    return {
+      result: {
+        ...input.request,
+        output,
+        status: "completed",
+        durationMs: Math.max(0, Date.now() - startedAt),
+      },
+      ...(activatedToolNames.length === 0 ? {} : { addedToolNames: activatedToolNames }),
+      ...(activatedToolNames.length === 0
+        ? {}
+        : {
+            rollback: () => input.mutateVisibilityState(async () => {
+              const activated = new Set(activatedToolNames);
+              const currentNames = input.harness.getActiveTools().map((tool) => tool.name);
+              await input.harness.setActiveTools(activeNamesAfterVisibilityChange({
+                activeNames: currentNames.filter((name) => !activated.has(name)),
+                deferredTools: input.deferredTools,
+                controlToolNames: input.controlToolNames,
+              }));
+            }),
+          }),
+    };
+  });
+}
+
+function activeNamesAfterVisibilityChange(input: {
+  readonly activeNames: readonly string[];
+  readonly deferredTools: AgentLoopToolVisibilityPlan["deferredTools"];
+  readonly controlToolNames: readonly string[];
+}): string[] {
+  const active = new Set(input.activeNames);
+  const hasDeferred = input.deferredTools.some((tool) => !active.has(tool.name));
+  const controls = new Set(input.controlToolNames);
+  if (!hasDeferred) return input.activeNames.filter((name) => !controls.has(name));
+  return [...input.activeNames, ...input.controlToolNames.filter((name) => !active.has(name))];
 }
 
 function parseVisibilitySearchInput(value: ToolFactValue | undefined): VisibilitySearchInput {
@@ -807,7 +844,7 @@ function createHarnessTool(
     label: definition.name,
     description: modelVisibleToolDescription(definition),
     parameters: Type.Unsafe(globalThis.structuredClone(definition.inputSchema)),
-    executionMode: definition.metadata?.operationType === "read-only" ? "parallel" : "sequential",
+    executionMode: "parallel",
     async execute(callId, parameters, signal, onUpdate) {
       const unscopedRequest: ToolCallRequest = {
         callId,
@@ -894,7 +931,7 @@ function createDelegatedAgentTool(
     label: definition.name,
     description: modelVisibleToolDescription(definition),
     parameters: Type.Unsafe(globalThis.structuredClone(definition.inputSchema)),
-    executionMode: "sequential",
+    executionMode: "parallel",
     async execute(callId, parameters, signal) {
       const request: ToolCallRequest = {
         callId,

@@ -86,7 +86,9 @@ Pi 当前没有替 AgentArbor 定义产品级、跨进程可恢复的确认状�
 
 Pi 负责模型请求中的工具批次和 AgentTool 调用。AgentArbor 的 ToolCenter 继续保证权限、确认、一次执行和事实完整性。
 
-Pi 的 per-tool `executionMode` 只能表达全批并行或遇顺序工具时全批串行。若 Ordinary 仍需要“前序读取并行、写入独占、后续读取等待”的更细顺序，现有 run-scoped gateway 可以暂时作为 ToolCenter 前的执行机械端口保留；不得再承担模型循环、总量预算或第二套工具结果排序。确认 Pi 能直接表达等价语义后应删除该 gateway。
+Ordinary 对全部 Pi AgentTool 显式声明 `executionMode: "parallel"`：一个 assistant turn 中同时返回的调用就是模型表达的同批独立工作。若 B 依赖 A 的结果，模型应先调用 A，再在下一 turn 基于结果调用 B。AgentArbor 不按工具名、读写分类或命令内容推断顺序，也不保留 Agent 级 FIFO、写屏障或第二套结果排序器。具体 adapter 仍必须履行自己的机械一致性契约；本地文件写入由 Host-owned 路径协调器只串行同一规范路径的短读改写区间，不同路径继续并行，不能让并行 `Edit` 静默覆盖。
+
+每个并行调用仍独立经过 schema、冻结执行授权、确认、取消和 ToolCenter 事实交付。一个调用失败或等待确认不能自动取消其他独立调用；全 run 取消继续传播到所有在途调用。完成事件可以按真实完成顺序发布，但 Pi 提供给下一模型轮次并持久化到 Session 的 tool result message 必须按 assistant source order 排列。文件陈旧写拒绝、原子写入、MCP 单服务并发上限等仍属于各自机械一致性或资源边界，不能被误写成模型调用依赖调度。
 
 ### 7. 压缩必须覆盖同一运行内的长工具循环
 

@@ -36,6 +36,7 @@ import {
 } from "../mcp/mcp-tool-contribution.js";
 import type { AgentLoopTokenCounter } from "../context-maintenance/index.js";
 import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
+import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 
 export type AgentRunResourceHost = {
   readonly configCenter: ConfigCenter;
@@ -45,6 +46,7 @@ export type AgentRunResourceHost = {
   readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
   readonly testOnlyAllowFakeModel?: boolean;
+  readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
 };
 
 export type AgentHostRunResources<
@@ -65,6 +67,7 @@ export type AgentHostRunResources<
   readonly processRegistry?: LocalCommandProcessRegistry;
   readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
+  readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
 };
 
 export type AgentRunResources<
@@ -217,6 +220,7 @@ async function prepareAgentHostRunResourcesWithEnvironment<
     processRegistry: runtime.processRegistry,
     processTerminator: runtime.processTerminator,
     toolOutputStore: runtime.toolOutputStore,
+    fileMutationCoordinator: runtime.fileMutationCoordinator,
   };
 }
 
@@ -303,5 +307,6 @@ export function createAgentToolCenterFactory(
     toolOutputStore: resources.toolOutputStore,
     outputTokenCounter: context?.outputTokenCounter,
     metricsSink: context?.metricsSink,
+    fileMutationCoordinator: resources.fileMutationCoordinator,
   });
 }

@@ -150,6 +150,12 @@ producer continuation 与 transport retention 分开：
 
 对 MCP 长尾工具，0.3.1 保留基于真实定义成本的渐进曝光机制，但它只改变当前模型请求的 active set，不改变 frozen catalog、execution allowed 或 confirmation policy。基础 workspace 工具不进入这套延迟加载。
 
+### 4.6 同轮并行语义
+
+Ordinary 把同一 assistant turn 返回的所有工具调用视为模型表达的一组独立工作，并统一交给 Pi 并行执行。调用依赖不由工程层根据工具名称、read/write 分类或 Shell 命令文本推断：模型需要先查看 A 的结果再决定 B 时，应自然地在下一 turn 发出 B。
+
+并行不削弱机械边界。每个调用仍独立经过 schema、冻结授权、确认、取消和结果交付；一个调用失败不自动取消同批其他调用。完成事件可按真实完成顺序出现，但进入下一次模型请求和 Pi Session 的 tool result message 保持 assistant 原始调用顺序。写入冲突由读取状态校验、陈旧写拒绝和工具自身的一致性契约处理，而不是用整批串行掩盖。
+
 ## 5. 评测方案
 
 ### 5.1 隔离方式

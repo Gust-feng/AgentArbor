@@ -27,6 +27,10 @@ import {
 } from "./adapters/local-workspace-tools.js";
 import { LocalWorkspaceFileState } from "./adapters/local-workspace-file-state.js";
 import {
+  InMemoryLocalWorkspaceMutationCoordinator,
+  type LocalWorkspaceMutationCoordinator,
+} from "./adapters/local-workspace-mutation-coordinator.js";
+import {
   createDefaultCommandShellConfig,
   createLocalShellCommandTool,
   type LocalCommandProcessRegistry,
@@ -59,6 +63,7 @@ export type CreateAgentToolRegistryOptions = {
   readonly toolOutputStore?: ToolOutputStore;
   readonly outputTokenCounter?: ToolOutputTokenCounter;
   readonly metricsSink?: ToolExecutionMetricsSink;
+  readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
 };
 
 export type ToolRegistryFetchLike = (
@@ -91,6 +96,7 @@ export function createAgentToolRegistry(
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
   const fileState = new LocalWorkspaceFileState();
+  const mutationCoordinator = options.fileMutationCoordinator ?? new InMemoryLocalWorkspaceMutationCoordinator();
   const commandShell = options.commandShell ?? createDefaultCommandShellConfig(process.platform, env);
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
   const baseToolScopes = options.baseToolScopes ?? ["agent-basic"];
@@ -98,8 +104,8 @@ export function createAgentToolRegistry(
     createLocalReadFileTool(workspaceRoot, { sandboxPolicy, fileState, outputTokenCounter: options.outputTokenCounter }),
     createLocalGlobTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
     createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
-    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy, fileState }),
-    createLocalEditFileTool(workspaceRoot, { sandboxPolicy, fileState }),
+    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy, fileState, mutationCoordinator }),
+    createLocalEditFileTool(workspaceRoot, { sandboxPolicy, fileState, mutationCoordinator }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
     ...managedProcessExecutors(options, workspaceRoot, sandboxPolicy, commandShell),
     ...contextAttachmentExecutors(options, workspaceRoot),

@@ -64,6 +64,7 @@ import { PanelHttpError } from "./http-utils.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 import { resolveTriggeredSkillContexts } from "./skill-service.js";
 import type { PanelRunInput } from "./request-parsers.js";
+import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -187,6 +188,7 @@ function assemblePanelRuntime(input: {
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
   const agentDefinitionOverrides = new Map<string, AgentDefinition>();
   const processRegistry = new InMemoryProcessRegistry();
+  const fileMutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
   const toolOutputStore = new FileSystemToolOutputStore(resolveToolEvidenceRoot(input));
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
   const capabilityCenter = new CapabilityCenter({
@@ -212,6 +214,7 @@ function assemblePanelRuntime(input: {
       processRegistry,
       processTerminator,
       toolOutputStore,
+      fileMutationCoordinator,
       testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
     },
     sessionRepository: agentSessionRepository,

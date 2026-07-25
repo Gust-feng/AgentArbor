@@ -39,6 +39,7 @@ export function LiveStreamBox({
   }
   const stateRef = useRef(initialRef.current);
   const frameRef = useRef<number | undefined>(undefined);
+  const initialLayoutRef = useRef(true);
   const latestRef = useRef({ live, text });
   const [displayed, setDisplayed] = useState(initialRef.current.displayed);
   latestRef.current = { live, text };
@@ -47,9 +48,10 @@ export function LiveStreamBox({
     const now = animationNow();
     const smooth = live && !reduceMotionRef.current;
     stateRef.current = updateStreamingTextTarget(stateRef.current, text, smooth, now);
-    stateRef.current = smooth
+    stateRef.current = smooth && !initialLayoutRef.current
       ? consumeStreamingTextFrame(stateRef.current, now)
       : stateRef.current;
+    initialLayoutRef.current = false;
     commitDisplayed(stateRef.current.displayed);
     if (smooth && streamingTextHasPendingDisplay(stateRef.current)) {
       scheduleFrame();

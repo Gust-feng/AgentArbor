@@ -27,7 +27,10 @@ export function createInitialStreamingTextState(
   if (!live || !animateOnMount || text.length === 0) {
     return createStreamingTextState(text);
   }
-  return updateStreamingTextTarget(createStreamingTextState(), text, true, now);
+  return consumeStreamingTextFrame(
+    updateStreamingTextTarget(createStreamingTextState(), text, true, now),
+    now,
+  );
 }
 
 export function updateStreamingTextTarget(

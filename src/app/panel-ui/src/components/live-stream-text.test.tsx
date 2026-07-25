@@ -3,6 +3,26 @@ import { act, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { LiveStreamBox } from "./live-stream-text";
 
+test("live stream mounts with visible text instead of an empty first render", () => {
+  vi.spyOn(performance, "now").mockReturnValue(0);
+  vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  const target = "abcdefghijklmnopqrst";
+
+  render(
+    <LiveStreamBox
+      text={target}
+      live
+      animateOnMount
+      renderStreamingText={(text) => <span data-testid="initial-stream-text">{text}</span>}
+    />,
+  );
+
+  const displayed = screen.getByTestId("initial-stream-text").textContent ?? "";
+  expect(displayed.length).toBeGreaterThan(0);
+  expect(displayed.length).toBeLessThan(target.length);
+});
+
 test("live stream smooths a provider chunk across frames and settles immediately", () => {
   let now = 0;
   let nextFrame: FrameRequestCallback | undefined;

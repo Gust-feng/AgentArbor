@@ -55,10 +55,11 @@ test("settled and restored text renders completely without replay", () => {
   );
 });
 
-test("new live text waits for the first display frame instead of consuming twice on mount", () => {
+test("new live text reveals a first chunk in its initial render", () => {
   const initial = createInitialStreamingTextState("abcdefghijklmnopqrst", true, true, 0);
 
-  assert.equal(initial.displayed, "");
+  assert.equal(initial.displayed.length > 0, true);
+  assert.equal(initial.displayed.length < initial.target.length, true);
   assert.equal(streamingTextHasPendingDisplay(initial), true);
 });
 

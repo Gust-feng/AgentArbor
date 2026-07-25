@@ -25,7 +25,6 @@ import {
   createLocalReadFileTool,
   createLocalWriteFileTool,
 } from "./adapters/local-workspace-tools.js";
-import { LocalWorkspaceFileState } from "./adapters/local-workspace-file-state.js";
 import {
   InMemoryLocalWorkspaceMutationCoordinator,
   type LocalWorkspaceMutationCoordinator,
@@ -95,17 +94,16 @@ export function createAgentToolRegistry(
   const env = options.env ?? process.env;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
-  const fileState = new LocalWorkspaceFileState();
   const mutationCoordinator = options.fileMutationCoordinator ?? new InMemoryLocalWorkspaceMutationCoordinator();
   const commandShell = options.commandShell ?? createDefaultCommandShellConfig(process.platform, env);
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
   const baseToolScopes = options.baseToolScopes ?? ["agent-basic"];
   const executors: readonly ToolExecutor[] = [
-    createLocalReadFileTool(workspaceRoot, { sandboxPolicy, fileState, outputTokenCounter: options.outputTokenCounter }),
+    createLocalReadFileTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
     createLocalGlobTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
     createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
-    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy, fileState, mutationCoordinator }),
-    createLocalEditFileTool(workspaceRoot, { sandboxPolicy, fileState, mutationCoordinator }),
+    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy, mutationCoordinator }),
+    createLocalEditFileTool(workspaceRoot, { sandboxPolicy, mutationCoordinator }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
     ...managedProcessExecutors(options, workspaceRoot, sandboxPolicy, commandShell),
     ...contextAttachmentExecutors(options, workspaceRoot),

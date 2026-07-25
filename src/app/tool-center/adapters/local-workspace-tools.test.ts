@@ -17,7 +17,6 @@ import {
 } from "./local-workspace-tools.js";
 import { ensurePidExited } from "./background-process-test-utils.js";
 import { createDefaultCommandShellConfig } from "./local-workspace-command-tools.js";
-import { LocalWorkspaceFileState } from "./local-workspace-file-state.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 const sourceDirectory = path.join(process.cwd(), "src", "app", "tool-center", "adapters");
@@ -169,27 +168,18 @@ test("C05 exposes a concise PascalCase workspace tool surface", () => {
   assert.deepEqual(Object.keys(asRecord(editItemProperties)), ["oldText", "newText"]);
 });
 
-test("C05 requires Read before modifying an existing file and rejects stale reads", async () => {
+test("C05 permits modifying existing files without a prior Read", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-c04-read-before-write-"));
   try {
     const target = path.join(root, "note.txt");
     await writeFile(target, "before\n", "utf8");
-    const fileState = new LocalWorkspaceFileState();
-    const readTool = createLocalReadFileTool(root, { fileState });
-    const writeTool = createLocalWriteFileTool(root, { fileState });
-    const editTool = createLocalEditFileTool(root, { fileState });
+    const writeTool = createLocalWriteFileTool(root);
+    const editTool = createLocalEditFileTool(root);
 
-    await assert.rejects(
-      () => writeTool.execute({ path: "note.txt", content: "blind overwrite\n" }, context),
-      /has not been read.*Use Read/,
-    );
-    await readTool.execute({ path: "note.txt" }, context);
-    await editTool.execute({ path: "note.txt", edits: [{ oldText: "before", newText: "after" }] }, context);
-    await writeFile(target, "external change with a different size\n", "utf8");
-    await assert.rejects(
-      () => editTool.execute({ path: "note.txt", edits: [{ oldText: "external", newText: "stale" }] }, context),
-      /changed after it was read.*Read it again/,
-    );
+    await writeTool.execute({ path: "note.txt", content: "blind overwrite\n" }, context);
+    await writeFile(target, "external change\n", "utf8");
+    await editTool.execute({ path: "note.txt", edits: [{ oldText: "external", newText: "updated" }] }, context);
+    assert.equal(await readFile(target, "utf8"), "updated change\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -200,11 +190,8 @@ test("same-run concurrent edits of one file compose in source order without losi
   try {
     const target = path.join(root, "note.txt");
     await writeFile(target, "alpha\nbeta\n", "utf8");
-    const fileState = new LocalWorkspaceFileState();
     const mutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
-    const readTool = createLocalReadFileTool(root, { fileState });
-    const editTool = createLocalEditFileTool(root, { fileState, mutationCoordinator });
-    await readTool.execute({ path: "note.txt" }, context);
+    const editTool = createLocalEditFileTool(root, { mutationCoordinator });
 
     const results = await Promise.all([
       editTool.execute({ path: "note.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] }, context),
@@ -223,11 +210,8 @@ test("same-run overlapping edits preserve the first change and reject the stale 
   try {
     const target = path.join(root, "note.txt");
     await writeFile(target, "alpha\n", "utf8");
-    const fileState = new LocalWorkspaceFileState();
     const mutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
-    const readTool = createLocalReadFileTool(root, { fileState });
-    const editTool = createLocalEditFileTool(root, { fileState, mutationCoordinator });
-    await readTool.execute({ path: "note.txt" }, context);
+    const editTool = createLocalEditFileTool(root, { mutationCoordinator });
 
     const results = await Promise.allSettled([
       editTool.execute({ path: "note.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] }, context),
@@ -243,18 +227,14 @@ test("same-run overlapping edits preserve the first change and reject the stale 
   }
 });
 
-test("shared mutation coordination rejects a second run based on an older file observation", async () => {
+test("shared mutation coordination composes independent edits across runs", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-cross-run-edits-"));
   try {
     const target = path.join(root, "note.txt");
     await writeFile(target, "alpha\nbeta\n", "utf8");
     const mutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
-    const firstState = new LocalWorkspaceFileState();
-    const secondState = new LocalWorkspaceFileState();
-    await createLocalReadFileTool(root, { fileState: firstState }).execute({ path: "note.txt" }, context);
-    await createLocalReadFileTool(root, { fileState: secondState }).execute({ path: "note.txt" }, context);
-    const firstEdit = createLocalEditFileTool(root, { fileState: firstState, mutationCoordinator });
-    const secondEdit = createLocalEditFileTool(root, { fileState: secondState, mutationCoordinator });
+    const firstEdit = createLocalEditFileTool(root, { mutationCoordinator });
+    const secondEdit = createLocalEditFileTool(root, { mutationCoordinator });
 
     const results = await Promise.allSettled([
       firstEdit.execute({ path: "note.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] }, context),
@@ -262,9 +242,8 @@ test("shared mutation coordination rejects a second run based on an older file o
     ]);
 
     assert.equal(results[0]?.status, "fulfilled");
-    assert.equal(results[1]?.status, "rejected");
-    assert.match(String(results[1]?.status === "rejected" ? results[1].reason : ""), /changed after it was read/);
-    assert.equal(await readFile(target, "utf8"), "ALPHA\nbeta\n");
+    assert.equal(results[1]?.status, "fulfilled");
+    assert.equal(await readFile(target, "utf8"), "ALPHA\nBETA\n");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

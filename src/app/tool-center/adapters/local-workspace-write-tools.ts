@@ -44,12 +44,11 @@ export function createLocalWriteFileTool(
   options: LocalWorkspaceToolOptions = {},
 ): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
-  const fileState = options.fileState;
   const mutationCoordinator = options.mutationCoordinator ?? new InMemoryLocalWorkspaceMutationCoordinator();
   return {
     definition: {
       name: "Write",
-      description: "Create or completely rewrite one UTF-8 text file. Read an existing file first; returns the resulting path, hashes, size, and diff.",
+      description: "Create or completely rewrite one UTF-8 text file; returns the resulting path, hashes, size, and diff.",
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -83,7 +82,6 @@ export function createLocalWriteFileTool(
           if (current.bytes.length > MAX_LOCAL_WORKSPACE_FILE_BYTES) {
             throw new Error(`File is too large to rewrite safely: ${target.relativePath}`);
           }
-          fileState?.assertContentCurrent(target.absolutePath, target.relativePath, current.bytes);
           original = current.text;
         } catch (error) {
           if (!isNodeError(error) || error.code !== "ENOENT") throw error;
@@ -98,7 +96,6 @@ export function createLocalWriteFileTool(
           await fs.writeFile(target.absolutePath, content, "utf8");
         }
         const written = Buffer.from(content, "utf8");
-        fileState?.rememberContent(target.absolutePath, written);
         return {
           refId: `workspace:file:${target.relativePath}`,
           path: target.relativePath,
@@ -119,12 +116,11 @@ export function createLocalEditFileTool(
   options: LocalWorkspaceToolOptions = {},
 ): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
-  const fileState = options.fileState;
   const mutationCoordinator = options.mutationCoordinator ?? new InMemoryLocalWorkspaceMutationCoordinator();
   return {
     definition: {
       name: "Edit",
-      description: "Replace exact text in one previously Read UTF-8 file. Every oldText must match exactly once; returns the resulting path, hashes, size, and diff.",
+      description: "Replace exact text in one UTF-8 file. Every oldText must match exactly once; returns the resulting path, hashes, size, and diff.",
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -171,7 +167,6 @@ export function createLocalEditFileTool(
         if (current.bytes.length > MAX_LOCAL_WORKSPACE_FILE_BYTES) {
           throw new Error(`File is too large to edit safely: ${target.relativePath}`);
         }
-        fileState?.assertContentCurrent(target.absolutePath, target.relativePath, current.bytes);
         const original = current.text;
         const located = locateExactEdits(original, edits, target.relativePath);
         assertNoOverlappingEdits(located, target.relativePath);
@@ -188,7 +183,6 @@ export function createLocalEditFileTool(
           await fs.writeFile(target.absolutePath, updated, "utf8");
         }
         const written = Buffer.from(updated, "utf8");
-        fileState?.rememberContent(target.absolutePath, written);
         return {
           refId: `workspace:file:${target.relativePath}`,
           path: target.relativePath,

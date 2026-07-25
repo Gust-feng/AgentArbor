@@ -111,7 +111,6 @@ export type RipgrepSearchRunner = (request: {
 
 export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT, options: LocalWorkspaceReadToolOptions = {}): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
-  const fileState = options.fileState;
   return {
     definition: {
       name: "Read",
@@ -155,7 +154,6 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         ? await fs.readFile(target.absolutePath, { signal: context.abortSignal })
         : undefined;
       const observedSize = bytes?.length ?? stat.size;
-      if (bytes !== undefined) fileState?.rememberContent(target.absolutePath, bytes);
       const probe = bytes?.subarray(0, Math.min(bytes.length, 8192)) ?? Buffer.alloc(Math.min(stat.size, 8192));
       if (bytes === undefined) {
         const handle = await fs.open(target.absolutePath, "r");

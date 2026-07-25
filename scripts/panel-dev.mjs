@@ -361,8 +361,10 @@ async function stopAll(exitCode) {
     return;
   }
   stopping = true;
-  process.exitCode = exitCode;
   await Promise.allSettled(children.map((child) => stopDevelopmentProcessTree(child)));
+  // Windows can retain stdio handles for terminated watcher children. End the
+  // supervisor explicitly so a dead dev session cannot look healthy.
+  process.exit(exitCode);
 }
 
 function printHelp() {

@@ -307,18 +307,12 @@
 .composer-context-usage {
   --context-usage-color: color-mix(in oklch, var(--accent) 76%, var(--fg));
   --context-usage-track: color-mix(in oklch, var(--fg) 16%, transparent);
+  position: relative;
   display: inline-grid;
   width: 20px;
   height: 20px;
   flex: 0 0 auto;
   place-items: center;
-  cursor: help;
-  opacity: 0.92;
-  transition: opacity var(--motion-fast-duration) var(--motion-ease-standard);
-}
-
-.composer-context-usage:hover {
-  opacity: 1;
 }
 
 .composer-context-usage[data-tone="warning"] {
@@ -344,7 +338,7 @@
 .composer-context-usage-track,
 .composer-context-usage-meter {
   fill: none;
-  stroke-width: 2.2;
+  stroke-width: 2.35;
 }
 
 .composer-context-usage-track {
@@ -356,6 +350,39 @@
   stroke-linecap: round;
   transform: rotate(-90deg);
   transform-origin: 10px 10px;
+  transition: stroke-dasharray var(--motion-panel-duration) var(--motion-ease-standard);
+}
+
+.composer-context-usage[data-source="unavailable"] .composer-context-usage-track {
+  stroke-dasharray: 1.2 3;
+}
+
+.composer-context-usage-tooltip {
+  position: absolute;
+  z-index: 40;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  border: 1px solid var(--popover-border);
+  border-radius: 5px;
+  background: var(--popover-bg);
+  padding: 5px 7px;
+  color: var(--popover-fg, var(--fg));
+  box-shadow: var(--popover-shadow);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 2px);
+  transition:
+    opacity var(--motion-fast-duration) var(--motion-ease-standard),
+    transform var(--motion-fast-duration) var(--motion-ease-standard);
+  white-space: nowrap;
+}
+
+.composer-context-usage:hover .composer-context-usage-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .composer-reasoning-chip {

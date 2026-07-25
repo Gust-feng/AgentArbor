@@ -506,7 +506,6 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
               data-tone={props.contextUsage.tone}
               role="img"
               aria-label={props.contextUsage.label}
-              title={props.contextUsage.label}
             >
               <svg className="composer-context-usage-svg" viewBox="0 0 20 20" aria-hidden="true">
                 <circle className="composer-context-usage-track" cx="10" cy="10" r="7" />
@@ -519,6 +518,9 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
                   strokeDasharray={contextUsageDashArray(props.contextUsage)}
                 />
               </svg>
+              <span className="composer-context-usage-tooltip" role="tooltip">
+                {props.contextUsage.label}
+              </span>
             </span>
           )}
         </div>

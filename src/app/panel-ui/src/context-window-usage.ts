@@ -53,8 +53,18 @@ export function contextWindowUsageFrom(input: {
     maxTokens,
     ringPercent: 0,
     tone: "muted",
-    label: `上下文容量 ${formatCompactTokenCount(maxTokens)}，等待模型用量`,
+    label: "上下文用量尚未可用",
   };
+}
+
+export function contextWindowTokensForActiveRun(input: {
+  readonly runContextWindowTokens?: number;
+  readonly selectedModelContextWindowTokens?: number;
+}): number | undefined {
+  // A run's frozen capability snapshot becomes authoritative as soon as its
+  // projection arrives. Until then, retain the selected model's known window
+  // so the composer does not lose its context indicator during run startup.
+  return positiveNumber(input.runContextWindowTokens) ?? positiveNumber(input.selectedModelContextWindowTokens);
 }
 
 export function latestModelUsageForRunFromTranscript(
@@ -98,7 +108,7 @@ function availableContextWindowUsage(input: {
     percent,
     ringPercent: clamp(percent, 0, 100),
     tone: usageTone(percent),
-    label: `最近一次模型请求已用${displayPercent}%上下文容量`,
+    label: `上下文已用 ${displayPercent}%`,
   };
 }
 

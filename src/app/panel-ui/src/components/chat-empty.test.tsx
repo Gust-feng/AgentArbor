@@ -30,6 +30,21 @@ test("data compatibility notice can be dismissed for the next empty state", asyn
   expect(screen.queryByRole("note", { name: "数据更新说明" })).toBeNull();
 });
 
+test("composer presents measured context usage as a readable meter", () => {
+  render(<ChatEmpty {...inputProps()} contextUsage={{
+    source: "provider_usage",
+    usedTokens: 12_000,
+    maxTokens: 128_000,
+    percent: 9.375,
+    ringPercent: 9.375,
+    tone: "normal",
+    label: "上下文已用 9%",
+  }} />);
+
+  expect(screen.getByRole("img", { name: "上下文已用 9%" })).toBeTruthy();
+  expect(screen.getByRole("tooltip").textContent).toContain("上下文已用 9%");
+});
+
 function inputProps(): ChatInputProps {
   return {
     value: "",

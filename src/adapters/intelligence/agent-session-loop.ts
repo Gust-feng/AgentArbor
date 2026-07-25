@@ -72,6 +72,8 @@ export type AgentSessionLoopOptions = {
   readonly toolDefinitionTokenCounter?: AgentSessionToolDefinitionTokenCounter;
   readonly onProviderToolDefinitionMetrics?: AgentSessionToolDefinitionMetricsObserver;
   readonly compactionSettings?: CompactionSettings;
+  /** Injectable clock for request timing observation. */
+  readonly now?: () => number;
 };
 
 export type AgentSessionToolDefinitionTokenCounter = (serializedDefinition: string) => number;
@@ -144,6 +146,8 @@ type AgentSessionExecutionState = {
   readonly abortSignalCleanups: Set<() => void>;
   readonly pendingRootToolRequests: Map<string, PendingToolRequest>;
   readonly preparedRootToolCallIds: Set<string>;
+  readonly now: () => number;
+  readonly timing: ProviderTimingAccumulator;
   inputEntryId?: string;
   latestLeafEntryId: string | null;
   safeLeafEntryId: string | null;
@@ -152,6 +156,23 @@ type AgentSessionExecutionState = {
   usage: ModelUsage;
   maintenanceFailure?: { readonly code: string; readonly error: string };
   toolAcceptanceFailure?: unknown;
+};
+
+type ProviderRequestTiming = {
+  readonly startedAtMs: number;
+  firstVisibleOutputAtMs?: number;
+};
+
+type ProviderTimingAccumulator = {
+  latencyTotalMs: number;
+  latencySampleCount: number;
+  firstTokenLatencyTotalMs: number;
+  firstTokenLatencySampleCount: number;
+  outputDurationTotalMs: number;
+  outputDurationSampleCount: number;
+  visibleOutputTokens: number;
+  visibleOutputDurationMs: number;
+  activeRequest?: ProviderRequestTiming;
 };
 
 type ActiveAgentLoopExecution = {
@@ -188,6 +209,8 @@ export function createAgentSessionLoop(options: AgentSessionLoopOptions): AgentL
         abortSignalCleanups: new Set(),
         pendingRootToolRequests: new Map(),
         preparedRootToolCallIds: new Set(),
+        now: options.now ?? (() => Date.now()),
+        timing: emptyProviderTimingAccumulator(),
         latestLeafEntryId: startEntryId,
         safeLeafEntryId: startEntryId,
         cancellationRequested: false,
@@ -1184,6 +1207,10 @@ function attachHarnessHooks(
     state.preparedRootToolCallIds.add(toolCallId);
     return undefined;
   });
+  harness.on("before_provider_request", () => {
+    state.timing.activeRequest = { startedAtMs: state.now() };
+    return undefined;
+  });
   harness.subscribe(async (event) => {
     await projectHarnessEvent(event, input, state, harness);
   });
@@ -1293,7 +1320,17 @@ async function projectHarnessEvent(
     return;
   }
   if (event.type === "message_update") {
-    if (event.assistantMessageEvent.type === "text_delta") input.onTextDelta?.(event.assistantMessageEvent.delta);
+    if (event.assistantMessageEvent.type === "text_delta") {
+      const activeRequest = state.timing.activeRequest;
+      if (
+        event.assistantMessageEvent.delta.length > 0 &&
+        activeRequest !== undefined &&
+        activeRequest.firstVisibleOutputAtMs === undefined
+      ) {
+        activeRequest.firstVisibleOutputAtMs = state.now();
+      }
+      input.onTextDelta?.(event.assistantMessageEvent.delta);
+    }
     if (event.assistantMessageEvent.type === "thinking_delta") input.onReasoningDelta?.(event.assistantMessageEvent.delta);
     return;
   }
@@ -1359,6 +1396,7 @@ async function projectHarnessEvent(
       });
     }
     state.usage = mergeUsage(state.usage, modelUsageFromProvider(event.message.usage));
+    state.usage = applyCompletedProviderTiming(state, event.message.usage.output);
     const reasoning = event.message.content
       .filter((block) => block.type === "thinking")
       .map((block) => block.thinking)
@@ -2263,6 +2301,79 @@ function modelUsageFromProvider(usage: Usage): ModelUsage {
   };
 }
 
+function emptyProviderTimingAccumulator(): ProviderTimingAccumulator {
+  return {
+    latencyTotalMs: 0,
+    latencySampleCount: 0,
+    firstTokenLatencyTotalMs: 0,
+    firstTokenLatencySampleCount: 0,
+    outputDurationTotalMs: 0,
+    outputDurationSampleCount: 0,
+    visibleOutputTokens: 0,
+    visibleOutputDurationMs: 0,
+  };
+}
+
+/**
+ * Pi exposes stream deltas but not request timings. Keep this run-local
+ * accumulator separate from the durable Session so completed Ordinary usage
+ * contains only timing facts we actually observed at the root harness.
+ */
+function applyCompletedProviderTiming(
+  state: AgentSessionExecutionState,
+  outputTokens: number,
+): ModelUsage {
+  const request = state.timing.activeRequest;
+  state.timing.activeRequest = undefined;
+  if (request === undefined) return state.usage;
+
+  const completedAtMs = state.now();
+  const latencyMs = elapsedMs(request.startedAtMs, completedAtMs);
+  state.timing.latencyTotalMs += latencyMs;
+  state.timing.latencySampleCount += 1;
+
+  if (request.firstVisibleOutputAtMs !== undefined) {
+    const firstTokenLatencyMs = elapsedMs(request.startedAtMs, request.firstVisibleOutputAtMs);
+    const outputDurationMs = elapsedMs(request.firstVisibleOutputAtMs, completedAtMs);
+    state.timing.firstTokenLatencyTotalMs += firstTokenLatencyMs;
+    state.timing.firstTokenLatencySampleCount += 1;
+    state.timing.outputDurationTotalMs += outputDurationMs;
+    state.timing.outputDurationSampleCount += 1;
+    if (Number.isFinite(outputTokens) && outputTokens > 0 && outputDurationMs > 0) {
+      state.timing.visibleOutputTokens += Math.floor(outputTokens);
+      state.timing.visibleOutputDurationMs += outputDurationMs;
+    }
+  }
+
+  return {
+    ...state.usage,
+    latencyMs: averageDuration(state.timing.latencyTotalMs, state.timing.latencySampleCount),
+    ...(state.timing.firstTokenLatencySampleCount === 0 ? {} : {
+      firstTokenLatencyMs: averageDuration(
+        state.timing.firstTokenLatencyTotalMs,
+        state.timing.firstTokenLatencySampleCount,
+      ),
+      outputDurationMs: averageDuration(
+        state.timing.outputDurationTotalMs,
+        state.timing.outputDurationSampleCount,
+      ),
+    }),
+    ...(state.timing.visibleOutputDurationMs === 0 ? {} : {
+      outputTokensPerSecond: Number((
+        state.timing.visibleOutputTokens / (state.timing.visibleOutputDurationMs / 1_000)
+      ).toFixed(2)),
+    }),
+  };
+}
+
+function elapsedMs(startedAtMs: number, completedAtMs: number): number {
+  return Math.max(0, Math.round(completedAtMs - startedAtMs));
+}
+
+function averageDuration(totalMs: number, sampleCount: number): number {
+  return Math.round(totalMs / sampleCount);
+}
+
 function mergeUsage(
   current: ModelUsage,
   next: ModelUsage | undefined,
@@ -2279,6 +2390,10 @@ function mergeUsage(
     uncachedInputTokens: (current.uncachedInputTokens ?? 0) + (next.uncachedInputTokens ?? 0),
     reasoningOutputTokens: (current.reasoningOutputTokens ?? 0) + (next.reasoningOutputTokens ?? 0),
     estimatedCostUsd: (current.estimatedCostUsd ?? 0) + (next.estimatedCostUsd ?? 0),
+    ...(current.latencyMs === undefined ? {} : { latencyMs: current.latencyMs }),
+    ...(current.firstTokenLatencyMs === undefined ? {} : { firstTokenLatencyMs: current.firstTokenLatencyMs }),
+    ...(current.outputDurationMs === undefined ? {} : { outputDurationMs: current.outputDurationMs }),
+    ...(current.outputTokensPerSecond === undefined ? {} : { outputTokensPerSecond: current.outputTokensPerSecond }),
     latestAgentRequest: options.preserveLatestAgentRequest
       ? current.latestAgentRequest
       : next.latestAgentRequest ?? current.latestAgentRequest,

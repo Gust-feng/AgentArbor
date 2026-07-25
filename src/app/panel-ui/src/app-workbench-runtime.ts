@@ -16,6 +16,7 @@ import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import {
   contextWindowUsageFrom,
+  contextWindowTokensForActiveRun,
   latestModelUsageFromEvents,
   latestModelUsageForRunFromTranscript,
   type ContextWindowUsage,
@@ -185,9 +186,10 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     const runContextWindowTokens =
       currentRun.capabilityResolution?.capabilityPlan?.modelCapabilities.contextWindowTokens;
     return contextWindowUsageFrom({
-      contextWindowTokens: currentRun.run === undefined
-        ? options.selectedModelContextWindowTokens
-        : runContextWindowTokens,
+      contextWindowTokens: contextWindowTokensForActiveRun({
+        runContextWindowTokens,
+        selectedModelContextWindowTokens: options.selectedModelContextWindowTokens,
+      }),
       modelUsage: latestModelUsage,
     });
   }, [

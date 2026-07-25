@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   contextWindowUsageFrom,
+  contextWindowTokensForActiveRun,
   latestModelUsageFromEvents,
   latestModelUsageForRunFromTranscript,
 } from "../src/context-window-usage.js";
@@ -20,7 +21,7 @@ test("context window usage prefers provider input tokens", () => {
   assert.equal(usage?.percent, 35);
   assert.equal(usage?.ringPercent, 35);
   assert.equal(usage?.tone, "normal");
-  assert.equal(usage?.label, "最近一次模型请求已用35%上下文容量");
+  assert.equal(usage?.label, "上下文已用 35%");
 });
 
 test("context window usage waits for provider usage when no measured usage is available", () => {
@@ -33,7 +34,7 @@ test("context window usage waits for provider usage when no measured usage is av
   assert.equal(usage?.percent, undefined);
   assert.equal(usage?.ringPercent, 0);
   assert.equal(usage?.tone, "muted");
-  assert.equal(usage?.label, "上下文容量 8K，等待模型用量");
+  assert.equal(usage?.label, "上下文用量尚未可用");
 });
 
 test("context window usage clamps only the visual ring when usage exceeds the window", () => {
@@ -48,7 +49,7 @@ test("context window usage clamps only the visual ring when usage exceeds the wi
   assert.equal(Math.round(usage?.percent ?? 0), 126);
   assert.equal(usage?.ringPercent, 100);
   assert.equal(usage?.tone, "danger");
-  assert.equal(usage?.label, "最近一次模型请求已用126%上下文容量");
+  assert.equal(usage?.label, "上下文已用 126%");
 });
 
 test("context window usage enters danger at ninety percent", () => {
@@ -66,6 +67,20 @@ test("context window usage returns undefined when no context window is known", (
   assert.equal(contextWindowUsageFrom({
     modelUsage: { latestAgentRequest: { inputTokens: 120 } },
   }), undefined);
+});
+
+test("active run keeps the selected model context window until its capability projection arrives", () => {
+  assert.equal(contextWindowTokensForActiveRun({
+    selectedModelContextWindowTokens: 128_000,
+  }), 128_000);
+  assert.equal(contextWindowTokensForActiveRun({
+    runContextWindowTokens: 256_000,
+    selectedModelContextWindowTokens: 128_000,
+  }), 256_000);
+  assert.equal(contextWindowTokensForActiveRun({
+    runContextWindowTokens: 0,
+    selectedModelContextWindowTokens: 128_000,
+  }), 128_000);
 });
 
 test("latest model usage helpers require the newest provider-measured Agent request", () => {

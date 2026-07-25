@@ -52,6 +52,25 @@ test("agent session loop completes a direct answer in the injected Session with 
   await loop.release();
 });
 
+test("agent session loop persists Pi-observed provider timing for visible output", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([fauxAssistantMessage("timed answer")]);
+  const timestamps = [1_000, 1_120, 1_620];
+  const loop = createAgentSessionLoop({
+    ...fixture,
+    now: () => timestamps.shift() ?? 1_620,
+  });
+
+  const result = await loop.execute(loopInput(emptyGateway()));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(result.usage.latencyMs, 620);
+  assert.equal(result.usage.firstTokenLatencyMs, 120);
+  assert.equal(result.usage.outputDurationMs, 500);
+  assert.equal(result.usage.outputTokensPerSecond, 6);
+  await loop.release();
+});
+
 test("provider definition metrics use the allowed active subset on every model request", async (t) => {
   const fixture = await createPayloadAwareFixture(t);
   fixture.faux.setResponses([

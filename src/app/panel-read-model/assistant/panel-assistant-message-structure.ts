@@ -2,7 +2,10 @@ import {
   projectAgentWorkTimelineView,
   type AgentWorkTimelineView,
 } from "./panel-agent-work-timeline-view.js";
-import type { ActivityItem } from "../transcript/panel-transcript-activity-copy.js";
+import {
+  isVisibleOrdinaryActivityItem,
+  type ActivityItem,
+} from "../transcript/panel-transcript-activity-copy.js";
 import type { ModelUsage } from "../../../domain/intelligence/index.js";
 import {
   isModelNarrativeActivityItem,
@@ -115,18 +118,10 @@ function assistantResponseHasStarted<
   if (timeline.confirmation.current !== undefined) {
     return true;
   }
-  return timeline.nodes.some((node) => !isPrefatoryAssistantNode(node));
-}
-
-function isPrefatoryAssistantNode(node: ProjectableTranscriptNode): boolean {
-  // Request preparation may delay the first provider event, but it is not itself a model response.
-  if (node.eventType === "model.requested") {
-    return true;
-  }
-  if (!node.eventType.startsWith("context.compaction.")) {
-    return false;
-  }
-  return node.phase !== "failed" && node.phase !== "blocked" && node.phase !== "cancelled";
+  // The waiting indicator may only yield to activity that the Ordinary
+  // presentation can actually render. Internal narration or request setup
+  // must not create an empty workflow frame between waiting and model text.
+  return timeline.items.some(isVisibleOrdinaryActivityItem);
 }
 
 export function assistantMessageHasTimeline<
@@ -200,19 +195,19 @@ function assistantBodySegments<
   });
   const fallbackText = input.fallbackText?.trim();
   const fallbackModelUsage = latestAnswerModelUsage(input.transcriptNodes);
-  if (input.preferTranscriptBodies && bodyNodes.length === 0) {
+  if (bodyNodes.length > 0 || input.preferTranscriptBodies) {
     return finalizeBodySegments(drafts, input.animateOnMount);
   }
   if (fallbackText === undefined || fallbackText.length === 0) {
     return finalizeBodySegments(drafts, input.animateOnMount);
   }
   return finalizeBodySegments(
-    mergeFallbackIntoBodyDrafts(drafts, {
+    [fallbackBodyDraft<TNode, TConfirmation>({
       text: fallbackText,
       live: input.live,
       tone: input.tone,
       modelUsage: fallbackModelUsage,
-    }),
+    })],
     input.animateOnMount,
   );
 }
@@ -237,67 +232,6 @@ function fallbackBodyDraft<
     tone: fallback.tone,
     modelUsage: fallback.modelUsage,
   };
-}
-
-function sameBodyText(left: string, right: string): boolean {
-  const normalizedLeft = left.replace(/\s+/g, " ").trim();
-  const normalizedRight = right.replace(/\s+/g, " ").trim();
-  return normalizedLeft.length > 0 && normalizedLeft === normalizedRight;
-}
-
-function mergeBodyText(left: string, right: string): string | undefined {
-  if (sameBodyText(left, right)) {
-    return left;
-  }
-  const normalizedLeft = left.replace(/\s+/g, " ").trim();
-  const normalizedRight = right.replace(/\s+/g, " ").trim();
-  if (normalizedLeft.length === 0 || normalizedRight.length === 0) {
-    return undefined;
-  }
-  if (normalizedRight.startsWith(normalizedLeft)) {
-    return right.trim();
-  }
-  if (normalizedLeft.startsWith(normalizedRight)) {
-    return left.trim();
-  }
-  return undefined;
-}
-
-function mergeFallbackIntoBodyDrafts<
-  TNode extends ProjectableTranscriptNode,
-  TConfirmation extends ConfirmationIdentity,
->(
-  drafts: readonly BodySegmentDraft<TNode, TConfirmation>[],
-  fallback: {
-    readonly text: string;
-    readonly live: boolean;
-    readonly tone: LiveAnswerTone;
-    readonly modelUsage?: ModelUsage;
-  },
-): readonly BodySegmentDraft<TNode, TConfirmation>[] {
-  const fallbackDraft = fallbackBodyDraft<TNode, TConfirmation>(fallback);
-  const latestBodyIndex = drafts.length - 1;
-  if (latestBodyIndex < 0) {
-    return [fallbackDraft];
-  }
-  const latestBody = drafts[latestBodyIndex];
-  const mergedText = mergeBodyText(latestBody.text, fallback.text);
-  const mergedCopyText = mergeBodyText(latestBody.copyText, fallback.text);
-  if (mergedText === undefined || mergedCopyText === undefined) {
-    return [...drafts, fallbackDraft];
-  }
-  return drafts.map((draft, index) => (
-    index === latestBodyIndex
-      ? {
-          ...draft,
-          text: mergedText,
-          copyText: mergedCopyText,
-          phase: fallback.live ? "noted" : "completed",
-          tone: fallback.tone,
-          modelUsage: draft.modelUsage ?? fallback.modelUsage,
-        }
-      : draft
-  ));
 }
 
 function latestAnswerModelUsage<TNode extends ProjectableTranscriptNode>(
@@ -411,9 +345,7 @@ function assistantMessageSegments<
     result.push(body);
   }
   return withActivityCollapseHints(
-    removeRepeatedModelActivityAcrossSegments(
-      mergeAdjacentBodySegments(result),
-    ),
+    removeRepeatedModelActivityAcrossSegments(result),
   );
 }
 
@@ -455,37 +387,6 @@ function pendingForActivitySegment<
 
 function assistantTimelineNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
   return timelineVisibleNodes(nodes);
-}
-
-function mergeAdjacentBodySegments<
-  TNode extends ProjectableTranscriptNode,
-  TConfirmation extends ConfirmationIdentity,
->(
-  segments: readonly AssistantMessageSegment<TNode, TConfirmation>[],
-): readonly AssistantMessageSegment<TNode, TConfirmation>[] {
-  const merged: AssistantMessageSegment<TNode, TConfirmation>[] = [];
-  for (const segment of segments) {
-    const previous = merged.at(-1);
-    if (previous?.kind === "body" && segment.kind === "body") {
-      const mergedText = mergeBodyText(previous.text, segment.text);
-      const mergedCopyText = mergeBodyText(previous.copyText, segment.copyText);
-      if ((previous.modelUsage !== undefined || segment.modelUsage !== undefined) && (mergedText === undefined || mergedCopyText === undefined)) {
-        merged.push(segment);
-        continue;
-      }
-      merged[merged.length - 1] = {
-        ...segment,
-        segmentKey: previous.segmentKey,
-        lifecycle: previous.lifecycle === "open" || segment.lifecycle === "open" ? "open" : segment.lifecycle,
-        text: mergedText ?? `${previous.text}\n\n${segment.text}`.trim(),
-        copyText: mergedCopyText ?? `${previous.copyText}\n\n${segment.copyText}`.trim(),
-        modelUsage: segment.modelUsage ?? previous.modelUsage,
-      };
-      continue;
-    }
-    merged.push(segment);
-  }
-  return merged;
 }
 
 function removeRepeatedModelActivityAcrossSegments<

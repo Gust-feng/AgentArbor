@@ -1,4 +1,5 @@
 import type { LiveRunBuffer } from "../run/panel-run-live-buffer.js";
+import type { LiveAnswerTone } from "../transcript/panel-live-transcript.js";
 import type {
   WorklineConversationTurn,
   WorklineProjectedTurn,
@@ -29,6 +30,24 @@ import {
   type AssistantFailureParts,
 } from "./panel-assistant-failure.js";
 
+export type AssistantWorkflowProjectionInput<
+  TTurn extends WorklineConversationTurn,
+  TNode extends AssistantTranscriptNodeLike,
+  TDeliverable extends AssistantDeliverableLike,
+  TPending extends ConfirmationIdentity,
+> = {
+  readonly turn: TTurn;
+  readonly transcriptNodes?: readonly TNode[];
+  readonly pending?: TPending;
+  readonly deliverable?: TDeliverable;
+  readonly content: string;
+  readonly live: boolean;
+  readonly keepStreamMounted: boolean;
+  readonly animateOnMount: boolean;
+  readonly liveTone?: LiveAnswerTone;
+  readonly collapseTimeline: boolean;
+};
+
 export type StableAssistantTurnDisplay<
   TTurn extends WorklineConversationTurn,
   TNode extends AssistantTranscriptNodeLike,
@@ -36,6 +55,8 @@ export type StableAssistantTurnDisplay<
   TPending extends ConfirmationIdentity,
 > = {
   readonly assistant: AssistantTranscriptTurnProjection<TTurn, TDeliverable, TPending>;
+  /** Exact visible facts used to build workflow; suitable for reference-only render stability checks. */
+  readonly projectionInput: AssistantWorkflowProjectionInput<TTurn, TNode, TDeliverable, TPending>;
   readonly workflow?: AssistantWorkflowDisplay<TNode, TPending>;
   readonly failure?: AssistantFailureParts;
 };
@@ -95,11 +116,8 @@ export function projectStableAssistantTurnDisplay<
     interruptionNodes,
     failure,
   );
-  const workflow = projectStableAssistantWorkflowDisplay({
-    // A terminal failure notice owns the user-visible error. Rebuild from the
-    // current nodes so a run.failed activity cached one frame earlier cannot
-    // survive beside that notice; real tool activity remains in the nodes.
-    previous: failure === undefined ? input.previousWorkflow : undefined,
+  const projectionInput: AssistantWorkflowProjectionInput<TTurn, TNode, TDeliverable, TPending> = {
+    turn: input.projectedTurn.turn,
     content: failure?.previous ?? assistant.content,
     deliverable: failure === undefined ? assistant.deliverable : undefined,
     transcriptNodes: workflowTranscriptNodes,
@@ -109,10 +127,18 @@ export function projectStableAssistantTurnDisplay<
     animateOnMount: assistant.animateOnMount,
     liveTone: assistant.liveTone,
     collapseTimeline,
+  };
+  const workflow = projectStableAssistantWorkflowDisplay({
+    // A terminal failure notice owns the user-visible error. Rebuild from the
+    // current nodes so a run.failed activity cached one frame earlier cannot
+    // survive beside that notice; real tool activity remains in the nodes.
+    previous: failure === undefined ? input.previousWorkflow : undefined,
+    ...projectionInput,
   });
   return {
     display: {
       assistant,
+      projectionInput,
       workflow: workflow.workflow,
       failure,
     },

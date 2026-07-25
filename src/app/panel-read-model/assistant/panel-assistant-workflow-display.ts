@@ -4,7 +4,6 @@ import {
   type AssistantMessageView,
 } from "./panel-assistant-message-view.js";
 import type { AssistantMessageSegmentLifecycle } from "./panel-assistant-message-structure.js";
-import { stabilizeAssistantMessageView } from "./panel-assistant-message-stability.js";
 import {
   timelineCollapseDecision,
   type TimelineCollapseReason,
@@ -77,7 +76,10 @@ export function projectStableAssistantWorkflowDisplay<
     liveTone: input.liveTone,
     preferTranscriptBodies: keepStreamMounted || live,
   });
-  const messageView = stabilizeAssistantMessageView(input.previous?.messageView, rawView);
+  // Transcript facts are projected from the current canonical nodes only.
+  // Previous workflow state may influence disclosure presentation below, but
+  // it must never decide which reasoning/body/tool facts exist.
+  const messageView = rawView;
   const workflow = workflowDisplayFromMessageView({
     previous: input.previous?.workflow,
     messageView,
@@ -154,8 +156,7 @@ function activitySegmentForcesVisible<
 >(
   segment: Extract<AssistantMessageSegment<TNode, TConfirmation>, { readonly kind: "activity" }>,
 ): boolean {
-  return segment.timeline.items.some((item) =>
-    item.variant === "context_compaction" || item.eventType.startsWith("model.reasoning."));
+  return segment.timeline.items.some((item) => item.variant === "context_compaction");
 }
 
 function activitySegmentNeedsAttention<

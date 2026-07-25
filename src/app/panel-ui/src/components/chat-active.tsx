@@ -247,7 +247,9 @@ export function ChatActive(props: ChatInputProps & {
                   projectedTurns={view.workline.turns}
                   turns={visibleConversation?.turns ?? []}
                   currentRunId={view.currentRunId}
-                  currentRunNodes={props.transcriptNodes}
+                  // Historical nodes are owned by the transcript cache. Feeding
+                  // only current-run facts avoids rebuilding old turns per delta.
+                  currentRunNodes={view.currentRunProjection.nodes}
                   run={props.run}
                   live={props.live}
                   workView={props.workView}

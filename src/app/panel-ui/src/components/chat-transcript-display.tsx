@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import React, { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { ConversationTurn } from "../contracts/conversation";
 import type {
   AgentDeliverable,
@@ -10,7 +10,6 @@ import type { LiveRunBuffer } from "../../../panel-read-model/run/panel-run-live
 import type { WorklineProjectedTurn } from "../../../panel-read-model/assistant/panel-assistant-workline";
 import type { LiveRunTranscriptProjection } from "../../../panel-read-model/transcript/panel-live-transcript";
 import { projectConversationDisplayList } from "../../../panel-conversation/panel-conversation-display-list";
-import { createConversationWorkflowDisplayState } from "../../../panel-conversation/panel-conversation-workflow-display";
 import { shouldCollapseStandaloneTimeline } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
 import {
   getTranscriptNodesCache,
@@ -26,6 +25,7 @@ export function ChatTranscriptDisplay(props: {
   readonly projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[];
   readonly turns: readonly ConversationTurn[];
   readonly currentRunId?: string;
+  /** Canonical/live nodes owned by currentRunId; historical runs come from the transcript cache. */
   readonly currentRunNodes: readonly TranscriptNode[];
   readonly run?: BasicAgentRun;
   readonly live?: LiveRunBuffer;
@@ -49,9 +49,6 @@ export function ChatTranscriptDisplay(props: {
   readonly hiddenEarlierTurnCount?: number;
   readonly onShowEarlierTurns?: () => void;
 }): React.ReactElement | null {
-  const conversationDisplayStateRef = useRef(
-    createConversationWorkflowDisplayState<ConversationTurn, TranscriptNode, AgentDeliverable, ConfirmationProjection>(),
-  );
   const cachedHistoricalSnapshot = useSyncExternalStore(
     useCallback(
       (listener: () => void) => subscribeTranscriptNodesCache(props.conversationId, listener),
@@ -70,7 +67,6 @@ export function ChatTranscriptDisplay(props: {
       hasPendingConfirmation: props.standaloneRun?.pending !== undefined,
     });
     return projectConversationDisplayList({
-      previous: conversationDisplayStateRef.current,
       conversationId: props.conversationId,
       projectedTurns: props.projectedTurns,
       turns: props.turns,
@@ -101,10 +97,6 @@ export function ChatTranscriptDisplay(props: {
     props.pending,
     props.standaloneRun,
   ]);
-
-  useLayoutEffect(() => {
-    conversationDisplayStateRef.current = conversationDisplay.state;
-  }, [conversationDisplay.state]);
 
   return (
     <TranscriptChain

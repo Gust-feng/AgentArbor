@@ -9,7 +9,7 @@ import {
 } from "../transcript/panel-transcript-turn-projection.js";
 import type { WorklineProjectedTurn } from "./panel-assistant-workline.js";
 
-test("stable assistant workflow display does not append late pre-body process after rendered fallback text", () => {
+test("assistant workflow display projects late reasoning and the canonical body from current facts", () => {
   const previous = projectStableAssistantWorkflowDisplay({
     content: "好的！让我来展示一下我的各项能力。",
     transcriptNodes: [],
@@ -40,9 +40,15 @@ test("stable assistant workflow display does not append late pre-body process af
     collapseTimeline: false,
   });
 
-  assert.deepEqual(next.workflow.segments.map((segment) => segment.kind), ["body"]);
-  assert.equal(next.workflow.segments[0]?.kind, "body");
-  assert.equal(next.workflow.segments[0]?.kind === "body" ? next.workflow.segments[0].segmentKey : undefined, "body:fallback");
+  assert.deepEqual(next.workflow.segments.map((segment) => segment.kind), ["activity", "body"]);
+  assert.deepEqual(
+    next.workflow.segments[0]?.kind === "activity"
+      ? next.workflow.segments[0].timeline.items.map((item) => item.nodeId)
+      : [],
+    ["thinking-1"],
+  );
+  assert.equal(next.workflow.segments[1]?.kind, "body");
+  assert.equal(next.workflow.segments[1]?.kind === "body" ? next.workflow.segments[1].segmentKey : undefined, "body:body-1");
 });
 
 test("stable assistant turn displays carry previous workflows by turn id instead of rematerializing from scratch", () => {
@@ -115,12 +121,18 @@ test("stable assistant turn displays carry previous workflows by turn id instead
 
   const display = second.displays.get("assistant-1");
   assert.ok(display !== undefined);
-  assert.deepEqual(display.workflow?.segments.map((segment) => segment.kind), ["body", "activity"]);
-  assert.equal(display.workflow?.segments[0]?.kind, "body");
-  assert.equal(display.workflow?.segments[0]?.kind === "body" ? display.workflow.segments[0].segmentKey : undefined, "body:body-1");
+  assert.deepEqual(display.workflow?.segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
   assert.deepEqual(
-    display.workflow?.segments[1]?.kind === "activity"
-      ? display.workflow.segments[1].timeline.items.map((item) => item.nodeId)
+    display.workflow?.segments[0]?.kind === "activity"
+      ? display.workflow.segments[0].timeline.items.map((item) => item.nodeId)
+      : [],
+    ["thinking-1"],
+  );
+  assert.equal(display.workflow?.segments[1]?.kind, "body");
+  assert.equal(display.workflow?.segments[1]?.kind === "body" ? display.workflow.segments[1].segmentKey : undefined, "body:body-1");
+  assert.deepEqual(
+    display.workflow?.segments[2]?.kind === "activity"
+      ? display.workflow.segments[2].timeline.items.map((item) => item.nodeId)
       : [],
     ["tool-1"],
   );

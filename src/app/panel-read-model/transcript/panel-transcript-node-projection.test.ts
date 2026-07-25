@@ -42,7 +42,7 @@ test("timeline projection keeps runtime model activity through the live-to-settl
   assert.deepEqual(settled.map((item) => item.nodeId), ["thinking-settled", "side-settled"]);
 });
 
-test("activity projection deduplicates raw model activity while keeping the earlier position", () => {
+test("activity projection keeps the terminal fact for one model_call", () => {
   const projected = activityVisibleNodes([
     node({
       nodeId: "thinking-live",
@@ -83,13 +83,13 @@ test("activity projection deduplicates raw model activity while keeping the earl
   const thinking = projected.filter((item) => item.kind === "thinking");
 
   assert.equal(thinking.length, 1);
-  assert.equal(thinking[0]?.nodeId, "thinking-live");
+  assert.equal(thinking[0]?.nodeId, "thinking-settled");
   assert.equal(thinking[0]?.phase, "completed");
   assert.equal(thinking[0]?.eventType, "model.reasoning.completed");
-  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-live", "body-1", "tool-1"]);
+  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-settled", "body-1", "tool-1"]);
 });
 
-test("activity projection deduplicates exact raw model activity even when model refs differ", () => {
+test("activity projection preserves identical text from different model calls", () => {
   const projected = activityVisibleNodes([
     node({
       nodeId: "thinking-live",
@@ -119,10 +119,10 @@ test("activity projection deduplicates exact raw model activity even when model 
     }),
   ]);
 
-  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-live", "body-1"]);
+  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-live", "body-1", "thinking-settled"]);
 });
 
-test("activity projection deduplicates repeated raw model activity across thinking and narration", () => {
+test("activity projection preserves reasoning and narration as different facts", () => {
   const projected = activityVisibleNodes([
     node({
       nodeId: "thinking-1",
@@ -163,10 +163,10 @@ test("activity projection deduplicates repeated raw model activity across thinki
 
   const modelActivity = projected.filter((item) => item.kind === "thinking" || item.kind === "system");
 
-  assert.equal(modelActivity.length, 1);
+  assert.equal(modelActivity.length, 2);
   assert.equal(modelActivity[0]?.nodeId, "thinking-1");
   assert.equal(modelActivity[0]?.kind, "thinking");
-  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-1", "body-1", "tool-1"]);
+  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-1", "body-1", "side-1", "tool-1"]);
 });
 
 test("activity projection keeps requested and completed tool phases as a full action record", () => {

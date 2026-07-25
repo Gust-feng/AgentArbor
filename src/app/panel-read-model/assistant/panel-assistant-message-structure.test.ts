@@ -39,7 +39,7 @@ test("assistant message structure keeps reasoning and tool activity around the f
   assert.deepEqual(activityNodeIds(structure), ["thinking-1", "tool-1"]);
 });
 
-test("assistant message structure deduplicates live and settled reasoning without merging it into the answer", () => {
+test("assistant message structure uses the terminal reasoning fact for one model_call", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -71,8 +71,8 @@ test("assistant message structure deduplicates live and settled reasoning withou
     ],
   });
 
-  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body"]);
-  assert.deepEqual(activityNodeIds(structure), ["thinking-live"]);
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["body", "activity"]);
+  assert.deepEqual(activityNodeIds(structure), ["thinking-settled"]);
 });
 
 test("assistant message structure keeps tool activity after body alongside reasoning", () => {
@@ -116,10 +116,10 @@ test("assistant message structure keeps tool activity after body alongside reaso
   });
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
-  assert.deepEqual(activityNodeIds(structure), ["thinking-live", "tool-1"]);
+  assert.deepEqual(activityNodeIds(structure), ["thinking-live", "thinking-settled", "tool-1"]);
 });
 
-test("assistant message structure keeps post-body reasoning and deduplicates identical snapshots", () => {
+test("assistant message structure keeps post-body reasoning from different model calls", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -161,11 +161,11 @@ test("assistant message structure keeps post-body reasoning and deduplicates ide
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["body", "activity"]);
   const activity = structure.segments[1]?.kind === "activity" ? structure.segments[1] : undefined;
-  assert.deepEqual(activity?.timeline.items.map((item) => item.nodeId), ["thinking-live", "tool-1"]);
+  assert.deepEqual(activity?.timeline.items.map((item) => item.nodeId), ["thinking-live", "thinking-settled", "tool-1"]);
   assert.equal(activity?.timeline.items.some((item) => item.copy.expandedDetail?.includes("demonstrate")), true);
 });
 
-test("assistant message structure deduplicates provider side narration already represented by reasoning", () => {
+test("assistant message structure keeps provider side narration distinct from reasoning", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -207,7 +207,7 @@ test("assistant message structure deduplicates provider side narration already r
   });
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body", "activity"]);
-  assert.deepEqual(activityNodeIds(structure), ["thinking-live", "tool-1"]);
+  assert.deepEqual(activityNodeIds(structure), ["thinking-live", "side-settled", "tool-1"]);
 });
 
 test("assistant message structure exposes segment lifecycle", () => {
@@ -311,7 +311,7 @@ test("assistant message structure applies final-result model usage to fallback a
   });
 });
 
-test("assistant message structure merges fallback answer into the latest body when the copy overlaps", () => {
+test("assistant message structure treats transcript body as authoritative over fallback copy", () => {
   const structure = projectAssistantMessageStructure({
     fallbackText: "最终回答",
     transcriptNodes: [
@@ -336,8 +336,8 @@ test("assistant message structure merges fallback answer into the latest body wh
 
   assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body"]);
   const body = structure.segments.find((segment) => segment.kind === "body");
-  assert.equal(body?.kind === "body" ? body.text : undefined, "最终回答");
-  assert.equal(structure.copyText, "最终回答");
+  assert.equal(body?.kind === "body" ? body.text : undefined, "最终");
+  assert.equal(structure.copyText, "最终");
 });
 
 test("assistant message structure suppresses speculative fallback body while a live turn has not emitted a body node", () => {
@@ -403,34 +403,38 @@ test("assistant message structure keeps waiting through successful prefatory con
   assert.equal(structure.awaitingFirstVisibleOutput, true);
 });
 
-test("assistant message structure removes waiting on reasoning and side narration", () => {
-  const cases = [
-    node({
+test("assistant message structure replaces waiting with visible reasoning", () => {
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [node({
       nodeId: "reasoning",
       sequence: 1,
       kind: "thinking",
       eventType: "model.reasoning.delta",
       phase: "noted",
       text: "正在分析当前问题。",
-    }),
-    node({
+    })],
+  });
+
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity"]);
+  assert.equal(structure.awaitingFirstVisibleOutput, false);
+});
+
+test("assistant message structure keeps waiting when only hidden model narration arrived", () => {
+  const structure = projectAssistantMessageStructure({
+    keepStreamMounted: true,
+    transcriptNodes: [node({
       nodeId: "side-output",
       sequence: 1,
       kind: "system",
       eventType: "model.side.completed",
       phase: "completed",
       text: "我先检查相关文件。",
-    }),
-  ];
+    })],
+  });
 
-  for (const activity of cases) {
-    const structure = projectAssistantMessageStructure({
-      keepStreamMounted: true,
-      transcriptNodes: [activity],
-    });
-    assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity"]);
-    assert.equal(structure.awaitingFirstVisibleOutput, false);
-  }
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["awaiting"]);
+  assert.equal(structure.awaitingFirstVisibleOutput, true);
 });
 
 test("assistant message structure removes waiting on failure or cancellation", () => {

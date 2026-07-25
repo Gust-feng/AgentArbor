@@ -14,7 +14,10 @@ import { compact } from "../text";
 import type { TranscriptNode } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-read-model/transcript/panel-live-transcript";
 import type { AssistantWorkflowDisplay } from "../../../panel-read-model/assistant/panel-assistant-workflow-display";
-import type { ConversationDisplayItem } from "../../../panel-conversation/panel-conversation-display-list";
+import type {
+  AssistantRenderProjectionInput,
+  ConversationDisplayItem,
+} from "../../../panel-conversation/panel-conversation-display-list";
 import { LiveStreamBox } from "./live-stream-text";
 import { RichText, StreamingRichText } from "./rich-text";
 import type { ChatModelOption } from "./chat-empty";
@@ -88,6 +91,7 @@ export function TranscriptChain(props: {
               terminalStatus={item.terminalStatus}
               model={model}
               workflow={item.workflow}
+              projectionInput={item.source === "turn" ? item.projectionInput : undefined}
               showModelUsage={props.showModelUsage}
             />
           )
@@ -98,6 +102,7 @@ export function TranscriptChain(props: {
               animateOnMount={item.animateOnMount}
               model={model}
               workflow={item.workflow}
+              projectionInput={item.source === "turn" ? item.projectionInput : undefined}
               showModelUsage={props.showModelUsage}
               onDecision={stableOnDecision}
               confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
@@ -205,6 +210,7 @@ type AssistantMessageProps = {
   readonly animateOnMount?: boolean;
   readonly model?: AssistantModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+  readonly projectionInput?: AssistantRenderProjectionInput<ConversationTurn, TranscriptNode, ConfirmationProjection>;
   readonly showModelUsage: boolean;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
@@ -266,6 +272,7 @@ type AssistantFailureMessageProps = {
   readonly terminalStatus?: AssistantTerminalStatus;
   readonly model?: AssistantModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+  readonly projectionInput?: AssistantRenderProjectionInput<ConversationTurn, TranscriptNode, ConfirmationProjection>;
   readonly showModelUsage: boolean;
 };
 
@@ -449,7 +456,7 @@ function AssistantFailureNotice(props: {
 }
 
 function assistantMessagePropsEqual(left: AssistantMessageProps, right: AssistantMessageProps): boolean {
-  return left.workflow === right.workflow &&
+  return workflowsHaveSameProjectionInput(left, right) &&
     left.showModelUsage === right.showModelUsage &&
     left.live === right.live &&
     left.animateOnMount === right.animateOnMount &&
@@ -461,9 +468,32 @@ function assistantMessagePropsEqual(left: AssistantMessageProps, right: Assistan
 function assistantFailureMessagePropsEqual(left: AssistantFailureMessageProps, right: AssistantFailureMessageProps): boolean {
   return left.failure.previous === right.failure.previous &&
     left.failure.error === right.failure.error &&
+    left.terminalStatus === right.terminalStatus &&
     left.showModelUsage === right.showModelUsage &&
     assistantModelBadgesEqual(left.model, right.model) &&
-    left.workflow === right.workflow;
+    workflowsHaveSameProjectionInput(left, right);
+}
+
+function workflowsHaveSameProjectionInput(
+  left: Pick<AssistantMessageProps, "workflow" | "projectionInput">,
+  right: Pick<AssistantMessageProps, "workflow" | "projectionInput">,
+): boolean {
+  if (left.workflow === right.workflow) return true;
+  const leftInput = left.projectionInput;
+  const rightInput = right.projectionInput;
+  if (leftInput === undefined || rightInput === undefined) return false;
+  // This is an identity check over canonical projection inputs, not a cache of
+  // inferred reasoning/body/tool output. Any changed fact reference must render.
+  return leftInput.turn === rightInput.turn &&
+    leftInput.transcriptNodes === rightInput.transcriptNodes &&
+    leftInput.pending === rightInput.pending &&
+    leftInput.deliverable === rightInput.deliverable &&
+    leftInput.content === rightInput.content &&
+    leftInput.live === rightInput.live &&
+    leftInput.keepStreamMounted === rightInput.keepStreamMounted &&
+    leftInput.animateOnMount === rightInput.animateOnMount &&
+    leftInput.liveTone === rightInput.liveTone &&
+    leftInput.collapseTimeline === rightInput.collapseTimeline;
 }
 
 function assistantModelBadgesEqual(left: AssistantModelBadge | undefined, right: AssistantModelBadge | undefined): boolean {

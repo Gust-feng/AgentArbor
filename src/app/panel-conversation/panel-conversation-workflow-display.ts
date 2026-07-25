@@ -20,7 +20,6 @@ import type { ConfirmationIdentity } from "../panel-read-model/transcript/panel-
 import {
   materializeConversationTranscript,
   stableTranscriptNodesByRunIdMap,
-  type MaterializedConversationTranscript,
 } from "../panel-read-model/transcript/panel-transcript-materializer.js";
 import type { LiveAnswerTone } from "../panel-read-model/transcript/panel-live-transcript.js";
 import {
@@ -43,7 +42,6 @@ export type ConversationWorkflowDisplayState<
 > = {
   readonly conversationId?: string;
   readonly emptyAssistantShells: AssistantShellSnapshot;
-  readonly materializedTranscript: MaterializedConversationTranscript<TNode>;
   readonly transcriptNodesByRunId: ReadonlyMap<string, readonly TNode[]>;
   readonly assistantDisplaysByTurnId: ReadonlyMap<string, StableAssistantTurnDisplay<TTurn, TNode, TDeliverable, TPending>>;
   readonly assistantWorkflowsByTurnId: ReadonlyMap<string, AssistantWorkflowDisplayState<TNode, TPending>>;
@@ -64,10 +62,6 @@ export function createConversationWorkflowDisplayState<
   return {
     conversationId: undefined,
     emptyAssistantShells: assistantShellSnapshot([]),
-    materializedTranscript: {
-      conversationId: undefined,
-      nodesByRunId: {},
-    },
     transcriptNodesByRunId: new Map<string, readonly TNode[]>(),
     assistantDisplaysByTurnId: new Map<string, StableAssistantTurnDisplay<TTurn, TNode, TDeliverable, TPending>>(),
     assistantWorkflowsByTurnId: new Map<string, AssistantWorkflowDisplayState<TNode, TPending>>(),
@@ -98,7 +92,6 @@ export function projectConversationWorkflowDisplay<
 } {
   const previous = conversationWorkflowDisplayStateForConversation(input.previous, input.conversationId);
   const materializedTranscript = materializeConversationTranscript({
-    previous: previous?.materializedTranscript,
     conversationId: input.conversationId,
     cachedNodesByRunId: input.cachedNodesByRunId,
     currentRunId: input.currentRunId,
@@ -126,7 +119,6 @@ export function projectConversationWorkflowDisplay<
     state: {
       conversationId: input.conversationId,
       emptyAssistantShells: assistantShellSnapshot(input.turns),
-      materializedTranscript,
       transcriptNodesByRunId,
       assistantDisplaysByTurnId: assistantDisplays.displays,
       assistantWorkflowsByTurnId: assistantDisplays.workflows,

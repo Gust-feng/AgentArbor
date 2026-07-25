@@ -20,6 +20,7 @@ export type TimelineCollapseActivityLike = {
 export type TimelineCollapseReason =
   | "structure"
   | "turn_settled"
+  | "reasoning_settled"
   | "active_or_pending"
   | "empty"
   | "needs_attention"
@@ -103,6 +104,9 @@ export function timelineCollapseDecision(input: {
   if (input.items.some((item) => !isAutoCollapsibleTimelinePhase(item.phase))) {
     return { collapsed: false, reason: "active_or_pending" };
   }
+  if (input.items.every(isSettledReasoningActivity)) {
+    return { collapsed: true, reason: "reasoning_settled" };
+  }
   if (input.defaultCollapsed) {
     return { collapsed: true, reason: "structure" };
   }
@@ -113,6 +117,10 @@ export function timelineCollapseDecision(input: {
     return { collapsed: true, reason: "structure" };
   }
   return { collapsed: false, reason: "expanded" };
+}
+
+function isSettledReasoningActivity(item: TimelineCollapseActivityLike): boolean {
+  return item.tone === "thinking" && isAutoCollapsibleTimelinePhase(item.phase);
 }
 
 export function collapsedTimelineSummary(input: {

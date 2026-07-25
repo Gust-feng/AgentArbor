@@ -9,7 +9,7 @@ import {
 import { appendLiveRunEvents, emptyLiveRun, type LiveRunBuffer } from "../run/panel-run-live-buffer.js";
 import { textStreamAssemblyFromText } from "./readable-text-fragments.js";
 
-test("withLiveTranscriptNodes replaces existing reasoning node instead of appending duplicate", () => {
+test("withLiveTranscriptNodes reconciles reasoning by model_call identity", () => {
   const existing = node({
     nodeId: "reasoning-existing",
     sequence: 1,
@@ -25,7 +25,7 @@ test("withLiveTranscriptNodes replaces existing reasoning node instead of append
   }));
 
   assert.equal(merged.length, 1);
-  assert.equal(merged[0]?.nodeId, "reasoning-existing");
+  assert.equal(merged[0]?.nodeId, "run-1:live:model-1:thinking");
   assert.equal(merged[0]?.text, "先分析目标，再检查约束");
   assert.equal(merged[0]?.eventType, "model.reasoning.completed");
 });
@@ -60,7 +60,7 @@ test("withLiveTranscriptNodes exposes the latest live tool progress without wait
   assert.equal(projected[0]?.display?.kind, "command_summary");
 });
 
-test("withLiveTranscriptNodes can match live reasoning by comparable text during streaming", () => {
+test("withLiveTranscriptNodes does not match live reasoning by comparable text", () => {
   const existing = node({
     nodeId: "reasoning-existing",
     sequence: 1,
@@ -75,8 +75,9 @@ test("withLiveTranscriptNodes can match live reasoning by comparable text during
     modelRefs: [],
   }));
 
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0]?.text, "先分析目标，再检查约束");
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0]?.text, "先分析目标");
+  assert.equal(merged[1]?.text, "先分析目标，再检查约束");
 });
 
 test("withLiveTranscriptNodes adds side text as a stable system node", () => {
@@ -178,7 +179,7 @@ test("withLiveTranscriptNodes keeps output after a tool in a later body node", (
   );
 });
 
-test("withLiveTranscriptNodes replaces existing side text node instead of duplicating it", () => {
+test("withLiveTranscriptNodes does not identify side text from display copy", () => {
   const existing = node({
     nodeId: "side-existing",
     sequence: 1,
@@ -193,10 +194,10 @@ test("withLiveTranscriptNodes replaces existing side text node instead of duplic
     modelRefs: [],
   }));
 
-  assert.equal(merged.length, 1);
+  assert.equal(merged.length, 2);
   assert.equal(merged[0]?.nodeId, "side-existing");
-  assert.equal(merged[0]?.eventType, "model.output.side");
-  assert.equal(merged[0]?.text, "准备读取文件");
+  assert.equal(merged[1]?.eventType, "model.output.side");
+  assert.equal(merged[1]?.text, "准备读取文件");
 });
 
 test("withLiveTranscriptNodes keeps completed body text stable across live to settled handoff", () => {
@@ -221,6 +222,28 @@ test("withLiveTranscriptNodes keeps completed body text stable across live to se
   assert.equal(merged[0]?.eventType, "model.output.completed");
   assert.equal(merged[0]?.phase, "completed");
   assert.equal(merged[0]?.text, "The user is asking");
+});
+
+test("withLiveTranscriptNodes gives an equal-sequence durable terminal fact authority over live content", () => {
+  const durable = node({
+    nodeId: "reasoning-durable",
+    sequence: 8,
+    eventType: "model.reasoning.completed",
+    kind: "thinking",
+    phase: "completed",
+    text: "权威完整思考",
+    refs: [{ kind: "model_call", id: "model-1" }],
+  });
+  const merged = withLiveTranscriptNodes([durable], live({
+    reasoningText: "仍在缓冲区中的旧思考",
+    reasoningCompleted: true,
+    reasoningSequence: 8,
+    updatedAtSequence: 8,
+  }));
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.nodeId, "reasoning-durable");
+  assert.equal(merged[0]?.text, "权威完整思考");
 });
 
 test("withLiveTranscriptNodes does not rewrite a completed body by comparable text alone", () => {
@@ -267,7 +290,7 @@ test("withLiveTranscriptNodes does not rewrite completed reasoning by comparable
   assert.notEqual(merged[1]?.nodeId, "reasoning-existing");
 });
 
-test("withLiveTranscriptNodes reuses completed reasoning when the live text is exactly the same", () => {
+test("withLiveTranscriptNodes preserves uncorrelated reasoning even when text is exactly the same", () => {
   const existing = node({
     nodeId: "reasoning-existing",
     sequence: 4,
@@ -283,11 +306,11 @@ test("withLiveTranscriptNodes reuses completed reasoning when the live text is e
     updatedAtSequence: 5,
   }));
 
-  assert.equal(merged.length, 1);
+  assert.equal(merged.length, 2);
   assert.equal(merged[0]?.nodeId, "reasoning-existing");
 });
 
-test("withLiveTranscriptNodes reuses completed body when the live text is exactly the same", () => {
+test("withLiveTranscriptNodes preserves uncorrelated body output even when text is exactly the same", () => {
   const existing = node({
     nodeId: "body-existing",
     sequence: 9,
@@ -303,7 +326,7 @@ test("withLiveTranscriptNodes reuses completed body when the live text is exactl
     updatedAtSequence: 10,
   }));
 
-  assert.equal(merged.length, 1);
+  assert.equal(merged.length, 2);
   assert.equal(merged[0]?.nodeId, "body-existing");
 });
 

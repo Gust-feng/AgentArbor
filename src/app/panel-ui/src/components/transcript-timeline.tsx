@@ -162,15 +162,7 @@ function WorkRecordDisclosure(props: {
   readonly autoOpen: boolean;
   readonly children: React.ReactNode;
 }): React.ReactElement {
-  const [open, setOpen] = React.useState(props.autoOpen);
-  const previousAutoOpen = React.useRef(props.autoOpen);
-  React.useEffect(() => {
-    if (previousAutoOpen.current === props.autoOpen) {
-      return;
-    }
-    previousAutoOpen.current = props.autoOpen;
-    setOpen(props.autoOpen);
-  }, [props.autoOpen]);
+  const [open, setOpen] = useAutoSynchronizedDisclosure(props.autoOpen);
 
   return (
     <details
@@ -191,15 +183,7 @@ function ReasoningDisclosure(props: {
   readonly autoOpen: boolean;
   readonly items: readonly ActivityItem[];
 }): React.ReactElement {
-  const [open, setOpen] = React.useState(props.autoOpen);
-  const previousAutoOpen = React.useRef(props.autoOpen);
-  React.useEffect(() => {
-    if (previousAutoOpen.current === props.autoOpen) {
-      return;
-    }
-    previousAutoOpen.current = props.autoOpen;
-    setOpen(props.autoOpen);
-  }, [props.autoOpen]);
+  const [open, setOpen] = useAutoSynchronizedDisclosure(props.autoOpen);
   const active = props.items.some(isActiveActivityItem);
 
   return (
@@ -218,6 +202,19 @@ function ReasoningDisclosure(props: {
       </div>
     </details>
   );
+}
+
+function useAutoSynchronizedDisclosure(autoOpen: boolean): readonly [boolean, React.Dispatch<React.SetStateAction<boolean>>] {
+  const [open, setOpen] = React.useState(autoOpen);
+  const previousAutoOpen = React.useRef(autoOpen);
+  React.useLayoutEffect(() => {
+    if (previousAutoOpen.current === autoOpen) return;
+    previousAutoOpen.current = autoOpen;
+    // Lifecycle-driven folding must land before paint; otherwise a completed
+    // reasoning block remains visibly open for one frame after the dots vanish.
+    setOpen(autoOpen);
+  }, [autoOpen]);
+  return [open, setOpen] as const;
 }
 
 function ActivityRecord(props: {

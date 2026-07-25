@@ -52,7 +52,7 @@ test("assistant message view projects answer rendering state outside React", () 
   });
 });
 
-test("assistant message view segments body nodes before the fallback answer", () => {
+test("assistant message view treats body nodes as canonical when fallback copy is also present", () => {
   const view = projectAssistantMessageView({
     content: "最终回答",
     transcriptNodes: [
@@ -75,14 +75,12 @@ test("assistant message view segments body nodes before the fallback answer", ()
     ],
   });
 
-  assert.deepEqual(view.segments.map((segment) => segment.kind), ["body", "activity", "body"]);
+  assert.deepEqual(view.segments.map((segment) => segment.kind), ["body", "activity"]);
   assert.equal(view.segments[0]?.kind, "body");
   assert.equal(view.segments[0]?.kind === "body" ? view.segments[0].text : undefined, "先说明。");
   assert.equal(view.segments[1]?.kind, "activity");
   assert.deepEqual(view.segments[1]?.kind === "activity" ? view.segments[1].timeline.items.map((item) => item.nodeId) : [], ["tool-1"]);
-  assert.equal(view.segments[2]?.kind, "body");
-  assert.equal(view.segments[2]?.kind === "body" ? view.segments[2].text : undefined, "最终回答");
-  assert.equal(view.copyText, "先说明。\n\n最终回答");
+  assert.equal(view.copyText, "先说明。");
 });
 
 test("assistant message view keeps later tool activity after body content arrives", () => {
@@ -471,7 +469,7 @@ test("assistant message view keeps reasoning ahead of fallback body", () => {
   assert.equal(body?.kind === "body" ? body.text : undefined, "最终回答");
 });
 
-test("assistant message view merges fallback answer into the latest body when the copy overlaps", () => {
+test("assistant message view does not rewrite a body from overlapping fallback copy", () => {
   const view = projectAssistantMessageView({
     content: "最终回答",
     transcriptNodes: [
@@ -496,8 +494,8 @@ test("assistant message view merges fallback answer into the latest body when th
 
   assert.deepEqual(view.segments.map((segment) => segment.kind), ["activity", "body"]);
   const body = view.segments.find((segment) => segment.kind === "body");
-  assert.equal(body?.kind === "body" ? body.text : undefined, "最终回答");
-  assert.equal(view.copyText, "最终回答");
+  assert.equal(body?.kind === "body" ? body.text : undefined, "最终");
+  assert.equal(view.copyText, "最终");
 });
 
 test("assistant message view suppresses speculative fallback body while a live turn has not emitted a body node", () => {

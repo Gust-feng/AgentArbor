@@ -79,7 +79,7 @@ test("assistant activity segment identity keeps tool identity when earlier think
   assert.equal(activitySegmentKey(withLateEarlierThinking), activitySegmentKey(withoutThinking));
 });
 
-test("assistant activity segment identity keeps model narrative and operational work independently addressable", () => {
+test("assistant activity segment identity groups adjacent canonical activity after the body", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -122,12 +122,12 @@ test("assistant activity segment identity keeps model narrative and operational 
 
   const segments = activitySegments(structure);
 
-  assert.equal(segments.length, 2);
+  assert.equal(segments.length, 1);
   assert.deepEqual(
     segments.flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
-    ["thinking-live", "tool-completed-1"],
+    ["thinking-settled", "tool-completed-1"],
   );
-  assert.equal(segments[1]?.segmentKey, "activity:tool-call:run-1:tool-call-1");
+  assert.equal(segments[0]?.segmentKey, "activity:tool-call:run-1:tool-call-1");
 });
 
 test("assistant activity segment identity stays stable when raw model narrative settles", () => {

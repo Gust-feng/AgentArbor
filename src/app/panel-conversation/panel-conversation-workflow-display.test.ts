@@ -7,7 +7,7 @@ import {
 } from "./panel-conversation-workflow-display.js";
 import type { WorklineProjectedTurn } from "../panel-read-model/assistant/panel-assistant-workline.js";
 
-test("conversation workflow display keeps rendered body stable when earlier process arrives late", () => {
+test("conversation workflow display restores late reasoning before the rendered body", () => {
   const initialState = createConversationWorkflowDisplayState<
     ReturnType<typeof turn>,
     ReturnType<typeof transcriptNode>,
@@ -71,7 +71,13 @@ test("conversation workflow display keeps rendered body stable when earlier proc
 
   const display = second.assistantDisplays.get("assistant-1");
   assert.ok(display !== undefined);
-  assert.deepEqual(display.workflow?.segments.map((segment) => segment.kind), ["body"]);
+  assert.deepEqual(display.workflow?.segments.map((segment) => segment.kind), ["activity", "body"]);
+  assert.deepEqual(
+    display.workflow?.segments
+      .filter((segment) => segment.kind === "activity")
+      .flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
+    ["thinking-1"],
+  );
 });
 
 test("conversation workflow display resets continuity when the conversation changes", () => {
@@ -98,7 +104,7 @@ test("conversation workflow display resets continuity when the conversation chan
   assert.deepEqual([...next.state.transcriptNodesByRunId.keys()], []);
 });
 
-test("standalone assistant workflow display keeps the same stable body when earlier process arrives late", () => {
+test("standalone assistant workflow display restores late reasoning before the stable body", () => {
   const previousState = createConversationWorkflowDisplayState<
     ReturnType<typeof turn>,
     ReturnType<typeof transcriptNode>,
@@ -142,10 +148,10 @@ test("standalone assistant workflow display keeps the same stable body when earl
     collapseTimeline: false,
   });
 
-  assert.deepEqual(second.workflow.segments.map((segment) => segment.kind), ["body"]);
+  assert.deepEqual(second.workflow.segments.map((segment) => segment.kind), ["activity", "body"]);
 });
 
-test("conversation workflow display isolates a later assistant update from earlier assistant workflows", () => {
+test("conversation workflow display reprojects earlier turns without changing their semantic output", () => {
   const turns = [
     turn("user-1", "user", "继续", "completed"),
     { ...turn("assistant-1", "assistant", "第一段正文。", "completed"), runId: "run-1" },
@@ -231,12 +237,11 @@ test("conversation workflow display isolates a later assistant update from earli
   const nextAssistantOne = second.assistantDisplays.get("assistant-1");
   const nextAssistantTwo = second.assistantDisplays.get("assistant-2");
 
-  assert.equal(nextAssistantOne, previousAssistantOne);
-  assert.equal(nextAssistantOne?.workflow, previousAssistantOne?.workflow);
-  assert.deepEqual(nextAssistantTwo?.workflow?.segments.map((segment) => segment.kind), ["body"]);
+  assert.deepEqual(nextAssistantOne, previousAssistantOne);
+  assert.deepEqual(nextAssistantTwo?.workflow?.segments.map((segment) => segment.kind), ["activity", "body"]);
 });
 
-test("conversation workflow display does not rewrite a closed activity when older thinking arrives later", () => {
+test("conversation workflow display inserts older reasoning without rewriting closed tool activity", () => {
   const turns = [
     turn("user-1", "user", "继续", "completed"),
     { ...turn("assistant-1", "assistant", "第一段正文。", "completed"), runId: "run-1" },
@@ -310,16 +315,16 @@ test("conversation workflow display does not rewrite a closed activity when olde
 
   const firstActivity = first.assistantDisplays.get("assistant-1")?.workflow?.segments
     .find((segment) => segment.kind === "activity");
-  const secondActivity = second.assistantDisplays.get("assistant-1")?.workflow?.segments
-    .find((segment) => segment.kind === "activity");
+  const secondActivities = second.assistantDisplays.get("assistant-1")?.workflow?.segments
+    .filter((segment) => segment.kind === "activity") ?? [];
 
   assert.deepEqual(
     firstActivity?.kind === "activity" ? firstActivity.timeline.items.map((item) => item.nodeId) : [],
     ["tool-1"],
   );
   assert.deepEqual(
-    secondActivity?.kind === "activity" ? secondActivity.timeline.items.map((item) => item.nodeId) : [],
-    ["tool-1"],
+    secondActivities.flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
+    ["thinking-1", "tool-1"],
   );
 });
 

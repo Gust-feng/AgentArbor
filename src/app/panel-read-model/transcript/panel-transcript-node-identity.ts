@@ -1,5 +1,3 @@
-import { userVisibleAnswer } from "../assistant/panel-assistant-visible-text.js";
-
 export type TranscriptNodeRefLike = {
   readonly kind: string;
   readonly id: string;
@@ -21,17 +19,7 @@ export type TranscriptNodeIdentityLike = {
   readonly refs?: readonly TranscriptNodeRefLike[];
 };
 
-type TranscriptMergeClass = "model_activity" | "body";
-
-export function transcriptNodeText(node: TranscriptNodeIdentityLike): string {
-  return node.text ?? node.summary ?? "";
-}
-
-export function comparableTranscriptText(value: string | undefined): string {
-  return userVisibleAnswer(value ?? "")
-    .replace(/[。.!！?？；;:：、，,\s]/g, "")
-    .trim();
-}
+type StructuredTranscriptFamily = "reasoning" | "side" | "body" | "tool_active" | "tool_terminal";
 
 export function isModelSideTranscriptNode(node: TranscriptNodeIdentityLike): boolean {
   return node.kind === "system" &&
@@ -42,81 +30,69 @@ export function isMergeableModelTranscriptNode(node: TranscriptNodeIdentityLike)
   return node.kind === "thinking" || isModelSideTranscriptNode(node);
 }
 
+/**
+ * Canonical identity is derived only from run-born structural facts.
+ * Reasoning, side narration and answer body intentionally remain different
+ * families even when providers emit identical text.
+ */
+export function transcriptNodeIdentityKey(node: TranscriptNodeIdentityLike): string {
+  const family = structuredTranscriptFamily(node);
+  const ownerId = family === "tool_active" || family === "tool_terminal"
+    ? firstRefId(node, "tool_call")
+    : family === undefined ? undefined : firstRefId(node, "model_call");
+  return ownerId === undefined
+    ? `${node.runId}:node:${node.nodeId}`
+    : `${node.runId}:${family}:${ownerId}`;
+}
+
 export function sameTranscriptNodeIdentity(
   left: TranscriptNodeIdentityLike,
   right: TranscriptNodeIdentityLike,
 ): boolean {
-  if (left.runId !== right.runId) {
-    return false;
-  }
-  if (left.nodeId === right.nodeId) {
-    return true;
-  }
-  const leftClass = transcriptMergeClass(left);
-  const rightClass = transcriptMergeClass(right);
-  if (leftClass === undefined || leftClass !== rightClass) {
-    return false;
-  }
-  const leftText = comparableTranscriptText(transcriptNodeText(left));
-  const rightText = comparableTranscriptText(transcriptNodeText(right));
-  if (leftText.length === 0 || rightText.length === 0) {
-    return false;
-  }
-  if (leftText === rightText) {
-    return leftClass === "model_activity" || transcriptModelRefsCompatible(left, right);
-  }
-  if (!leftText.startsWith(rightText) && !rightText.startsWith(leftText)) {
-    return false;
-  }
-  if (leftClass === "model_activity") {
-    return true;
-  }
-  return transcriptModelRefsCompatible(left, right);
+  if (left.runId !== right.runId) return false;
+  if (left.nodeId === right.nodeId) return true;
+  const leftFamily = structuredTranscriptFamily(left);
+  const rightFamily = structuredTranscriptFamily(right);
+  if (leftFamily === undefined || leftFamily !== rightFamily) return false;
+  const refKind = leftFamily === "tool_active" || leftFamily === "tool_terminal" ? "tool_call" : "model_call";
+  const leftOwner = firstRefId(left, refKind);
+  const rightOwner = firstRefId(right, refKind);
+  return leftOwner !== undefined && leftOwner === rightOwner;
 }
 
+/**
+ * Reconciles two observations of one structurally identified fact. Content is
+ * never spliced or selected by textual similarity: terminal facts outrank live
+ * facts, then the newer sequence wins.
+ */
 export function mergeTranscriptNodes<TNode extends TranscriptNodeIdentityLike>(
   previous: TNode,
   incoming: TNode,
 ): TNode {
-  const mergeClass = transcriptMergeClass(previous);
-  if (mergeClass === undefined || mergeClass !== transcriptMergeClass(incoming)) {
-    return incoming;
-  }
-  const text = moreCompleteTranscriptText(transcriptNodeText(previous), transcriptNodeText(incoming));
-  const merged = {
-    ...incoming,
-    nodeId: previous.nodeId,
-    sequence: previous.sequence,
-    timestamp: previous.timestamp ?? incoming.timestamp,
-    modelUsage: incoming.modelUsage ?? previous.modelUsage,
-    refs: mergeTranscriptRefs(previous.refs ?? [], incoming.refs ?? []),
-    text,
-    summary: text === undefined ? incoming.summary ?? previous.summary : compactTranscriptSummary(text),
+  if (!sameTranscriptNodeIdentity(previous, incoming)) return incoming;
+  const winner = transcriptNodeAuthority(incoming) >= transcriptNodeAuthority(previous)
+    ? incoming
+    : previous;
+  const loser = winner === incoming ? previous : incoming;
+  return {
+    ...winner,
+    modelUsage: winner.modelUsage ?? loser.modelUsage,
+    refs: mergeTranscriptRefs(winner.refs ?? [], loser.refs ?? []),
   } as TNode;
-  if (mergeClass !== "model_activity") {
-    return merged;
-  }
-  return preserveModelActivityPresentation(previous, incoming, merged);
 }
 
 export function mergeTranscriptNodeLists<TNode extends TranscriptNodeIdentityLike>(
   previous: readonly TNode[],
   incoming: readonly TNode[],
 ): readonly TNode[] {
-  const merged: TNode[] = [...previous];
-  const index = transcriptNodeMergeIndex(merged);
+  const merged = [...previous];
   for (const node of incoming) {
-    const existingIndex = findTranscriptNodeMergeIndex(merged, index, node);
-    if (existingIndex >= 0) {
-      const existing = merged[existingIndex];
-      if (existing !== undefined) {
-        merged[existingIndex] = mergeTranscriptNodes(existing, node);
-        indexTranscriptNode(index, merged[existingIndex]!, existingIndex);
-      }
+    const existingIndex = merged.findIndex((item) => sameTranscriptNodeIdentity(item, node));
+    if (existingIndex < 0) {
+      merged.push(node);
       continue;
     }
-    merged.push(node);
-    indexTranscriptNode(index, node, merged.length - 1);
+    merged[existingIndex] = mergeTranscriptNodes(merged[existingIndex]!, node);
   }
   return sortTranscriptNodes(merged);
 }
@@ -126,37 +102,16 @@ export function mergeReplacingTranscriptNodeLists<TNode extends TranscriptNodeId
   incoming: readonly TNode[],
 ): readonly TNode[] {
   const merged: TNode[] = [];
-  const mergedIndex = transcriptNodeMergeIndex(merged);
-  const previousIndex = transcriptNodeMergeIndex(previous);
   for (const node of incoming) {
-    const existingMergedIndex = findTranscriptNodeMergeIndex(merged, mergedIndex, node);
-    if (existingMergedIndex >= 0) {
-      const existing = merged[existingMergedIndex];
-      if (existing !== undefined) {
-        merged[existingMergedIndex] = mergeTranscriptNodes(existing, node);
-        indexTranscriptNode(mergedIndex, merged[existingMergedIndex]!, existingMergedIndex);
-      }
+    const alreadyMergedIndex = merged.findIndex((item) => sameTranscriptNodeIdentity(item, node));
+    if (alreadyMergedIndex >= 0) {
+      merged[alreadyMergedIndex] = mergeTranscriptNodes(merged[alreadyMergedIndex]!, node);
       continue;
     }
-    const existingPreviousIndex = findTranscriptNodeMergeIndex(previous, previousIndex, node);
-    const existingPrevious = existingPreviousIndex >= 0 ? previous[existingPreviousIndex] : undefined;
-    const nextNode = existingPrevious === undefined ? node : mergeTranscriptNodes(existingPrevious, node);
-    merged.push(nextNode);
-    indexTranscriptNode(mergedIndex, nextNode, merged.length - 1);
+    const previousNode = previous.find((item) => sameTranscriptNodeIdentity(item, node));
+    merged.push(previousNode === undefined ? node : mergeTranscriptNodes(previousNode, node));
   }
   return sortTranscriptNodes(merged);
-}
-
-export function moreCompleteTranscriptText(left: string, right: string): string | undefined {
-  const leftText = left.trim();
-  const rightText = right.trim();
-  if (leftText.length === 0) return rightText.length === 0 ? undefined : rightText;
-  if (rightText.length === 0) return leftText;
-  const compactLeft = comparableTranscriptText(leftText);
-  const compactRight = comparableTranscriptText(rightText);
-  if (compactRight.length > compactLeft.length) return rightText;
-  if (compactLeft.length > compactRight.length) return leftText;
-  return rightText.length >= leftText.length ? rightText : leftText;
 }
 
 export function mergeTranscriptRefs<TRef extends TranscriptNodeRefLike>(
@@ -174,137 +129,33 @@ export function mergeTranscriptRefs<TRef extends TranscriptNodeRefLike>(
   return result;
 }
 
-function transcriptMergeClass(node: TranscriptNodeIdentityLike): TranscriptMergeClass | undefined {
-  if (isMergeableModelTranscriptNode(node)) {
-    return "model_activity";
-  }
-  if (node.kind === "body") {
-    return "body";
-  }
+function structuredTranscriptFamily(node: TranscriptNodeIdentityLike): StructuredTranscriptFamily | undefined {
+  if (node.kind === "thinking") return "reasoning";
+  if (isModelSideTranscriptNode(node)) return "side";
+  if (node.kind === "body") return "body";
+  if (node.kind === "tool") return isTerminalTranscriptNode(node) ? "tool_terminal" : "tool_active";
   return undefined;
 }
 
-type TranscriptNodeMergeIndex = {
-  readonly byNodeId: Map<string, number>;
-  readonly byModelText: Map<string, number[]>;
-  readonly byBodyText: Map<string, number[]>;
-};
-
-function transcriptNodeMergeIndex<TNode extends TranscriptNodeIdentityLike>(
-  nodes: readonly TNode[],
-): TranscriptNodeMergeIndex {
-  const index: TranscriptNodeMergeIndex = {
-    byNodeId: new Map<string, number>(),
-    byModelText: new Map<string, number[]>(),
-    byBodyText: new Map<string, number[]>(),
-  };
-  nodes.forEach((node, nodeIndex) => indexTranscriptNode(index, node, nodeIndex));
-  return index;
+function firstRefId(node: TranscriptNodeIdentityLike, kind: string): string | undefined {
+  return node.refs?.find((ref) => ref.kind === kind && ref.id.length > 0)?.id;
 }
 
-function indexTranscriptNode(
-  index: TranscriptNodeMergeIndex,
-  node: TranscriptNodeIdentityLike,
-  nodeIndex: number,
-): void {
-  index.byNodeId.set(transcriptNodeIdKey(node), nodeIndex);
-  const textKey = transcriptNodeTextKey(node);
-  if (textKey === undefined) return;
-  const target = transcriptMergeClass(node) === "body" ? index.byBodyText : index.byModelText;
-  const existing = target.get(textKey) ?? [];
-  target.set(textKey, [...existing.filter((item) => item !== nodeIndex), nodeIndex]);
+function transcriptNodeAuthority(node: TranscriptNodeIdentityLike): number {
+  const terminalRank = isTerminalTranscriptNode(node) ? 1_000_000_000 : 0;
+  return terminalRank + Math.max(0, node.sequence);
 }
 
-function findTranscriptNodeMergeIndex<TNode extends TranscriptNodeIdentityLike>(
-  nodes: readonly TNode[],
-  index: TranscriptNodeMergeIndex,
-  node: TNode,
-): number {
-  const nodeIdMatch = index.byNodeId.get(transcriptNodeIdKey(node));
-  if (nodeIdMatch !== undefined && sameTranscriptNodeIdentity(nodes[nodeIdMatch]!, node)) {
-    return nodeIdMatch;
-  }
-  const textKey = transcriptNodeTextKey(node);
-  const mergeClass = transcriptMergeClass(node);
-  const candidates = textKey === undefined
-    ? undefined
-    : (mergeClass === "body" ? index.byBodyText : index.byModelText).get(textKey);
-  if (candidates !== undefined) {
-    for (let indexIndex = candidates.length - 1; indexIndex >= 0; indexIndex -= 1) {
-      const nodeIndex = candidates[indexIndex]!;
-      const candidate = nodes[nodeIndex];
-      if (candidate !== undefined && sameTranscriptNodeIdentity(candidate, node)) {
-        return nodeIndex;
-      }
-    }
-  }
-  return nodes.findIndex((item) => sameTranscriptNodeIdentity(item, node));
-}
-
-function transcriptNodeIdKey(node: TranscriptNodeIdentityLike): string {
-  return `${node.runId}:${node.nodeId}`;
-}
-
-function transcriptNodeTextKey(node: TranscriptNodeIdentityLike): string | undefined {
-  const mergeClass = transcriptMergeClass(node);
-  if (mergeClass === undefined) return undefined;
-  const text = comparableTranscriptText(transcriptNodeText(node));
-  if (text.length === 0) return undefined;
-  return `${node.runId}:${mergeClass}:${text}`;
-}
-
-function transcriptModelRefsCompatible(
-  left: TranscriptNodeIdentityLike,
-  right: TranscriptNodeIdentityLike,
-): boolean {
-  const leftRefs = modelCallIds(left);
-  const rightRefs = modelCallIds(right);
-  if (leftRefs.length === 0 || rightRefs.length === 0) {
-    return true;
-  }
-  return leftRefs.some((id) => rightRefs.includes(id));
-}
-
-function modelCallIds(node: TranscriptNodeIdentityLike): readonly string[] {
-  return (node.refs ?? []).filter((ref) => ref.kind === "model_call").map((ref) => ref.id);
-}
-
-function preserveModelActivityPresentation<TNode extends TranscriptNodeIdentityLike>(
-  previous: TNode,
-  incoming: TNode,
-  merged: TNode,
-): TNode {
-  if (previous.kind === incoming.kind || (previous.kind !== "thinking" && incoming.kind !== "thinking")) {
-    return merged;
-  }
-  if (previous.kind !== "thinking") {
-    return {
-      ...merged,
-      kind: previous.kind,
-      phase: previous.phase ?? merged.phase,
-      eventType: previous.eventType ?? merged.eventType,
-      title: previous.title ?? merged.title,
-    } as TNode;
-  }
-  const completed = previous.phase === "completed" ||
-    incoming.phase === "completed" ||
-    previous.eventType === "model.reasoning.completed" ||
-    incoming.eventType === "model.reasoning.completed";
-  const eventType = completed ? "model.reasoning.completed" : previous.eventType ?? merged.eventType;
-  return {
-    ...merged,
-    kind: "thinking",
-    phase: completed ? "completed" : merged.phase,
-    eventType,
-    title: previous.title ?? merged.title,
-  } as TNode;
+function isTerminalTranscriptNode(node: TranscriptNodeIdentityLike): boolean {
+  return node.phase === "completed" ||
+    node.phase === "failed" ||
+    node.phase === "blocked" ||
+    node.phase === "cancelled" ||
+    node.eventType?.endsWith(".completed") === true ||
+    node.eventType === "tool.failed" ||
+    node.eventType === "tool.cancelled";
 }
 
 function sortTranscriptNodes<TNode extends TranscriptNodeIdentityLike>(nodes: readonly TNode[]): readonly TNode[] {
   return [...nodes].sort((left, right) => left.sequence - right.sequence || left.nodeId.localeCompare(right.nodeId));
-}
-
-function compactTranscriptSummary(value: string): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length <= 220 ? normalized : `${normalized.slice(0, 219)}…`;
 }

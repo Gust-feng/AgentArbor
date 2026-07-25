@@ -1,9 +1,6 @@
 import {
   appendTextStreamAssembly,
   emptyTextStreamAssembly,
-  appendReadableTextFragment,
-  appendStreamTextEventFragment,
-  appendSnapshotTextFragment,
   textStreamFragmentSourceFromEventId,
   type TextStreamAssembly,
 } from "../transcript/readable-text-fragments.js";
@@ -279,10 +276,6 @@ function liveModelRequestId(event: RunEventLike): string | undefined {
   return event.refs.find((ref) => ref.kind === "model_call")?.id;
 }
 
-function appendLiveText(current: string, next: string): string {
-  return appendStreamTextEventFragment(current, next, undefined);
-}
-
 function appendLiveTextFragment(
   current: TextStreamAssembly,
   next: string,
@@ -299,12 +292,14 @@ function appendCompletedReasoningSnapshot(
   current: TextStreamAssembly,
   event: RunEventLike
 ): TextStreamAssembly {
-  const next = event.delta ?? event.detail?.preview ?? event.summary ?? "";
-  if (!shouldUseCompletedReasoningSnapshot(current.text, next)) {
-    return current;
-  }
+  const authoritative = event.delta ?? event.detail?.preview;
+  const summary = event.summary?.trim() ?? "";
+  const next = (authoritative ?? (current.text.trim().length === 0 || !isGenericCompletedReasoningSummary(summary)
+    ? summary
+    : "")).trim();
+  if (next.length === 0) return current;
   return {
-    text: preferredSnapshotText(current.text, next),
+    text: next,
     replayCatchupText: "",
     liveSourceObserved: current.liveSourceObserved || textStreamFragmentSourceFromEventId(event.id) === "live",
   };
@@ -315,69 +310,16 @@ function appendCompletedOutputSnapshot(
   event: RunEventLike
 ): TextStreamAssembly {
   const next = completedOutputFragment(current.text, event);
-  if (!shouldUseCompletedOutputSnapshot(current.text, next)) {
-    return current;
-  }
+  const hasAuthoritativePreview = (event.detail?.preview?.trim().length ?? 0) > 0;
+  const text = hasAuthoritativePreview
+    ? next
+    : current.text.trim().length > 0 ? current.text : next;
+  if (text.length === 0) return current;
   return {
-    text: preferredCompletedOutputText(current.text, next),
+    text,
     replayCatchupText: "",
     liveSourceObserved: current.liveSourceObserved || textStreamFragmentSourceFromEventId(event.id) === "live",
   };
-}
-
-function shouldUseCompletedReasoningSnapshot(current: string, next: string): boolean {
-  const normalizedNext = normalizeBoundaryText(next);
-  if (normalizedNext.length === 0) return false;
-  const normalizedCurrent = normalizeBoundaryText(current);
-  return normalizedCurrent.length === 0 ||
-    normalizedNext.startsWith(normalizedCurrent) ||
-    normalizedCurrent.startsWith(normalizedNext);
-}
-
-function shouldUseCompletedOutputSnapshot(current: string, next: string): boolean {
-  const normalizedNext = normalizeBoundaryText(next);
-  if (normalizedNext.length === 0) return false;
-  const normalizedCurrent = normalizeBoundaryText(current);
-  return normalizedCurrent.length === 0 ||
-    normalizedNext.startsWith(normalizedCurrent) ||
-    normalizedCurrent.startsWith(normalizedNext);
-}
-
-function preferredSnapshotText(current: string, next: string): string {
-  if (current.length === 0) return next;
-  if (next.startsWith(current)) return next;
-  if (current.startsWith(next)) return current;
-  const normalizedCurrent = normalizeBoundaryText(current);
-  const normalizedNext = normalizeBoundaryText(next);
-  if (
-    normalizedCurrent.length > 0 &&
-    normalizedNext.length > 0 &&
-    (normalizedCurrent === normalizedNext || normalizedCurrent.startsWith(normalizedNext) || normalizedNext.startsWith(normalizedCurrent))
-  ) {
-    return current;
-  }
-  return appendSnapshotTextFragment(current, next);
-}
-
-function preferredCompletedOutputText(current: string, next: string): string {
-  if (current.length === 0) return next;
-  if (next.startsWith(current)) return next;
-  if (current.startsWith(next)) return current;
-  const normalizedCurrent = normalizeBoundaryText(current);
-  const normalizedNext = normalizeBoundaryText(next);
-  if (normalizedCurrent.length === 0 || normalizedNext.length === 0) {
-    return current;
-  }
-  if (normalizedCurrent === normalizedNext) {
-    return current.length >= next.length ? current : next;
-  }
-  if (normalizedNext.startsWith(normalizedCurrent)) {
-    return appendReadableTextFragment(current, normalizedNext.slice(normalizedCurrent.length));
-  }
-  if (normalizedCurrent.startsWith(normalizedNext)) {
-    return current;
-  }
-  return current;
 }
 
 function completedOutputFragment(
@@ -407,8 +349,9 @@ function isGenericCompletedBodySummary(value: string): boolean {
     normalized === "已回答";
 }
 
-function normalizeBoundaryText(value: string): string {
-  return value.replace(/\s+/g, "").trim();
+function isGenericCompletedReasoningSummary(value: string): boolean {
+  const normalized = value.replace(/[。.!！?？；;:：、，,\s]/g, "");
+  return normalized === "思考完成" || normalized === "推理完成" || normalized === "已完成思考";
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {

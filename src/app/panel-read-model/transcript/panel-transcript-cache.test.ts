@@ -134,12 +134,12 @@ test("transcript cache merges live and settled reasoning with different node ids
   ]);
 
   assert.equal(updated["run-1"]?.length, 1);
-  assert.equal(updated["run-1"]?.[0]?.nodeId, "run-1:live:model-1:thinking");
-  assert.equal(updated["run-1"]?.[0]?.sequence, 1);
+  assert.equal(updated["run-1"]?.[0]?.nodeId, "run-1:event:9:model.reasoning.completed");
+  assert.equal(updated["run-1"]?.[0]?.sequence, 9);
   assert.equal(updated["run-1"]?.[0]?.text, "The user is asking me to demonstrate capabilities and inspect the workspace.");
 });
 
-test("transcript cache merges exact repeated model activity even when refs differ", () => {
+test("transcript cache replaces the current run snapshot instead of matching display text", () => {
   const cached = mergeTranscriptNodesByRunId({}, "run-1", [
     transcriptNode({
       nodeId: "thinking-live",
@@ -165,7 +165,7 @@ test("transcript cache merges exact repeated model activity even when refs diffe
     }),
   ]);
 
-  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["thinking-live"]);
+  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["thinking-settled"]);
 });
 
 test("transcript cache merges live and settled body nodes with different ids", () => {
@@ -194,7 +194,7 @@ test("transcript cache merges live and settled body nodes with different ids", (
     }),
   ]);
 
-  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["body-live"]);
+  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["body-settled"]);
   assert.equal(updated["run-1"]?.[0]?.text, "Let me showcase my capabilities.");
 });
 

@@ -127,6 +127,21 @@ test("context compaction timeline stays expanded as a visible status row", () =>
   }), { collapsed: false, reason: "expanded" });
 });
 
+test("a completed reasoning-only segment collapses before the turn settles", () => {
+  assert.deepEqual(timelineCollapseDecision({
+    collapseTimeline: false,
+    defaultCollapsed: false,
+    lifecycle: "settled",
+    items: [{
+      tone: "thinking",
+      phase: "completed",
+      copy: { label: "思考", detail: "先核对状态所有权" },
+    }],
+    hasCurrentConfirmation: false,
+    hasBodySegments: false,
+  }), { collapsed: true, reason: "reasoning_settled" });
+});
+
 test("segment lifecycle keeps open and attention timelines expanded", () => {
   assert.deepEqual(timelineCollapseDecision({
     collapseTimeline: true,

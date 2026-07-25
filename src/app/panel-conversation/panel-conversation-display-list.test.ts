@@ -112,7 +112,7 @@ test("conversation display list keeps assistant turns in the unified list withou
   assert.equal(display.items[1]?.kind === "assistant" ? display.items[1].source : undefined, "turn");
 });
 
-test("conversation display list carries workflow continuity when a standalone run becomes a turn", () => {
+test("conversation display list reprojects a standalone run from canonical turn facts", () => {
   const standaloneDisplay = projectConversationDisplayList({
     previous: createConversationWorkflowDisplayState(),
     conversationId: "conversation-1",
@@ -239,7 +239,7 @@ test("conversation display list carries workflow continuity when a standalone ru
   assert.equal(activitySegments.length, 2);
   assert.deepEqual(
     activitySegments.flatMap((segment) => segment.timeline.items.map((timelineItem) => timelineItem.nodeId)),
-    ["thinking-live", "tool-1"],
+    ["thinking-live", "thinking-settled", "tool-1"],
   );
 });
 

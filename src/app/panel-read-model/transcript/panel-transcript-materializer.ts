@@ -10,25 +10,22 @@ export type MaterializedConversationTranscript<T extends TranscriptNodeCacheItem
 
 const emptyTranscriptNodes: readonly never[] = Object.freeze([]);
 
+/**
+ * Combines only the facts supplied for this projection. Referential stability
+ * belongs to stableTranscriptNodesByRunIdMap, where complete node identities
+ * are available; carrying an older snapshot here can hide metadata updates.
+ */
 export function materializeConversationTranscript<T extends TranscriptNodeCacheItem>(input: {
-  readonly previous?: MaterializedConversationTranscript<T>;
   readonly conversationId?: string;
   readonly cachedNodesByRunId: Readonly<Record<string, readonly T[]>>;
   readonly currentRunId?: string;
   readonly currentRunNodes: readonly T[];
 }): MaterializedConversationTranscript<T> {
-  const currentConversationNodes = mergeVisibleTranscriptNodesByRunId(
+  const nodesByRunId = mergeVisibleTranscriptNodesByRunId(
     input.cachedNodesByRunId,
     input.currentRunId,
     input.currentRunNodes,
   );
-  const previousConversationNodes = input.previous !== undefined && input.previous.conversationId === input.conversationId
-    ? input.previous.nodesByRunId
-    : {};
-  const nodesByRunId = mergeStickyTranscriptNodesByRunId(previousConversationNodes, currentConversationNodes);
-  if (input.previous !== undefined && input.previous.conversationId === input.conversationId && nodesByRunId === input.previous.nodesByRunId) {
-    return input.previous;
-  }
   return {
     conversationId: input.conversationId,
     nodesByRunId,
@@ -96,80 +93,6 @@ function transcriptNodeListsEqual<T>(
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length; index += 1) {
     if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function mergeStickyTranscriptNodesByRunId<T extends TranscriptNodeCacheItem>(
-  previous: Readonly<Record<string, readonly T[]>>,
-  next: Readonly<Record<string, readonly T[]>>,
-): Readonly<Record<string, readonly T[]>> {
-  const merged: Record<string, readonly T[]> = { ...previous };
-  let changed = false;
-  for (const [runId, nodes] of Object.entries(next)) {
-    const previousNodes = merged[runId] ?? [];
-    const nextNodes = mergeTranscriptNodeLists(previousNodes, nodes);
-    if (transcriptNodeListsSemanticallyEqual(previousNodes, nextNodes)) {
-      merged[runId] = previousNodes;
-      continue;
-    }
-    merged[runId] = nextNodes;
-    changed = true;
-  }
-  return changed ? merged : previous;
-}
-
-function transcriptNodeListsSemanticallyEqual<T extends TranscriptNodeCacheItem>(
-  left: readonly T[],
-  right: readonly T[],
-): boolean {
-  if (left === right) return true;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    const leftNode = left[index];
-    const rightNode = right[index];
-    if (leftNode === undefined || rightNode === undefined || !transcriptNodesSemanticallyEqual(leftNode, rightNode)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function transcriptNodesSemanticallyEqual(
-  left: TranscriptNodeCacheItem,
-  right: TranscriptNodeCacheItem,
-): boolean {
-  return left.nodeId === right.nodeId &&
-    left.runId === right.runId &&
-    left.sequence === right.sequence &&
-    left.eventType === right.eventType &&
-    left.kind === right.kind &&
-    left.phase === right.phase &&
-    left.title === right.title &&
-    left.summary === right.summary &&
-    left.text === right.text &&
-    left.timestamp === right.timestamp &&
-    transcriptRefsSemanticallyEqual(left.refs ?? [], right.refs ?? []);
-}
-
-function transcriptRefsSemanticallyEqual(
-  left: NonNullable<TranscriptNodeCacheItem["refs"]>,
-  right: NonNullable<TranscriptNodeCacheItem["refs"]>,
-): boolean {
-  if (left === right) return true;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    const leftRef = left[index];
-    const rightRef = right[index];
-    if (
-      leftRef === undefined ||
-      rightRef === undefined ||
-      leftRef.kind !== rightRef.kind ||
-      leftRef.id !== rightRef.id ||
-      leftRef.label !== rightRef.label
-    ) {
       return false;
     }
   }

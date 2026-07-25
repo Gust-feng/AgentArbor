@@ -87,6 +87,26 @@ export function createLiveRunUpdateController(
     },
   });
 
+  const commitSettledProjection = (
+    subscription: LiveRunSubscription,
+    settled: SettledRunProjection,
+    observe: (previous: AppState) => AppState,
+  ): void => {
+    if (!subscriptionIsCurrent(subscription)) {
+      return;
+    }
+    cacheSettledRunTranscriptNodes(settled);
+    options.setApp((previous) => {
+      if (!canApplyToState(previous, subscription)) {
+        return previous;
+      }
+      return appStateWithSettledConversationGuard(previous, {
+        expectedConversationId: subscription.conversationId,
+        next: appStateWithSettledRunProjection(observe(previous), settled),
+      });
+    });
+  };
+
   function startPolling(subscription: LiveRunSubscription): void {
     appendOnlyBatcher.clear();
     const { runId } = subscription;
@@ -144,6 +164,32 @@ export function createLiveRunUpdateController(
       const workView = ordinaryWorkViewFromRunView(runView);
       const capabilityResolution = runView.capabilityResolution;
       const detail = runView.detail;
+      if (run !== undefined && !shouldKeepRefreshing(run.status)) {
+        const settled = await loadSettledRunProjection({ runId, run, workView, capabilityResolution });
+        liveRunSettled = true;
+        stopPolling(options.pollTimer);
+        stopStream(options.streamRef);
+        commitSettledProjection(subscription, settled, (previous) => appStateWithObservedRunEvent(previous, {
+          runId,
+          run,
+          event,
+          workView,
+          capabilityResolution,
+          detail,
+        }));
+        const followUp = refreshingFollowUpRun(settled);
+        if (followUp !== undefined) {
+          options.activeRunIdRef.current = followUp.runId;
+          startLiveUpdates({
+            ...subscription,
+            runId: followUp.runId,
+            cursor: followUp.cursor,
+          });
+        } else {
+          void options.refreshConversations();
+        }
+        return;
+      }
       if (subscriptionIsCurrent(subscription)) {
         options.setApp((previous) =>
           canApplyToState(previous, subscription)
@@ -157,34 +203,6 @@ export function createLiveRunUpdateController(
               })
             : previous
         );
-      }
-      if (run !== undefined && !shouldKeepRefreshing(run.status)) {
-        liveRunSettled = true;
-        stopPolling(options.pollTimer);
-        stopStream(options.streamRef);
-        const settled = await loadSettledRunProjection({ runId, run, workView, capabilityResolution });
-        if (subscriptionIsCurrent(subscription)) {
-          cacheSettledRunTranscriptNodes(settled);
-          options.setApp((previous) =>
-            canApplyToState(previous, subscription)
-              ? appStateWithSettledConversationGuard(previous, {
-                  expectedConversationId: subscription.conversationId,
-                  next: appStateWithSettledRunProjection(previous, settled),
-                })
-              : previous
-          );
-        }
-        const followUp = refreshingFollowUpRun(settled);
-        if (followUp !== undefined) {
-          options.activeRunIdRef.current = followUp.runId;
-          startLiveUpdates({
-            ...subscription,
-            runId: followUp.runId,
-            cursor: followUp.cursor,
-          });
-        } else {
-          void options.refreshConversations();
-        }
       }
     };
     const stopBootstrapPolling = (): void => stopPolling(options.pollTimer);
@@ -300,22 +318,22 @@ export function createLiveRunUpdateController(
     if (reset) appendOnlyBatcher.clear();
     else appendOnlyBatcher.flush();
     const { runId } = subscription;
-    if (subscriptionIsCurrent(subscription)) {
-      options.setApp((previous) =>
-        canApplyToState(previous, subscription)
-          ? appStateWithObservedRunProjection(previous, {
-              runId,
-              run: runView.run,
-              events: runView.replay.events,
-              workView: ordinaryWorkViewFromRunView(runView),
-              capabilityResolution: runView.capabilityResolution,
-              detail: runView.detail,
-              reset,
-            })
-          : previous
-      );
-    }
     if (!isObservedRunSettled(runView.run)) {
+      if (subscriptionIsCurrent(subscription)) {
+        options.setApp((previous) =>
+          canApplyToState(previous, subscription)
+            ? appStateWithObservedRunProjection(previous, {
+                runId,
+                run: runView.run,
+                events: runView.replay.events,
+                workView: ordinaryWorkViewFromRunView(runView),
+                capabilityResolution: runView.capabilityResolution,
+                detail: runView.detail,
+                reset,
+              })
+            : previous
+        );
+      }
       return;
     }
     const settled = await loadSettledRunProjection({
@@ -324,17 +342,15 @@ export function createLiveRunUpdateController(
       workView: ordinaryWorkViewFromRunView(runView),
       capabilityResolution: runView.capabilityResolution,
     });
-    if (subscriptionIsCurrent(subscription)) {
-      cacheSettledRunTranscriptNodes(settled);
-      options.setApp((previous) =>
-        canApplyToState(previous, subscription)
-          ? appStateWithSettledConversationGuard(previous, {
-              expectedConversationId: subscription.conversationId,
-              next: appStateWithSettledRunProjection(previous, settled),
-            })
-          : previous
-      );
-    }
+    commitSettledProjection(subscription, settled, (previous) => appStateWithObservedRunProjection(previous, {
+      runId,
+      run: runView.run,
+      events: runView.replay.events,
+      workView: ordinaryWorkViewFromRunView(runView),
+      capabilityResolution: runView.capabilityResolution,
+      detail: runView.detail,
+      reset,
+    }));
     const followUp = refreshingFollowUpRun(settled);
     if (followUp !== undefined) {
       options.activeRunIdRef.current = followUp.runId;

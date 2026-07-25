@@ -6,18 +6,8 @@ import {
   transcriptNodesForRunId,
 } from "./panel-transcript-materializer.js";
 
-test("transcript materializer keeps previously rendered nodes during same-conversation cache gaps", () => {
-  const previous = materializeConversationTranscript({
-    conversationId: "conversation-1",
-    cachedNodesByRunId: {
-      "run-1": [node("node-1", "run-1", 1)],
-      "run-2": [node("node-2", "run-2", 2)],
-    },
-    currentRunNodes: [],
-  });
-
+test("transcript materializer projects only current canonical inputs during cache changes", () => {
   const next = materializeConversationTranscript({
-    previous,
     conversationId: "conversation-1",
     cachedNodesByRunId: {
       "run-2": [node("node-2", "run-2", 2)],
@@ -25,21 +15,12 @@ test("transcript materializer keeps previously rendered nodes during same-conver
     currentRunNodes: [],
   });
 
-  assert.deepEqual(next.nodesByRunId["run-1"]?.map((item) => item.nodeId), ["node-1"]);
+  assert.equal(next.nodesByRunId["run-1"], undefined);
   assert.deepEqual(next.nodesByRunId["run-2"]?.map((item) => item.nodeId), ["node-2"]);
 });
 
-test("transcript materializer resets sticky nodes when the conversation changes", () => {
-  const previous = materializeConversationTranscript({
-    conversationId: "conversation-1",
-    cachedNodesByRunId: {
-      "run-1": [node("node-1", "run-1", 1)],
-    },
-    currentRunNodes: [],
-  });
-
+test("transcript materializer isolates nodes when the conversation changes", () => {
   const next = materializeConversationTranscript({
-    previous,
     conversationId: "conversation-2",
     cachedNodesByRunId: {},
     currentRunNodes: [],
@@ -62,7 +43,7 @@ test("stable transcript map reuses array references for unchanged runs", () => {
   assert.deepEqual(transcriptNodesForRunId(second, undefined), []);
 });
 
-test("transcript materializer reuses previous run node references when refreshed nodes are unchanged", () => {
+test("transcript materializer never hides metadata-only node updates behind an old snapshot", () => {
   const previousBody = transcriptNode({
     nodeId: "body-1",
     runId: "run-1",
@@ -78,49 +59,29 @@ test("transcript materializer reuses previous run node references when refreshed
     },
     currentRunNodes: [],
   });
+  const nextBody = {
+    ...previousBody,
+    modelUsage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+  };
   const next = materializeConversationTranscript({
-    previous,
     conversationId: "conversation-1",
     cachedNodesByRunId: {
-      "run-1": [
-        transcriptNode({
-          nodeId: "body-1",
-          runId: "run-1",
-          sequence: 1,
-          kind: "body",
-          eventType: "model.output.completed",
-          text: "第一段正文。",
-        }),
-      ],
+      "run-1": [nextBody],
     },
     currentRunNodes: [],
   });
 
-  assert.equal(next, previous);
-  assert.equal(next.nodesByRunId["run-1"], previous.nodesByRunId["run-1"]);
-  assert.equal(next.nodesByRunId["run-1"]?.[0], previousBody);
+  assert.notEqual(next, previous);
+  assert.equal(next.nodesByRunId["run-1"]?.[0], nextBody);
+  assert.deepEqual(next.nodesByRunId["run-1"]?.[0]?.modelUsage, {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+  });
 });
 
-test("transcript materializer semantically merges sticky model nodes with new settled nodes", () => {
-  const previous = materializeConversationTranscript({
-    conversationId: "conversation-1",
-    cachedNodesByRunId: {
-      "run-1": [
-        transcriptNode({
-          nodeId: "thinking-live",
-          runId: "run-1",
-          sequence: 1,
-          kind: "thinking",
-          eventType: "model.reasoning.delta",
-          text: "The user is asking me to demonstrate capabilities.",
-          refs: [{ kind: "model_call", id: "model-1" }],
-        }),
-      ],
-    },
-    currentRunNodes: [],
-  });
+test("transcript materializer replaces live reasoning with the durable fact by model_call identity", () => {
   const next = materializeConversationTranscript({
-    previous,
     conversationId: "conversation-1",
     cachedNodesByRunId: {
       "run-1": [
@@ -138,12 +99,12 @@ test("transcript materializer semantically merges sticky model nodes with new se
     currentRunNodes: [],
   });
 
-  assert.deepEqual(next.nodesByRunId["run-1"]?.map((item) => item.nodeId), ["thinking-live"]);
-  assert.equal(next.nodesByRunId["run-1"]?.[0]?.sequence, 1);
+  assert.deepEqual(next.nodesByRunId["run-1"]?.map((item) => item.nodeId), ["thinking-settled"]);
+  assert.equal(next.nodesByRunId["run-1"]?.[0]?.sequence, 8);
   assert.equal(next.nodesByRunId["run-1"]?.[0]?.text, "The user is asking me to demonstrate capabilities and inspect the workspace.");
 });
 
-test("transcript materializer merges cached and current thinking nodes for the same run around body output", () => {
+test("transcript materializer preserves different model calls even when their thinking text matches", () => {
   const materialized = materializeConversationTranscript({
     conversationId: "conversation-1",
     cachedNodesByRunId: {
@@ -182,13 +143,11 @@ test("transcript materializer merges cached and current thinking nodes for the s
   });
 
   const nodes = materialized.nodesByRunId["run-1"] ?? [];
-  assert.deepEqual(nodes.map((item) => item.nodeId), ["thinking-live", "body-1"]);
-  assert.equal(nodes.filter((item) => item.kind === "thinking").length, 1);
-  assert.equal(nodes[0]?.eventType, "model.reasoning.completed");
-  assert.equal(nodes[0]?.phase, "completed");
+  assert.deepEqual(nodes.map((item) => item.nodeId), ["thinking-live", "body-1", "thinking-settled"]);
+  assert.equal(nodes.filter((item) => item.kind === "thinking").length, 2);
 });
 
-test("transcript materializer merges cached thinking and current side narration for the same model narrative", () => {
+test("transcript materializer preserves reasoning and side narration as different fact types", () => {
   const materialized = materializeConversationTranscript({
     conversationId: "conversation-1",
     cachedNodesByRunId: {
@@ -219,8 +178,8 @@ test("transcript materializer merges cached thinking and current side narration 
   });
 
   const nodes = materialized.nodesByRunId["run-1"] ?? [];
-  assert.deepEqual(nodes.map((item) => item.nodeId), ["thinking-1"]);
-  assert.equal(nodes.filter((item) => item.kind === "thinking" || item.kind === "system").length, 1);
+  assert.deepEqual(nodes.map((item) => item.nodeId), ["thinking-1", "side-1"]);
+  assert.equal(nodes.filter((item) => item.kind === "thinking" || item.kind === "system").length, 2);
 });
 
 function node(nodeId: string, runId: string, sequence: number) {

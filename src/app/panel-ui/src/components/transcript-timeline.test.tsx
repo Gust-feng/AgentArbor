@@ -417,6 +417,51 @@ test("visible model activity does not recreate the prefatory dots", () => {
   expect(reasoning?.querySelectorAll("details")).toHaveLength(0);
 });
 
+test("reasoning disclosure closes when reasoning settles and can be reopened manually", () => {
+  const running: ActivityItem = {
+    nodeId: "node-thinking",
+    key: "thinking-1",
+    eventType: "model.reasoning.delta",
+    copy: { detail: "思考中", expandedDetail: "正在分析当前问题。" },
+    tone: "thinking",
+    phase: "noted",
+    toolKind: "thinking",
+  };
+  const rendered = render(
+    <AgentWorkTimeline
+      view={{ nodes: [], items: [running], confirmation: {}, hasContent: true }}
+      presentation="agent_work"
+      lifecycle="open"
+      collapsed={false}
+      confirmationBusy={false}
+    />,
+  );
+
+  const reasoning = screen.getByText("思考中").closest("details");
+  expect(reasoning?.open).toBe(true);
+
+  const completed: ActivityItem = {
+    ...running,
+    eventType: "model.reasoning.completed",
+    copy: { detail: "思考过程", expandedDetail: "已经完成当前问题分析。" },
+    phase: "completed",
+  };
+  rendered.rerender(
+    <AgentWorkTimeline
+      view={{ nodes: [], items: [completed], confirmation: {}, hasContent: true }}
+      presentation="agent_work"
+      lifecycle="settled"
+      collapsed
+      collapseReason="reasoning_settled"
+      confirmationBusy={false}
+    />,
+  );
+
+  expect(screen.getByText("思考过程").closest("details")?.open).toBe(false);
+  fireEvent.click(screen.getByText("思考过程").closest("summary")!);
+  expect(screen.getByText("思考过程").closest("details")?.open).toBe(true);
+});
+
 test("ordinary process keeps real command calls without a synthetic group", () => {
   const items: ActivityItem[] = ["pnpm typecheck", "pnpm test"].map((subject, index) => ({
     nodeId: `node-command-${index}`,
@@ -595,9 +640,32 @@ test("ordinary timeline shows full reasoning while hiding the internal model req
   expect(screen.queryByText("未完成")).toBeNull();
 });
 
-test("completed model reasoning uses one disclosure beside the final answer", () => {
+test("late completed model reasoning replaces hidden narration and stays available in a collapsed disclosure", () => {
   const reasoningText = "先确认用户意图，再组织最终回答。";
+  const previous = projectStableAssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>({
+    content: "最终回答。",
+    transcriptNodes: [
+      transcriptNode({
+        nodeId: "side-output",
+        kind: "system",
+        eventType: "model.side.completed",
+        phase: "completed",
+        text: reasoningText,
+        sequence: 1,
+      }),
+      transcriptNode({
+        nodeId: "answer-completed",
+        kind: "answer",
+        eventType: "final.result",
+        phase: "completed",
+        text: "最终回答。",
+        sequence: 2,
+      }),
+    ],
+    collapseTimeline: true,
+  });
   const workflow = projectStableAssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>({
+    previous,
     content: "最终回答。",
     transcriptNodes: [
       transcriptNode({
@@ -632,9 +700,11 @@ test("completed model reasoning uses one disclosure beside the final answer", ()
   );
 
   const process = screen.getByText("思考过程").closest("details");
-  expect(process?.open).toBe(true);
+  expect(process?.open).toBe(false);
   expect(process?.contains(screen.getByText(reasoningText))).toBe(true);
   expect(process?.querySelectorAll("details")).toHaveLength(0);
+  fireEvent.click(screen.getByText("思考过程").closest("summary")!);
+  expect(process?.open).toBe(true);
 });
 
 function transcriptNode(input: Partial<TranscriptNode> & Pick<TranscriptNode, "nodeId" | "kind" | "eventType" | "phase">): TranscriptNode {

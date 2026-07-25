@@ -97,7 +97,7 @@ test("reasoning completed can extend a partial reasoning snapshot", () => {
   assert.equal(buffer.turns[0]?.reasoningCompleted, true);
 });
 
-test("reasoning completed does not collapse spaced live text into compact snapshot", () => {
+test("reasoning completed accepts the terminal snapshot without comparing display text", () => {
   const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
     event({
       id: "run-1:live:model.reasoning.delta:model-1:1",
@@ -113,7 +113,7 @@ test("reasoning completed does not collapse spaced live text into compact snapsh
     }),
   ]);
 
-  assert.equal(buffer.turns[0]?.reasoning.text, "The user is");
+  assert.equal(buffer.turns[0]?.reasoning.text, "Theuserisasking");
   assert.equal(buffer.turns[0]?.reasoningCompleted, true);
 });
 
@@ -219,7 +219,7 @@ test("model output delta closes prior reasoning stage before the body is rendere
   assert.equal(buffer.turns[0]?.output.text, "Let me showcase my capabilities.");
 });
 
-test("model output completed can settle live output to the final snapshot", () => {
+test("model output completed does not rewrite live output from summary copy", () => {
   const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
     event({
       id: "run-1:live:model.output.delta:model-1:1",
@@ -235,7 +235,7 @@ test("model output completed can settle live output to the final snapshot", () =
     }),
   ]);
 
-  assert.equal(buffer.turns[0]?.output.text, "The user is asking");
+  assert.equal(buffer.turns[0]?.output.text, "The user is");
   assert.equal(buffer.turns[0]?.outputCompleted, true);
   assert.equal(buffer.turns[0]?.outputSequence, 10);
 });

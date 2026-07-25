@@ -167,6 +167,7 @@ const STARTUP_INTRO_MIN_RECT_MS = STARTUP_INTRO_TEXT_PRINT_DURATION_MS + 180;
 const STARTUP_INTRO_HANDOFF_PAINT_FRAMES = 2;
 const STARTUP_INTRO_TITLE_READY_PAINT_FRAMES = 6;
 const STARTUP_INTRO_TITLE_HANDOFF_SAMPLE_FRAMES = 4;
+const STARTUP_INTRO_FRAME_WAIT_TIMEOUT_MS = 500;
 const STARTUP_INTRO_HANDOFF_HOLD_MS = 0;
 const STARTUP_INTRO_VISUAL_SAMPLE_INTERVAL_MS = 80;
 const REDUCED_MOTION_EXPAND_MS = 80;
@@ -890,9 +891,18 @@ function waitForStartupIntroAnimationFrames(count: number): Promise<void> {
   if (typeof window === "undefined" || count <= 0) return Promise.resolve();
   return new Promise((resolve) => {
     let remaining = count;
+    let settled = false;
+    const timeout = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    }, STARTUP_INTRO_FRAME_WAIT_TIMEOUT_MS);
     const tick = () => {
+      if (settled) return;
       remaining -= 1;
       if (remaining <= 0) {
+        settled = true;
+        window.clearTimeout(timeout);
         resolve();
         return;
       }

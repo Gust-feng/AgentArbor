@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import {
   StartupIntroOverlay,
@@ -43,6 +43,25 @@ test("startup animation already consumed by the desktop host begins directly in 
   render(<StartupStateProbe startupAnimationEnabled startupAnimationAllowed={false} />);
 
   expect(screen.getByTestId("startup-state").textContent).toBe("done:none");
+});
+
+test("startup animation completes when animation frames are suspended", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  try {
+    render(<StartupStateProbe startupAnimationEnabled />);
+
+    for (let phase = 0; phase < 8; phase += 1) {
+      await act(async () => {
+        await vi.runOnlyPendingTimersAsync();
+      });
+    }
+
+    expect(screen.getByTestId("startup-state").textContent).toBe("done:none");
+  } finally {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
 });
 
 function StartupStateProbe(props: {

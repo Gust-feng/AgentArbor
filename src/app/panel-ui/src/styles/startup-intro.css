@@ -27,10 +27,6 @@
   overflow: hidden;
   background: transparent;
   isolation: isolate;
-  pointer-events: auto;
-}
-
-.startup-intro-overlay[data-phase="title-handoff"] {
   pointer-events: none;
 }
 
@@ -312,6 +308,7 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
 .app-root[data-startup-intro="title-handoff"] .chat-input-floating {
   opacity: 1;
   visibility: visible;
+  pointer-events: auto;
   transition:
     opacity var(--startup-intro-app-reveal-duration) cubic-bezier(0.2, 0.74, 0.18, 1),
     visibility 0ms linear 0ms;
@@ -336,7 +333,7 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
 .app-root[data-startup-intro="title-handoff"] > .app-workbench {
   opacity: 1;
   visibility: visible;
-  pointer-events: none;
+  pointer-events: auto;
   transition:
     opacity var(--startup-intro-app-reveal-duration) cubic-bezier(0.2, 0.74, 0.18, 1),
     visibility 0ms linear 0ms;

@@ -24,6 +24,10 @@ const LEGACY_LOCAL_STORAGE_PREFERENCE_KEYS = [
   "agentarbor.panel.agent_cluster.enabled",
 ] as const;
 
+type LegacyLocalStoragePreferenceKey = typeof LEGACY_LOCAL_STORAGE_PREFERENCE_KEYS[number];
+
+const DESKTOP_LOCAL_PREFERENCE_FILE = "agentarbor-local-preferences.json";
+
 export function createDesktopLocalPreferenceStore(
   options: DesktopLocalPreferenceStoreOptions
 ): DesktopLocalPreferenceStore {
@@ -33,7 +37,7 @@ export function createDesktopLocalPreferenceStore(
 
   const readAll = (): Record<string, string> => {
     if (cachedPreferences === undefined) {
-      cachedPreferences = readDesktopLocalPreferences(preferencePath);
+      cachedPreferences = readInitialDesktopLocalPreferences(options.userDataDirectory, preferencePath);
     }
     if (!legacyMigrationAttempted) {
       legacyMigrationAttempted = true;
@@ -87,7 +91,25 @@ function readDesktopLocalPreferencePayload(payload: unknown): { readonly key: st
 }
 
 function desktopLocalPreferencePath(userDataDirectory: string): string {
-  return path.join(userDataDirectory, "preferences", "local-preferences.json");
+  // Chromium owns a root-level `Preferences` file. Windows treats that name as
+  // the same path as `preferences`, so AgentArbor preferences must not use it
+  // as a directory.
+  return path.join(userDataDirectory, DESKTOP_LOCAL_PREFERENCE_FILE);
+}
+
+function readInitialDesktopLocalPreferences(
+  userDataDirectory: string,
+  preferencePath: string
+): Record<string, string> {
+  if (existsSync(preferencePath)) {
+    return readDesktopLocalPreferences(preferencePath);
+  }
+  const legacyPreferencePath = path.join(userDataDirectory, "preferences", "local-preferences.json");
+  const legacyPreferences = readDesktopLocalPreferences(legacyPreferencePath);
+  if (Object.keys(legacyPreferences).length > 0) {
+    persistDesktopLocalPreferences(preferencePath, legacyPreferences);
+  }
+  return legacyPreferences;
 }
 
 function readDesktopLocalPreferences(preferencePath: string): Record<string, string> {
@@ -194,11 +216,35 @@ function readLegacyLevelDbPreferencesInto(levelDbDirectory: string, preferences:
       continue;
     }
     for (const key of LEGACY_LOCAL_STORAGE_PREFERENCE_KEYS) {
-      const value = lastLegacyLocalStorageValue(raw, key);
+      const value = normalizeLegacyLocalStoragePreferenceValue(key, lastLegacyLocalStorageValue(raw, key));
       if (value !== undefined) {
         preferences[key] = value;
       }
     }
+  }
+}
+
+function normalizeLegacyLocalStoragePreferenceValue(
+  key: LegacyLocalStoragePreferenceKey,
+  value: string | undefined
+): string | undefined {
+  if (value === undefined) return undefined;
+  switch (key) {
+    case "agentarbor:style":
+      return value === "default" || value === "classic" || value === "glass" ? value : undefined;
+    case "agentarbor:color":
+      return value === "system" || value === "light" || value === "dark" ||
+        value === "warm" || value === "forest" || value === "slate" ||
+        value === "aurora" || value === "sunset" || value === "ocean"
+        ? value
+        : undefined;
+    case "agentarbor:motion":
+      return value === "system" || value === "standard" || value === "reduced" ? value : undefined;
+    case "agentarbor:startup-animation":
+    case "agentarbor:model-usage-display":
+    case "agentarbor.panel.sidebar.collapsed":
+    case "agentarbor.panel.agent_cluster.enabled":
+      return value === "true" || value === "false" ? value : undefined;
   }
 }
 

@@ -421,7 +421,7 @@ test("panel React workbench consumes Ordinary Agent projection APIs", async () =
   assert.equal(chatActive.includes("projectConversationDisplayList"), false);
   assert.equal(chatActive.includes("<ChatTranscriptDisplay"), true);
   assert.equal(chatTranscriptDisplay.includes("projectConversationDisplayList"), true);
-  assert.equal(chatTranscriptDisplay.includes("createConversationWorkflowDisplayState"), true);
+  assert.equal(chatTranscriptDisplay.includes("createConversationWorkflowDisplayState"), false);
   assert.equal(chatTranscriptDisplay.includes("subscribeTranscriptNodesCache"), true);
   assert.equal(chatActive.includes("standaloneAssistant"), false);
   assert.equal(conversationDisplayListProjection.includes("projectConversationWorkflowDisplay"), true);

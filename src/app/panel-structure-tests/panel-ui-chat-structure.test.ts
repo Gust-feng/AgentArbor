@@ -136,7 +136,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActive.includes("panel-ui-queued-turns"), false);
   assert.equal(chatActive.includes("conversationWithQueuedUserTurns"), false);
   assert.equal(chatTranscriptDisplay.includes("projectConversationDisplayList"), true);
-  assert.equal(chatTranscriptDisplay.includes("createConversationWorkflowDisplayState"), true);
+  assert.equal(chatTranscriptDisplay.includes("createConversationWorkflowDisplayState"), false);
   assert.equal(chatTranscriptDisplay.includes("subscribeTranscriptNodesCache(props.conversationId, listener)"), true);
   assert.equal(chatTranscriptDisplay.includes("transcriptNodesCacheForConversation(\n    cachedHistoricalSnapshot,\n    props.conversationId"), true);
   assert.equal(chatTranscriptDisplay.includes("cachedNodesByRunId: cachedHistoricalNodes,\n      currentRunId: props.currentRunId"), true);
@@ -347,7 +347,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes("export function TypingDots"), false);
   assert.equal(chatTranscriptChain.includes("typing-dots"), true);
   assert.equal(chatActive.includes("session-placeholder"), false);
-  assert.equal(chatTranscriptChain.includes("collapseTimeline"), false);
+  assert.equal(chatTranscriptChain.includes("leftInput.collapseTimeline === rightInput.collapseTimeline"), true);
   assert.equal(chatTranscriptChain.includes("assistant-workline-collapsed"), true);
   assert.equal(chatActive.includes("shouldCollapseStandaloneTimeline"), false);
   assert.equal(chatTranscriptDisplay.includes("shouldCollapseStandaloneTimeline"), true);

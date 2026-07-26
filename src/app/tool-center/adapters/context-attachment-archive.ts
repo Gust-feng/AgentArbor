@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../../kernel/values/index.js";
 import { promises as fs } from "node:fs";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import {
@@ -182,9 +183,6 @@ function isUnsafeArchivePath(value: string): boolean {
   return normalized.startsWith("/") || /^[A-Za-z]:\//u.test(normalized) || normalized.split("/").some((part) => part === "..");
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function nonNegativeInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0

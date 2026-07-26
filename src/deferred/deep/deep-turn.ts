@@ -16,7 +16,7 @@ import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../../kernel/inte
 import {
   compactAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
-} from "../context-maintenance/index.js";
+} from "../../app/context-maintenance/index.js";
 import type { DeepTurnMessage } from "./deep-model-io.js";
 import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 

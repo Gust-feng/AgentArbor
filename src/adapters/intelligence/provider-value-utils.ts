@@ -31,25 +31,12 @@ export function parseToolArguments(value: unknown): ToolFactValue {
   }
 }
 
-export function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-export function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
 /**
- * 判断一个值是否为“普通记录对象”（非 null、非数组、typeof === "object"）。
- * 作为 `asRecord` 的唯一判定来源，确保所有调用点对“记录”的语义完全一致。
+ * 记录判定与规整统一由 `src/kernel/values/` 提供，这里转出以保持既有 import 路径稳定。
  */
-export function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * 把任意值规整为普通记录对象；非记录值（null、数组、原始类型、undefined）返回空对象 `{}`。
- */
-export function asRecord(value: unknown): Record<string, unknown> {
-  return isPlainRecord(value) ? value : {};
-}
+export {
+  asRecord,
+  isPlainRecord,
+  numberOrUndefined,
+  stringOrUndefined,
+} from "../../kernel/values/index.js";

@@ -1,3 +1,4 @@
+import { asRecord } from "../../../kernel/values/index.js";
 import path from "node:path";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import type { ProcessTerminator, ProcessRecord } from "../../runtime-guard/index.js";
@@ -150,11 +151,6 @@ function isInsideWorkspace(rootDirectory: string, candidate: string): boolean {
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;

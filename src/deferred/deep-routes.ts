@@ -34,8 +34,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 // 模型运行时统一入口：ModelRuntimeConfigurationError 经 model-runtime/index.ts
 // re-export，禁止 app 层直接 import intelligence-channel-factory（panel-runtime-structure 命名中性约束）。
-import { ModelRuntimeConfigurationError } from "../model-runtime/index.js";
-import type { ModelRuntimeMode } from "../model-runtime/index.js";
+import { ModelRuntimeConfigurationError } from "../app/model-runtime/index.js";
+import type { ModelRuntimeMode } from "../app/model-runtime/index.js";
 import {
   PanelHttpError,
   parseStreamCursor,
@@ -43,20 +43,20 @@ import {
   writeJson,
   writePanelError,
   writeSseEvent,
-} from "./http-utils.js";
-import { deepConversationRunEnvelope } from "../deep/deep-run-view-base.js";
-import type { ConfigCenter } from "../config-center/index.js";
+} from "../app/panel-server/http-utils.js";
+import { deepConversationRunEnvelope } from "./deep/deep-run-view-base.js";
+import type { ConfigCenter } from "../app/config-center/index.js";
 import type {
   DeepChildInstructionQueueResult,
-} from "../deep/deep-child-scheduler-contracts.js";
+} from "./deep/deep-child-scheduler-contracts.js";
 import {
   type DeepChildConfirmationDecision,
-} from "../deep/deep-child-agent-runner.js";
+} from "./deep/deep-child-agent-runner.js";
 import {
   MultiAgentFeatureError,
   type MultiAgentFeature,
   type MultiAgentRunEventUpdate,
-} from "../deep/multi-agent-feature.js";
+} from "./deep/multi-agent-feature.js";
 import {
   parseConfirmationDecision,
   parseConversationPinInput,
@@ -67,8 +67,9 @@ import {
   parseDeepRunControlRequest,
   parseDeepRunFollowUpRequest,
   parseDeepRunStartRequest,
-} from "./request-parsers.js";
-import { parseDeepRunListLimit } from "./deep-route-helpers.js";
+} from "../app/panel-server/request-parsers.js";
+import { parseDeepRunListLimit } from "../app/panel-server/deep-route-helpers.js";
+import { errorMessage } from "../kernel/values/index.js";
 
 const DEEP_STREAM_HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -916,9 +917,3 @@ async function resolveDeepAiMode(
   return config.defaultAiMode;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}

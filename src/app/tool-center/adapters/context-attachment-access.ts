@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../../kernel/values/index.js";
 /**
  * Resolves model-visible Task Soil attachments to authorized local targets.
  *
@@ -371,9 +372,6 @@ function modelSafeRef(ref: string): string | undefined {
   return normalized.startsWith("local-file:") || normalized.startsWith("local-project:") ? undefined : ref;
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function toPortableRelativePath(value: string): string {
   return value.split(path.sep).join("/");

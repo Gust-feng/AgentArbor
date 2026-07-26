@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../../kernel/values/index.js";
 import type { TaskSoilContextRef } from "../../../domain/soil/index.js";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import {
@@ -540,9 +541,6 @@ function compactRecord(value: Readonly<Record<string, unknown>>): Readonly<Recor
   return result;
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function booleanOrDefault(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;

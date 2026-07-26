@@ -3,11 +3,11 @@ import type {
   ChildAgentRunModelMessageTrace,
   ChildAgentRunParentInstruction,
 } from "../../domain/underground/agent-fabric.js";
-import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
+import type { DesktopTaskSoilInput } from "../../app/task-soil/task-soil-workspace.js";
 import {
   workspaceFolderSummaryFromPath,
   type WorkspaceFolderSummary,
-} from "../task-soil/workspace-folder-summary.js";
+} from "../../app/task-soil/workspace-folder-summary.js";
 import { deepConversationRunEnvelope, deepConversationRunSummary } from "./deep-run-view-base.js";
 import type {
   DeepConversation,

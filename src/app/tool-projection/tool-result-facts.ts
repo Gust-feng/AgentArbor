@@ -1,11 +1,9 @@
+import { asRecord } from "../../kernel/values/index.js";
+export { asRecord };
 import type { ToolErrorFacts } from "../../domain/tools/index.js";
 
 /** Runtime value readers shared by model and display projections. */
-export function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : {};
-}
+
 
 export function optionalRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
   const record = asRecord(value);

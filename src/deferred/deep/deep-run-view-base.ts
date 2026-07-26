@@ -1,4 +1,4 @@
-import type { WorkspaceFolderSummary } from "../task-soil/workspace-folder-summary.js";
+import type { WorkspaceFolderSummary } from "../../app/task-soil/workspace-folder-summary.js";
 
 export function deepConversationRunEnvelope<TStatus extends string>(input: {
   readonly runId: string;

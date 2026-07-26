@@ -1,3 +1,4 @@
+import { asOptionalRecord } from "../values/index.js";
 import type {
   ModelOutputContract,
   ModelVisibleOutputFieldType,
@@ -45,7 +46,7 @@ export function createModelVisibleOutputProjection(input: {
     };
   }
 
-  const structuredOutput = asRecord(input.response.structuredOutput);
+  const structuredOutput = asOptionalRecord(input.response.structuredOutput);
   if (structuredOutput === undefined) {
     return undefined;
   }
@@ -93,7 +94,7 @@ function createVisibleItem(input: {
   readonly fieldTypes?: Readonly<Record<string, ModelVisibleOutputFieldType>>;
   readonly maxFieldLength: number;
 }): ModelVisibleOutputItem {
-  const record = asRecord(input.value);
+  const record = asOptionalRecord(input.value);
   if (record === undefined) {
     return { itemId: input.itemId, fields: [] };
   }
@@ -134,9 +135,3 @@ function rootletKindFromAdviceContractId(contractId: string): string | undefined
   return contractId.slice(prefix.length).split(".")[0];
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Readonly<Record<string, unknown>>;
-  }
-  return undefined;
-}

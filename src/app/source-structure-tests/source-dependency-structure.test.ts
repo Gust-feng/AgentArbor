@@ -17,6 +17,13 @@ import {
   sourceInvocationNames,
 } from "./source-structure-test-utils.js";
 
+/**
+ * Multi-Agent 实现已归档到 `src/deferred/deep/`：按 ADR-0025 保留内部闭环，
+ * 但不由生产 Composition Root 装配，也不参与主干构建与 `pnpm test`。
+ * 这些边界断言继续对归档源码生效，确保它在被恢复前不会悄悄漂移。
+ */
+const DEFERRED_DEEP_ROOT = path.join(process.cwd(), "src", "deferred", "deep");
+
 test("app and domain source dependencies do not form local cycles", async () => {
   for (const area of ["src/app", "src/domain"]) {
     const graph = await buildSourceGraph(area);
@@ -98,7 +105,7 @@ test("runtime feature modules do not depend on panel-server composition", async 
   const featureRoots = [
     path.join(appRoot, "ordinary-agent"),
     path.join(appRoot, "sub-agents"),
-    path.join(appRoot, "deep"),
+    DEFERRED_DEEP_ROOT,
     path.join(appRoot, "skills"),
     path.join(appRoot, "research"),
   ];
@@ -117,7 +124,7 @@ test("runtime feature modules do not depend on panel-server composition", async 
 
 test("Deep and Multi-Agent feature code do not depend on ordinary Desktop implementations", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const deepRoot = path.join(appRoot, "deep");
+  const deepRoot = DEFERRED_DEEP_ROOT;
   const forbiddenRoots = [
     path.join(appRoot, "ordinary-agent"),
     path.join(appRoot, "desktop-agent"),
@@ -139,7 +146,7 @@ test("Deep and Multi-Agent feature code do not depend on ordinary Desktop implem
 });
 
 test("Multi-Agent feature uses precise infrastructure ports instead of MinimalRuntime", async () => {
-  const files = (await collectSourceFiles(path.join(process.cwd(), "src", "app", "deep")))
+  const files = (await collectSourceFiles(DEFERRED_DEEP_ROOT))
     .filter((file) => !isTestAssetSource(file));
   const violations: string[] = [];
   for (const file of files) {
@@ -313,7 +320,7 @@ test("MultiAgentFeature remains detached from production composition", async () 
 });
 
 test("MultiAgentFeature facade does not expose owned stores or lifecycle registries", async () => {
-  const file = path.join(process.cwd(), "src", "app", "deep", "multi-agent-feature.ts");
+  const file = path.join(DEFERRED_DEEP_ROOT, "multi-agent-feature.ts");
   const source = await fs.readFile(file, "utf8");
   const publicFacade = source.slice(
     source.indexOf("export type MultiAgentFeature ="),
@@ -353,7 +360,7 @@ test("MultiAgentFeature facade does not expose owned stores or lifecycle registr
 });
 
 test("deferred deep routes remain a thin reconstruction adapter without constructing runtime or stores", async () => {
-  const deepRoutes = path.join(process.cwd(), "src", "app", "panel-server", "deep-routes.ts");
+  const deepRoutes = path.join(process.cwd(), "src", "deferred", "deep-routes.ts");
   const source = await fs.readFile(deepRoutes, "utf8");
   const forbiddenImports = sourceImportBindings(source, deepRoutes)
     .filter((binding) =>
@@ -407,7 +414,7 @@ test("deferred deep routes remain a thin reconstruction adapter without construc
     );
   }
 
-  const featureFile = path.join(process.cwd(), "src", "app", "deep", "multi-agent-feature.ts");
+  const featureFile = path.join(DEFERRED_DEEP_ROOT, "multi-agent-feature.ts");
   const featureSource = await fs.readFile(featureFile, "utf8");
   const runtimeFacade = featureSource.slice(
     featureSource.indexOf("type MultiAgentFeatureRuntime ="),

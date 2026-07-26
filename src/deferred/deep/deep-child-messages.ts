@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isNodeError, toPersistedJsonShape } from "../../kernel/values/index.js";
 import type {
   ChildAgentRunParentInstructionSource,
   ChildAgentRunParentInstructionStatus,
@@ -54,20 +55,20 @@ export class InMemoryDeepChildMessageStore implements DeepChildMessageStore {
   private readonly records = new Map<string, DeepChildMessageRecord>();
 
   async upsert(record: DeepChildMessageRecord): Promise<DeepChildMessageRecord> {
-    this.records.set(messageKey(record.runId, record.messageRef), clone(record));
-    return clone(record);
+    this.records.set(messageKey(record.runId, record.messageRef), toPersistedJsonShape(record));
+    return toPersistedJsonShape(record);
   }
 
   async getByRef(runId: string, messageRef: string): Promise<DeepChildMessageRecord | undefined> {
     const record = this.records.get(messageKey(runId, messageRef));
-    return record === undefined ? undefined : clone(record);
+    return record === undefined ? undefined : toPersistedJsonShape(record);
   }
 
   async listForRun(runId: string): Promise<readonly DeepChildMessageRecord[]> {
     return [...this.records.values()]
       .filter((record) => record.runId === runId)
       .sort(compareMessages)
-      .map(clone);
+      .map(toPersistedJsonShape);
   }
 
   async listForChild(runId: string, childRunId: string): Promise<readonly DeepChildMessageRecord[]> {
@@ -89,7 +90,7 @@ export function createFileSystemDeepChildMessageStore(runtimeHome: string): Deep
     async upsert(record: DeepChildMessageRecord): Promise<DeepChildMessageRecord> {
       const filePath = messagePath(root, record.runId, record.messageRef);
       await writeJsonFile(filePath, record);
-      return clone(record);
+      return toPersistedJsonShape(record);
     },
 
     async getByRef(runId: string, messageRef: string): Promise<DeepChildMessageRecord | undefined> {
@@ -187,10 +188,4 @@ function safeFileName(value: string): string {
   return encodeURIComponent(value);
 }
 
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === code;
-}
 
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}

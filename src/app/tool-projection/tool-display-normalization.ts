@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../kernel/values/index.js";
 import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { ToolFileDisplayOperation } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
@@ -600,9 +601,6 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function stringArray(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];

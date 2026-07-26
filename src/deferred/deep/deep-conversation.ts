@@ -19,14 +19,15 @@
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { createId, nowIso } from "../../kernel/id.js";
+import { isFileNotFound, toPersistedJsonShape } from "../../kernel/values/index.js";
 import type { Constraint } from "../../domain/constraints.js";
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
-import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
+import type { ModelRuntimeMode } from "../../app/model-runtime/contracts.js";
 import {
   createTaskSoilFromDesktopInput,
   parseDesktopTaskSoilInput,
   type DesktopTaskSoilInput,
-} from "../task-soil/task-soil-workspace.js";
+} from "../../app/task-soil/task-soil-workspace.js";
 import {
   DEEP_RUN_KIND,
   DEEP_RUN_MODE,
@@ -269,7 +270,7 @@ function emptyToUndefined(value: string | undefined): string | undefined {
 }
 
 function cloneDeepConversation(conversation: DeepConversation): DeepConversation {
-  return JSON.parse(JSON.stringify(conversation)) as DeepConversation;
+  return toPersistedJsonShape(conversation);
 }
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
@@ -296,6 +297,3 @@ function safeFileName(value: string): string {
   return encodeURIComponent(value);
 }
 
-function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
-}

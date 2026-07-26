@@ -18,6 +18,8 @@
     "test:panel": "vitest run --config vitest.panel.config.ts",
     "test:release-gate": "node --test scripts/windows-release-validation.test.mjs",
     "test:dev-scripts": "node --test scripts/panel-dev-process-tree.test.mjs",
+    "build:deferred": "tsc -p tsconfig.deferred.json",
+    "test:deferred": "pnpm build:deferred && node scripts/run-deferred-tests.mjs",
     "test": "pnpm build && node scripts/run-node-tests.mjs && pnpm test:panel && pnpm test:release-gate && pnpm test:dev-scripts",
     "smoke:real-ai": "pnpm build && node dist/app/real-ai-smoke.js",
     "panel": "pnpm build && node dist/app/panel.js",

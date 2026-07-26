@@ -104,12 +104,20 @@ route 必须一对一委托 feature。控制请求找不到 child、scheduler �
 
 ## 验证
 
+Multi-Agent 源码已归档到 `src/deferred/`，不再进入 `pnpm build:node` 与 `pnpm test`。验证改用归档入口：
+
 ```powershell
-pnpm build:node
-node --test --test-concurrency=1 dist/app/deep/deep-task-board.test.js dist/app/deep/deep-child-scheduler-core.test.js dist/app/deep/deep-child-scheduler-instructions.test.js
-node --test --test-concurrency=1 dist/app/deep/deep-run-executor-child.test.js dist/app/deep/deep-run-executor-synthesis.test.js dist/app/deep/multi-agent-feature.test.js
-node --test --test-concurrency=1 dist/app/panel-server/integration-tests/panel-server-deep-routes.test.js
+pnpm test:deferred
 ```
+
+需要只跑单个用例时，先 `pnpm build:deferred`，再指向 `dist-deferred/`：
+
+```powershell
+pnpm build:deferred
+node --test --test-concurrency=1 dist-deferred/deferred/deep/deep-task-board.test.js
+```
+
+`panel-server-deep-routes.test.ts` 断言 `/api/deep/*` 返回真实业务响应，与生产固定的 410 冲突，已从归档测试入口排除，恢复 Multi-Agent 时需连同 HTTP 契约一起重新设计。归档边界见[Multi-Agent 源码归档边界](17-Multi-Agent源码归档边界.md)。
 
 跨模块提交门还需运行 `pnpm typecheck:panel`、`pnpm build:panel` 和完整 `pnpm test`。
 

@@ -1,3 +1,4 @@
+import { asRecord } from "../../../kernel/values/index.js";
 import type { ToolDisplayProjection } from "../../../domain/observation/index.js";
 import type {
   DelegatedAgentExecutionMetadata,
@@ -135,11 +136,6 @@ function errorFactsFromToolFacts(
   return toolErrorFactsOrUndefined(output.errorFacts) ?? toolErrorFactsOrUndefined(payload.errorFacts);
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : {};
-}
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;

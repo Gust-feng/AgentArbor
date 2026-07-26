@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
+import { isNodeError, toPersistedJsonShape } from "../../kernel/values/index.js";
 import {
   assertRunSnapshotCodec,
   decodeRunSnapshot,
@@ -129,7 +131,7 @@ export function createFileSystemRunSnapshotStore<TSnapshot>(input: {
         );
         await updateManifest((entries) => entries.set(prepared.envelope.runId, prepared.envelope))
           .catch(() => undefined);
-        return cloneJson(prepared.snapshot);
+        return toPersistedJsonShape(prepared.snapshot);
       });
     },
 
@@ -143,7 +145,7 @@ export function createFileSystemRunSnapshotStore<TSnapshot>(input: {
         codec: input.codec,
         getEnvelope: input.getEnvelope,
       });
-      return decoded === undefined ? undefined : cloneJson(decoded.snapshot);
+      return decoded === undefined ? undefined : toPersistedJsonShape(decoded.snapshot);
     },
 
     async list(limit = 50): Promise<readonly TSnapshot[]> {
@@ -181,7 +183,7 @@ export function createFileSystemRunSnapshotStore<TSnapshot>(input: {
       return available
         .sort((left, right) => compareRunEnvelopeByRecency(left.envelope, right.envelope))
         .slice(0, normalizedLimit)
-        .map(({ snapshot }) => cloneJson(snapshot));
+        .map(({ snapshot }) => toPersistedJsonShape(snapshot));
     },
 
     delete(runId: string): Promise<void> {
@@ -377,31 +379,10 @@ async function writeJsonFileAtomically(filePath: string, value: unknown): Promis
     throw error;
   }
   await handle.close();
-  await renameWithTransientRetry(tempPath, filePath).catch(async (error: unknown) => {
+  await renameWithRetry(tempPath, filePath).catch(async (error: unknown) => {
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   });
-}
-
-async function renameWithTransientRetry(source: string, target: string): Promise<void> {
-  const maxAttempts = 6;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await fs.rename(source, target);
-      return;
-    } catch (error) {
-      if (attempt >= maxAttempts || !isTransientRenameError(error)) throw error;
-      await delay(25 * attempt);
-    }
-  }
-}
-
-function isTransientRenameError(error: unknown): boolean {
-  return isNodeError(error, "EPERM") || isNodeError(error, "EACCES") || isNodeError(error, "EBUSY");
-}
-
-async function delay(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readJsonFile(filePath: string, ownerId: string): Promise<unknown | undefined> {
@@ -430,11 +411,4 @@ async function readJsonFile(filePath: string, ownerId: string): Promise<unknown 
   }
 }
 
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error &&
-    (error as { readonly code?: unknown }).code === code;
-}
 
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../kernel/values/index.js";
 /**
  * Deep child Agent runner.
  *
@@ -25,7 +26,7 @@ import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import {
   frozenSnapshotHasToolOutputReader,
   inheritToolOutputReader,
-} from "../capability/tool-output-reader-capability.js";
+} from "../../app/capability/tool-output-reader-capability.js";
 import {
   createDeepChildLoopContextRef,
   createDeepChildLoopContextRecord,
@@ -616,12 +617,6 @@ function formatChildToolCalls(toolCalls: ChildAgentRunExecution["toolCalls"]): s
   return toolCalls.map((call) => `${call.toolName}:${call.status}`).join(", ");
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return typeof error === "string" ? error : String(error);
-}
 
 function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) {

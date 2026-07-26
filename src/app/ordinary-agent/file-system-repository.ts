@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
+import { isNodeError, toPersistedJsonShape } from "../../kernel/values/index.js";
 import { cloneToolInputSchema, isCanonicalToolName, toolCallFactId, type ToolInputSchema } from "../../domain/tools/index.js";
 import {
   ORDINARY_RUN_SCHEMA_VERSION,
@@ -557,7 +559,7 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
           schemaVersion: ORDINARY_RUN_SCHEMA_VERSION,
           revision: actualRevision + 1,
           savedAt: state.timestamps.updatedAt,
-          state: cloneJson(state),
+          state: toPersistedJsonShape(state),
         };
         const stateValidation = rawStateSchema.safeParse(document.state);
         if (!stateValidation.success) {
@@ -569,7 +571,7 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
         // The snapshot is the commit. Index maintenance is deliberately separate
         // from run writes so unrelated runs never wait for a full snapshot scan.
         await updateManifest((entries) => entries.set(state.runId, summaryFromDocument(document))).catch(() => undefined);
-        return cloneJson(document);
+        return toPersistedJsonShape(document);
       });
     },
     get(runId) { return readSnapshot(rootDir, runId); },
@@ -601,7 +603,7 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
           for (const runId of invalidRunIds) entries.delete(runId);
         }).catch(() => undefined);
       }
-      return cloneJson(available);
+      return toPersistedJsonShape(available);
     },
     delete(runId) {
       return enqueueRun(runId, async () => {
@@ -626,7 +628,7 @@ async function readSnapshot(rootDir: string, runId: string): Promise<OrdinaryRun
   if (!result.success || result.data.state.runId !== runId) {
     throw new OrdinaryRunSnapshotIncompatibleError(runId, result.success ? "run identity is invalid" : z.prettifyError(result.error));
   }
-  return cloneJson(result.data);
+  return toPersistedJsonShape(result.data);
 }
 
 async function scanSummaries(rootDir: string): Promise<OrdinaryRunSummary[]> {
@@ -714,19 +716,6 @@ async function writeJsonAtomically(filePath: string, value: unknown): Promise<vo
   catch (error) { await fs.rm(tempPath, { force: true }).catch(() => undefined); throw error; }
 }
 
-async function renameWithRetry(source: string, target: string): Promise<void> {
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
-    try { await fs.rename(source, target); return; }
-    catch (error) {
-      if (attempt === 6 || !isTransientRenameError(error)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-    }
-  }
-}
-
-function isTransientRenameError(error: unknown): boolean { return isNodeError(error, "EPERM") || isNodeError(error, "EACCES") || isNodeError(error, "EBUSY"); }
 function snapshotPath(rootDir: string, runId: string): string { return path.join(runDirectory(rootDir, runId), "snapshot.json"); }
 function runDirectory(rootDir: string, runId: string): string { return path.join(rootDir, "runs", encodeURIComponent(runId)); }
 function manifestPath(rootDir: string): string { return path.join(rootDir, "manifest.json"); }
-function isNodeError(error: unknown, code: string): boolean { return typeof error === "object" && error !== null && "code" in error && (error as { readonly code?: unknown }).code === code; }
-function cloneJson<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }

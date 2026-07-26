@@ -1,3 +1,4 @@
+import { asRecord } from "../../kernel/values/index.js";
 type JsonRecord = Record<string, unknown>;
 type ResponsesOutputStatus = "in_progress" | "completed" | "incomplete";
 type TerminalResponsesStatus = Extract<ResponsesOutputStatus, "completed" | "incomplete">;
@@ -400,8 +401,3 @@ function protocolError(message: string): Error {
   return new Error(`Invalid OpenAI Responses stream: ${message}`);
 }
 
-function asRecord(value: unknown): JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as JsonRecord
-    : {};
-}

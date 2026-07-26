@@ -22,7 +22,7 @@
 import type { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import { createId, nowIso } from "../../kernel/id.js";
-import { AppRunEventHub } from "../run-runtime-core/event-stream.js";
+import { AppRunEventHub } from "../../app/run-runtime-core/event-stream.js";
 import type {
   AgentRunTree,
   ChildAgentRun,

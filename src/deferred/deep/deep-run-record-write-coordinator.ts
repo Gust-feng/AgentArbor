@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { DeepRunRecord, DeepRunRecordStore } from "./deep-run-record-store.js";
+import { errorMessage } from "../../kernel/values/index.js";
 
 export type DeepRunRecordWriteOperation = "save" | "delete";
 
@@ -252,12 +253,6 @@ export function createDeepRunRecordWriteCoordinator(
   };
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return typeof error === "string" ? error : String(error);
-}
 
 /**
  * Keeps query ownership on the repository while routing every durable mutation

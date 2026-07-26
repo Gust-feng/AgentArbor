@@ -1,3 +1,4 @@
+import { asRecord } from "../../../kernel/values/index.js";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import { ToolOutputStoreError, type ToolOutputStore } from "../tool-output-store.js";
 
@@ -237,9 +238,6 @@ function safeWindowEnd(startChar: number, maxTextChars: number): number {
   return Math.min(Number.MAX_SAFE_INTEGER, startChar + maxTextChars);
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
-}
 
 function safeRefToken(value: string): string {
   const token = value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);

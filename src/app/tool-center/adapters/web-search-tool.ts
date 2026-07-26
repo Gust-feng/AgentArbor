@@ -1,3 +1,4 @@
+import { asOptionalRecord, stringOrUndefined } from "../../../kernel/values/index.js";
 import type { ToolExecutor, ToolExecutionContext } from "../../../domain/tools/index.js";
 
 export type FetchLike = (
@@ -358,16 +359,16 @@ function providerFailed(input: ProviderSearchInput, status: number): WebSearchTo
 }
 
 function queryFromInput(input: unknown): string | undefined {
-  const record = asRecord(input);
+  const record = asOptionalRecord(input);
   const value = record?.query;
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function resultsFromTavily(raw: unknown): WebSearchToolOutput["results"] {
-  const record = asRecord(raw);
+  const record = asOptionalRecord(raw);
   const results = Array.isArray(record?.results) ? record.results : [];
   return results.map((item) => {
-    const result = asRecord(item);
+    const result = asOptionalRecord(item);
     return compactSearchResult({
       title: stringOrFallback(result?.title, "Untitled result"),
       url: stringOrFallback(result?.url, ""),
@@ -378,10 +379,10 @@ function resultsFromTavily(raw: unknown): WebSearchToolOutput["results"] {
 }
 
 function resultsFromExa(raw: unknown): WebSearchToolOutput["results"] {
-  const record = asRecord(raw);
+  const record = asOptionalRecord(raw);
   const results = Array.isArray(record?.results) ? record.results : [];
   return results.map((item) => {
-    const result = asRecord(item);
+    const result = asOptionalRecord(item);
     const highlights = Array.isArray(result?.highlights)
       ? result.highlights.filter((highlight): highlight is string => typeof highlight === "string").join(" ")
       : undefined;
@@ -395,10 +396,10 @@ function resultsFromExa(raw: unknown): WebSearchToolOutput["results"] {
 }
 
 function resultsFromZai(raw: unknown): WebSearchToolOutput["results"] {
-  const record = asRecord(raw);
+  const record = asOptionalRecord(raw);
   const results = Array.isArray(record?.search_result) ? record.search_result : [];
   return results.map((item) => {
-    const result = asRecord(item);
+    const result = asOptionalRecord(item);
     return compactSearchResult({
       title: stringOrFallback(result?.title, "Untitled result"),
       url: stringOrFallback(result?.link, ""),
@@ -410,8 +411,8 @@ function resultsFromZai(raw: unknown): WebSearchToolOutput["results"] {
 }
 
 function resultsFromMetaso(raw: unknown): WebSearchToolOutput["results"] {
-  const record = asRecord(raw);
-  const data = asRecord(record?.data) ?? record;
+  const record = asOptionalRecord(raw);
+  const data = asOptionalRecord(record?.data) ?? record;
   const directResults = firstArray(data?.webpages, data?.results, data?.references, data?.searchResults);
   if (directResults.length > 0) {
     return directResults.map((item, index) => metasoReferenceResult(item, index));
@@ -420,7 +421,7 @@ function resultsFromMetaso(raw: unknown): WebSearchToolOutput["results"] {
 }
 
 function metasoReferenceResult(item: unknown, index: number): WebSearchToolOutput["results"][number] {
-  const result = asRecord(item);
+  const result = asOptionalRecord(item);
   const title = stringOrFallback(
     result?.title ?? result?.name ?? result?.siteName ?? result?.source,
     `秘塔搜索结果 ${index + 1}`
@@ -440,10 +441,10 @@ function metasoReferenceResult(item: unknown, index: number): WebSearchToolOutpu
 }
 
 function resultsFromGoogle(raw: unknown): WebSearchToolOutput["results"] {
-  const record = asRecord(raw);
+  const record = asOptionalRecord(raw);
   const results = Array.isArray(record?.items) ? record.items : [];
   return results.map((item) => {
-    const result = asRecord(item);
+    const result = asOptionalRecord(item);
     return compactSearchResult({
       title: stringOrFallback(result?.title, "Untitled result"),
       url: stringOrFallback(result?.link, ""),
@@ -455,11 +456,11 @@ function resultsFromGoogle(raw: unknown): WebSearchToolOutput["results"] {
 }
 
 function resultsFromBing(raw: unknown): WebSearchToolOutput["results"] {
-  const record = asRecord(raw);
-  const webPages = asRecord(record?.webPages);
+  const record = asOptionalRecord(raw);
+  const webPages = asOptionalRecord(record?.webPages);
   const results = Array.isArray(webPages?.value) ? webPages.value : [];
   return results.map((item) => {
-    const result = asRecord(item);
+    const result = asOptionalRecord(item);
     return compactSearchResult({
       title: stringOrFallback(result?.name, "Untitled result"),
       url: stringOrFallback(result?.url, ""),
@@ -547,9 +548,6 @@ function stringOrFallback(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function firstArray(...values: readonly unknown[]): readonly unknown[] {
   for (const value of values) {
@@ -560,18 +558,12 @@ function firstArray(...values: readonly unknown[]): readonly unknown[] {
   return [];
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Readonly<Record<string, unknown>>;
-  }
-  return undefined;
-}
 
 function publishedAtFromGoogleResult(result: Readonly<Record<string, unknown>> | undefined): string | undefined {
-  const pageMap = asRecord(result?.pagemap);
+  const pageMap = asOptionalRecord(result?.pagemap);
   const metatags = Array.isArray(pageMap?.metatags) ? pageMap.metatags : [];
   for (const item of metatags) {
-    const tag = asRecord(item);
+    const tag = asOptionalRecord(item);
     const value = stringOrUndefined(tag?.["article:published_time"] ?? tag?.["date"] ?? tag?.["datepublished"]);
     if (value !== undefined) {
       return value;

@@ -14,8 +14,8 @@ import type { Constraint } from "../../domain/constraints.js";
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
-import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
-import type { ModelRuntimeChannelContext } from "../model-runtime/factory.js";
+import type { ModelRuntimeMode } from "../../app/model-runtime/contracts.js";
+import type { ModelRuntimeChannelContext } from "../../app/model-runtime/factory.js";
 import {
   createDeepConversationService,
   createFileSystemDeepConversationStore,
@@ -90,14 +90,14 @@ import {
   appendDeepRunFollowUpTurn,
   createDeepRunFollowUpTurn,
 } from "./deep-follow-up-turns.js";
-import { createTaskSoilFromDesktopInput } from "../task-soil/task-soil-workspace.js";
+import { createTaskSoilFromDesktopInput } from "../../app/task-soil/task-soil-workspace.js";
 import {
   assertRunModeForKind,
   resolveRunModeForKind,
   type AgentArborRunKind,
   type AgentArborRunMode,
-} from "../run-runtime-core/run-mode-policy.js";
-import type { CapabilityAgentProfile } from "../capability/capability-policy.js";
+} from "../../app/run-runtime-core/run-mode-policy.js";
+import type { CapabilityAgentProfile } from "../../app/capability/capability-policy.js";
 import {
   continueDeepChildAgent,
   DeepChildPostExecutionPersistenceError,

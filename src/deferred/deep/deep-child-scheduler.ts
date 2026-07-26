@@ -1,3 +1,4 @@
+import { errorMessage } from "../../kernel/values/index.js";
 /**
  * DeepChildScheduler —— 多 Agent run 的并发 child 调度（deep 一期，T1-3，ADR-0025）。
  *
@@ -915,9 +916,3 @@ export class DeepChildScheduler {
   }
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return typeof error === "string" ? error : String(error);
-}

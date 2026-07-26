@@ -1,3 +1,5 @@
+import { stringOrUndefined } from "../../kernel/values/index.js";
+import { asRecord } from "../../kernel/values/index.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -819,16 +821,7 @@ function arrayItems(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Readonly<Record<string, unknown>>;
-  }
-  return {};
-}
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function toRepositoryPath(value: string): string {
   return value.split(path.sep).join("/");

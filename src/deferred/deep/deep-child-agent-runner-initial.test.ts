@@ -4,9 +4,9 @@ import test from "node:test";
 import {
   createReadToolOutputTool,
   MAX_TOOL_OUTPUT_READ_CHARS,
-} from "../tool-center/adapters/tool-output-read-tool.js";
-import { ToolCenter } from "../tool-center/tool-center.js";
-import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
+} from "../../app/tool-center/adapters/tool-output-read-tool.js";
+import { ToolCenter } from "../../app/tool-center/tool-center.js";
+import { InMemoryToolOutputStore } from "../../app/tool-center/tool-output-store.js";
 import {
   DEEP_CHILD_DEFAULT_MAX_MODEL_ROUNDS,
   DEEP_CHILD_DEFAULT_MAX_TOOL_ROUNDS,

@@ -1,6 +1,6 @@
 import path from "node:path";
 import test from "node:test";
-import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
+import { readDeferredSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
 
 test("multi Agent workspace uses a linear answer transcript with click-to-open details", async () => {
   const [multiAgentWorkspace, deepView, deepViewModel, deepTranscriptModel, deepWorkDetailModel, transcriptTimeline, deepStyles] = await Promise.all([
@@ -408,10 +408,10 @@ test("child detail workflow renders model output and collapsed desktop Agent too
     readPanelUiSource("deep-view-model.ts"),
     readPanelUiSource("deep-work-detail-model.ts"),
     readPanelUiSource(path.join("contracts", "deep.ts")),
-    readAppSource(path.join("deep", "deep-child-run-result-mapping.ts")),
-    readAppSource(path.join("deep", "deep-runtime.ts")),
-    readAppSource(path.join("deep", "deep-read-model.ts")),
-    readAppSource(path.join("deep", "deep-agent-run-tree-ref.ts")),
+    readDeferredSource(path.join("deep", "deep-child-run-result-mapping.ts")),
+    readDeferredSource(path.join("deep", "deep-runtime.ts")),
+    readDeferredSource(path.join("deep", "deep-read-model.ts")),
+    readDeferredSource(path.join("deep", "deep-agent-run-tree-ref.ts")),
   ]);
 
   includes(deepWorkDetailModel, "displayActivityItemsForNodes([node])");

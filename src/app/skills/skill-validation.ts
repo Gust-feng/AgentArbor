@@ -1,3 +1,4 @@
+import { isPlainRecord } from "../../kernel/values/index.js";
 import { createHash } from "node:crypto";
 import { parseDocument } from "yaml";
 
@@ -268,9 +269,6 @@ function normalizeJsonValue(value: unknown): SkillJsonValue | undefined {
   return undefined;
 }
 
-function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function parseYamlFrontmatter(value: string): Readonly<Record<string, unknown>> {
   if (value.trim().length === 0) {

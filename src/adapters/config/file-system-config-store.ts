@@ -8,7 +8,8 @@ import type {
   NormalSettingsStore,
   SecretMetadata,
 } from "../../domain/config/index.js";
-import { asRecord } from "../intelligence/provider-value-utils.js";
+import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
+import { asRecord, isFileNotFound, stringOrUndefined } from "../../kernel/values/index.js";
 
 export type AgentArborConfigDirectoryEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -145,7 +146,7 @@ async function writeJsonFileAtomically(filePath: string, value: unknown): Promis
   await fs.mkdir(directory, { recursive: true });
   try {
     await fs.writeFile(tempPath, payload, { encoding: "utf8", mode: 0o600 });
-    await renameWithRetry(tempPath, filePath);
+    await renameWithRetry(tempPath, filePath, { backoffMs: renameBackoffMs });
   } catch (error) {
     try {
       await fs.rm(tempPath, { force: true });
@@ -154,39 +155,6 @@ async function writeJsonFileAtomically(filePath: string, value: unknown): Promis
     }
     throw error;
   }
-}
-
-/**
- * 跨平台原子重命名；对 Windows 上偶发的可恢复错误做短退避重试。
- *
- * 背景：Windows 的 fs.rename 在目标文件被防病毒扫描、并发读句柄瞬时占用、或与并发的另一次
- * 原子写碰撞时，会抛 EPERM / EACCES / ENOTEMPTY，即使操作语义上完全合法。这是 Windows
- * 文件系统原子写的已知平台差异（POSIX rename 原子且极少触发这些码）。对这几类瞬时错误重试
- * 可让并发的 settings / run 记录写入稳定收敛，避免单次平台抖动导致整个 run 失败。
- */
-async function renameWithRetry(source: string, target: string, maxAttempts = 6): Promise<void> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await fs.rename(source, target);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (!isTransientRenameError(error)) {
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, renameBackoffMs(attempt)));
-    }
-  }
-  throw lastError;
-}
-
-function isTransientRenameError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-  const code = (error as { code?: string }).code;
-  return code === "EPERM" || code === "EACCES" || code === "ENOTEMPTY";
 }
 
 function renameBackoffMs(attempt: number): number {
@@ -200,8 +168,8 @@ function parseSecretsFile(raw: unknown): LocalDevSecretsFile {
   const secrets: Record<string, { value: string; updatedAt: string }> = {};
   for (const [secretRef, secret] of Object.entries(rawSecrets)) {
     const secretRecord = asRecord(secret);
-    const value = optionalString(secretRecord.value);
-    const updatedAt = optionalString(secretRecord.updatedAt);
+    const value = stringOrUndefined(secretRecord.value);
+    const updatedAt = stringOrUndefined(secretRecord.updatedAt);
     if (value !== undefined && updatedAt !== undefined) {
       secrets[secretRef] = { value, updatedAt };
     }
@@ -209,18 +177,10 @@ function parseSecretsFile(raw: unknown): LocalDevSecretsFile {
   return {
     version: 1,
     secrets,
-    updatedAt: optionalString(record.updatedAt) ?? new Date(0).toISOString(),
+    updatedAt: stringOrUndefined(record.updatedAt) ?? new Date(0).toISOString(),
   };
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function nonBlank(value: string | undefined): string | undefined {
   return value !== undefined && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
 }

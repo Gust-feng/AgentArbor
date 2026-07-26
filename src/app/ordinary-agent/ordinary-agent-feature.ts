@@ -10,6 +10,7 @@ import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import type {
   DecideOrdinaryApprovalInput,
   OrdinaryAgentFeature,
+  OrdinaryStableTerminalRunFacts,
   OrdinaryConversationControlDocument,
   OrdinaryConversationControlRepository,
   OrdinaryConversationControlState,
@@ -74,6 +75,7 @@ export function createOrdinaryAgentFeature(input: {
   const mutationQueues = new Map<string, Promise<void>>();
   const activityStreams = new Map<string, { streamId: string; nextSequence: number; activities: OrdinaryRunActivity[] }>();
   const listeners = new Map<string, Set<(activity: OrdinaryRunActivity) => void>>();
+  const stableTerminalListeners = new Set<(runId: string) => void>();
   const activeModelRequestIds = new Map<string, string>();
   const reasoningBuffers = new Map<string, { readonly modelRequestId: string; content: string }>();
   const sessionsAwaitingFinalization = new Set<string>();
@@ -920,6 +922,79 @@ export function createOrdinaryAgentFeature(input: {
     if (resultPersistenceFailure !== undefined) throw resultPersistenceFailure;
   }
 
+  /**
+   * Terminal facts are stable only after every accepted tool result reached a
+   * durable final fact and the live execution fully settled. Cancellation is
+   * deliberately stricter here than for scheduling: memory consumers must not
+   * observe a cancelled run whose abort-ignoring harness may still append facts.
+   */
+  function isStableTerminalState(state: OrdinaryRunState): boolean {
+    return isTerminal(state) &&
+      state.pendingToolRound === undefined &&
+      !state.toolCalls.some((result) => result.status === "approval_required") &&
+      !acceptedToolResults.has(state.runId) &&
+      !approvalReservations.has(state.runId) &&
+      !continuations.has(state.runId) &&
+      !controllers.has(state.runId) &&
+      !executions.has(state.runId);
+  }
+
+  function notifyStableTerminal(runId: string): void {
+    const document = documents.get(runId);
+    if (document === undefined || !isStableTerminalState(document.state)) return;
+    for (const listener of [...stableTerminalListeners]) {
+      try {
+        listener(runId);
+      } catch {
+        // A memory or audit consumer cannot roll back committed Ordinary facts.
+      }
+    }
+  }
+
+  function projectStableTerminalRunFacts(
+    document: OrdinaryRunSnapshotDocument,
+  ): OrdinaryStableTerminalRunFacts {
+    const state = document.state;
+    const status = state.status;
+    if (status.kind !== "completed" && status.kind !== "failed" &&
+        status.kind !== "cancelled" && status.kind !== "blocked") {
+      throw new OrdinaryFeatureError(
+        "ordinary_run_state_conflict",
+        `Ordinary run ${state.runId} is not terminal`,
+      );
+    }
+    return clone({
+      runId: state.runId,
+      sourceRevision: document.revision,
+      turn: state.turn,
+      userMessage: state.input.userMessage,
+      taskContextRefs: (state.input.taskSoil?.contextRefs ?? []).map((contextRef) => contextRef.ref),
+      workspaceRoot: state.birth.capabilitySnapshot.workspace.workspaceDirectory,
+      workspaceSelection: state.birth.workspaceSelection ?? "default",
+      executionStarted: state.timeline.some((event) => event.type === "run.started"),
+      toolFacts: state.toolCalls
+        .filter((result): result is ToolCallResult & { readonly status: "completed" | "failed" | "cancelled" } =>
+          result.status === "completed" || result.status === "failed" || result.status === "cancelled")
+        .map((result) => ({
+          toolFactId: toolCallFactId(result),
+          ...(result.parentToolCallFactId === undefined ? {} : { parentToolFactId: result.parentToolCallFactId }),
+          toolName: result.toolName,
+          status: result.status,
+          durationMs: result.durationMs,
+          ...(result.error === undefined ? {} : {
+            error: {
+              ...(result.errorDomain === undefined ? {} : { domain: result.errorDomain }),
+              ...(typeof result.errorFacts?.code === "string" ? { code: result.errorFacts.code } : {}),
+              message: result.error,
+            },
+          }),
+        })),
+      status,
+      createdAt: state.timestamps.createdAt,
+      terminalAt: state.timestamps.terminalAt!,
+    });
+  }
+
   function isSchedulingBarrierCleared(state: OrdinaryRunState): boolean {
     if (!isTerminal(state) || state.pendingToolRound !== undefined ||
         approvalReservations.has(state.runId) || continuations.has(state.runId) ||
@@ -938,6 +1013,7 @@ export function createOrdinaryAgentFeature(input: {
     const postExecution = operation.then(() => undefined, () => undefined).then(async () => {
       if (executions.get(runId) === operation) executions.delete(runId);
       await activateSuccessor(runId);
+      notifyStableTerminal(runId);
     });
     trackPostExecutionTask(postExecution);
   }
@@ -1272,6 +1348,7 @@ export function createOrdinaryAgentFeature(input: {
       if (sessionFinalizationPending.has(runId)) {
         await finalizeExecutionSession(runId, document.state, document.state.status.kind !== "completed");
         await activateSuccessor(runId);
+        notifyStableTerminal(runId);
       }
       return clone(document.state);
     }
@@ -1308,6 +1385,7 @@ export function createOrdinaryAgentFeature(input: {
     const stillHasLiveExecution = controllers.has(runId) || executions.has(runId) || approvalReservations.has(runId);
     if (!stillHasLiveExecution) await settleExecution(runId);
     await activateSuccessor(runId);
+    notifyStableTerminal(runId);
     const settled = await load(runId);
     return settled === undefined ? cancellation.state : clone(settled.state);
   }
@@ -1378,6 +1456,7 @@ export function createOrdinaryAgentFeature(input: {
           message: "The live confirmation continuation is no longer available.",
       });
       await activateSuccessor(ownerRunId);
+      notifyStableTerminal(ownerRunId);
       return blocked;
     }
     const operation = (async () => {
@@ -1471,6 +1550,14 @@ export function createOrdinaryAgentFeature(input: {
         });
         return clone(views.slice(0, Math.max(0, Math.floor(limit))));
       },
+      async getStableTerminalRunFacts(runId) {
+        // Startup reconciliation must finish first so recovered runs already
+        // closed their lost continuations, pending tool rounds and approvals.
+        await readyPromise;
+        const document = await load(runId);
+        if (document === undefined || !isStableTerminalState(document.state)) return undefined;
+        return projectStableTerminalRunFacts(document);
+      },
     },
     events: {
       async replay(runId, cursor) {
@@ -1505,6 +1592,13 @@ export function createOrdinaryAgentFeature(input: {
           if (runListeners.size === 0) listeners.delete(runId);
         };
       },
+      subscribeStableTerminalRuns(listener) {
+        assertLive();
+        stableTerminalListeners.add(listener);
+        return () => {
+          stableTerminalListeners.delete(listener);
+        };
+      },
     },
     async release() {
       if (releasePromise !== undefined) return releasePromise;
@@ -1536,6 +1630,7 @@ export function createOrdinaryAgentFeature(input: {
     await releaseContinuations();
     await finalizeRemainingSessions();
     listeners.clear();
+    stableTerminalListeners.clear();
     activityStreams.clear();
     activeModelRequestIds.clear();
     reasoningBuffers.clear();

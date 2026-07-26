@@ -512,7 +512,7 @@ function createGovernanceView(input: RunObservationSnapshotInput): RunObservatio
     status: input.pathBias !== undefined ? "completed" : input.fruit !== undefined ? "in_progress" : "not_started",
     fruitId: input.fruit?.id,
     fruitStatus: input.fruit?.governanceStatus,
-    runMemoryId: input.runMemory?.id,
+    pathMemoryId: input.pathMemoryId,
     experienceCandidateId: input.experienceCandidate?.id,
     pathBiasId: input.pathBias?.id,
   };
@@ -520,12 +520,12 @@ function createGovernanceView(input: RunObservationSnapshotInput): RunObservatio
 
 function createSoilReturnStubView(input: RunObservationSnapshotInput): RunObservationSoilReturnStubView {
   const hasReturnCandidate =
-    input.runMemory !== undefined || input.experienceCandidate !== undefined || input.pathBias !== undefined;
+    input.pathMemoryId !== undefined || input.experienceCandidate !== undefined || input.pathBias !== undefined;
   return {
     status: hasReturnCandidate ? "completed" : "not_started",
     summary:
       "V0.4 exposes governed return candidates as read-model refs only; no persistent Soil asset store exists yet.",
-    runMemoryId: input.runMemory?.id,
+    pathMemoryId: input.pathMemoryId,
     experienceCandidateId: input.experienceCandidate?.id,
     pathBiasId: input.pathBias?.id,
     persistedSoilAssetRefs: [],

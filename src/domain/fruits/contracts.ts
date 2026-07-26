@@ -1,28 +1,7 @@
-export type RunMemory = {
-  id: string;
-  sourceGoalId: string;
-  directionHandoffId: string;
-  directionHandoffVersion: number;
-  growthPlanId: string;
-  nutrientRequestIds: string[];
-  nutrientPatchIds: string[];
-  growthPlanRevisionIds: string[];
-  sourceTaskIds: string[];
-  sourceAgentIds: string[];
-  artifactIds: string[];
-  verificationIds: string[];
-  actualPath: string[];
-  deviations: string[];
-  successPatterns: string[];
-  failurePatterns: string[];
-  reusableSignals: string[];
-  riskNotes: string[];
-  createdAt: string;
-};
-
 export type ExperienceCandidate = {
   id: string;
-  sourceRunMemoryId: string;
+  /** PathMemory (ADR-0032) is the only run-level source for future candidates. */
+  sourcePathMemoryId: string;
   appliesToGoalTypes: string[];
   reusablePattern: string;
   preconditions: string[];

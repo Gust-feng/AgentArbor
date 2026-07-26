@@ -741,6 +741,140 @@ test("feature release aborts live execution and releases its owned resources", a
   assert.deepEqual(order, ["abort", "finalize"]);
 });
 
+test("stable terminal facts appear only after terminal commit and notify subscribers", async (t) => {
+  const run = await fixture(t, { execute: async (input) => completedOutcome(input, "stable done", run.sessions) });
+  const notified: string[] = [];
+  const unsubscribe = run.feature.events.subscribeStableTerminalRuns((runId) => notified.push(runId));
+  t.after(unsubscribe);
+
+  assert.equal(await run.feature.queries.getStableTerminalRunFacts("stable-facts"), undefined);
+  await run.feature.commands.start(startInput("stable-facts"));
+  await waitForStatus(run.feature, "stable-facts", "completed");
+  const deadline = Date.now() + 5_000;
+  while (notified.length === 0 && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.deepEqual(notified, ["stable-facts"]);
+
+  const facts = await run.feature.queries.getStableTerminalRunFacts("stable-facts");
+  assert.notEqual(facts, undefined);
+  assert.equal(facts?.runId, "stable-facts");
+  assert.equal(facts?.status.kind, "completed");
+  assert.equal(facts?.userMessage, "stable-facts");
+  assert.equal(facts?.executionStarted, true);
+  assert.equal(typeof facts?.terminalAt, "string");
+  assert.equal(typeof facts?.sourceRevision, "number");
+  assert.deepEqual(facts?.toolFacts, []);
+  assert.equal("input" in (facts ?? {}), false);
+});
+
+test("cancelled run exposes stable facts only after accepted tool results settle", async (t) => {
+  const gate = createGate();
+  let releaseToolResult!: () => void;
+  const toolResultGate = new Promise<void>((resolve) => { releaseToolResult = resolve; });
+  const run = await fixture(t, {
+    async execute(input) {
+      const session = await prepareSession(input, run.sessions);
+      gate.enter();
+      await waitForAbort(input.abortSignal);
+      // The already accepted tool finishes after cancellation was requested.
+      await toolResultGate;
+      const late = completedTool("late-tool", "late.txt");
+      await input.onToolResult?.(late);
+      return { status: "cancelled", reason: String(input.abortSignal.reason), session, toolCalls: [late], usage: {} };
+    },
+  });
+  await run.feature.commands.start(startInput("stable-cancel"));
+  await gate.entered;
+
+  const cancellation = run.feature.commands.cancel("stable-cancel", "cancelled_by_user");
+  releaseToolResult();
+  await cancellation;
+  await waitForStableTerminalFacts(run.feature, "stable-cancel");
+  const facts = await run.feature.queries.getStableTerminalRunFacts("stable-cancel");
+  assert.equal(facts?.status.kind, "cancelled");
+  assert.equal(facts?.toolFacts.length, 1);
+  assert.equal(facts?.toolFacts[0]?.toolName, "read");
+  assert.equal(facts?.toolFacts[0]?.status, "completed");
+  assert.equal("output" in (facts?.toolFacts[0] ?? {}), false);
+});
+
+test("restart reconciliation makes recovered blocked runs stable and readable", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-stable-restart-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const sessions = new SessionHarness();
+  const sessionRef = ordinaryAgentSessionRef();
+  sessions.ensure(sessionRef);
+  const recordedAt = clock();
+  let running = createInitialOrdinaryRunState({
+    runId: "stable-lost-run",
+    sessionRef,
+    turn: ordinaryRunTurn("stable-lost-run"),
+    runInput: { userMessage: "interrupted work" },
+    birth: ordinaryRunBirth(),
+    recordedAt: recordedAt(),
+    eventId: "lost-created",
+  });
+  running = transitionOrdinaryRun({ state: running, transition: { type: "start" }, recordedAt: recordedAt(), eventId: "lost-started" });
+  await repository.save(running, 0);
+  await controls.save({
+    conversationId: running.turn.conversationId,
+    createdAt: running.timestamps.createdAt,
+    sessionRef,
+  }, 0, running.timestamps.createdAt);
+
+  const notified: string[] = [];
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: controls,
+    sessionRepository: sessions,
+    execution: { async execute() { throw new Error("recovered run must not re-execute"); } },
+    now: clock("2026-01-01T00:01:00.000Z"),
+    idFactory: ids(80),
+  });
+  restarted.events.subscribeStableTerminalRuns((runId) => notified.push(runId));
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  await waitForStatus(restarted, "stable-lost-run", "blocked");
+  const facts = await waitForStableTerminalFacts(restarted, "stable-lost-run");
+  assert.equal(facts.status.kind, "blocked");
+  assert.equal(facts.status.kind === "blocked" ? facts.status.reason.code : undefined, "execution_continuation_lost");
+  assert.equal(facts.executionStarted, true);
+});
+
+test("listRuns plus stable facts reconciliation view skips runs that are not yet stable", async (t) => {
+  const gate = createGate();
+  const run = await fixture(t, {
+    async execute(input) {
+      const session = await prepareSession(input, run.sessions);
+      gate.enter();
+      await waitForAbort(input.abortSignal);
+      return { status: "cancelled", reason: String(input.abortSignal.reason), session, toolCalls: [], usage: {} };
+    },
+  });
+  await run.feature.commands.start(startInput("unstable-live"));
+  await gate.entered;
+  const summaries = await run.feature.queries.listRuns(Number.MAX_SAFE_INTEGER);
+  assert.equal(summaries.some((summary) => summary.runId === "unstable-live"), true);
+  assert.equal(await run.feature.queries.getStableTerminalRunFacts("unstable-live"), undefined);
+  await run.feature.commands.cancel("unstable-live");
+  await waitForStableTerminalFacts(run.feature, "unstable-live");
+});
+
+async function waitForStableTerminalFacts(
+  feature: ReturnType<typeof createOrdinaryAgentFeature>,
+  runId: string,
+): Promise<NonNullable<Awaited<ReturnType<ReturnType<typeof createOrdinaryAgentFeature>["queries"]["getStableTerminalRunFacts"]>>>> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const facts = await feature.queries.getStableTerminalRunFacts(runId);
+    if (facts !== undefined) return facts;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error(`Timed out waiting for stable terminal facts of ${runId}`);
+}
+
 async function fixture(t: test.TestContext, execution: OrdinaryExecutionPort) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-feature-"));
   const sessions = new SessionHarness();

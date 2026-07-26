@@ -410,6 +410,42 @@ export type SubmitOrdinaryTurnResult = {
   readonly run: OrdinaryRunState;
 };
 
+/**
+ * Narrow public projection of one run whose terminal facts are stable: the
+ * terminal snapshot and every accepted tool result are durably persisted and
+ * the live execution has settled. This is an Ordinary-owned source contract
+ * for read-only consumers such as PathMemory capture or audits.
+ */
+export type OrdinaryStableTerminalRunFacts = {
+  readonly runId: string;
+  /** Persisted snapshot revision backing these facts. */
+  readonly sourceRevision: number;
+  readonly turn: OrdinaryRunTurn;
+  readonly userMessage: string;
+  readonly taskContextRefs: readonly string[];
+  readonly workspaceRoot: string;
+  readonly workspaceSelection: "default" | "explicit";
+  readonly executionStarted: boolean;
+  readonly toolFacts: readonly {
+    readonly toolFactId: string;
+    readonly parentToolFactId?: string;
+    readonly toolName: string;
+    readonly status: "completed" | "failed" | "cancelled";
+    readonly durationMs: number;
+    readonly error?: {
+      readonly domain?: string;
+      readonly code?: string;
+      readonly message: string;
+    };
+  }[];
+  readonly status: Extract<
+    OrdinaryRunStatus,
+    { readonly kind: "completed" | "failed" | "cancelled" | "blocked" }
+  >;
+  readonly createdAt: string;
+  readonly terminalAt: string;
+};
+
 export interface OrdinaryAgentFeature {
   readonly commands: {
     start(input: StartOrdinaryRunInput): Promise<OrdinaryRunState>;
@@ -426,10 +462,14 @@ export interface OrdinaryAgentFeature {
     listRuns(limit?: number): Promise<readonly OrdinaryRunSummary[]>;
     getConversation(conversationId: string): Promise<OrdinaryConversationReadModel | undefined>;
     listConversations(limit?: number): Promise<readonly OrdinaryConversationReadModel[]>;
+    /** Returns undefined until the run's terminal facts are durably settled. */
+    getStableTerminalRunFacts(runId: string): Promise<OrdinaryStableTerminalRunFacts | undefined>;
   };
   readonly events: {
     replay(runId: string, cursor?: OrdinaryRunActivityCursor): Promise<OrdinaryRunActivityReplay | undefined>;
     subscribe(runId: string, listener: (activity: OrdinaryRunActivity) => void): () => void;
+    /** Notifies once terminal facts are stable; the same run may notify again and consumers must be idempotent. */
+    subscribeStableTerminalRuns(listener: (runId: string) => void): () => void;
   };
   release(): Promise<void>;
 }

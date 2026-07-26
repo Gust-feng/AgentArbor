@@ -5,7 +5,7 @@ import type {
 } from "../common.js";
 import type { DirectionHandoffPackage } from "../agentarbor/direction-handoff-package/contracts.js";
 import type { GrowthPlan, TaskSpec, WorkflowIR } from "../aboveground/contracts.js";
-import type { ExperienceCandidate, FruitCandidate, PathBias, RunMemory } from "../fruits/contracts.js";
+import type { ExperienceCandidate, FruitCandidate, PathBias } from "../fruits/contracts.js";
 import type { VerificationReport } from "../governance/contracts.js";
 import type { CandidateComparison } from "../underground/candidate-comparison-contracts.js";
 import type {
@@ -616,7 +616,7 @@ export type RunObservationGovernanceView = {
   readonly status: ObservationStatus;
   readonly fruitId?: string;
   readonly fruitStatus?: FruitCandidate["governanceStatus"];
-  readonly runMemoryId?: string;
+  readonly pathMemoryId?: string;
   readonly experienceCandidateId?: string;
   readonly pathBiasId?: string;
 };
@@ -624,7 +624,7 @@ export type RunObservationGovernanceView = {
 export type RunObservationSoilReturnStubView = {
   readonly status: ObservationStatus;
   readonly summary: string;
-  readonly runMemoryId?: string;
+  readonly pathMemoryId?: string;
   readonly experienceCandidateId?: string;
   readonly pathBiasId?: string;
   readonly persistedSoilAssetRefs: readonly string[];
@@ -642,7 +642,8 @@ export type RunObservationSnapshotInput = {
   artifactRefs?: readonly ArtifactRef[];
   verification?: VerificationReport;
   fruit?: FruitCandidate;
-  runMemory?: RunMemory;
+  /** Deferred Multi-Agent observation may reference a captured PathMemory by id only. */
+  pathMemoryId?: string;
   experienceCandidate?: ExperienceCandidate;
   pathBias?: PathBias;
 };

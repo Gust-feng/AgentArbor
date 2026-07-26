@@ -5,6 +5,7 @@ import {
   type ModelMessage,
 } from "../../domain/intelligence/index.js";
 import { nowIso } from "../../kernel/id.js";
+import { isNodeError, toPersistedJsonShape } from "../../kernel/values/index.js";
 
 export const DEEP_CHILD_LOOP_CONTEXT_REF_PREFIX = "child_loop_context";
 
@@ -39,20 +40,20 @@ export class InMemoryDeepChildLoopContextStore implements DeepChildLoopContextSt
     assertCurrentContextRecord(record);
     const key = contextKey(record.runId, record.contextRef);
     const stored = latestContextRecord(this.records.get(key), record);
-    this.records.set(key, clone(stored));
-    return clone(stored);
+    this.records.set(key, toPersistedJsonShape(stored));
+    return toPersistedJsonShape(stored);
   }
 
   async getByRef(runId: string, contextRef: string): Promise<DeepChildLoopContextRecord | undefined> {
     const record = this.records.get(contextKey(runId, contextRef));
-    return record === undefined ? undefined : clone(record);
+    return record === undefined ? undefined : toPersistedJsonShape(record);
   }
 
   async listForChild(runId: string, childRunId: string): Promise<readonly DeepChildLoopContextRecord[]> {
     return [...this.records.values()]
       .filter((record) => record.runId === runId && record.childRunId === childRunId)
       .sort(compareRecords)
-      .map(clone);
+      .map(toPersistedJsonShape);
   }
 
   async deleteForRun(runId: string): Promise<void> {
@@ -73,7 +74,7 @@ export function createFileSystemDeepChildLoopContextStore(runtimeHome: string): 
       const existing = await readCurrentContextRecord(filePath, record.runId, record.contextRef);
       const stored = latestContextRecord(existing, record);
       await writeJsonFile(filePath, stored);
-      return clone(stored);
+      return toPersistedJsonShape(stored);
     },
 
     async getByRef(runId: string, contextRef: string): Promise<DeepChildLoopContextRecord | undefined> {
@@ -204,9 +205,6 @@ function safeFileName(value: string): string {
   return encodeURIComponent(value);
 }
 
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { code?: string }).code === code;
-}
 
 function cloneMessages(messages: readonly ModelMessage[]): readonly ModelMessage[] {
   return messages.map((message) => {
@@ -227,6 +225,3 @@ function cloneMessages(messages: readonly ModelMessage[]): readonly ModelMessage
   });
 }
 
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}

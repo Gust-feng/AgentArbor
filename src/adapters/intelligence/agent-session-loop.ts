@@ -61,6 +61,7 @@ import {
 import { modelFailureKindFromError } from "../../kernel/intelligence/failures.js";
 import { compactSessionContextIfNeeded } from "./session-context-compaction.js";
 import type { ModelProviderPayloadTransformer } from "./model-provider-binding.js";
+import { errorMessage } from "../../kernel/values/index.js";
 
 export type AgentSessionLoopOptions = {
   readonly executionEnvironment: ExecutionEnv;
@@ -2428,9 +2429,6 @@ function sameIds(expected: readonly string[], actual: readonly string[]): boolea
   return actualIds.size === actual.length && expected.every((id) => actualIds.has(id));
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException("Agent loop was cancelled.", "AbortError");

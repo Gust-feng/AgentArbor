@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream, promises as fs, type BigIntStats } from "node:fs";
 import path from "node:path";
+import { isFileNotFound } from "../../kernel/values/index.js";
 import { StringDecoder } from "node:string_decoder";
 import type { SkillRuntimeResourceType } from "./skill-loader.js";
 
@@ -483,6 +484,3 @@ function isInsideOrEqual(basePath: string, candidatePath: string): boolean {
   return relative === "" || (relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
-}

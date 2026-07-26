@@ -69,6 +69,7 @@ import {
   parseDeepRunStartRequest,
 } from "./request-parsers.js";
 import { parseDeepRunListLimit } from "./deep-route-helpers.js";
+import { errorMessage } from "../../kernel/values/index.js";
 
 const DEEP_STREAM_HEARTBEAT_INTERVAL_MS = 15_000;
 
@@ -916,9 +917,3 @@ async function resolveDeepAiMode(
   return config.defaultAiMode;
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}

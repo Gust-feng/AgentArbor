@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isFileNotFound } from "../../kernel/values/index.js";
 import {
   normalizeSubAgentFrontmatter,
   parseSubAgentMarkdown,
@@ -286,9 +287,6 @@ function errorMessage(error: Error): string {
   return error.message.trim() || error.name;
 }
 
-function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
-}
 
 function assertSubAgentDefinitionHashesMatch(
   subAgent: SubAgentDefinition,

@@ -29,6 +29,7 @@ import type {
   ExploreDeepChildFactory,
 } from "./deep-child-scheduler-contracts.js";
 import { DeepTaskBoard } from "./deep-task-board.js";
+import { errorMessage } from "../../kernel/values/index.js";
 
 /** Raw parent instruction retained by the scheduler until it is consumed or cancelled. */
 export type DeepChildScheduledInstruction = {
@@ -368,9 +369,3 @@ function preserveKnownChildMaterialAfterFollowUpFailure(
   };
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return typeof error === "string" ? error : String(error);
-}

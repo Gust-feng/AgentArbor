@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isFileNotFound } from "../../kernel/values/index.js";
 import {
   normalizeSkillFrontmatter,
   parseSkillMarkdown,
@@ -720,6 +721,3 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
-}

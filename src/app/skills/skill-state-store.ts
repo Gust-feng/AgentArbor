@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isFileNotFound } from "../../kernel/values/index.js";
 import { z } from "zod";
 import type { SkillDefinition } from "../../domain/basic-agent/index.js";
 import { nowIso } from "../../kernel/id.js";
@@ -164,6 +165,3 @@ const SKILL_STATE_FILE_SCHEMA = z.object({
   }).strict()),
 }).strict();
 
-function isFileNotFound(error: unknown): boolean {
-  return typeof error === "object" && error !== null && (error as { code?: string }).code === "ENOENT";
-}

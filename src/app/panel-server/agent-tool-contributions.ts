@@ -1,4 +1,5 @@
 import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
+import { createNoteWriteTool, type AgentNotesFeature } from "../agent-notes/index.js";
 import type {
   AgentToolProviderFetch,
   AgentToolRegistryContribution,
@@ -11,11 +12,27 @@ export function createHostAgentToolContributions(input: {
   readonly runtime: AgentToolRuntimeContext;
   readonly resources: AgentHostRunResources;
   readonly providerFetch?: AgentToolProviderFetch;
+  /** Models decide when and what to remember; Host only contributes the note tool. */
+  readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
 }): readonly AgentToolRegistryContribution[] {
-  return [createResearchToolRegistryContribution({
+  const contributions: AgentToolRegistryContribution[] = [createResearchToolRegistryContribution({
     constraints: input.runtime.constraints,
     env: input.resources.aiEnvironment,
     fetch: input.providerFetch,
     workspaceRoot: input.resources.workspaceRoot,
   })];
+  if (input.agentNotes !== undefined) {
+    const agentNotes = input.agentNotes;
+    contributions.push((register) => {
+      register({
+        executor: createNoteWriteTool({
+          notes: agentNotes,
+          workspaceRoot: input.resources.workspaceRoot,
+        }),
+        scopes: ["desktop-basic"],
+        enabledByDefault: true,
+      });
+    });
+  }
+  return contributions;
 }

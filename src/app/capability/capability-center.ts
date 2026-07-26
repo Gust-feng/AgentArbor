@@ -36,7 +36,7 @@ import {
   createAgentToolRegistry,
   type ToolRegistryFetchLike,
 } from "../tool-center/builtin-tool-runtime.js";
-import { applyAgentToolRegistryContributions } from "../tool-center/factory.js";
+import { applyAgentToolRegistryContributions, type AgentToolRegistryContribution } from "../tool-center/factory.js";
 import { normalizeWorkspaceDirectory } from "../config-center/workspace-settings.js";
 import {
   ToolRegistry,
@@ -50,6 +50,7 @@ import { discoverSubAgents, normalizeSubAgentRoots, type SubAgentDiscoveryOption
 import { createSubAgentAgentToolCatalogContribution } from "../sub-agents/sub-agent-agent-tools.js";
 import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
+import { createNoteWriteTool, type AgentNotesFeature } from "../agent-notes/index.js";
 import { createMcpToolRegistryContribution } from "../mcp/mcp-tool-contribution.js";
 import { toolCatalogContractHash } from "./tool-definition-contract.js";
 
@@ -71,6 +72,8 @@ export type CapabilityCenterOptions = {
   readonly fetch?: ToolRegistryFetchLike;
   readonly playwrightAvailable?: boolean;
   readonly toolOutputStore?: ToolOutputStore;
+  /** Model-owned memory is exposed through NoteWrite and must be present in the frozen run catalog. */
+  readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
   readonly resolveModelCapabilities?: typeof resolveModelCapabilities;
 };
 
@@ -222,13 +225,25 @@ export class CapabilityCenter {
     const registry = new ToolRegistry({
       toolCenter: { outputStore: this.options.toolOutputStore },
     });
-    applyAgentToolRegistryContributions(registry, { toolStates }, [
+    const agentNotes = this.options.agentNotes;
+    const hostContributions: AgentToolRegistryContribution[] = [
       createResearchToolRegistryContribution({
         env,
         fetch: this.options.fetch,
         workspaceRoot: workspace.workspaceDirectory,
       }),
-    ]);
+      ...(agentNotes === undefined ? [] : [((register) => {
+        register({
+          executor: createNoteWriteTool({
+            notes: agentNotes,
+            workspaceRoot: workspace.workspaceDirectory,
+          }),
+          scopes: ["desktop-basic"],
+          enabledByDefault: true,
+        });
+      }) as AgentToolRegistryContribution]),
+    ];
+    applyAgentToolRegistryContributions(registry, { toolStates }, hostContributions);
     createAgentToolRegistry(toolRegistryOptions, registry);
     if (mcpToolProvider !== undefined) {
       applyAgentToolRegistryContributions(registry, { toolStates }, [

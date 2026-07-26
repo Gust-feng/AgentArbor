@@ -33,7 +33,7 @@ test("runtime AgentDefinition catalog owns the default desktop definition and ex
   });
 
   assert.equal(catalog.desktopAgentDefinition, DESKTOP_ROOT_AGENT);
-  assert.equal(runAgentDefinitionRef(catalog.desktopAgentDefinition).promptVersion, "v4");
+  assert.equal(runAgentDefinitionRef(catalog.desktopAgentDefinition).promptVersion, "v5");
   assert.equal(catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT)), DESKTOP_ROOT_AGENT);
   assert.equal(
     catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V3)),

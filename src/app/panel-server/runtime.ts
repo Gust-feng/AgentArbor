@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
@@ -53,6 +54,11 @@ import {
   type ExperienceCandidateFeature,
 } from "../experience-candidate/index.js";
 import {
+  createAgentNotesFeature,
+  createFileSystemAgentNoteRepository,
+  type AgentNotesFeature,
+} from "../agent-notes/index.js";
+import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
   type ProcessRegistryCleanupResult,
@@ -103,6 +109,7 @@ export type PanelRuntime = {
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
+  readonly agentNotesFeature: AgentNotesFeature;
   readonly pathMemoryFeature: PathMemoryFeature;
   readonly experienceCandidateFeature: ExperienceCandidateFeature;
   readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
@@ -208,6 +215,10 @@ function assemblePanelRuntime(input: {
   const fileMutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
   const toolOutputStore = new FileSystemToolOutputStore(resolveToolEvidenceRoot(input));
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
+  const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
+  const agentNotesFeature = createAgentNotesFeature({
+    repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
+  });
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
     skillRoots: input.skillRoots,
@@ -217,8 +228,8 @@ function assemblePanelRuntime(input: {
     resolveSubAgentRoots: input.resolveSubAgentRoots,
     fetch: input.providerFetch,
     toolOutputStore,
+    agentNotes: agentNotesFeature,
   });
-  const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
   const agentSessionEnvironment = new NodeExecutionEnv({ cwd: ordinaryRuntimeRoot });
   const agentSessionRepository = new FileSystemAgentSessionRepository({
     fileSystem: agentSessionEnvironment,
@@ -256,6 +267,7 @@ function assemblePanelRuntime(input: {
           }
         : { routingMode: "keyword", abortSignal: context.abortSignal },
     ),
+    agentNotes: agentNotesFeature,
     resolveSubAgentRoots: (workspaceRoot) =>
       input.resolveSubAgentRoots?.({ workspaceDirectory: workspaceRoot }) ?? input.subAgentRoots,
   });
@@ -320,6 +332,7 @@ function assemblePanelRuntime(input: {
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
     ordinaryAgentFeature,
+    agentNotesFeature,
     pathMemoryFeature,
     experienceCandidateFeature,
     ordinaryPathMemoryConnector,
@@ -352,6 +365,18 @@ function resolvePathMemoryRoot(input: {
     throw new Error("PathMemory requires a runtime directory.");
   }
   return path.join(runtimeHome, "path-memory");
+}
+
+function resolveAgentNotesRoot(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  const runtimeHome = input.runtimePaths?.runtimeHome ??
+    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
+  if (runtimeHome === undefined) {
+    throw new Error("Agent notes require a runtime directory.");
+  }
+  return path.join(runtimeHome, "agent-notes");
 }
 
 function resolveExperienceCandidateRoot(input: {
@@ -409,7 +434,13 @@ async function prepareOrdinaryRunBirth(
     baseCapabilitySnapshot,
     input.reasoningEffort,
   );
-  const definition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
+  const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
+  const workspaceRoot = input.workspaceDirectory ?? process.cwd();
+  const noteInjection = await runtime.agentNotesFeature.queries.startupInjection(workspaceRoot);
+  // The injected note is frozen with this run's definition. This preserves the
+  // existing definition/hash invariant: a restarted run uses exactly the notes
+  // it saw at birth, while the next run sees any later model-written revision.
+  const definition = definitionWithAgentNotes(configuredDefinition, noteInjection);
   const agentDefinitionRef = runAgentDefinitionRef(definition);
   runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), definition);
   return {
@@ -422,6 +453,24 @@ async function prepareOrdinaryRunBirth(
     workspaceSelection: input.workspaceDirectory === undefined ? "default" : "explicit",
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
+  };
+}
+
+function definitionWithAgentNotes(
+  definition: AgentDefinition,
+  noteInjection: string | undefined,
+): AgentDefinition {
+  if (noteInjection === undefined) return definition;
+  const systemPrompt = `${definition.prompt.systemPrompt}\n\n<agent_notes>\n${noteInjection}\n</agent_notes>`;
+  const fingerprint = createHash("sha256").update(systemPrompt, "utf8").digest("hex").slice(0, 12);
+  return {
+    ...definition,
+    prompt: {
+      ...definition.prompt,
+      promptRef: `${definition.prompt.promptRef}:agent-notes`,
+      version: `${definition.prompt.version}:notes-${fingerprint}`,
+      systemPrompt,
+    },
   };
 }
 

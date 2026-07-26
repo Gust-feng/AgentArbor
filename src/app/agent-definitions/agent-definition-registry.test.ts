@@ -61,7 +61,7 @@ test("AgentDefinitionRegistry resolves current and legacy desktop root prompt ve
   const legacyV1Ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1);
   const legacyRef = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1);
 
-  assert.equal(currentRef.promptVersion, "v4");
+  assert.equal(currentRef.promptVersion, "v5");
   assert.equal(legacyV3Ref.promptVersion, "v3");
   assert.equal(legacyV2Ref.promptVersion, "v2");
   assert.equal(legacyV1Ref.promptVersion, "v1");

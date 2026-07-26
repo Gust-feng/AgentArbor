@@ -33,6 +33,27 @@ test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary c
   }
 });
 
+test("Panel capability snapshots freeze NoteWrite so the model can actually use agent notes", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-agent-notes-catalog-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory });
+    const snapshot = await runtime.capabilityCenter.snapshot();
+    const noteWrite = snapshot.toolCatalog.tools.find((tool) => tool.name === "NoteWrite");
+
+    assert.notEqual(noteWrite, undefined);
+    assert.equal(noteWrite?.scopes.includes("desktop-basic"), true);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("NoteWrite"), true);
+  } finally {
+    await runtime?.ordinaryAgentFeature.release();
+    await runtime?.ordinaryPathMemoryConnector.release();
+    await runtime?.pathMemoryFeature.release();
+    await runtime?.releaseAgentSessionStorage();
+    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test("Panel composition wires Ordinary terminal runs into durable PathMemory records", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-path-memory-wiring-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
@@ -77,6 +98,43 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
     await runtime?.releaseAgentSessionStorage();
     if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
     await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
+});
+
+test("Panel composition freezes agent-written notes into the next Ordinary run instructions", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-agent-notes-runtime-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory });
+    const workspace = path.join(directory, "project");
+    await runtime.agentNotesFeature.commands.write({ kind: "global" }, "- Reply in Chinese.");
+    await runtime.agentNotesFeature.commands.write(
+      { kind: "workspace", workspaceRoot: workspace },
+      "- Build this project with pnpm build.",
+    );
+
+    const birth = await runtime.prepareOrdinaryRunBirth({ goal: "check notes", workspaceDirectory: workspace });
+
+    assert.match(birth.instructions, /<agent_notes>/u);
+    assert.match(birth.instructions, /Reply in Chinese/u);
+    assert.match(birth.instructions, /Build this project with pnpm build/u);
+    assert.match(birth.agentDefinitionRef.promptRef, /agent-notes/u);
+    assert.match(birth.agentDefinitionRef.promptVersion, /notes-/u);
+
+    // Notes are scoped: a different workspace sees only the global notebook.
+    const otherBirth = await runtime.prepareOrdinaryRunBirth({
+      goal: "check other notes",
+      workspaceDirectory: path.join(directory, "other-project"),
+    });
+    assert.match(otherBirth.instructions, /Reply in Chinese/u);
+    assert.doesNotMatch(otherBirth.instructions, /pnpm build/u);
+  } finally {
+    await runtime?.ordinaryAgentFeature.release();
+    await runtime?.ordinaryPathMemoryConnector.release();
+    await runtime?.pathMemoryFeature.release();
+    await runtime?.releaseAgentSessionStorage();
+    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

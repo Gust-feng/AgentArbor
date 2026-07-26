@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { ordinaryRunResourceUrl } from "./ordinary-run-request.ts";
+import { test } from "vitest";
+import { ordinaryRunResourceUrl } from "./ordinary-run-request";
 
 test("ordinary run requests omit the cursor until the backend issues an opaque token", () => {
   assert.equal(

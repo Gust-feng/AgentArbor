@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../values/index.js";
 import type { ConfirmationRequest } from "../../domain/basic-agent/index.js";
 import type {
   ToolCallRequest,
@@ -151,6 +152,3 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}

@@ -1,3 +1,4 @@
+import { asRecord } from "../../kernel/values/index.js";
 import type { Constraint } from "../../domain/constraints.js";
 import { createTaskSoil, type ReadonlySoilStore, type TaskSoil, type TaskSoilContextRef } from "../../domain/soil/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
@@ -293,12 +294,6 @@ function booleanOrUndefined(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Readonly<Record<string, unknown>>;
-  }
-  return {};
-}
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];

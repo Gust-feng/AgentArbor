@@ -1,3 +1,5 @@
+import { stringOrUndefined } from "../../kernel/values/index.js";
+import { asRecord } from "../../kernel/values/index.js";
 import type {
   InformationAccess,
   InformationAccessStatus,
@@ -407,20 +409,11 @@ function formatSourceList(sources: readonly InformationSourceKind[]): string {
   return sources.join(", ");
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Readonly<Record<string, unknown>>;
-  }
-  return {};
-}
 
 function stringOrFallback(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;

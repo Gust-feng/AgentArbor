@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../kernel/values/index.js";
 import path from "node:path";
 import type { SkillDefinition } from "../../domain/basic-agent/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
@@ -324,9 +325,6 @@ function resourceRelativePathFromSource(skill: SkillDefinition, sourcePath: stri
   return normalizeResourcePathForKey(relativePath);
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function resourceTypeOrUndefined(value: unknown): SkillRuntimeResourceType | undefined {
   return value === "reference" || value === "asset" || value === "script" ? value : undefined;

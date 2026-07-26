@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../kernel/values/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import { asRecord } from "./provider-value-utils.js";
 
@@ -40,9 +41,6 @@ function messageFromPayload(value: unknown): string | undefined {
   );
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function stripSdkStatusPrefix(message: string | undefined, status: number | undefined): string | undefined {
   if (message === undefined) {

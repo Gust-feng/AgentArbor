@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../../kernel/values/index.js";
 import type { ToolExecutor, ToolExecutionContext } from "../../../domain/tools/index.js";
 
 export type FetchLike = (
@@ -547,9 +548,6 @@ function stringOrFallback(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function firstArray(...values: readonly unknown[]): readonly unknown[] {
   for (const value of values) {

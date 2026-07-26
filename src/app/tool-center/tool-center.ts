@@ -1,3 +1,4 @@
+import { asRecord } from "../../kernel/values/index.js";
 import type {
   ToolCallRequest,
   ToolCallResult,
@@ -1434,9 +1435,6 @@ function mergeToolErrorFacts(
   return merged;
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : {};
-}
 
 function compactToolErrorText(value: string, maxLength: number): string {
   const normalized = normalizeToolErrorText(value);

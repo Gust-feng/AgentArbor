@@ -1,3 +1,4 @@
+import { asRecord } from "../values/index.js";
 import type { ModelMessage, ModelResponse } from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
@@ -527,11 +528,6 @@ function compactSerializedJsonPreview(serialized: string, maxChars: number): str
   return `${serialized.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : {};
-}
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;

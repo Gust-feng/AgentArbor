@@ -1,3 +1,4 @@
+import { asRecord } from "../../kernel/values/index.js";
 import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
 
 export function normalizeOpenAIModelRequestSettings(
@@ -136,6 +137,3 @@ function booleanOrUndefined(value: boolean | undefined): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}

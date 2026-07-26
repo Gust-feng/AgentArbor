@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../../kernel/values/index.js";
 import { promises as fs } from "node:fs";
 import type { ToolExecutor, ToolFactValue } from "../../../domain/tools/index.js";
 import {
@@ -657,9 +658,6 @@ function boundedOffset(value: unknown, maxOffset: number): number {
   return Math.min(maxOffset, Math.max(0, positiveInteger(value) ?? 0));
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
 
 function compactRecord(value: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));

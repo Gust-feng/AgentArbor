@@ -1,3 +1,4 @@
+import { stringOrUndefined } from "../../../kernel/values/index.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ModelInputAttachment } from "../../../domain/intelligence/index.js";
@@ -201,6 +202,3 @@ function imageDetailFromUnknown(value: unknown): "auto" | "low" | "high" {
   return value === "low" || value === "high" ? value : "auto";
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}

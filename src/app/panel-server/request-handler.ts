@@ -28,8 +28,15 @@ import {
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
 import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
 import { OrdinaryFeatureError } from "../ordinary-agent/contracts.js";
+import { PathMemoryFeatureError } from "../path-memory/contracts.js";
 import { OrdinaryPanelCursorError } from "./ordinary-agent-panel-projection.js";
 import { handlePanelOrdinaryRoute } from "./ordinary-routes.js";
+import { handlePanelPathMemoryRoute, pathMemoryFeatureHttpError } from "./path-memory-routes.js";
+import { ExperienceCandidateFeatureError } from "../experience-candidate/contracts.js";
+import {
+  experienceCandidateFeatureHttpError,
+  handlePanelExperienceCandidateRoute,
+} from "./experience-candidate-routes.js";
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
 import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
@@ -134,6 +141,14 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         writePanelError(response, ordinaryFeatureHttpError(error));
         return;
       }
+      if (error instanceof PathMemoryFeatureError) {
+        writePanelError(response, pathMemoryFeatureHttpError(error));
+        return;
+      }
+      if (error instanceof ExperienceCandidateFeatureError) {
+        writePanelError(response, experienceCandidateFeatureHttpError(error));
+        return;
+      }
       logUnhandledPanelRequestError(request, error);
       writePanelError(response, new PanelHttpError(500, "panel_internal_error", "面板请求失败。"));
     }).finally(() => {
@@ -235,6 +250,14 @@ async function handlePanelRequest(
     return;
   }
 
+  if (await handlePanelPathMemoryRoute(runtime, request, response, url)) {
+    return;
+  }
+
+  if (await handlePanelExperienceCandidateRoute(runtime, request, response, url)) {
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/skills") {
     writeJson(response, 200, {
       ok: true,
@@ -324,6 +347,12 @@ export async function closePanelServer(
     await cleanupPanelRuntimeOwnedProcesses(runtime);
     await waitForPanelRequestIdle(server, runtime);
     await ordinaryDisposal;
+    // The connector stays subscribed until Ordinary has produced its final
+    // stable terminal facts; memory drain failures are shutdown diagnostics
+    // and never rewrite committed Ordinary terminal state.
+    await runtime.ordinaryPathMemoryConnector.release();
+    await runtime.pathMemoryFeature.release();
+    await runtime.experienceCandidateFeature.release();
     await runtime.releaseAgentSessionStorage();
     if (runtime.toolOutputStore.close !== undefined) {
       await runtime.toolOutputStore.close();
@@ -368,6 +397,14 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
   const cleanupErrors = cleanupResults.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : []
   );
+  const memoryCleanup = await Promise.allSettled([
+    runtime.ordinaryPathMemoryConnector.release()
+      .then(() => runtime.pathMemoryFeature.release())
+      .then(() => runtime.experienceCandidateFeature.release()),
+  ]);
+  cleanupErrors.push(...memoryCleanup.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : []
+  ));
   try {
     await runtime.releaseAgentSessionStorage();
   } catch (error) {

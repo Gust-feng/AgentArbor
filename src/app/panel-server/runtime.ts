@@ -39,6 +39,20 @@ import {
   type OrdinaryRunBirth,
 } from "../ordinary-agent/index.js";
 import {
+  createFileSystemPathMemoryRepository,
+  createPathMemoryFeature,
+  type PathMemoryFeature,
+} from "../path-memory/index.js";
+import {
+  createOrdinaryPathMemoryConnector,
+  type OrdinaryPathMemoryConnector,
+} from "../path-memory/ordinary-path-memory-connector.js";
+import {
+  createExperienceCandidateFeature,
+  createFileSystemExperienceCandidateRepository,
+  type ExperienceCandidateFeature,
+} from "../experience-candidate/index.js";
+import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
   type ProcessRegistryCleanupResult,
@@ -89,6 +103,9 @@ export type PanelRuntime = {
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
+  readonly pathMemoryFeature: PathMemoryFeature;
+  readonly experienceCandidateFeature: ExperienceCandidateFeature;
+  readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
   readonly releaseAgentSessionStorage: () => Promise<void>;
@@ -253,6 +270,26 @@ function assemblePanelRuntime(input: {
     }),
     ...(input.ordinaryAgentExecution === undefined ? {} : { testOnlyAllowSessionlessExecution: true }),
   });
+  const pathMemoryFeature = createPathMemoryFeature({
+    repository: createFileSystemPathMemoryRepository(resolvePathMemoryRoot(input)),
+  });
+  const experienceCandidateFeature = createExperienceCandidateFeature({
+    repository: createFileSystemExperienceCandidateRepository(resolveExperienceCandidateRoot(input)),
+    // Narrow cross-feature port: candidates only reference PathMemory records
+    // that exist at proposal time; no feature object crosses the boundary.
+    pathMemoryLookup: async (memoryId) => await pathMemoryFeature.queries.get(memoryId) !== undefined,
+  });
+  // Wiring adapter only: memory capture failures are diagnostics and never
+  // block or rewrite the user's Ordinary runs.
+  const ordinaryPathMemoryConnector = createOrdinaryPathMemoryConnector({
+    ordinary: ordinaryAgentFeature,
+    pathMemory: pathMemoryFeature,
+    onDiagnostic: (diagnostic) => console.error(
+      `[panel-server] PathMemory ${diagnostic.source} capture failed`,
+      diagnostic.runId,
+      diagnostic.error,
+    ),
+  });
   const runtime: PanelRuntime = {
     isQuiescing: false,
     configCenter: input.configCenter,
@@ -276,6 +313,9 @@ function assemblePanelRuntime(input: {
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
     ordinaryAgentFeature,
+    pathMemoryFeature,
+    experienceCandidateFeature,
+    ordinaryPathMemoryConnector,
     prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
@@ -293,6 +333,30 @@ function resolveOrdinaryRuntimeRoot(input: {
     throw new Error("Ordinary Agent requires a runtime directory.");
   }
   return path.join(runtimeHome, "ordinary-agent");
+}
+
+function resolvePathMemoryRoot(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  const runtimeHome = input.runtimePaths?.runtimeHome ??
+    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
+  if (runtimeHome === undefined) {
+    throw new Error("PathMemory requires a runtime directory.");
+  }
+  return path.join(runtimeHome, "path-memory");
+}
+
+function resolveExperienceCandidateRoot(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  const runtimeHome = input.runtimePaths?.runtimeHome ??
+    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
+  if (runtimeHome === undefined) {
+    throw new Error("ExperienceCandidate requires a runtime directory.");
+  }
+  return path.join(runtimeHome, "experience-candidates");
 }
 
 function resolveToolEvidenceRoot(input: {

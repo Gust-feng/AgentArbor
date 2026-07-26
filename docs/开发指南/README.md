@@ -19,7 +19,9 @@
 9. [普通 Agent 主干开发指南](06-工程实现/09-普通Agent主干开发指南/README.md)
 10. [子 Agent 工具能力开发书](06-工程实现/09-普通Agent主干开发指南/11-子Agent工具能力开发书.md)
 11. [功能模块边界与组合根](06-工程实现/11-功能模块边界与组合根.md)
-12. [共享工具层收敛与重复实现治理](06-工程实现/16-共享工具层收敛与重复实现治理.md)
+12. [路径记忆第一阶段开发方案](06-工程实现/15-路径记忆第一阶段开发方案.md)
+13. [共享工具层收敛与重复实现治理](06-工程实现/16-共享工具层收敛与重复实现治理.md)
+14. [Multi-Agent 源码归档边界](06-工程实现/17-Multi-Agent源码归档边界.md)
 
 ## 一句话定位
 
@@ -46,7 +48,7 @@ AgentArbor 是一个桌面通用 Agent Workbench。用户默认直接使用 Ordi
 - `agent`、`atomic`、`Plan`、`Handoff` 等命名必须匹配真实职责；`atomic` 只用于真正有全成功/全失败、回滚或一致性边界的场景。
 - `AgentTurnRuntime` 仅服务 Deep child，不是 Ordinary 主链；默认稳定测试应使用 fake/stub model loop 验证 AI 路径。
 - reasoningTrace 只保存决策摘要、输入引用、模型/工具引用、不确定性和证据 refs，不保存 raw chain-of-thought。
-- Fruits 不是 Global Soil；Run Memory、Experience Candidate 和候选能力必须经过 Governance Pipeline 才能入土。
+- Fruits 不是 Global Soil；PathMemory、Experience Candidate 和候选能力必须经过 Governance Pipeline 才能入土。
 - Path Bias 只能影响偏好和方案排序，不能覆盖 hard constraint。
 - Codex、OpenCode、Agent Skills 等平台格式是适配层，不是 AgentArbor 产品语义的事实源。
 

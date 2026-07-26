@@ -12,7 +12,7 @@ import {
 
 test("conversation control repository atomically advances v2 metadata around one required Session ref", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-control-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const repository = createFileSystemOrdinaryConversationControlRepository(root);
   const initial = control();
   const first = await repository.save(initial, 0, initial.createdAt);
@@ -40,7 +40,7 @@ test("conversation control repository atomically advances v2 metadata around one
 
 test("conversation control repository rejects missing Session refs and v1 snapshots without migration", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-invalid-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const repository = createFileSystemOrdinaryConversationControlRepository(root);
   const { sessionRef: _sessionRef, ...withoutSession } = control();
   await assert.rejects(repository.save(
@@ -68,7 +68,7 @@ test("conversation control repository rejects missing Session refs and v1 snapsh
 
 test("conversation control repository list isolates incompatible and damaged snapshots", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-list-isolation-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const repository = createFileSystemOrdinaryConversationControlRepository(root);
   const valid = control();
   await repository.save(valid, 0, "2026-01-01T00:00:02.000Z");

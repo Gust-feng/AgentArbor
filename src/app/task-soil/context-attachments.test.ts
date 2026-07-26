@@ -29,7 +29,7 @@ test("context attachment preview creates file refs with bounded file preview", a
     assert.equal(text.includes("sk-context-secret"), true);
     assert.equal(text.includes("Bearer live-token"), true);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -43,6 +43,6 @@ test("context attachment preview rejects outside-workspace refs and accepts toke
     const web = await createContextAttachmentPreview({ workspaceRoot: workspace, raw: { kind: "web", value: "https://example.com/?access_token=abc" } });
     assert.equal(web.ref, "web:https://example.com/?access_token=abc");
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

@@ -7,7 +7,7 @@ import { createPanelRuntime } from "./runtime.js";
 
 test("Panel composition keeps Host-owned tool evidence readable after runtime recreation", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-tool-evidence-"));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const first = createPanelRuntime({ configDirectory: directory });
   const retained = await first.toolOutputStore.retain({
     mediaType: "text/plain",

@@ -167,8 +167,8 @@ test("context attachment table read returns executable row continuation facts", 
     assert.equal(asRecord(secondRows[0]).rowNumber, 3);
     assert.equal((asRecord(secondRows[0]).values as readonly unknown[])[0], "south");
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -219,8 +219,8 @@ test("context attachment table tools read TSV inside selected local project", as
     assert.equal(modelVisible.includes(projectRoot), false);
     assert.equal(modelVisible.includes("local-project:"), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -324,8 +324,8 @@ test("context attachment table tools inspect and read selected XLSX workbook wit
     assert.equal(modelVisible.includes(xlsxFile), false);
     assert.equal(modelVisible.includes("local-file:"), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -395,8 +395,8 @@ test("context attachment XLSX reads fail explicitly for corruption, cancellation
     assert.equal(asRecord(tooLarge.output).reason, "spreadsheet_file_too_large");
     assert.equal(cancelled.status, "cancelled");
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -443,7 +443,7 @@ test("context attachment table tools report unsupported legacy XLS spreadsheet f
     assert.equal(modelVisible.includes(xlsFile), false);
     assert.equal(modelVisible.includes("local-file:"), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

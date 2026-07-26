@@ -39,7 +39,7 @@ const AGENT_TOOL_NAMES = ["Agent", "AgentSpawn"];
 
 test("Ordinary Host resources preserve canonical context and expose mechanical, MCP, Skill, and native Sub-Agent capabilities", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-run-resources-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const imagePath = path.join(root, "screen.png");
   await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   const skillResource = path.join(root, "guide.md");
@@ -263,7 +263,7 @@ test("Ordinary Host resources keep MCP definitions direct when the tokenizer is 
 
 test("Ordinary Host resources run retained Skill evidence and confirmation through the real Agent Session loop", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-vertical-tools-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const skillResource = path.join(root, "references", "guide.md");
   const skillEvidence = `SKILL_EVIDENCE_MARKER\n${"evidence ".repeat(1_500)}SKILL_EVIDENCE_END`;
   await fs.mkdir(path.dirname(skillResource), { recursive: true });

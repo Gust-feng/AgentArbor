@@ -16,7 +16,7 @@ test("desktop local preference store persists accepted AgentArbor preferences", 
       "agentarbor:startup-animation": "true",
     });
   } finally {
-    await fs.rm(temp, { recursive: true, force: true });
+    await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -30,7 +30,7 @@ test("desktop local preference store does not collide with Chromium's Preference
     assert.equal(store.read("agentarbor:model-usage-display"), "true");
     assert.equal(path.basename(store.preferencePath), "agentarbor-local-preferences.json");
   } finally {
-    await fs.rm(temp, { recursive: true, force: true });
+    await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -57,7 +57,7 @@ test("desktop local preference store migrates startup animation from legacy Chro
       "agentarbor:startup-animation": "true",
     });
   } finally {
-    await fs.rm(temp, { recursive: true, force: true });
+    await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -87,7 +87,7 @@ test("desktop local preference store keeps explicit JSON preferences ahead of le
       "agentarbor:startup-animation": "false",
     });
   } finally {
-    await fs.rm(temp, { recursive: true, force: true });
+    await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -106,7 +106,7 @@ test("desktop local preference store rejects corrupted boolean suffixes from leg
 
     assert.equal(store.read("agentarbor:model-usage-display"), undefined);
   } finally {
-    await fs.rm(temp, { recursive: true, force: true });
+    await fs.rm(temp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

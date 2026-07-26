@@ -67,7 +67,7 @@ test("FileSystemDeepChildMessageStore writes under deep-runs child-messages part
     );
     assert.equal(await fileExists(expectedPath), true);
   } finally {
-    await fs.rm(runtimeHome, { recursive: true, force: true });
+    await fs.rm(runtimeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

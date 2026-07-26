@@ -36,7 +36,7 @@ test("installSkillPackage installs a valid local skill package", async () => {
     assert.equal(await readText(path.join(targetRoot, "writer", "SKILL.md")), await readText(path.join(source, "SKILL.md")));
     assert.equal(await readText(path.join(targetRoot, "writer", "references", "guide.md")), "Guide body.");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -60,7 +60,7 @@ test("installSkillPackage rejects source directory and name mismatch", async () 
     assert.equal(result.issues.some((issue) => issue.code === "name_directory_mismatch"), true);
     assert.equal(await pathExists(path.join(root, "target", "other-name")), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -104,7 +104,7 @@ test("installSkillPackage rejects invalid skill names, unsafe package paths, and
     assert.equal(noSkill.status, "blocked");
     assert.equal(noSkill.issues[0]?.code, "missing_skill_md");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -127,7 +127,7 @@ test("installSkillPackage rejects overwrite without explicit flag", async () => 
     assert.equal(second.issues[0]?.code, "target_exists");
     assert.equal(await readText(path.join(targetRoot, "reviewer", "SKILL.md")), await readText(path.join(source, "SKILL.md")));
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -152,7 +152,7 @@ test("installSkillPackage reports target root preparation failures as blocked re
     assert.equal(result.issues[0]?.code, "target_root_not_directory");
     assert.equal(await readText(targetRoot), "not a directory");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -204,7 +204,7 @@ test("installSkillPackage replace creates backup and rollback restores old packa
     assert.equal((await readText(path.join(targetRoot, "auditor", "SKILL.md"))).includes("Old body."), true);
     assert.equal(await pathExists(replaced.backupPath!), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -242,7 +242,7 @@ test("rollbackSkillPackageInstall blocks when installed target changed after rep
     assert.equal(await readText(path.join(targetRoot, "auditor", "references", "state.txt")), "external edit");
     assert.equal(await pathExists(replaced.backupPath!), true);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -275,7 +275,7 @@ test("installSkillPackage rejects symlinks in source package when platform suppo
     assert.equal(result.issues[0]?.path, link);
     assert.equal(await pathExists(path.join(root, "target", "linked")), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

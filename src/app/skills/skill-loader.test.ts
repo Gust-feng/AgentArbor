@@ -72,7 +72,7 @@ test("discoverSkills loads standard SKILL.md metadata without reading resources"
     }]);
     assert.equal(JSON.stringify(skills).includes("RESOURCE_SENTINEL"), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -100,7 +100,7 @@ test("selectTriggeredSkills ignores disabled skills and loadSkillBody reads body
     assert.equal(body.includes("Review instructions."), true);
     assert.equal(body.includes("---"), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -235,7 +235,7 @@ test("discoverSkills parses compatible extended fields", async () => {
       path.resolve(skillDir, "refs/patterns.md"),
     ]);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -266,7 +266,7 @@ test("discoverSkills parses Claude-compatible invocation control fields", async 
     assert.equal(skill?.disableModelInvocation, true);
     assert.equal(skill?.userInvocable, true);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -306,7 +306,7 @@ test("discoverSkills parses version and provenance metadata for distribution tra
       channels: ["project", "plugin"],
     });
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -361,7 +361,7 @@ test("discoverSkills remains compatible with standard minimal SKILL.md files", a
     assert.equal(skill.references, undefined);
     assert.equal(skill.loadError, undefined);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -413,7 +413,7 @@ test("discoverSkills parses nested metadata, compatibility, license, and allowed
     });
     assert.deepEqual(skill?.allowedTools, ["read", "shell"]);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -470,7 +470,7 @@ test("discoverSkills parses standard YAML frontmatter features", async () => {
     assert.deepEqual(skill?.allowedTools, ["read", "shell"]);
     assert.equal(skill?.loadError, undefined);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -500,7 +500,7 @@ test("discoverSkills returns invalid packages as disabled diagnostics without fa
     assert.deepEqual(triggered.map((skill) => skill.id), ["valid-skill"]);
     await assert.rejects(() => loadSkillBody(invalid), /Cannot load invalid skill/);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -529,7 +529,7 @@ test("discoverSkills turns malformed YAML frontmatter into a disabled diagnostic
     assert.match(skill?.loadError ?? "", /name|description/);
     assert.deepEqual(skill?.resourceIndex, []);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -563,7 +563,7 @@ test("discoverSkills rejects frontmatter resource paths that escape the skill pa
     assert.equal(JSON.stringify(skill?.resourceIndex ?? []).includes("outside.md"), false);
     assert.equal(JSON.stringify(skill).includes("OUTSIDE_SENTINEL"), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -585,7 +585,7 @@ test("discoverSkills marks directory name mismatches invalid and keeps diagnosti
     assert.equal(skill?.enabled, false);
     assert.match(skill?.loadError ?? "", /match package directory/);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -656,7 +656,7 @@ test("discoverSkills indexes scripts, references, and assets without loading fil
     assert.equal(JSON.stringify(skill).includes("ASSET_SENTINEL"), false);
     assert.equal(JSON.stringify(skill).includes("EVAL_SENTINEL"), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -682,7 +682,7 @@ test("discoverSkills and loadSkillBodyFacts expose stable content hashes", async
     assert.equal(facts.bodyHash, skill!.bodyHash);
     assert.equal(facts.metadataHash, skill!.metadataHash);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -715,7 +715,7 @@ test("getSkillDisclosure returns correct content at each level", async () => {
     // "full" level falls back to summary (async body load is separate)
     assert.equal(getSkillDisclosure(skill, "full"), "A longer summary of what the writer skill does in practice.");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -735,7 +735,7 @@ test("getSkillDisclosure falls back to description when summary is absent", asyn
 
     assert.equal(getSkillDisclosure(skill, "summary"), "Fallback desc.");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -759,7 +759,7 @@ test("selectTriggeredSkillsWithStrategy keyword strategy matches existing select
     assert.deepEqual(structured.selectedSkills.map((skill) => skill.name), triggered.map((skill) => skill.name));
     assert.equal(structured.candidateReasons[0]?.code, "keyword_match");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -797,7 +797,7 @@ test("selectTriggeredSkillsWithStrategy llm strategy prepares candidates without
     assert.equal(structured.omittedReasons.some((reason) => reason.code === "llm_routing_required"), true);
     assert.deepEqual(explicitTriggered.map((skill) => skill.name), ["skill-a"]);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -817,7 +817,7 @@ test("selectTriggeredSkillsWithStrategy llm strategy returns empty when all skil
 
     assert.equal(triggered.length, 0);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -861,7 +861,7 @@ test("discoverSkills preserves source roots and selection prefers higher-precede
     assert.equal(selection.candidateContexts[0]?.sourcePrecedence, 100);
     assert.equal(selection.candidateContexts[0]?.text.includes(projectRoot), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -931,6 +931,6 @@ test("discoverSkills applies only source-qualified state", async () => {
     assert.equal(withQualifiedState.find((skill) => skill.sourceKind === "project")?.enabled, false);
     assert.equal(withQualifiedState.find((skill) => skill.sourceKind === "user")?.enabled, true);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

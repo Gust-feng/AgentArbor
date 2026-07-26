@@ -39,7 +39,7 @@ test("FileSystemSkillStateStore writes only source-qualified v2 state", async ()
     assert.equal(raw.includes('"version": 2'), true);
     assert.equal(raw.includes(`"stateKey": "${stateKey}"`), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -63,6 +63,6 @@ test("FileSystemSkillStateStore discards old and malformed state without migrati
     await fs.writeFile(filePath, "not json", "utf8");
     assert.equal((await store.readStates()).size, 0);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

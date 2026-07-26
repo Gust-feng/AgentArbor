@@ -73,7 +73,7 @@ test("Desktop Agent resolves authorized local image refs into ephemeral model at
     assert.equal(user?.content, "Describe the attached image.");
     assert.equal(JSON.stringify(taskSoil).includes(bytes.toString("base64")), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -100,6 +100,6 @@ test("Desktop Agent does not attach image payloads for non-vision models", async
 
     assert.equal(resolved[0]?.attachments, undefined);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

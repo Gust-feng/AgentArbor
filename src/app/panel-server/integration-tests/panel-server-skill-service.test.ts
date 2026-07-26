@@ -86,7 +86,7 @@ test("resolveTriggeredSkillContexts uses the run-created skill catalog instead o
     assert.equal(contexts[0]?.markUsedStatus, "succeeded");
     assert.deepEqual(usedSkillIds, ["source:unscoped:frozen-review"]);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -160,7 +160,7 @@ test("resolveTriggeredSkillContexts records explicit selector trigger reasons", 
     assert.deepEqual(usedSkillIds, ["source:unscoped:explicit-skill"]);
     assert.equal(channel.requests.length, 0);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -189,7 +189,7 @@ test("resolveTriggeredSkillContexts defaults to keyword routing even when a mode
     assert.deepEqual(contexts, []);
     assert.equal(channel.requests.length, 0);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -248,7 +248,7 @@ test("resolveTriggeredSkillContexts uses the opt-in model router with safe froze
     assert.equal(requestText.includes("sourcePath"), false);
     assert.equal(requestText.includes(writer.sourcePath), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -299,7 +299,7 @@ test("resolveTriggeredSkillContexts rejects model selections outside the frozen 
     assert.equal(rejected.some((reason) => reason.code === "disabled" && reason.skillId === "disabled"), true);
     assert.equal(rejected.some((reason) => reason.code === "invalid" && reason.skillId === "invalid"), true);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -365,7 +365,7 @@ test("resolveTriggeredSkillContexts keeps router facts when model-selected skill
     assert.match(contexts[0]?.error ?? "", /hash/);
     assert.equal(JSON.stringify(contexts).includes("Use modified instructions."), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -448,7 +448,7 @@ test("resolveTriggeredSkillContexts fails closed when the current skill body has
     assert.equal(JSON.stringify(contexts).includes("Use modified instructions"), false);
     assert.deepEqual(usedSkillIds, []);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -490,7 +490,7 @@ test("resolveTriggeredSkillContexts keeps compatibility when the frozen catalog 
     assert.match(contexts[0]?.warning ?? "", /缺少冻结 hash/);
     assert.equal(contexts[0]?.markUsedStatus, "skipped");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -584,7 +584,7 @@ test("resolveTriggeredSkillContexts keeps loaded skills when markUsed fails and 
     assert.equal(contexts[0]?.markUsedStatus, "failed");
     assert.match(contexts[0]?.warning ?? "", /使用记录更新失败/);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -645,7 +645,7 @@ test("resolveTriggeredSkillContexts skips disabled frozen skills and caps keywor
       "source:unscoped:review-5",
     ]);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

@@ -327,7 +327,7 @@ async function createFixture(options: { readonly referenceContent?: string } = {
         omitted: overrides.omitted,
       };
     },
-    remove: () => fs.rm(root, { recursive: true, force: true }),
+    remove: () => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
   };
 }
 

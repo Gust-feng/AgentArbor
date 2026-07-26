@@ -27,7 +27,7 @@ test("runSkillQualityEvals skips quality cases without an intelligence channel",
     assert.equal(report.results[0]?.status, "skipped");
     assert.equal(report.results[0]?.reason, "Quality eval requires an intelligence channel.");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -70,7 +70,7 @@ test("runSkillQualityEvals generates with and without skill outputs without expo
     assert.equal(JSON.stringify(report).includes("This review identifies material risk"), false);
     assert.equal(JSON.stringify(report).includes(root), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -91,7 +91,7 @@ test("runSkillQualityEvals fails when with-skill output does not improve by requ
     assert.equal(result?.actualDelta, 0);
     assert.equal(result?.reason, "withSkill output did not satisfy all quality checks or required delta.");
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -123,7 +123,7 @@ test("runSkillQualityEvals isolates model failures and validation failures per c
     assert.equal(JSON.stringify(thrown).includes(root), false);
     assert.equal(JSON.stringify(invalid).includes("material risk"), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

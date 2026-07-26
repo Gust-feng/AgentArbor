@@ -87,8 +87,8 @@ test("context attachment image tool reads selected local image as ephemeral mode
       assert.equal(attachment.source.data, image.toString("base64"));
     }
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -140,8 +140,8 @@ test("context attachment image tool reads image inside selected local project by
       assert.equal(attachment.source.data, image.toString("base64"));
     }
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -186,8 +186,8 @@ test("context attachment image tool reports unsupported when model lacks vision 
     assert.equal(modelVisible.includes(imageFile), false);
     assert.equal(toolExecutionModelAttachments(result), undefined);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

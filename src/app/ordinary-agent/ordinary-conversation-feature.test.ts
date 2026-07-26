@@ -221,7 +221,7 @@ function ids(initial = 0) { let value = initial; return (prefix: string) => `${p
 function createGate() { let enter!: () => void; let release!: () => void; return { entered: new Promise<void>((resolve) => { enter = resolve; }), released: new Promise<void>((resolve) => { release = resolve; }), enter, release }; }
 async function removeTestDirectory(root: string): Promise<void> {
   for (let attempt = 1; attempt <= 6; attempt += 1) {
-    try { await fs.rm(root, { recursive: true, force: true }); return; }
+    try { await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); return; }
     catch (error) {
       const code = typeof error === "object" && error !== null && "code" in error ? (error as { readonly code?: unknown }).code : undefined;
       if (attempt === 6 || (code !== "ENOTEMPTY" && code !== "EPERM" && code !== "EBUSY")) throw error;

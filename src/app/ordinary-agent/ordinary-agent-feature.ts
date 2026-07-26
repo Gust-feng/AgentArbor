@@ -1,5 +1,4 @@
 import type { ConfirmationDecision } from "../../domain/confirmation/index.js";
-import type { ModelMessage } from "../../domain/intelligence/index.js";
 import {
   toolCallFactId,
   type ToolCallProgress,
@@ -18,6 +17,7 @@ import type {
   OrdinaryExecutionContinuation,
   OrdinaryExecutionOutcome,
   OrdinaryExecutionPort,
+  OrdinaryFeatureDiagnostic,
   OrdinaryRunActivity,
   OrdinaryRunActivityCursor,
   OrdinaryRunActivityReplay,
@@ -31,7 +31,6 @@ import type {
 } from "./contracts.js";
 import { OrdinaryFeatureError } from "./contracts.js";
 import { executionErrorFacts } from "../execution-errors/index.js";
-import { canonicalToolResultMessage } from "../model-runtime/tool-result-message.js";
 import type { AgentSessionEntryRef, AgentSessionRepository } from "../model-runtime/agent-session.js";
 import {
   normalizeOrdinaryConversationTitle,
@@ -57,6 +56,13 @@ export function createOrdinaryAgentFeature(input: {
   /** Test-only seam for injected executions that can emit refs but cannot write a real Session. */
   readonly testOnlyAllowSessionlessExecution?: boolean;
   readonly releaseToolEvidenceOwner?: (ownerId: string) => void | Promise<void>;
+  /**
+   * Observability hook for failures that never rewrite committed run facts but
+   * would otherwise be invisible: Session finalization failures that keep the
+   * conversation queue paused, and startup recovery marking a conversation
+   * unavailable. Never called for normal run failures (those are run facts).
+   */
+  readonly onDiagnostic?: (diagnostic: OrdinaryFeatureDiagnostic) => void;
   readonly now?: () => string;
   readonly idFactory?: IdFactory;
 }): OrdinaryAgentFeature {
@@ -81,6 +87,7 @@ export function createOrdinaryAgentFeature(input: {
   const sessionsAwaitingFinalization = new Set<string>();
   const sessionFinalizationPending = new Set<string>();
   const sessionFinalizationFailures = new Map<string, unknown>();
+  const sessionFinalizationRetries = new Map<string, Promise<void>>();
   const visibleAssistantBuffers = new Map<string, string>();
   const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
   let released = false;
@@ -142,12 +149,14 @@ export function createOrdinaryAgentFeature(input: {
         if (await conversationView(control) === undefined) {
           conversationDocuments.delete(conversationId);
           unavailableConversationIds.add(conversationId);
+          emitDiagnostic({ kind: "conversation_unavailable", conversationId });
         }
-      } catch {
+      } catch (error) {
         // Unsupported or incomplete Session branches remain on disk for diagnosis, but
         // cannot make unrelated conversations or new tasks unavailable.
         conversationDocuments.delete(conversationId);
         unavailableConversationIds.add(conversationId);
+        emitDiagnostic({ kind: "conversation_unavailable", conversationId, error });
       }
     }
     for (const document of documents.values()) {
@@ -800,7 +809,18 @@ export function createOrdinaryAgentFeature(input: {
       }
     }
     sessionFinalizationFailures.set(runId, firstFailure);
+    // The run itself is already terminal; a stuck finalization pauses the
+    // conversation queue, so the operator must be able to see why.
+    emitDiagnostic({ kind: "session_finalization_failed", runId, error: firstFailure });
     throw firstFailure;
+  }
+
+  function emitDiagnostic(diagnostic: OrdinaryFeatureDiagnostic): void {
+    try {
+      input.onDiagnostic?.(diagnostic);
+    } catch {
+      // Diagnostics never affect committed facts or control flow.
+    }
   }
 
   async function runExecution(runId: string): Promise<void> {
@@ -1026,8 +1046,34 @@ export function createOrdinaryAgentFeature(input: {
     );
   }
 
+  /**
+   * A terminal run whose Session finalize failed keeps the scheduling barrier
+   * closed. Retrying at every scheduling event turns a transient finalize
+   * failure into a short pause instead of a silent, permanent queue deadlock.
+   */
+  async function retryFailedSessionFinalization(runId: string): Promise<void> {
+    if (!sessionFinalizationPending.has(runId) || !sessionFinalizationFailures.has(runId)) return;
+    const existing = sessionFinalizationRetries.get(runId);
+    if (existing !== undefined) {
+      await existing;
+      return;
+    }
+    const attempt = (async () => {
+      const document = await load(runId);
+      if (document === undefined || !isTerminal(document.state)) return;
+      await finalizeExecutionSession(runId, document.state, document.state.status.kind !== "completed");
+    })().catch(() => undefined);
+    sessionFinalizationRetries.set(runId, attempt);
+    try {
+      await attempt;
+    } finally {
+      if (sessionFinalizationRetries.get(runId) === attempt) sessionFinalizationRetries.delete(runId);
+    }
+  }
+
   async function activateSuccessor(predecessorRunId: string): Promise<void> {
     if (released) return;
+    await retryFailedSessionFinalization(predecessorRunId);
     const predecessor = await load(predecessorRunId);
     if (predecessor === undefined || !isSchedulingBarrierCleared(predecessor.state)) return;
     const control = await loadConversationControl(predecessor.state.turn.conversationId);
@@ -1637,6 +1683,7 @@ export function createOrdinaryAgentFeature(input: {
     sessionsAwaitingFinalization.clear();
     sessionFinalizationPending.clear();
     sessionFinalizationFailures.clear();
+    sessionFinalizationRetries.clear();
     visibleAssistantBuffers.clear();
     visibleAssistantCheckpointTimers.clear();
     approvalReservations.clear();

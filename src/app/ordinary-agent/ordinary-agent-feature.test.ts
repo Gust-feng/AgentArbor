@@ -741,6 +741,48 @@ test("feature release aborts live execution and releases its owned resources", a
   assert.deepEqual(order, ["abort", "finalize"]);
 });
 
+test("a failed Session finalization surfaces a diagnostic and does not permanently deadlock the queue", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-finalize-retry-"));
+  const sessions = new SessionHarness();
+  let finalizeAttempts = 0;
+  const diagnostics: { kind: string; runId?: string }[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      execute: async (input) => completedOutcome(input, `answer ${input.runId}`, sessions),
+      async finalizeSession() {
+        finalizeAttempts += 1;
+        // The first finalizeExecutionSession call burns both inline attempts.
+        if (finalizeAttempts <= 2) throw new Error("transient finalize failure");
+      },
+    },
+    onDiagnostic: (diagnostic) => diagnostics.push({
+      kind: diagnostic.kind,
+      ...(diagnostic.kind === "session_finalization_failed" ? { runId: diagnostic.runId } : {}),
+    }),
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("finalize-retry-1"));
+  await waitForStatus(feature, "finalize-retry-1", "completed");
+  assert.deepEqual(diagnostics, [{ kind: "session_finalization_failed", runId: "finalize-retry-1" }]);
+
+  // Scheduling a successor must retry the stuck finalization instead of
+  // waiting forever behind a permanently closed barrier.
+  const successor = startInput("finalize-retry-2");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "finalize-retry-1" },
+  });
+  const state = await waitForStatus(feature, "finalize-retry-2", "completed");
+  assert.equal(state.status.kind, "completed");
+  assert.equal(finalizeAttempts >= 3, true);
+});
+
 test("stable terminal facts appear only after terminal commit and notify subscribers", async (t) => {
   const run = await fixture(t, { execute: async (input) => completedOutcome(input, "stable done", run.sessions) });
   const notified: string[] = [];

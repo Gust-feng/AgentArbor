@@ -264,6 +264,13 @@ function assemblePanelRuntime(input: {
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(ordinaryRuntimeRoot),
     sessionRepository: agentSessionRepository,
     releaseToolEvidenceOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "session_finalization_failed") {
+        console.error(`[panel-server] Ordinary run ${diagnostic.runId} Session finalization failed; the conversation queue stays paused until a retry succeeds`, diagnostic.error);
+      } else {
+        console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} is unavailable after startup recovery; its data remains on disk for diagnosis`, diagnostic.error);
+      }
+    },
     execution: input.ordinaryAgentExecution ?? createOrdinaryAgentLoopExecutionPort({
       resources: ordinaryRunResources,
       onReleaseError: (error) => console.error("[panel-server] Ordinary run resource release failed", error),

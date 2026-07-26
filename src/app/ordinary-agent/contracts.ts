@@ -54,6 +54,24 @@ export class OrdinaryFeatureError extends Error {
   }
 }
 
+/**
+ * Failures that never rewrite committed run facts but must not stay invisible.
+ * They surface through the feature's optional `onDiagnostic` hook only.
+ */
+export type OrdinaryFeatureDiagnostic =
+  | {
+      /** Session finalize failed; the conversation queue stays paused until a retry succeeds. */
+      readonly kind: "session_finalization_failed";
+      readonly runId: string;
+      readonly error: unknown;
+    }
+  | {
+      /** Startup recovery could not project this conversation; its data stays on disk for diagnosis. */
+      readonly kind: "conversation_unavailable";
+      readonly conversationId: string;
+      readonly error?: unknown;
+    };
+
 export type OrdinaryRunBirth = {
   readonly instructions: string;
   readonly aiMode: ModelRuntimeMode;

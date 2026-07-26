@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
+import { isNodeError } from "../../kernel/values/index.js";
 import {
   ORDINARY_CONVERSATION_SCHEMA_VERSION,
   OrdinaryFeatureError,
@@ -132,22 +134,6 @@ async function writeJsonAtomically(filePath: string, value: unknown): Promise<vo
   catch (error) { await fs.rm(tempPath, { force: true }).catch(() => undefined); throw error; }
 }
 
-async function renameWithRetry(source: string, target: string): Promise<void> {
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
-    try { await fs.rename(source, target); return; }
-    catch (error) {
-      if (attempt === 6 || !isTransientRenameError(error)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-    }
-  }
-}
-
 function documentPath(rootDir: string, conversationId: string): string {
   return path.join(rootDir, "conversations", encodeURIComponent(conversationId), "snapshot.json");
-}
-function isTransientRenameError(error: unknown): boolean {
-  return isNodeError(error, "EPERM") || isNodeError(error, "EACCES") || isNodeError(error, "EBUSY");
-}
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { readonly code?: unknown }).code === code;
 }

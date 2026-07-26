@@ -353,7 +353,13 @@ test("http_request fails partial side-effecting responses without a replay conti
         input: { method, url: "https://example.test/items", body: { name: "demo" } },
       },
       context,
-      { callerAgentId: context.callerAgentId, allowedTools: ["HttpRequest"] }
+      {
+        callerAgentId: context.callerAgentId,
+        allowedTools: ["HttpRequest"],
+        // Side-effect HTTP submissions are confirmation-gated; this test is
+        // about partial-response delivery after an approved submission.
+        approvedConfirmationIds: [`confirmation-call-${method.toLowerCase()}-partial-response`],
+      }
     );
     const output = asIncompleteHttpOutput(result.output);
     const errorFacts = result.errorFacts as Readonly<Record<string, unknown>> | undefined;

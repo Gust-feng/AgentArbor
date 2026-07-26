@@ -81,6 +81,56 @@ test("tool security policy allows local, private, and metadata URLs", () => {
   }
 });
 
+test("tool security policy gates side-effect HTTP submissions even without static confirmation metadata", () => {
+  const metadata = readOnlyMetadata();
+  for (const method of ["POST", "PUT", "DELETE", "patch"]) {
+    const request = {
+      callId: `call-${method}`,
+      toolName: "HttpRequest",
+      input: { url: "https://example.test/submit", method },
+    };
+    const decision = evaluateToolCallSecurity({
+      request,
+      definition: toolDefinition("HttpRequest", metadata),
+      metadata,
+      context: { platform: "win32" },
+    });
+    assert.equal(decision.decision, "approval_required", method);
+
+    const approved = evaluateToolCallSecurity({
+      request,
+      definition: toolDefinition("HttpRequest", metadata),
+      metadata,
+      context: { platform: "win32", approvedConfirmationIds: [confirmationIdForToolCall(request.callId)] },
+    });
+    assert.equal(approved.decision, "allow", method);
+  }
+
+  // GET/HEAD and requests without a method stay confirmation-free reads.
+  for (const input of [
+    { url: "https://example.test/page", method: "GET" },
+    { url: "https://example.test/page", method: "HEAD" },
+    { url: "https://example.test/page" },
+  ]) {
+    const decision = evaluateToolCallSecurity({
+      request: { callId: "call-read", toolName: "HttpRequest", input },
+      definition: toolDefinition("HttpRequest", metadata),
+      metadata,
+      context: { platform: "win32" },
+    });
+    assert.equal(decision.decision, "allow", JSON.stringify(input));
+  }
+
+  // Full access mode still skips the dynamic gate like every other gate.
+  const fullAccess = evaluateToolCallSecurity({
+    request: { callId: "call-full", toolName: "HttpRequest", input: { url: "https://example.test/submit", method: "POST" } },
+    definition: toolDefinition("HttpRequest", metadata),
+    metadata,
+    context: { platform: "win32", confirmationPolicy: "full_access" },
+  });
+  assert.equal(fullAccess.decision, "allow");
+});
+
 test("tool security policy allows normal external read-only URLs", () => {
   const decision = evaluateToolCallSecurity({
     request: { callId: "call-web", toolName: "web_fetch", input: { url: "https://example.test/page?q=agent" } },

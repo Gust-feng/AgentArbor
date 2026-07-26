@@ -26,7 +26,11 @@ export function evaluateToolCallSecurity(input: {
     return { decision: "allow", reason: "Matching confirmation id was approved for this tool call." };
   }
 
-  if (input.metadata.requiresConfirmation === true) {
+  // A request that names both a URL and a side-effect HTTP method submits an
+  // external write. Prompt-injected content must not drive such submissions
+  // without the user seeing them, even when the tool's static metadata allows
+  // confirmation-free reads (e.g. HttpRequest GET).
+  if (input.metadata.requiresConfirmation === true || isSideEffectHttpSubmission(input.request)) {
     if (input.context.confirmationPolicy === "full_access") {
       return { decision: "allow", reason: "Full access mode allows confirmation-gated tool calls." };
     }
@@ -98,6 +102,16 @@ function confirmationActionSummary(displayName: string, affectedResources: reado
 function confirmationConsequence(displayName: string, affectedResources: readonly string[]): string {
   const target = affectedResources.length === 0 ? "" : `目标：${affectedResources.join("、")}。`;
   return `${target}批准后只执行本次${displayName}。`;
+}
+
+const SIDE_EFFECT_HTTP_METHODS = new Set(["POST", "PUT", "DELETE", "PATCH"]);
+
+function isSideEffectHttpSubmission(request: ToolCallRequest): boolean {
+  const record = asRecord(request.input);
+  const method = stringOrUndefined(record.method)?.toUpperCase();
+  return stringOrUndefined(record.url) !== undefined &&
+    method !== undefined &&
+    SIDE_EFFECT_HTTP_METHODS.has(method);
 }
 
 function evaluateUrlSupport(request: ToolCallRequest): ToolSecurityDecision | undefined {

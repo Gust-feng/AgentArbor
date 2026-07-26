@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
+import { isNodeError, toPersistedJsonShape } from "../../kernel/values/index.js";
 import {
   EXPERIENCE_CANDIDATE_SCHEMA_VERSION,
   ExperienceCandidateFeatureError,
@@ -80,7 +82,7 @@ export function validateExperienceCandidateRecord(
       `ExperienceCandidate ${record.candidateId} revision ${record.revision} is invalid: ${z.prettifyError(result.error)}`,
     );
   }
-  return cloneJson(result.data);
+  return toPersistedJsonShape(result.data);
 }
 
 export function createFileSystemExperienceCandidateRepository(rootDir: string): ExperienceCandidateRepository {
@@ -124,7 +126,7 @@ export function createFileSystemExperienceCandidateRepository(rootDir: string): 
         `ExperienceCandidate ${candidateId} revision ${revision} is incompatible with ${EXPERIENCE_CANDIDATE_SCHEMA_VERSION}: ${result.success ? "record identity is invalid" : z.prettifyError(result.error)}`,
       );
     }
-    return cloneJson(result.data.record);
+    return toPersistedJsonShape(result.data.record);
   }
 
   async function listRevisionNumbers(candidateId: string): Promise<readonly number[]> {
@@ -286,24 +288,3 @@ async function writeJsonAtomically(filePath: string, value: unknown): Promise<vo
   }
 }
 
-async function renameWithRetry(source: string, target: string): Promise<void> {
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
-    try {
-      await fs.rename(source, target);
-      return;
-    } catch (error) {
-      if (attempt === 6 || !isTransientRenameError(error)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-    }
-  }
-}
-
-function isTransientRenameError(error: unknown): boolean {
-  return isNodeError(error, "EPERM") || isNodeError(error, "EACCES") || isNodeError(error, "EBUSY");
-}
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { readonly code?: unknown }).code === code;
-}
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}

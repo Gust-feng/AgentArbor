@@ -16,6 +16,7 @@ import {
   Monitor,
   Palette,
   RefreshCw,
+  Route,
   Server,
   SlidersHorizontal,
   X,
@@ -39,6 +40,7 @@ import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settin
 import { SkillSettings } from "./skill-settings";
 import { SubAgentSettings } from "./sub-agent-settings";
 import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
+import { PathMemorySettings } from "./path-memory-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
@@ -251,6 +253,7 @@ export function SettingsDialog(props: {
             )}
             {activeGroup === "appearance" && <AppearanceSettings />}
             {activeGroup === "statistics" && <UsageStatisticsSettings />}
+            {activeGroup === "pathMemory" && <PathMemorySettings />}
             {activeGroup === "developer" && <DeveloperToolStatistics />}
             {activeGroup === "about" && (
               <AboutSettings
@@ -278,6 +281,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
+  { id: "pathMemory", label: "路径记忆", icon: <Route size={15} /> },
   { id: "developer", label: "开发者选项", icon: <Code2 size={15} /> },
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];

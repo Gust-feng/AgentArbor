@@ -267,6 +267,11 @@ function isAllowedNativeTitleTooltip(finding: {
       finding.tag === "span" && finding.tagSource.includes("title={item.label}")
     );
   }
+  if (finding.file === "components/path-memory-settings.tsx" && finding.tag === "span") {
+    // Truncated archive fields expose their full value as a compact inspection tooltip.
+    return finding.tagSource.includes("path-memory-row-request") ||
+      finding.tagSource.includes("path-memory-row-meta");
+  }
   return finding.file === "components/copy-action-button.tsx" &&
     finding.tag === "button" &&
     finding.tagSource.includes("copy-action-button");

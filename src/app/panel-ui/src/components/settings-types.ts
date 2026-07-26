@@ -43,5 +43,6 @@ export type SettingsGroup =
   | "workspace"
   | "appearance"
   | "statistics"
+  | "pathMemory"
   | "developer"
   | "about";

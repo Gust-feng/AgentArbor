@@ -8,7 +8,7 @@
 
 Multi-Agent 的 Panel UI、Deep DTO 和实现源码暂时保留，以便未来重构复用其中可验证的局部机制；当前 Panel 不装配其 feature、不加载 Deep 历史，也不接受 `/api/deep/*` 请求。该路径统一返回 `410 multi_agent_deferred`，不会创建 provider、ToolCenter、store 或后台运行。
 
-后端只有一个生产组合根：`createPanelRuntime()`。它当前只创建 `OrdinaryAgentFeature` 及其所需的中性资源；`ordinary-routes` 只做 HTTP/SSE 适配。Multi-Agent 的 feature、store、control registry 和资源装配不进入当前生产运行时，也不参与关闭流程。
+后端只有一个生产组合根：`createPanelRuntime()`。它当前创建 `OrdinaryAgentFeature`、`PathMemoryFeature`、二者之间的 `OrdinaryPathMemoryConnector` 以及所需的中性资源；`ordinary-routes` 只做 HTTP/SSE 适配。Multi-Agent 的 feature、store、control registry 和资源装配不进入当前生产运行时，也不参与关闭流程。
 
 Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -> OrdinaryAgentFeature -> Agent Session adapter -> Pi AgentHarness/Session -> ToolCenter`。Pi 负责模型-工具循环、Session 分支和压缩；Ordinary feature 负责业务状态、持久化和 read-model 事实。旧 BasicAgent、Desktop session、Panel run job、应用层 Underground、`MinimalRuntime`、旧 conversation/run route、`/api/desktop/runs` 与 `/api/underground/*` 已删除。Panel JSON 输入已在 HTTP 边界使用 Zod 校验；当前尚未完成的是 Workbench/UI surface 隔离。
 
@@ -165,6 +165,9 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 当前唯一可运行的产品入口是普通桌面 Agent。Multi-Agent 的代码和测试被延期保留，不能混入默认 Ordinary 路径。
 
 - 产品当前只装配 Ordinary 的业务状态、事件、仓储与 read-model；Sub-Agent 的调用与结果归父 Ordinary run
+- 每个进入稳定终态（`completed / failed / blocked / cancelled`）的 Ordinary run 都会由 `OrdinaryPathMemoryConnector` 自动采集为一条只读 `path-memory/v1` 记录，写入 `runtime/path-memory/records/`；实时通知与启动对账共享同一幂等来源键（一 run 一条），进程在终态后、写记忆前退出时下次启动补写。PathMemory 只保存来源身份、用户请求、冻结工作区、工具事实索引、终态和 `not_recorded` verification，不复制 transcript、assistant 正文、工具 input/output 或附件字节。记忆写入失败只形成诊断，不改写 Ordinary 终态
+- 路径记忆当前范围是“第一阶段 + 部分第二阶段”（见 ADR-0032）：设置页提供只读 PathMemory 管理视图、显式删除和采集诊断；`/api/path-memory/*` 提供 list、确定性关键词 search（Latin 整词 + CJK bigram）、get、diagnostics 和 DELETE；`/api/experience-candidates/*` 提供用户显式 propose / revise / accept / reject / retire，revision 链 gapless 且治理状态互斥。显式删除写入 `runtime/path-memory/deletions/` tombstone，采集与启动对账遇 tombstone 返回 `suppressed` 并计入 `skippedDeleted` 诊断，重启后不会复活已删除记忆；恢复被删除的记忆没有默认路径，必须由未来的显式 command 清除 tombstone
+- 路径记忆当前仍然没有：模型自动召回、memory tool、prompt 注入、PathBias、向量检索、后台 LLM 总结、Governance/Global Soil。PathMemory 与 ExperienceCandidate 均不进入模型上下文；注入必须晚于治理（ADR-0032 §8）
 - 默认入口为普通 `agent`；Agent 集群设置开关、侧栏按钮、Deep 历史加载与 `/api/deep/*` 均已停用，普通请求不会自动或显式转为 deep
 - 已有的 manager、child、TaskBoard、scheduler 与 synthesis 源码只作为未来重构参考，不构成当前 Agent Team 或可恢复的历史运行
 - 恢复 Multi-Agent 前必须重新确认其模型通道、附件、确认、持久化、入口和 Panel surface，不能直接重新接通历史 API

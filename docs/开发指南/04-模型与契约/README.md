@@ -2,7 +2,7 @@
 
 本章定义 AgentArbor 当前实现必须先稳定的数据模型。代码可以晚出生，但契约不能含混。
 
-本章中的 Task Soil、Plan、Workflow IR、Nutrient Request、Nutrient Patch、Constraint、Run Memory、Experience Candidate、Capability Asset 和 Path Bias 共同决定系统如何从一次桌面任务中收获可复用倾向，而不是把历史经验和约束停留在自然语言总结里。
+本章中的 Task Soil、Plan、Workflow IR、Nutrient Request、Nutrient Patch、Constraint、PathMemory、Experience Candidate、Capability Asset 和 Path Bias 共同决定系统如何从一次桌面任务中收获可复用倾向，而不是把历史经验和约束停留在自然语言总结里。
 
 ## 文档列表
 

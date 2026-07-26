@@ -92,6 +92,13 @@ export function createOrdinaryAgentFeature(input: {
   const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
   let released = false;
   let releasePromise: Promise<void> | undefined;
+  /**
+   * Distinguishes terminal replay streams across feature instances. Cursors are
+   * process-lifetime handles: a restarted process must answer an old cursor with
+   * the reset protocol, exactly like the mutable streams whose random streamIds
+   * never repeat across restarts.
+   */
+  const streamEpoch = idFactory("ordinary-activity-stream");
 
   const readyPromise = recoverPersistedRuns();
   // Observe eager recovery immediately; public calls still await the original rejected promise.
@@ -106,12 +113,21 @@ export function createOrdinaryAgentFeature(input: {
       let document = await input.repository.get(summary.runId);
       if (document === undefined) continue;
       documents.set(summary.runId, document);
-      streamFor(
-        summary.runId,
-        document.state.timeline,
-        document.state.toolCalls,
-        document.state.toolResultRecordedAt,
-      );
+      // Settled terminal runs receive no further activities; their streams are
+      // pure projections of the persisted timeline and are rebuilt on demand by
+      // replay (which passes the rebuild inputs). Materializing them here would
+      // duplicate every historical run's timeline in memory for the whole
+      // process lifetime. Runs that still need recovery below (pending tool
+      // rounds, lost approvals) keep an eager stream because those paths append
+      // activities through bare streamFor(runId), which must not start empty.
+      if (needsLiveActivityStream(document.state)) {
+        streamFor(
+          summary.runId,
+          document.state.timeline,
+          document.state.toolCalls,
+          document.state.toolResultRecordedAt,
+        );
+      }
       if (document.state.status.kind === "awaiting_approval") {
         await blockLostApproval(summary.runId, {
           code: "confirmation_continuation_lost",
@@ -198,9 +214,50 @@ export function createOrdinaryAgentFeature(input: {
     const document = await input.repository.get(runId);
     if (document !== undefined) {
       documents.set(runId, document);
-      streamFor(runId, document.state.timeline, document.state.toolCalls, document.state.toolResultRecordedAt);
+      // Settled terminal runs get their stream lazily from replay; runs that may
+      // still append activities (live, pending round, lost approval) need it now.
+      if (needsLiveActivityStream(document.state)) {
+        streamFor(runId, document.state.timeline, document.state.toolCalls, document.state.toolResultRecordedAt);
+      }
     }
     return document;
+  }
+
+  /** A run can still append activities while live or until its recovery paths settle. */
+  function needsLiveActivityStream(state: OrdinaryRunState): boolean {
+    return !isTerminal(state) ||
+      state.pendingToolRound !== undefined ||
+      state.toolCalls.some((result) => result.status === "approval_required");
+  }
+
+  /**
+   * Ephemeral replay projection for a settled terminal run. The activities are a
+   * pure function of the persisted document, so the streamId can be derived
+   * deterministically from the run identity and revision: repeated replays stay
+   * cursor-compatible with each other without pinning the stream in memory, and
+   * a later revision (delete + recreate) naturally invalidates old cursors.
+   *
+   * The id is additionally scoped by a per-feature-instance epoch so cursors do
+   * NOT survive process restarts: reconnecting clients must keep receiving the
+   * established `run.stream.reset` + full terminal replay contract instead of a
+   * silently empty stream. Memory eviction must not change the HTTP protocol.
+   */
+  function terminalReplayStream(document: OrdinaryRunSnapshotDocument): {
+    streamId: string;
+    nextSequence: number;
+    activities: OrdinaryRunActivity[];
+  } {
+    const activities = durableActivities(
+      document.state.runId,
+      document.state.timeline,
+      document.state.toolCalls,
+      document.state.toolResultRecordedAt,
+    );
+    return {
+      streamId: `${streamEpoch}:terminal:${document.state.runId}:${document.revision}`,
+      nextSequence: activities.length + 1,
+      activities,
+    };
   }
 
   async function enqueue<T>(runId: string, operation: () => Promise<T>): Promise<T> {
@@ -969,6 +1026,23 @@ export function createOrdinaryAgentFeature(input: {
         // A memory or audit consumer cannot roll back committed Ordinary facts.
       }
     }
+    maybeReleaseTerminalStream(runId);
+  }
+
+  /**
+   * Drops the in-memory activity stream of a settled terminal run once nobody
+   * is subscribed. The stream duplicates the persisted timeline (every durable
+   * activity wraps a cloned run event), so keeping it alive for finished runs
+   * doubles the memory footprint of the whole run history for the process
+   * lifetime. Replay rebuilds the stream on demand from the persisted state;
+   * the fresh streamId then invalidates old cursors through the existing
+   * `reset` protocol, which panel consumers already handle.
+   */
+  function maybeReleaseTerminalStream(runId: string): void {
+    if ((listeners.get(runId)?.size ?? 0) > 0) return;
+    const document = documents.get(runId);
+    if (document === undefined || !isStableTerminalState(document.state)) return;
+    activityStreams.delete(runId);
   }
 
   function projectStableTerminalRunFacts(
@@ -1610,11 +1684,15 @@ export function createOrdinaryAgentFeature(input: {
         await readyPromise;
         const document = await load(runId);
         if (document === undefined) return undefined;
-        const stream = streamFor(
-          runId,
-          document.state.timeline,
-          document.state.toolCalls,
-          document.state.toolResultRecordedAt,
+        // Live runs use the cached mutable stream. Settled terminal runs whose
+        // stream was already released rebuild an ephemeral projection instead of
+        // re-pinning it: the stream is a pure function of the persisted document,
+        // so a deterministic streamId keeps concurrent and repeated replays
+        // cursor-stable without holding the duplicate timeline in memory.
+        const stream = activityStreams.get(runId) ?? (
+          needsLiveActivityStream(document.state)
+            ? streamFor(runId, document.state.timeline, document.state.toolCalls, document.state.toolResultRecordedAt)
+            : terminalReplayStream(document)
         );
         const reset = cursor !== undefined && (
           cursor.streamId !== stream.streamId || cursor.sequence < 0 || cursor.sequence >= stream.nextSequence
@@ -1635,7 +1713,12 @@ export function createOrdinaryAgentFeature(input: {
         listeners.set(runId, runListeners);
         return () => {
           runListeners.delete(listener);
-          if (runListeners.size === 0) listeners.delete(runId);
+          if (runListeners.size === 0) {
+            listeners.delete(runId);
+            // The last live consumer left; a settled terminal run no longer
+            // needs its in-memory stream (replay rebuilds it on demand).
+            maybeReleaseTerminalStream(runId);
+          }
         };
       },
       subscribeStableTerminalRuns(listener) {

@@ -1011,6 +1011,40 @@ function createGate() {
   const entered = new Promise<void>((resolve) => { enter = resolve; });
   return { entered, enter };
 }
+
+test("settled terminal runs release their in-memory activity stream and replay from persistence", async (t) => {
+  const run = await fixture(t, { execute: async (input) => completedOutcome(input, "evicted answer", run.sessions) });
+  await run.feature.commands.start(startInput("evicted-run"));
+  await waitForStatus(run.feature, "evicted-run", "completed");
+
+  // 无订阅者的稳定终态 run：流应已被驱逐；replay 必须仍能从持久化状态重建完整活动。
+  const first = await run.feature.events.replay("evicted-run");
+  assert.notEqual(first, undefined);
+  assert.equal(first!.activities.length > 0, true, "replay must rebuild activities from the persisted timeline");
+  assert.equal(
+    first!.activities.every((activity) => activity.durability === "durable"),
+    true,
+    "a rebuilt terminal stream only contains durable facts",
+  );
+
+  // 重建的投影必须游标稳定：两次 replay 之间续用游标不能触发 reset。
+  const second = await run.feature.events.replay("evicted-run", first!.cursor);
+  assert.equal(second!.reset, false, "repeated terminal replays must stay cursor-compatible");
+  assert.deepEqual(second!.activities, [], "an up-to-date cursor sees no new activities");
+
+  // 终态答案不因驱逐而丢失。
+  const terminalTransition = first!.activities.filter((activity) => activity.type === "run.transition").at(-1);
+  assert.equal(terminalTransition?.type, "run.transition");
+
+  // 订阅期间流被固定；最后一个订阅者退订后再次释放，replay 依旧可用。
+  const unsubscribe = run.feature.events.subscribe("evicted-run", () => undefined);
+  const whileSubscribed = await run.feature.events.replay("evicted-run");
+  assert.notEqual(whileSubscribed, undefined);
+  unsubscribe();
+  const afterUnsubscribe = await run.feature.events.replay("evicted-run");
+  assert.equal(afterUnsubscribe!.activities.length, first!.activities.length,
+    "the activity projection must survive stream release cycles unchanged");
+});
 async function removeTestDirectory(root: string): Promise<void> {
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     try { await fs.rm(root, { recursive: true, force: true }); return; }

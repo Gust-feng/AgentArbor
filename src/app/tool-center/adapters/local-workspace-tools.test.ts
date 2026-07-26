@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, symlink, writeFile, mkdir } from "node:fs/promises";
 import { createConnection, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -725,6 +725,48 @@ test("local read rejects paths outside workspace", async () => {
     );
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace boundary follows symlinks so links cannot escape the workspace", async (t) => {
+  const base = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-symlink-"));
+  t.after(async () => { await rm(base, { recursive: true, force: true }); });
+  const root = path.join(base, "workspace");
+  const outside = path.join(base, "outside");
+  await mkdir(root, { recursive: true });
+  await mkdir(outside, { recursive: true });
+  await writeFile(path.join(outside, "secret.txt"), "outside secret\n", "utf8");
+  try {
+    // A directory symlink inside the workspace pointing outside it.
+    await symlink(outside, path.join(root, "escape"), "junction");
+  } catch {
+    // Environments that forbid link creation cannot exercise this escape.
+    return;
+  }
+
+  const readFileTool = createLocalReadFileTool(root);
+  await assert.rejects(
+    () => readFileTool.execute({ path: "escape/secret.txt" }, context),
+    /outside the workspace boundary/,
+  );
+
+  const writeFileTool = createLocalWriteFileTool(root);
+  await assert.rejects(
+    () => writeFileTool.execute({ path: "escape/planted.txt", content: "nope" }, context),
+    /outside the workspace boundary/,
+  );
+  const editFileTool = createLocalEditFileTool(root);
+  await assert.rejects(
+    () => editFileTool.execute({ path: "escape/secret.txt", edits: [{ oldText: "outside", newText: "changed" }] }, context),
+    /outside the workspace boundary/,
+  );
+
+  // A symlink resolving inside the workspace keeps working.
+  await writeFile(path.join(root, "inside.txt"), "inside data\n", "utf8");
+  await symlink(path.join(root, "inside.txt"), path.join(root, "alias.txt"), "file").catch(() => undefined);
+  const aliased = await readFileTool.execute({ path: "alias.txt" }, context).catch(() => undefined);
+  if (aliased !== undefined) {
+    assert.equal(asDirectToolFacts(aliased).content, "inside data\n");
   }
 });
 

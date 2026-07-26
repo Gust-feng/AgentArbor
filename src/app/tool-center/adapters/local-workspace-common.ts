@@ -1,6 +1,7 @@
 import { asRecord } from "../../../kernel/values/index.js";
 export { asRecord };
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 import { utf16SafePrefixLength } from "../text-window.js";
@@ -29,10 +30,47 @@ export function resolveWorkspacePath(rootDirectory: string, requestedPath: strin
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("Path is outside the workspace boundary.");
   }
+  assertRealPathInsideWorkspace(root, absolutePath);
   return {
     absolutePath,
     relativePath: relative.length === 0 ? "." : normalizePath(relative),
   };
+}
+
+/**
+ * A lexical prefix check alone lets a symlink or Windows junction inside the
+ * workspace point anywhere on disk. Resolving the deepest existing ancestor to
+ * its real path keeps the workspace boundary true for the actual file system
+ * target, including files that do not exist yet (e.g. a new Write target).
+ */
+function assertRealPathInsideWorkspace(root: string, absolutePath: string): void {
+  const realRoot = realPathOrUndefined(root) ?? root;
+  const pendingSegments: string[] = [];
+  let probe = absolutePath;
+  let realProbe = realPathOrUndefined(probe);
+  while (realProbe === undefined) {
+    const parent = path.dirname(probe);
+    if (parent === probe) {
+      realProbe = probe;
+      break;
+    }
+    pendingSegments.unshift(path.basename(probe));
+    probe = parent;
+    realProbe = realPathOrUndefined(probe);
+  }
+  const realTarget = path.resolve(realProbe, ...pendingSegments);
+  const relative = path.relative(realRoot, realTarget);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Path is outside the workspace boundary.");
+  }
+}
+
+function realPathOrUndefined(value: string): string | undefined {
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export function toWorkspaceRelative(rootDirectory: string, absolutePath: string): string {

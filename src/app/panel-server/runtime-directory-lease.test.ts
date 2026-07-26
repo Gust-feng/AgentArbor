@@ -10,7 +10,7 @@ import {
 
 test("panel runtime directory has one live writer and can be acquired again after release", async (t) => {
   const runtimeDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-lease-"));
-  t.after(() => fs.rm(runtimeDirectory, { recursive: true, force: true }));
+  t.after(() => fs.rm(runtimeDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const first = await acquirePanelRuntimeDirectoryLease(runtimeDirectory);
   t.after(() => first.release());
 

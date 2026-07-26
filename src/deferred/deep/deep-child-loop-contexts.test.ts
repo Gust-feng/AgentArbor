@@ -20,7 +20,7 @@ test("Deep child loop context keeps one latest filesystem snapshot per child", a
   try {
     await assertLatestContextContract(createFileSystemDeepChildLoopContextStore(runtimeHome));
   } finally {
-    await fs.rm(runtimeHome, { recursive: true, force: true });
+    await fs.rm(runtimeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

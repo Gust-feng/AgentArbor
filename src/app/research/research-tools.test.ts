@@ -175,7 +175,7 @@ test("research read tool continues from the first unread character without repea
     assert.deepEqual(starts, [0, 200, 400]);
     assert.equal(chunks.join(""), source);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

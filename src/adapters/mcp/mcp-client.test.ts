@@ -1812,7 +1812,7 @@ test("resolveMcpExecutable prioritizes AgentArbor user runtime bin", async () =>
     assert.equal(resolution.executable?.toLowerCase(), executablePath.toLowerCase());
     assert.equal(resolution.managedDirectories[0], bin);
   } finally {
-    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1828,7 +1828,7 @@ test("mcpManagedRuntimeDirectories treats AGENTARBOR_HOME as the user AgentArbor
     assert.equal(directories[0], path.join(agentArborHome, "bin"));
     assert.equal(directories.includes(path.join(agentArborHome, ".agentarbor", "bin")), false);
   } finally {
-    await fs.rm(agentArborHome, { recursive: true, force: true });
+    await fs.rm(agentArborHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1862,8 +1862,8 @@ test("ensureManagedMcpExecutable imports discovered runtime entry into AgentArbo
     assert.equal(resolved.source, "agentarbor");
     assert.equal(resolved.executable?.toLowerCase(), managedPath.toLowerCase());
   } finally {
-    await fs.rm(home, { recursive: true, force: true });
-    await fs.rm(external, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(external, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1892,8 +1892,8 @@ test("ensureManagedMcpExecutable imports explicit base runtime paths into AgentA
     assert.equal(ensured.executable?.toLowerCase(), managedPath.toLowerCase());
     assert.equal(await fileExists(managedPath), true);
   } finally {
-    await fs.rm(home, { recursive: true, force: true });
-    await fs.rm(external, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(external, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1929,8 +1929,8 @@ test("McpClientWrapper starts stdio servers from AgentArbor user runtime bin", a
       await client.disconnect();
     }
   } finally {
-    await fs.rm(home, { recursive: true, force: true });
-    await fs.rm(serverDirectory, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(serverDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

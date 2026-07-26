@@ -58,8 +58,8 @@ test("context attachment tools read selected local file by attachmentId without 
     assert.equal(modelVisible.includes(localFile), false);
     assert.equal(modelVisible.includes("local-file:"), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -129,8 +129,8 @@ test("context attachment text read returns executable character continuation", a
     assert.equal(secondResult.startChar, 4);
     assert.equal(asRecord(asRecord(asRecord(secondRead.output).continuation).nextInput).startChar, 8);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -192,8 +192,8 @@ test("context attachment text continuation keeps emoji surrogate pairs intact", 
     assert.equal(split.status, "failed");
     assert.match(String(split.error), /must not split a UTF-16 surrogate pair/);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -238,8 +238,8 @@ test("context attachment text read rejects a character window too small to advan
     assert.equal(result.status, "failed");
     assert.match(String(result.error), /attachment_read_text maxLength must be at least 3/);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -293,8 +293,8 @@ test("context attachment text read rejects invalid explicit maxLength values", a
       assert.match(String(result.error), /attachment_read_text startChar/);
     }
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -338,8 +338,8 @@ test("context attachment text read rejects line ranges with maxLength to avoid s
     assert.equal(result.status, "failed");
     assert.match(String(result.error), /cannot combine maxLength with startLine\/endLine/);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -419,8 +419,8 @@ test("context attachment PDF tool extracts text-native PDF content and rejects i
       assert.match(String(invalid.error), /maxLength must be at least 3 and a safe integer/);
     }
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -494,8 +494,8 @@ test("context attachment tools browse search and read files inside selected loca
     assert.equal(projected.includes(projectRoot), false);
     assert.equal(projected.includes("local-project:"), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -595,8 +595,8 @@ test("context attachment list and search tools expose executable continuation of
     assert.equal(Array.isArray(secondSearchResult.matches), true);
     assert.equal(asRecord((secondSearchResult.matches as readonly unknown[])[0]).path, "src/note-3.txt");
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -681,8 +681,8 @@ test("context attachment list and search tools fail honestly at the offset ceili
     assert.equal(searchOutput.reachedOffsetCeiling, true);
     assert.equal(searchOutput.offsetCeiling, 10_000);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(projectRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -723,8 +723,8 @@ test("context attachment tools reject refs outside current Task Soil permissions
     assert.equal(modelVisible.includes("not authorized"), true);
     assert.equal(modelVisible.includes(localFile), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

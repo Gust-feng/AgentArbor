@@ -17,7 +17,7 @@ const context: ToolExecutionContext = {
 
 test("FileSystemToolOutputStore keeps exact evidence readable across restart and final reads", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const content = `alpha😀${"x".repeat(40)}omega`;
   const first = new FileSystemToolOutputStore(root, {
     now: () => Date.parse("2026-07-17T00:00:00.000Z"),
@@ -57,7 +57,7 @@ test("FileSystemToolOutputStore keeps exact evidence readable across restart and
 
 test("FileSystemToolOutputStore releases only evidence owned by the requested run", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-owner-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   let token = 0;
   const store = new FileSystemToolOutputStore(root, {
     createRefToken: () => `owner-evidence-${token += 1}`,
@@ -74,7 +74,7 @@ test("FileSystemToolOutputStore releases only evidence owned by the requested ru
 
 test("ToolCenter publishes a durable evidence continuation without duplicating the full output", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-center-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const store = new FileSystemToolOutputStore(root, { createRefToken: () => "tool-center-evidence" });
   const center = new ToolCenter({ outputStore: store, maxInlineOutputChars: 32 });
   center.register(createReadToolOutputTool(store));
@@ -124,7 +124,7 @@ test("ToolCenter publishes a durable evidence continuation without duplicating t
 
 test("FileSystemToolOutputStore fails fast when durable evidence content is damaged", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-corrupt-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const store = new FileSystemToolOutputStore(root, { createRefToken: () => "corrupt-evidence" });
   const retained = await store.retain(retainInput("original", "call-corrupt", "run-corrupt"));
   await fs.writeFile(path.join(root, "entries", "corrupt-evidence", "content.txt"), "changed", "utf8");
@@ -137,7 +137,7 @@ test("FileSystemToolOutputStore fails fast when durable evidence content is dama
 
 test("FileSystemToolOutputStore invalidates verified read cache when evidence changes", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-cache-invalidate-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const store = new FileSystemToolOutputStore(root, { createRefToken: () => "cached-evidence" });
   const retained = await store.retain(retainInput("original", "call-cache", "run-cache"));
   assert.equal((await store.read(retained.ref, { startChar: 0, maxChars: 3 }))?.content, "ori");
@@ -154,7 +154,7 @@ test("FileSystemToolOutputStore invalidates verified read cache when evidence ch
 
 test("FileSystemToolOutputStore streams one large verification and reuses its bounded window index", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-indexed-read-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const content = `${"a".repeat(65_535)}😀中${"b".repeat(70_000)}😀tail`;
   const store = new FileSystemToolOutputStore(root, {
     createRefToken: () => "indexed-evidence",
@@ -202,7 +202,7 @@ test("FileSystemToolOutputStore streams one large verification and reuses its bo
 
 test("FileSystemToolOutputStore rejects an item above the durable byte limit without writing it", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-item-limit-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const store = new FileSystemToolOutputStore(root, {
     createRefToken: () => "oversized-evidence",
     maxItemBytes: 4,
@@ -220,7 +220,7 @@ test("FileSystemToolOutputStore rejects an item above the durable byte limit wit
 
 test("FileSystemToolOutputStore enforces durable entry and total byte capacity across restart", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-evidence-capacity-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   let token = 0;
   const options = {
     createRefToken: () => `capacity-${token += 1}`,

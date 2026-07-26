@@ -272,7 +272,7 @@ async function createSkillFixture(name: string): Promise<SkillResourcePackageInp
 }
 
 async function removeFixture(fixture: { readonly rootPath: string }): Promise<void> {
-  await fs.rm(fixture.rootPath, { recursive: true, force: true });
+  await fs.rm(fixture.rootPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 function expectResolved(result: SkillResourceResolverResult): SkillResourceResolvedFacts {

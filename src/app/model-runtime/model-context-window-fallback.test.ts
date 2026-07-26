@@ -71,6 +71,6 @@ test("context window fallback writes a scoped 128K override without losing provi
     assert.equal(resolveModelCapabilities({ profile: profile!, overrides }).supportsVisionInput, false);
     assert.equal(resolveModelCapabilities({ profile: otherProfile!, overrides }).supportsVisionInput, false);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

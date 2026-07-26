@@ -403,7 +403,7 @@ test("ResearchRuntime reads only registered command-log refs", async () => {
     assert.equal(illegal.result, undefined);
     assert.equal(JSON.stringify({ unknown, illegal }).includes("must not be read"), false);
   } finally {
-    await fs.rm(codebaseRoot, { recursive: true, force: true });
+    await fs.rm(codebaseRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -422,7 +422,7 @@ test("ResearchRuntime codebase adapter searches and reads repository text files"
     assert.equal(read.result?.uri, "repo://module.ts");
     assert.equal(read.result?.contentPreview?.includes("ResearchRuntime codebase search"), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -436,7 +436,7 @@ test("ResearchRuntime codebase adapter rejects path traversal reads", async () =
     assert.equal(read.status, "invalid-input");
     assert.equal(read.message?.includes("escapes repository root"), true);
   } finally {
-    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

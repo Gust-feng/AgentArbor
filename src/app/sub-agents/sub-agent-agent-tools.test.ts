@@ -204,7 +204,7 @@ async function subAgentRoot(
   definitions: readonly DefinitionFixture[],
 ): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-sdk-sub-agent-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   for (const definition of definitions) {
     const directory = path.join(root, definition.name);
     await fs.mkdir(directory, { recursive: true });

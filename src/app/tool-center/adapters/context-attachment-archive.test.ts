@@ -80,7 +80,7 @@ test("context attachment archive tools inspect selected ZIP without extracting o
     assert.equal(modelVisible.includes(zipFile), false);
     assert.equal(modelVisible.includes("local-file:"), false);
   } finally {
-    await fs.rm(workspace, { recursive: true, force: true });
-    await fs.rm(localRoot, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

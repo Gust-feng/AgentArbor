@@ -189,7 +189,7 @@ test("FileSystemDeepConversationStore 写入 runtimeHome/deep-conversations 独�
     const afterDelete = await store.get(sample.conversationId);
     assert.equal(afterDelete, undefined);
   } finally {
-    await fs.rm(tmp, { recursive: true, force: true });
+    await fs.rm(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -218,7 +218,7 @@ test("FileSystemDeepConversationStore keeps conversations created by fresh proce
     assert.equal((await restartedStore.get(firstId))?.title, "first process");
     assert.equal((await restartedStore.get(secondId))?.title, "second process");
   } finally {
-    await fs.rm(tmp, { recursive: true, force: true });
+    await fs.rm(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

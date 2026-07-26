@@ -210,7 +210,7 @@ test("runSkillDoctor reports package quality issues without loading resource con
     assert.equal(JSON.stringify(report).includes("EVAL_SENTINEL"), false);
     assert.equal(JSON.stringify(report).includes("The review identifies a material risk"), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -277,7 +277,7 @@ test("runSkillDoctor can execute routing eval cases through the model router whe
     assert.equal(channel.requests.every((request) => request.purpose === "skill_routing"), true);
     assert.equal(channel.requests.every((request) => (request.tools ?? []).length === 0), true);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -352,7 +352,7 @@ test("runSkillDoctor can explicitly execute quality eval cases without exposing 
     assert.equal(JSON.stringify(report).includes("WITH_SKILL_OUTPUT_SENTINEL"), false);
     assert.equal(JSON.stringify(report).includes("This answer identifies material risk"), false);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

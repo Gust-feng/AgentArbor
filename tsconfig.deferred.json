@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-deferred",
+    "noEmit": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.cts"],
+  "exclude": ["dist", "dist-deferred", "node_modules", "src/app/panel-ui/src"]
+}

@@ -59,7 +59,9 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 
 ### 2. 延期的 Agent 集群参考实现
 
-`src/app/deep/`、`deep-routes.ts` 和关联 Panel 模块保留历史实现与测试，供未来重构筛选可复用机制。当前生产组合根不创建 `MultiAgentFeature`，主路由不调用 Deep route adapter，下面的内容只说明保留源码的原有行为，不能被解释为当前可用功能。
+`src/deferred/deep/`、`src/deferred/deep-routes.ts` 和关联 Panel 模块保留历史实现与测试，供未来重构筛选可复用机制。当前生产组合根不创建 `MultiAgentFeature`，主路由不调用 Deep route adapter，下面的内容只说明保留源码的原有行为，不能被解释为当前可用功能。
+
+该后端源码已归档：不进入 `pnpm build` 与 `pnpm test`，改由 `pnpm test:deferred` 单独编译与验证。Panel 前端 deep 投影仍留在 `src/app/panel-ui/`，由默认关闭的 `agentClusterEnabled` 本地偏好控制；即使手动开启，所有 `/api/deep/*` 调用仍返回 410。归档边界、验证方式与恢复条件见 `docs/开发指南/06-工程实现/17-Multi-Agent源码归档边界.md`。
 
 - 编排边界：`DeepRunExecutor` 维持 manager 动作循环（`direct_answer / spawn_children / wait_children / continue_child / synthesize / ask_user / stop`），其中 `spawn_children` 会把 child 放入 `DeepTaskBoard` 后经 `DeepChildScheduler` 真实并发启动；`wait_children` 会真实等待在途 child；`continue_child` 表示父层审查或操作已有 child，并给同一个 child run 追加指令继续标准 Agent loop；若目标 child 仍是 `pending / running`，追加指令先进入 scheduler FIFO 队列，等当前 child loop 到达材料边界后以同一 `childRunId` 续跑，不抢占当前模型/工具调用；`synthesize` 前会先启动并等待 pending / running child 清场，且只在已有 child 材料时由父层综合产出 `SynthesizedConclusion`。
 - 当前协作边界：只允许 manager + 一层 child（`depth = 1`）；child 由 `DeepChildAgentRunner` 作为显式 child Agent run 执行，父 Agent 派生 `DeepChildSpec`（目标、角色、工具授权、可选轮次预算），派生时把父层生成的 objective 冻结到 child `AgentSpec.instructions` 作为 run 出生事实。child 调用中性的 `AgentTurnRuntime.execute(input, semantics)`，由 Multi-Agent 自己选择 final-output-only 投影，再经 ToolCenter 与 Confirmation Gate 完成标准模型-工具-模型循环。模型、基础工具、Research 与 MCP 由唯一后端 Composition Root 通过中性工厂和 contribution 装配；Multi-Agent 不复用 Ordinary 实现，`/api/deep/*` 也不创建 provider、ToolCenter、store 或 runtime。child 未显式设置 `maxModelRounds / maxToolRounds` 时默认各 200 轮，显式更小值保留，超过 200 时钳制到 200；轮次边界只作失控保护，耗尽后进入未完成状态，不能替父 Agent 判断任务已经完成。child 模型请求不写入固定输出/延迟预算。child 若遇到 `approval_required`、`out_of_fuel` 或 `context_overflow`，会进入 `blocked` child run，而不是误报 failed；child 自身中断或异常停止会进入 `interrupted` child run，不再被任务板误投影为 completed。

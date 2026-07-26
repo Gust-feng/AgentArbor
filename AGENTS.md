@@ -81,6 +81,7 @@ Agent 口径必须区分产品架构和实现命名：保留 deep / Agent 集群
   .claude/
   .agentarbor/
   src/
+    deferred/
 ```
 
 ## 目录边界
@@ -93,6 +94,7 @@ Agent 口径必须区分产品架构和实现命名：保留 deep / Agent 集群
 - `.claude/`：Claude Code 开发适配层。
 - `.agentarbor/`：未来 Plan Package 的实现/存储形态或目录名，用于保存可持久化 Plan、引用、谱系、validation 和审计材料；不保存最终资产，不替代 Task Soil 或 Global Soil。只有契约稳定、有真实出生依据和显式写入授权时才增量创建。
 - `src/`：AgentArbor TypeScript 实现代码。当前按 Workbench Shell、Ordinary Agent、Multi-Agent、Sub-Agent、中性能力与 Host Composition Root 的功能所有权渐进收口；长期能力只能通过稳定端口按需出生。
+- `src/deferred/`：已归档的延期实现，当前只有 Multi-Agent 后端。它被排除出 `tsconfig.json`、`pnpm build` 和 `pnpm test`，改由 `pnpm build:deferred` 与 `pnpm test:deferred` 单独编译验证，确保归档不腐烂。生产代码禁止 import 该目录；不得在其中继续开发新功能。恢复需要显式 ADR 决策，边界见 `docs/开发指南/06-工程实现/17-Multi-Agent源码归档边界.md`。
 
 禁止把这些层混用。平台适配文件不是 AgentArbor 原生产品事实源，未来运行时资产也不能替代当前开发文档。
 

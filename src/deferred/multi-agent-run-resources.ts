@@ -1,16 +1,16 @@
-import type { CapabilityAgentProfile } from "../capability/capability-policy.js";
-import { resolveRunToolBoundary } from "../capability/run-tool-boundary.js";
-import type { MultiAgentRunResourceAcquirer } from "../deep/multi-agent-feature.js";
+import type { CapabilityAgentProfile } from "../app/capability/capability-policy.js";
+import { resolveRunToolBoundary } from "../app/capability/run-tool-boundary.js";
+import type { MultiAgentRunResourceAcquirer } from "./deep/multi-agent-feature.js";
 import {
   projectMultiAgentCapabilitySnapshot,
-} from "../deep/multi-agent-capability-snapshot.js";
+} from "./deep/multi-agent-capability-snapshot.js";
 import {
   createAgentToolCenterFactory,
   prepareAgentRunResources,
   type AgentRunResourceHost,
-} from "./agent-run-resources.js";
-import { createHostAgentToolContributions } from "./agent-tool-contributions.js";
-import { createOpenAITokenCounter } from "../context-maintenance/index.js";
+} from "../app/panel-server/agent-run-resources.js";
+import { createHostAgentToolContributions } from "../app/panel-server/agent-tool-contributions.js";
+import { createOpenAITokenCounter } from "../app/context-maintenance/index.js";
 
 /**
  * Composition adapter between the neutral Host resource factory and the

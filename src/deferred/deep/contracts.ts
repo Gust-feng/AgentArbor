@@ -28,7 +28,7 @@ import type {
   SanitizedInformationAccessConfig,
 } from "../../domain/config/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
-import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
+import type { ModelRuntimeMode } from "../../app/model-runtime/contracts.js";
 import type {
   AgentRunTree,
   AgentSpec,
@@ -44,7 +44,7 @@ import {
   AGENT_FABRIC_MVP_MAX_DEPTH,
   assertNoDirectChildOutputHandoff,
 } from "../../domain/underground/agent-fabric.js";
-import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
+import type { DesktopTaskSoilInput } from "../../app/task-soil/task-soil-workspace.js";
 import type { MultiAgentCapabilitySnapshot } from "./multi-agent-capability-snapshot.js";
 
 export type { MultiAgentCapabilitySnapshot };

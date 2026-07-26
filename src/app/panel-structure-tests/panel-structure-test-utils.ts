@@ -14,6 +14,16 @@ export async function readAppSource(fileName: string): Promise<string> {
   return fs.readFile(path.join(process.cwd(), "src", "app", fileName), "utf8");
 }
 
+/**
+ * 读取归档模块（`src/deferred/`）源码。
+ *
+ * Multi-Agent 后端已归档，但 Panel 侧仍保留其前端投影，二者之间的契约对齐
+ * 仍需被结构测试守住——否则归档代码与现役前端会在无人察觉时漂移。
+ */
+export async function readDeferredSource(fileName: string): Promise<string> {
+  return fs.readFile(path.join(process.cwd(), "src", "deferred", fileName), "utf8");
+}
+
 export function assertFirstScreenHasNoInternalTerms(html: string): void {
   for (const term of [
     "Task Soil",

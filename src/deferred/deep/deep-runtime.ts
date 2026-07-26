@@ -32,7 +32,7 @@
 import type { ToolConfirmationPolicy } from "../../domain/tools/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
-import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
+import type { ModelRuntimeMode } from "../../app/model-runtime/contracts.js";
 import type { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { createId, nowIso, type IdFactory } from "../../kernel/id.js";
 import { createMessage } from "../../kernel/messages/create-message.js";

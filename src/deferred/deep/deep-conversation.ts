@@ -22,12 +22,12 @@ import { createId, nowIso } from "../../kernel/id.js";
 import { isFileNotFound, toPersistedJsonShape } from "../../kernel/values/index.js";
 import type { Constraint } from "../../domain/constraints.js";
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
-import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
+import type { ModelRuntimeMode } from "../../app/model-runtime/contracts.js";
 import {
   createTaskSoilFromDesktopInput,
   parseDesktopTaskSoilInput,
   type DesktopTaskSoilInput,
-} from "../task-soil/task-soil-workspace.js";
+} from "../../app/task-soil/task-soil-workspace.js";
 import {
   DEEP_RUN_KIND,
   DEEP_RUN_MODE,

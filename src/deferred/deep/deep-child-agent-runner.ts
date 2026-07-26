@@ -26,7 +26,7 @@ import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import {
   frozenSnapshotHasToolOutputReader,
   inheritToolOutputReader,
-} from "../capability/tool-output-reader-capability.js";
+} from "../../app/capability/tool-output-reader-capability.js";
 import {
   createDeepChildLoopContextRef,
   createDeepChildLoopContextRecord,

@@ -4,17 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Multi-Agent 源码已归档到 src/deferred/，被 tsconfig.json 排除，不会编译进 dist。
+// 因此这里不再需要按文件名过滤延期用例；归档代码由 pnpm test:deferred 单独验证。
 const distRoot = path.join(repoRoot, "dist");
-// Multi-Agent remains a retained, non-production module until its separate redesign.
-// Its historical HTTP suite expects routes that production intentionally returns as 410.
-const deferredTestKeys = new Set([
-  "dist/app/panel-server/integration-tests/panel-server-deep-routes.test.js",
-]);
 
-const testFiles = (await collectTestFiles(distRoot))
+const productionTestFiles = (await collectTestFiles(distRoot))
   .map((filePath) => path.relative(repoRoot, filePath))
   .sort((left, right) => left.localeCompare(right));
-const productionTestFiles = testFiles.filter((filePath) => !deferredTestKeys.has(pathKey(filePath)));
 
 console.log(`Running ${productionTestFiles.length} production test files with concurrency 4.`);
 await runNodeTests(productionTestFiles, 4);
@@ -31,9 +27,6 @@ async function collectTestFiles(directory) {
   return files.flat();
 }
 
-function pathKey(filePath) {
-  return filePath.split(path.sep).join("/");
-}
 
 function runNodeTests(files, concurrency) {
   if (files.length === 0) {

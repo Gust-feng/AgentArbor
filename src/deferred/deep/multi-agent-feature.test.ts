@@ -41,7 +41,7 @@ import {
   createDeepChildMessageRecord,
   type DeepChildMessageStore,
 } from "./deep-child-messages.js";
-import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
+import { InMemoryToolOutputStore } from "../../app/tool-center/tool-output-store.js";
 import {
   createMultiAgentFeatureTestFixture as createMultiAgentFeature,
 } from "./tests/multi-agent-feature-test-support.js";

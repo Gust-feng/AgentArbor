@@ -7,7 +7,7 @@ import {
   type RunEnvelope,
   type RunSnapshotCodec,
   type RunSnapshotStore,
-} from "../run-runtime-core/snapshot-store.js";
+} from "../../app/run-runtime-core/snapshot-store.js";
 import type {
   DeepExplorationReport,
   DeepLiveProjection,

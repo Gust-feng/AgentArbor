@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-Multi-Agent 不属于当前生产运行时。`src/app/deep/`、`src/app/panel-server/deep-routes.ts`、关联 Panel 模块和旧 Chat/Responses transport 作为未来重构的代码基础保留，但当前 `createPanelRuntime()` 不创建 `MultiAgentFeature`，`/api/deep/*` 固定返回 `410 multi_agent_deferred`。
+Multi-Agent 不属于当前生产运行时。`src/deferred/deep/`、`src/deferred/deep-routes.ts`、关联 Panel 模块和旧 Chat/Responses transport 作为未来重构的代码基础保留（源码已归档，边界见[Multi-Agent 源码归档边界](17-Multi-Agent源码归档边界.md)），但当前 `createPanelRuntime()` 不创建 `MultiAgentFeature`，`/api/deep/*` 固定返回 `410 multi_agent_deferred`。
 
 这不是删除 Multi-Agent，也不是把 Deep 的业务状态转换为 Ordinary 状态。已有 Deep 持久化数据、DTO 和实现不迁移、不双读、不在启动期加载。
 

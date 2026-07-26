@@ -75,7 +75,9 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(writeSource.includes("function parseExactEdits"), true);
   assert.equal(writeSource.includes("function locateExactEdits"), true);
   assert.equal(commonSource.includes("export function resolveWorkspacePath"), true);
-  assert.equal(commonSource.includes("export function asRecord"), true);
+  // asRecord 已收敛到 src/kernel/values；common 继续对外提供该名字，
+  // 但通过转出而不是本地重新实现，避免记录判定语义再次分裂。
+  assert.equal(commonSource.includes("export { asRecord };"), true);
 });
 
 test("default command shell follows AgentArbor Windows auto-detection order", async () => {

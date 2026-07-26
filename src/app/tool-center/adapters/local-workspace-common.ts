@@ -1,3 +1,5 @@
+import { asRecord } from "../../../kernel/values/index.js";
+export { asRecord };
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { TextDecoder } from "node:util";
@@ -59,9 +61,7 @@ export function truncateText(value: string, maxLength: number): string {
   return `${value.slice(0, prefixLength)}…`;
 }
 
-export function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
-}
+
 
 export function stringOrFallback(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;

@@ -116,7 +116,9 @@ test("config settings schema keeps tool and MCP settings split", async () => {
   assert.equal(toolConfirmationSettings.includes("export function parseToolConfirmationSettings"), true);
   assert.equal(toolConfirmationSettings.includes("export function normalizeToolConfirmationSettings"), true);
   assert.equal(settingsUtils.includes("export function requiredString"), true);
-  assert.equal(settingsUtils.includes("export function asRecord"), true);
+  // asRecord 已收敛到 src/kernel/values；settings-utils 继续对外提供该名字，
+  // 但通过转出而不是本地重新实现，避免记录判定语义再次分裂。
+  assert.equal(settingsUtils.includes('export { asRecord } from "../../kernel/values/index.js";'), true);
 });
 
 test("command shell settings keep runtime environment detection split", async () => {

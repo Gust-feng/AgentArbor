@@ -1,3 +1,4 @@
+import { asOptionalRecord } from "../values/index.js";
 import type {
   ModelOutputContract,
   ModelOutputValidationIssue,
@@ -92,7 +93,7 @@ export function validateOutputContract(
   const issues: ModelOutputValidationIssue[] = [];
 
   if (contract.format === "json_object") {
-    const objectOutput = asRecord(structuredOutput);
+    const objectOutput = asOptionalRecord(structuredOutput);
     if (objectOutput === undefined) {
       issues.push(issue("MODEL_OUTPUT_NOT_OBJECT", "Model output must be a JSON object.", "structuredOutput"));
     } else {
@@ -151,7 +152,7 @@ export function failedModelOutputValidation(
 }
 
 function isOutputContract(value: unknown): value is ModelOutputContract {
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
   return (
     record !== undefined &&
     typeof record.contractId === "string" &&
@@ -162,7 +163,7 @@ function isOutputContract(value: unknown): value is ModelOutputContract {
 }
 
 function isBudget(value: unknown): boolean {
-  const record = asRecord(value);
+  const record = asOptionalRecord(value);
   if (record === undefined) {
     return false;
   }
@@ -177,9 +178,3 @@ function issue(code: string, message: string, path?: string): ModelOutputValidat
   return { code, message, path };
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return undefined;
-}

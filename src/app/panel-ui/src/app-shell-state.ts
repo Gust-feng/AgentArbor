@@ -1,5 +1,4 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
-import { getStartupAnimationEnabled } from "./app-motion";
 import {
   getModelUsageDisplayEnabled,
   saveModelUsageDisplayEnabled,
@@ -23,8 +22,6 @@ export type AppShellState = {
   readonly settingsGroup: SettingsGroup;
   readonly sidebarCollapsed: boolean;
   readonly setSidebarCollapsed: Dispatch<SetStateAction<boolean>>;
-  readonly startupAnimationEnabled: boolean;
-  readonly setStartupAnimationEnabled: Dispatch<SetStateAction<boolean>>;
   readonly modelUsageDisplayEnabled: boolean;
   readonly setModelUsageDisplayEnabled: Dispatch<SetStateAction<boolean>>;
   readonly agentClusterEnabled: boolean;
@@ -43,7 +40,6 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("models");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsedPreference);
-  const [startupAnimationEnabled, setStartupAnimationEnabled] = useState(getStartupAnimationEnabled);
   const [modelUsageDisplayEnabled, setModelUsageDisplayEnabled] = useState(getModelUsageDisplayEnabled);
   const [agentClusterEnabled, setAgentClusterEnabled] = useState(() =>
     isMultiAgentEntryEnabled(loadAgentClusterEnabledPreference())
@@ -83,8 +79,6 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     settingsGroup,
     sidebarCollapsed,
     setSidebarCollapsed,
-    startupAnimationEnabled,
-    setStartupAnimationEnabled,
     modelUsageDisplayEnabled,
     setModelUsageDisplayEnabled,
     agentClusterEnabled,

@@ -1,20 +1,13 @@
 import React, { useRef, useState } from "react";
-import { WorkbenchShell } from "./components/workbench-shell";
-import { useStartupIntro } from "./app-startup-intro";
+import { PersonalWorkbench } from "./personal-workbench/personal-workbench";
 import { useAppShellEffects } from "./app-shell-effects";
 import { persistSidebarCollapsedPreference, useAppShellState } from "./app-shell-state";
 import { useAppQueuedMessages } from "./app-queued-message-state";
 import { useAppWorkbenchConfigState } from "./app-workbench-config-state";
 import { useAppWorkbenchRuntime } from "./app-workbench-runtime";
 import {
-  buildSidebarProps,
-  buildWorkbenchMainProps,
   buildWorkbenchSettingsDialogProps,
-  chatScreenFrom,
   isBootstrappingApp,
-  isStartupIntroActive,
-  startupIntroOverlayPropsFrom,
-  startupIntroRootStyleFrom,
 } from "./app-workbench-shell-props";
 import { useAppWorkbenchTaskState } from "./app-workbench-task-state";
 import { buildWorkbenchInputProps } from "./app-workbench-input-props";
@@ -22,7 +15,7 @@ import { createInitialAppState } from "./app-state";
 
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
-  const [startupAnimationAllowed] = useState(readStartupAnimationAllowed);
+  const isBootstrapping = isBootstrappingApp(app);
   const taskState = useAppWorkbenchTaskState(app);
   const {
     goal,
@@ -65,18 +58,14 @@ export function App(): React.ReactElement {
     },
   });
   const {
-    screen,
     setScreen,
     settingsOpen,
     settingsGroup,
     sidebarCollapsed,
     setSidebarCollapsed,
-    startupAnimationEnabled,
-    setStartupAnimationEnabled,
     modelUsageDisplayEnabled,
     setModelUsageDisplayEnabled,
     agentClusterEnabled,
-    pinningConversationIds,
     setPinningConversationIds,
     inputCloseSignal,
     setInputCloseSignal,
@@ -85,7 +74,9 @@ export function App(): React.ReactElement {
     changeModelUsageDisplay,
     changeAgentClusterEnabled,
   } = shellState;
-  const agentClusterActive = agentClusterEnabled && app.agentMode === "deep";
+  // The personal workbench is the production Ordinary entry. Deferred Deep
+  // remains a settings/runtime compatibility concern, not a rendered surface.
+  const agentClusterActive = false;
   const runtime = useAppWorkbenchRuntime({
     app,
     setApp,
@@ -122,11 +113,8 @@ export function App(): React.ReactElement {
     contextUsage,
     modelResponding,
     pendingConfirmation,
-    pendingCount,
     confirmationBusy,
     contextBusy,
-    deepChildOperationBusyId,
-    deepResynthesisBusy,
     savingModel,
     savingWorkspace,
     savingDesktopAgent,
@@ -134,7 +122,6 @@ export function App(): React.ReactElement {
     runActions,
     deepEntryActions,
     deepTaskActions,
-    sidebarActions,
     settingsController,
     composerActions,
   } = runtime;
@@ -145,29 +132,13 @@ export function App(): React.ReactElement {
   } = runActions;
   const {
     openNormalAgentEntry,
-    openNormalTaskEntry,
     openNormalConversation,
-    openAgentClusterRun,
-    openAgentClusterConversation,
-    openAgentClusterEntry,
   } = deepEntryActions;
   openNormalAgentEntryRef.current = openNormalAgentEntry;
   const {
     submitDeepInput,
-    startConfirmedDeepRun,
     stopDeepTask,
-    sendDeepChildMessage,
-    decideDeepChild,
-    resynthesizeDeepRun,
   } = deepTaskActions;
-  const {
-    renameConversation,
-    toggleConversationPinned,
-    deleteConversation,
-    renameDeepConversation,
-    toggleDeepConversationPinned,
-    deleteDeepConversation,
-  } = sidebarActions;
   const {
     selectInputModel,
     selectAttachment,
@@ -179,15 +150,14 @@ export function App(): React.ReactElement {
   useAppShellEffects({
     sidebarCollapsed,
     persistSidebarCollapsed: persistSidebarCollapsedPreference,
-    setStartupAnimationEnabled,
     setModelUsageDisplayEnabled,
     appUpdate: app.appUpdate,
     checkAppUpdate: settingsController.checkAppUpdate,
     refreshAppUpdateStatus: settingsController.refreshAppUpdateStatus,
   });
   const {
-    queuedMessages,
     enqueueMessage,
+    queuedMessages,
     removeQueuedMessage,
     updateQueuedMessage,
   } = useAppQueuedMessages({
@@ -196,7 +166,7 @@ export function App(): React.ReactElement {
     setGoal,
     startTask,
   });
-  const { inputProps, deepInputProps } = buildWorkbenchInputProps({
+  const { inputProps: baseInputProps } = buildWorkbenchInputProps({
     agentClusterActive,
     goal,
     setGoal,
@@ -230,62 +200,13 @@ export function App(): React.ReactElement {
     deepActiveRunId: app.deepActiveRunId,
     deepIntakeStatus: app.deepIntakeStatus,
   });
-
-  const chatScreen = chatScreenFrom({
-    agentClusterActive,
-    screen,
-    conversation: app.conversation,
-    currentRun,
-  });
-  const isBootstrapping = isBootstrappingApp(app);
-  const startupIntro = useStartupIntro(isBootstrapping, { startupAnimationEnabled, startupAnimationAllowed });
-  const startupIntroRootStyle = startupIntroRootStyleFrom(startupIntro);
-  const startupIntroActive = isStartupIntroActive(startupIntro);
-  const sidebarProps = buildSidebarProps({
-    chatScreen,
-    app,
-    pendingCount,
-    sidebarCollapsed,
-    agentClusterActive,
-    agentClusterEnabled,
-    pinningConversationIds,
-    onNew: openNormalTaskEntry,
-    onOpenAgentCluster: openAgentClusterEntry,
-    onOpenDeepConversation: (conversationId) => void openAgentClusterConversation(conversationId),
-    onOpenDeepRun: (runId) => void openAgentClusterRun(runId),
-    onOpen: openNormalConversation,
-    onRename: (id, title) => void renameConversation(id, title),
-    onRenameDeep: (id, title) => void renameDeepConversation(id, title),
-    onTogglePinned: (id, pinned) => void toggleConversationPinned(id, pinned),
-    onToggleDeepPinned: (id, pinned) => void toggleDeepConversationPinned(id, pinned),
-    onDelete: (id) => void deleteConversation(id),
-    onDeleteDeep: (id) => void deleteDeepConversation(id),
-    onOpenSettings: () => openSettings("models"),
-  });
-  const workbenchMainProps = buildWorkbenchMainProps({
-    isBootstrapping,
-    agentClusterActive,
-    chatScreen,
-    startupIntroActive,
-    app,
-    inputProps,
-    deepInputProps,
-    currentRun,
-    modelUsageDisplayEnabled,
-    pendingConfirmation,
-    onDecision: (decision, guidance) => void decideConfirmation(decision, guidance),
-    confirmationBusy,
+  const inputProps = {
+    ...baseInputProps,
     queuedMessages,
     onRemoveQueuedMessage: removeQueuedMessage,
     onUpdateQueuedMessage: updateQueuedMessage,
-    deepChildOperationBusyId,
-    deepResynthesisBusy,
-    onStartConfirmedRun: startConfirmedDeepRun,
-    onChildMessage: sendDeepChildMessage,
-    onChildConfirmation: decideDeepChild,
-    onResynthesize: resynthesizeDeepRun,
-    onStopRun: stopDeepTask,
-  });
+  };
+
   const settingsDialogProps = buildWorkbenchSettingsDialogProps({
     settingsOpen,
     closeSettings,
@@ -318,28 +239,25 @@ export function App(): React.ReactElement {
     },
     actions: settingsController,
   });
-  const startupIntroOverlayProps = startupIntroOverlayPropsFrom(startupIntro, sidebarCollapsed);
-
   return (
-    <WorkbenchShell
-      startupIntroPhase={startupIntro.overlayPhase}
+    <PersonalWorkbench
+      isBootstrapping={isBootstrapping}
       sidebarCollapsed={sidebarCollapsed}
-      rootStyle={startupIntroRootStyle}
-      sidebarProps={sidebarProps}
       onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+      conversation={app.conversation}
+      conversations={app.conversations}
+      currentRun={currentRun}
+      inputProps={inputProps}
+      showModelUsage={modelUsageDisplayEnabled}
+      error={app.error}
+      pendingConfirmation={pendingConfirmation}
+      confirmationBusy={confirmationBusy}
+      onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
+      onOpenConversation={openNormalConversation}
+      onOpenSettings={() => openSettings("models")}
       appUpdate={app.appUpdate}
       onInstallAppUpdate={() => void settingsController.installAppUpdate()}
-      mainProps={workbenchMainProps}
       settingsDialogProps={settingsDialogProps}
-      startupIntroOverlayProps={startupIntroOverlayProps}
     />
   );
-}
-
-function readStartupAnimationAllowed(): boolean {
-  return document.documentElement.dataset.desktopStartupAnimation !== "consumed";
-}
-
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }

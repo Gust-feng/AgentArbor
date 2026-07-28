@@ -1,5 +1,4 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
-import { getStartupAnimationEnabled, subscribeMotionSettingsChanged } from "./app-motion";
 import {
   getModelUsageDisplayEnabled,
   subscribeModelUsageDisplayChanged,
@@ -9,7 +8,6 @@ import type { AppUpdateInfo } from "./contracts/app-update";
 export type AppShellEffectsOptions = {
   readonly sidebarCollapsed: boolean;
   readonly persistSidebarCollapsed: (collapsed: boolean) => void;
-  readonly setStartupAnimationEnabled: Dispatch<SetStateAction<boolean>>;
   readonly setModelUsageDisplayEnabled: Dispatch<SetStateAction<boolean>>;
   readonly appUpdate?: AppUpdateInfo;
   readonly checkAppUpdate: () => Promise<void>;
@@ -26,10 +24,6 @@ export function useAppShellEffects(options: AppShellEffectsOptions): void {
   useEffect(() => {
     options.persistSidebarCollapsed(options.sidebarCollapsed);
   }, [options.persistSidebarCollapsed, options.sidebarCollapsed]);
-
-  useEffect(() => subscribeMotionSettingsChanged(() => {
-    options.setStartupAnimationEnabled(getStartupAnimationEnabled());
-  }), [options.setStartupAnimationEnabled]);
 
   useEffect(() => subscribeModelUsageDisplayChanged(() => {
     options.setModelUsageDisplayEnabled(getModelUsageDisplayEnabled());

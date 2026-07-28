@@ -1,0 +1,219 @@
+/*
+ * The runtime settings bridge deliberately owns its styling locally. It keeps
+ * the existing configuration controls functional without importing the old
+ * panel theme or its document-level CSS variables into the prototype shell.
+ */
+.aa-redesign-root .settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.aa-redesign-root .settings-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(26, 27, 36, 0.24);
+  backdrop-filter: blur(4px);
+}
+
+.aa-redesign-root .settings-dialog {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(1080px, calc(100vw - 48px));
+  height: min(740px, calc(100vh - 48px));
+  grid-template-columns: 188px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--aa-border);
+  border-radius: 8px;
+  background: var(--aa-surface);
+  color: var(--aa-text-1);
+  box-shadow: 0 20px 60px rgba(28, 30, 42, 0.18);
+}
+
+.aa-redesign-root .settings-sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 12px 8px;
+  border-right: 1px solid var(--aa-border);
+  background: var(--aa-canvas);
+}
+
+.aa-redesign-root .settings-close-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin: 0 4px 12px auto;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aa-text-3);
+  cursor: pointer;
+}
+
+.aa-redesign-root .settings-close-button:hover,
+.aa-redesign-root .settings-sidebar nav button:hover {
+  background: var(--aa-surface-hover);
+}
+
+.aa-redesign-root .settings-sidebar nav {
+  display: grid;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.aa-redesign-root .settings-sidebar nav button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aa-text-2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aa-redesign-root .settings-sidebar nav button.active {
+  background: var(--aa-accent-bg);
+  color: var(--aa-accent);
+}
+
+.aa-redesign-root .settings-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.aa-redesign-root .settings-main > header {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--aa-border);
+}
+
+.aa-redesign-root .settings-main h2,
+.aa-redesign-root .settings-main h3,
+.aa-redesign-root .settings-main p {
+  margin: 0;
+}
+
+.aa-redesign-root .settings-main h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.aa-redesign-root .settings-content {
+  min-width: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px 28px;
+}
+
+.aa-redesign-root .settings-content > * {
+  min-width: 0;
+}
+
+.aa-redesign-root .settings-card,
+.aa-redesign-root .service-settings-card,
+.aa-redesign-root .mcp-service-card,
+.aa-redesign-root .provider-row,
+.aa-redesign-root .model-catalog-panel,
+.aa-redesign-root .settings-runtime-card {
+  border: 1px solid var(--aa-border);
+  border-radius: 7px;
+  background: var(--aa-surface);
+}
+
+.aa-redesign-root .settings-card,
+.aa-redesign-root .service-settings-card,
+.aa-redesign-root .mcp-service-card,
+.aa-redesign-root .settings-runtime-card {
+  padding: 16px;
+}
+
+.aa-redesign-root .settings-content :is(input, select, textarea) {
+  width: 100%;
+  border: 1px solid var(--aa-border);
+  border-radius: 6px;
+  background: var(--aa-canvas);
+  color: var(--aa-text-1);
+  font: inherit;
+}
+
+.aa-redesign-root .settings-content :is(input, select) {
+  min-height: 34px;
+  padding: 6px 9px;
+}
+
+.aa-redesign-root .settings-content textarea {
+  min-height: 88px;
+  padding: 9px;
+  resize: vertical;
+}
+
+.aa-redesign-root .settings-content button,
+.aa-redesign-root .settings-content a {
+  color: var(--aa-accent);
+}
+
+.aa-redesign-root .settings-content button {
+  border-radius: 6px;
+  font: inherit;
+}
+
+.aa-redesign-root .settings-content button:not(:disabled) {
+  cursor: pointer;
+}
+
+.aa-redesign-root .settings-content button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.aa-redesign-root .settings-content :is(input, select, textarea, button):focus-visible,
+.aa-redesign-root .settings-close-button:focus-visible,
+.aa-redesign-root .settings-sidebar nav button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--aa-accent) 58%, transparent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+  .aa-redesign-root .settings-overlay {
+    padding: 10px;
+  }
+
+  .aa-redesign-root .settings-dialog {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 20px);
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .aa-redesign-root .settings-sidebar nav button {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 9px;
+  }
+
+  .aa-redesign-root .settings-sidebar nav button span {
+    display: none;
+  }
+
+  .aa-redesign-root .settings-content {
+    padding: 16px;
+  }
+}

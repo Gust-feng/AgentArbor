@@ -323,14 +323,18 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
   transition: none;
 }
 
-.app-root[data-startup-intro] > .app-workbench {
+.app-root[data-startup-intro] > .app-workbench,
+.app-root[data-startup-intro] > .personal-workbench {
   opacity: 0.001;
   visibility: visible;
   pointer-events: none;
+  backface-visibility: hidden;
+  will-change: opacity;
   transition: none;
 }
 
-.app-root[data-startup-intro="title-handoff"] > .app-workbench {
+.app-root[data-startup-intro="title-handoff"] > .app-workbench,
+.app-root[data-startup-intro="title-handoff"] > .personal-workbench {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -340,7 +344,8 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
   transition-delay: var(--startup-intro-workbench-reveal-delay), 0ms;
 }
 
-.app-root[data-startup-intro="title-ready"] > .app-workbench {
+.app-root[data-startup-intro="title-ready"] > .app-workbench,
+.app-root[data-startup-intro="title-ready"] > .personal-workbench {
   opacity: 0.001;
   visibility: visible;
   pointer-events: none;
@@ -351,7 +356,8 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
   transition-delay: var(--startup-intro-sidebar-reveal-delay), 0ms;
 }
 
-.app-root[data-startup-intro="title-handoff"] > .app-workbench {
+.app-root[data-startup-intro="title-handoff"] > .app-workbench,
+.app-root[data-startup-intro="title-handoff"] > .personal-workbench {
   transition-delay: var(--startup-intro-workbench-reveal-delay), 0ms;
 }
 
@@ -390,7 +396,8 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
 }
 
 .app-root[data-startup-intro="title-ready"] .chat-empty-heading,
-.app-root[data-startup-intro="title-handoff"] .chat-empty-heading {
+.app-root[data-startup-intro="title-handoff"] .chat-empty-heading,
+.app-root[data-startup-intro] .personal-home__welcome h1 {
   opacity: 0.001;
   visibility: visible;
   transform: translate3d(0, 0, 0);

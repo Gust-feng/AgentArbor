@@ -1133,6 +1133,7 @@ function isStartupIntroChromeVisible(): boolean {
   const chromeNodes = document.querySelectorAll<HTMLElement>(
     ".app-root[data-startup-intro] > .app-sidebar, " +
     ".app-root[data-startup-intro] > .app-workbench, " +
+    ".app-root[data-startup-intro] > .personal-workbench, " +
     ".app-root[data-startup-intro] .app-workbench-header, " +
     ".app-root[data-startup-intro] .chat-input-floating"
   );

@@ -39,6 +39,7 @@ import { ToolExecutionObservationGateway } from "../ordinary-agent/tool-executio
 import { OrdinaryToolMetricsCollector } from "../ordinary-agent/tool-runtime-metrics.js";
 import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
 import type { AgentNotesFeature } from "../agent-notes/index.js";
+import type { SpaceFeature } from "../spaces/index.js";
 import {
   createSubAgentAgentToolCatalogContribution,
   createSubAgentAgentTools,
@@ -84,6 +85,8 @@ export type CreateOrdinaryAgentRunResourceAcquirerInput = {
   readonly resolveSkillContexts?: OrdinaryAgentSkillContextResolver;
   /** Host-owned note feature; exposed to the model only through NoteWrite. */
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
+  /** Feature-owned reference tree exposed through ordinary Agent tools. */
+  readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
   readonly resolveSubAgentRoots: (workspaceRoot: string) => readonly SubAgentRootInput[];
 };
 
@@ -192,6 +195,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
               resources,
               providerFetch: options.host.providerFetch,
               agentNotes: options.agentNotes,
+              spaces: options.spaces,
             }),
             createSkillToolRegistryContribution(skillContexts),
           ],

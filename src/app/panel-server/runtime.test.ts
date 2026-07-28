@@ -54,6 +54,26 @@ test("Panel capability snapshots freeze NoteWrite so the model can actually use 
   }
 });
 
+test("Panel capability snapshots freeze Space tools so an Ordinary Agent can organize references", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-catalog-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory });
+    const snapshot = await runtime.capabilityCenter.snapshot();
+    for (const name of ["SpaceList", "SpaceCreate", "SpaceCreateFolder", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]) {
+      assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
+    }
+  } finally {
+    await runtime?.ordinaryAgentFeature.release();
+    await runtime?.ordinaryPathMemoryConnector.release();
+    await runtime?.pathMemoryFeature.release();
+    await runtime?.spaceFeature.release();
+    await runtime?.releaseAgentSessionStorage();
+    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test("Panel composition wires Ordinary terminal runs into durable PathMemory records", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-path-memory-wiring-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;

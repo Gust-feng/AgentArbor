@@ -33,10 +33,12 @@ import { OrdinaryPanelCursorError } from "./ordinary-agent-panel-projection.js";
 import { handlePanelOrdinaryRoute } from "./ordinary-routes.js";
 import { handlePanelPathMemoryRoute, pathMemoryFeatureHttpError } from "./path-memory-routes.js";
 import { ExperienceCandidateFeatureError } from "../experience-candidate/contracts.js";
+import { SpaceFeatureError } from "../spaces/index.js";
 import {
   experienceCandidateFeatureHttpError,
   handlePanelExperienceCandidateRoute,
 } from "./experience-candidate-routes.js";
+import { handlePanelSpaceRoute, spaceFeatureHttpError } from "./space-routes.js";
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
 import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
@@ -149,6 +151,10 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         writePanelError(response, experienceCandidateFeatureHttpError(error));
         return;
       }
+      if (error instanceof SpaceFeatureError) {
+        writePanelError(response, spaceFeatureHttpError(error));
+        return;
+      }
       logUnhandledPanelRequestError(request, error);
       writePanelError(response, new PanelHttpError(500, "panel_internal_error", "面板请求失败。"));
     }).finally(() => {
@@ -258,6 +264,10 @@ async function handlePanelRequest(
     return;
   }
 
+  if (await handlePanelSpaceRoute(runtime, request, response, url)) {
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/skills") {
     writeJson(response, 200, {
       ok: true,
@@ -353,6 +363,7 @@ export async function closePanelServer(
     await runtime.ordinaryPathMemoryConnector.release();
     await runtime.pathMemoryFeature.release();
     await runtime.experienceCandidateFeature.release();
+    await runtime.spaceFeature.release();
     await runtime.releaseAgentSessionStorage();
     if (runtime.toolOutputStore.close !== undefined) {
       await runtime.toolOutputStore.close();
@@ -405,6 +416,11 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
   cleanupErrors.push(...memoryCleanup.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : []
   ));
+  try {
+    await runtime.spaceFeature.release();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
   try {
     await runtime.releaseAgentSessionStorage();
   } catch (error) {

@@ -51,6 +51,7 @@ import { createSubAgentAgentToolCatalogContribution } from "../sub-agents/sub-ag
 import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import { createNoteWriteTool, type AgentNotesFeature } from "../agent-notes/index.js";
+import { createSpaceTools, type SpaceFeature } from "../spaces/index.js";
 import { createMcpToolRegistryContribution } from "../mcp/mcp-tool-contribution.js";
 import { toolCatalogContractHash } from "./tool-definition-contract.js";
 
@@ -74,6 +75,8 @@ export type CapabilityCenterOptions = {
   readonly toolOutputStore?: ToolOutputStore;
   /** Model-owned memory is exposed through NoteWrite and must be present in the frozen run catalog. */
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
+  /** Reference-only content organization available to the model through Space tools. */
+  readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
   readonly resolveModelCapabilities?: typeof resolveModelCapabilities;
 };
 
@@ -226,6 +229,7 @@ export class CapabilityCenter {
       toolCenter: { outputStore: this.options.toolOutputStore },
     });
     const agentNotes = this.options.agentNotes;
+    const spaces = this.options.spaces;
     const hostContributions: AgentToolRegistryContribution[] = [
       createResearchToolRegistryContribution({
         env,
@@ -241,6 +245,11 @@ export class CapabilityCenter {
           scopes: ["desktop-basic"],
           enabledByDefault: true,
         });
+      }) as AgentToolRegistryContribution]),
+      ...(spaces === undefined ? [] : [((register) => {
+        for (const executor of createSpaceTools({ spaces })) {
+          register({ executor, scopes: ["desktop-basic"], enabledByDefault: true });
+        }
       }) as AgentToolRegistryContribution]),
     ];
     applyAgentToolRegistryContributions(registry, { toolStates }, hostContributions);

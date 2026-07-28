@@ -40,6 +40,9 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     experienceCandidateFeature: {
       async release() { disposalOrder.push("experience-candidate"); },
     },
+    spaceFeature: {
+      async release() { disposalOrder.push("space"); },
+    },
     async releaseAgentSessionStorage() {
       disposalOrder.push("session-storage");
     },
@@ -57,7 +60,7 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
 
   assert.equal(runtime.isQuiescing, true);
   // Memory drains only after Ordinary produced its final stable terminal facts.
-  assert.deepEqual(disposalOrder.slice(0, 4), ["ordinary", "path-memory-connector", "path-memory", "experience-candidate"]);
+  assert.deepEqual(disposalOrder.slice(0, 5), ["ordinary", "path-memory-connector", "path-memory", "experience-candidate", "space"]);
   assert.equal(disposalOrder.at(-1), "session-storage");
   assert.equal(processCleanupCount, 1);
   assert.equal(await outputStore.read(retained.ref, { startChar: 0, maxChars: 64 }), undefined);

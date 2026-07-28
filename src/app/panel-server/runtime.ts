@@ -59,6 +59,11 @@ import {
   type AgentNotesFeature,
 } from "../agent-notes/index.js";
 import {
+  createFileSystemSpaceRepository,
+  createSpaceFeature,
+  type SpaceFeature,
+} from "../spaces/index.js";
+import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
   type ProcessRegistryCleanupResult,
@@ -110,6 +115,7 @@ export type PanelRuntime = {
   readonly appUpdateService: AppUpdateServiceLike;
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
   readonly agentNotesFeature: AgentNotesFeature;
+  readonly spaceFeature: SpaceFeature;
   readonly pathMemoryFeature: PathMemoryFeature;
   readonly experienceCandidateFeature: ExperienceCandidateFeature;
   readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
@@ -219,6 +225,9 @@ function assemblePanelRuntime(input: {
   const agentNotesFeature = createAgentNotesFeature({
     repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
   });
+  const spaceFeature = createSpaceFeature({
+    repository: createFileSystemSpaceRepository(resolveSpaceRoot(input)),
+  });
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
     skillRoots: input.skillRoots,
@@ -229,6 +238,7 @@ function assemblePanelRuntime(input: {
     fetch: input.providerFetch,
     toolOutputStore,
     agentNotes: agentNotesFeature,
+    spaces: spaceFeature,
   });
   const agentSessionEnvironment = new NodeExecutionEnv({ cwd: ordinaryRuntimeRoot });
   const agentSessionRepository = new FileSystemAgentSessionRepository({
@@ -268,6 +278,7 @@ function assemblePanelRuntime(input: {
         : { routingMode: "keyword", abortSignal: context.abortSignal },
     ),
     agentNotes: agentNotesFeature,
+    spaces: spaceFeature,
     resolveSubAgentRoots: (workspaceRoot) =>
       input.resolveSubAgentRoots?.({ workspaceDirectory: workspaceRoot }) ?? input.subAgentRoots,
   });
@@ -333,6 +344,7 @@ function assemblePanelRuntime(input: {
     appUpdateService: input.appUpdateService,
     ordinaryAgentFeature,
     agentNotesFeature,
+    spaceFeature,
     pathMemoryFeature,
     experienceCandidateFeature,
     ordinaryPathMemoryConnector,
@@ -389,6 +401,18 @@ function resolveExperienceCandidateRoot(input: {
     throw new Error("ExperienceCandidate requires a runtime directory.");
   }
   return path.join(runtimeHome, "experience-candidates");
+}
+
+function resolveSpaceRoot(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  const runtimeHome = input.runtimePaths?.runtimeHome ??
+    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
+  if (runtimeHome === undefined) {
+    throw new Error("Space feature requires a runtime directory.");
+  }
+  return path.join(runtimeHome, "spaces");
 }
 
 function resolveToolEvidenceRoot(input: {

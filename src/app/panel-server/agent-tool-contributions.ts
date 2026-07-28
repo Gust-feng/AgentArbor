@@ -1,5 +1,6 @@
 import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import { createNoteWriteTool, type AgentNotesFeature } from "../agent-notes/index.js";
+import { createSpaceTools, type SpaceFeature } from "../spaces/index.js";
 import type {
   AgentToolProviderFetch,
   AgentToolRegistryContribution,
@@ -14,6 +15,8 @@ export function createHostAgentToolContributions(input: {
   readonly providerFetch?: AgentToolProviderFetch;
   /** Models decide when and what to remember; Host only contributes the note tool. */
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
+  /** SpaceFeature owns reference organization; ToolCenter only executes its commands. */
+  readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
 }): readonly AgentToolRegistryContribution[] {
   const contributions: AgentToolRegistryContribution[] = [createResearchToolRegistryContribution({
     constraints: input.runtime.constraints,
@@ -32,6 +35,14 @@ export function createHostAgentToolContributions(input: {
         scopes: ["desktop-basic"],
         enabledByDefault: true,
       });
+    });
+  }
+  if (input.spaces !== undefined) {
+    const spaces = input.spaces;
+    contributions.push((register) => {
+      for (const executor of createSpaceTools({ spaces })) {
+        register({ executor, scopes: ["desktop-basic"], enabledByDefault: true });
+      }
     });
   }
   return contributions;

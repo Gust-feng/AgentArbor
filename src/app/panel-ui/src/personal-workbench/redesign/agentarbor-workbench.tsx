@@ -2,7 +2,6 @@ import { Check, FileSearch, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
-import { ChatTranscriptDisplay } from "../../components/chat-transcript-display";
 import type { ChatInputProps } from "../../components/chat-empty";
 import { WorkbenchSettingsDialog } from "../../components/workbench-settings-dialog";
 import type { AppUpdateInfo } from "../../contracts/app-update";
@@ -21,6 +20,7 @@ import { SearchPage } from "./app/components/SearchPage";
 import { resolveById } from "./app/components/brainStore";
 import { applyPrefs, loadPrefs } from "./app/components/readingPrefs";
 import { RunPanel, type RunStep } from "./app/components/RunPanel";
+import { RedesignTranscript } from "./app/components/RedesignTranscript";
 
 export type RedesignWorkbenchProps = {
   readonly isBootstrapping: boolean;
@@ -246,7 +246,7 @@ function ConversationSurface(props: {
           ? "completed"
           : "initial";
   const content = active.hasVisibleContent ? (
-    <ChatTranscriptDisplay
+    <RedesignTranscript
       conversationId={props.conversation?.conversationId}
       projectedTurns={active.workline.turns}
       turns={props.conversation?.turns ?? []}

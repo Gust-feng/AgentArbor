@@ -1,13 +1,6 @@
 import type { AgentMode, ComposerToolConfirmationPolicy } from "./app-config-projection";
-import { isTerminalDeepRunStatus, shouldKeepDeepRunBusy } from "./app-deep-history";
 import type { ChatInputProps, ChatModelOption } from "./components/chat-empty";
 import type { ContextAttachment } from "./contracts/context";
-import type {
-  DeepIntakeStatus,
-  DeepLivePhase,
-  DeepRunStatus,
-  DeepRunView,
-} from "./contracts/deep";
 import type { ContextWindowUsage } from "./context-window-usage";
 
 export type WorkbenchInputPropsOptions = {
@@ -40,18 +33,14 @@ export type WorkbenchInputPropsOptions = {
   readonly stopDeepTask: () => void | Promise<void>;
   readonly modelResponding: boolean;
   readonly deepBusy: boolean;
-  readonly deep: DeepRunView | undefined;
+  readonly deep: unknown;
   readonly deepActiveRunId?: string;
-  readonly deepIntakeStatus?: DeepIntakeStatus;
+  readonly deepIntakeStatus?: unknown;
 };
 
 export type WorkbenchInputPropsViewModel = {
   readonly activeInputAgentMode: AgentMode;
   readonly inputProps: ChatInputProps;
-  readonly deepInputProps: ChatInputProps;
-  readonly hasBusyDeepRun: boolean;
-  readonly hasPendingDeepRunBootstrap: boolean;
-  readonly hasActiveDeepRun: boolean;
 };
 
 export function buildWorkbenchInputProps(
@@ -97,69 +86,8 @@ export function buildWorkbenchInputProps(
       void options.cancelRun();
     },
   };
-  const hasBusyDeepRun = shouldKeepDeepRunBusy(options.deep?.run);
-  const hasPendingDeepRunBootstrap = options.deepActiveRunId !== undefined && options.deep === undefined;
-  const hasActiveDeepRun = hasBusyDeepRun || hasPendingDeepRunBootstrap;
-  const deepInputProps: ChatInputProps = {
-    ...inputProps,
-    busy: options.deepBusy && !hasActiveDeepRun,
-    running: options.deepBusy && hasActiveDeepRun,
-    queuedMessages: undefined,
-    onRemoveQueuedMessage: undefined,
-    onUpdateQueuedMessage: undefined,
-    placeholder: deepInputPlaceholder(
-      options.deep?.run.status,
-      options.deep?.liveProjection.phase,
-      options.deepBusy,
-      hasActiveDeepRun,
-      options.deepIntakeStatus,
-    ),
-    onSubmit: () => {
-      void options.submitDeepInput();
-    },
-    onCancel: () => {
-      void options.stopDeepTask();
-    },
-    cancelLabel: "停止",
-  };
-
   return {
     activeInputAgentMode,
     inputProps,
-    deepInputProps,
-    hasBusyDeepRun,
-    hasPendingDeepRunBootstrap,
-    hasActiveDeepRun,
   };
-}
-
-function deepInputPlaceholder(
-  status: DeepRunStatus | undefined,
-  phase: DeepLivePhase | undefined,
-  busy: boolean,
-  hasActiveRun: boolean,
-  intakeStatus: "needs_input" | "answered" | "plan_ready" | "running" | undefined,
-): string {
-  if (busy && !hasActiveRun) {
-    return "正在理解...";
-  }
-  if (intakeStatus === "needs_input") {
-    return "补充要求或范围...";
-  }
-  if (intakeStatus === "answered" && !hasActiveRun) {
-    return "继续围绕当前主题补充...";
-  }
-  if (intakeStatus === "plan_ready" && !hasActiveRun) {
-    return "继续调整计划或确认开始...";
-  }
-  if (!hasActiveRun) {
-    return "描述要协作处理的目标...";
-  }
-  if (busy || status === "running" || status === "pending" || phase === "needs_input") {
-    return "补充要求...";
-  }
-  if (status !== undefined && isTerminalDeepRunStatus(status)) {
-    return "继续围绕当前主题补充...";
-  }
-  return "描述要协作处理的目标...";
 }

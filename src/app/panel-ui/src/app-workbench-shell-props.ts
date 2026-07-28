@@ -3,7 +3,6 @@ import { StartupIntroOverlay, startupIntroTimingStyle, type StartupIntroState } 
 import type { AppState } from "./app-state";
 import type { CurrentRunProjection } from "./app-run-projection";
 import { Sidebar } from "./components/sidebar";
-import { WorkbenchMain } from "./components/workbench-main";
 import { WorkbenchSettingsDialog } from "./components/workbench-settings-dialog";
 import type { SettingsGroup } from "./components/settings-types";
 import type { AppUpdateInfo } from "./contracts/app-update";
@@ -112,62 +111,6 @@ export function buildSidebarProps(options: {
     onDelete: options.onDelete,
     onDeleteDeep: options.onDeleteDeep,
     onOpenSettings: options.onOpenSettings,
-  };
-}
-
-export function buildWorkbenchMainProps(options: {
-  readonly isBootstrapping: boolean;
-  readonly agentClusterActive: boolean;
-  readonly chatScreen: SidebarScreen;
-  readonly startupIntroActive: boolean;
-  readonly app: Pick<AppState, "error" | "conversation" | "deep" | "deepConversation" | "deepIntakeStatus" | "deepBusy" | "deepPendingGoal" | "deepActiveRunId">;
-  readonly inputProps: React.ComponentProps<typeof WorkbenchMain>["inputProps"];
-  readonly deepInputProps: React.ComponentProps<typeof WorkbenchMain>["deepInputProps"];
-  readonly currentRun: CurrentRunProjection;
-  readonly modelUsageDisplayEnabled: boolean;
-  readonly pendingConfirmation: React.ComponentProps<typeof WorkbenchMain>["pendingConfirmation"];
-  readonly onDecision: React.ComponentProps<typeof WorkbenchMain>["onDecision"];
-  readonly confirmationBusy: boolean;
-  readonly queuedMessages: React.ComponentProps<typeof WorkbenchMain>["queuedMessages"];
-  readonly onRemoveQueuedMessage: React.ComponentProps<typeof WorkbenchMain>["onRemoveQueuedMessage"];
-  readonly onUpdateQueuedMessage: React.ComponentProps<typeof WorkbenchMain>["onUpdateQueuedMessage"];
-  readonly deepChildOperationBusyId?: string;
-  readonly deepResynthesisBusy: boolean;
-  readonly onStartConfirmedRun: React.ComponentProps<typeof WorkbenchMain>["onStartConfirmedRun"];
-  readonly onChildMessage: React.ComponentProps<typeof WorkbenchMain>["onChildMessage"];
-  readonly onChildConfirmation: React.ComponentProps<typeof WorkbenchMain>["onChildConfirmation"];
-  readonly onResynthesize: React.ComponentProps<typeof WorkbenchMain>["onResynthesize"];
-  readonly onStopRun: React.ComponentProps<typeof WorkbenchMain>["onStopRun"];
-}): React.ComponentProps<typeof WorkbenchMain> {
-  return {
-    isBootstrapping: options.isBootstrapping,
-    deepActive: options.agentClusterActive,
-    chatScreen: options.chatScreen,
-    startupIntroActive: options.startupIntroActive,
-    error: options.app.error,
-    inputProps: options.inputProps,
-    deepInputProps: options.deepInputProps,
-    conversation: options.app.conversation,
-    currentRun: options.currentRun,
-    showModelUsage: options.modelUsageDisplayEnabled,
-    pendingConfirmation: options.pendingConfirmation,
-    onDecision: options.onDecision,
-    confirmationBusy: options.confirmationBusy,
-    queuedMessages: options.queuedMessages,
-    onRemoveQueuedMessage: options.onRemoveQueuedMessage,
-    onUpdateQueuedMessage: options.onUpdateQueuedMessage,
-    deepView: options.app.deep,
-    deepConversation: options.app.deepConversation,
-    deepIntakeStatus: options.app.deepIntakeStatus,
-    deepBusy: options.app.deepBusy || options.deepChildOperationBusyId !== undefined,
-    deepPendingGoal: options.app.deepPendingGoal,
-    deepChildOperationBusyId: options.deepChildOperationBusyId,
-    deepResynthesisBusy: options.deepResynthesisBusy,
-    onStartConfirmedRun: options.onStartConfirmedRun,
-    onChildMessage: options.onChildMessage,
-    onChildConfirmation: options.onChildConfirmation,
-    onResynthesize: options.onResynthesize,
-    onStopRun: options.onStopRun,
   };
 }
 

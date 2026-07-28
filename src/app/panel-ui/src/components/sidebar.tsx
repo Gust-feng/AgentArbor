@@ -11,7 +11,11 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { isDeepConversationActive } from "../deep-sidebar-selection";
+// Deep/Multi-Agent 已剥离，此函数始终返回 false。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isDeepConversationActive(..._args: any[]): boolean {
+  return false;
+}
 import {
   isConversationWaitingForUser,
 } from "../conversation-state";

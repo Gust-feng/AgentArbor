@@ -6,9 +6,7 @@ import {
   projectCurrentRun,
   type CurrentRunProjection,
 } from "./app-run-projection";
-import { createDeepRunUpdateController } from "./app-deep-live-updates";
-import { createAppDeepEntryController } from "./app-deep-entry";
-import { createAppDeepTaskController } from "./app-deep-task-controller";
+
 import { createAppSidebarConversationController } from "./app-sidebar-conversation-controller";
 import { createAppSettingsController, type AppSettingsController } from "./app-settings-controller";
 import { createAppComposerController } from "./app-composer-controller";
@@ -75,8 +73,7 @@ export type AppWorkbenchRuntime = {
   readonly pendingCount: number;
   readonly confirmationBusy: boolean;
   readonly contextBusy: boolean;
-  readonly deepChildOperationBusyId?: string;
-  readonly deepResynthesisBusy: boolean;
+
   readonly savingModel: boolean;
   readonly savingWorkspace: boolean;
   readonly savingDesktopAgent: boolean;
@@ -85,17 +82,25 @@ export type AppWorkbenchRuntime = {
     ReturnType<typeof createAppRunController>,
     "loadConversation" | "startTask" | "cancelRun" | "decideConfirmation" | "resetChat"
   >;
-  readonly deepEntryActions: Pick<
-    ReturnType<typeof createAppDeepEntryController>,
-    "openNormalAgentEntry" | "openNormalTaskEntry" | "openNormalConversation" | "openAgentClusterRun" | "openAgentClusterConversation" | "openAgentClusterEntry"
-  >;
-  readonly deepTaskActions: Pick<
-    ReturnType<typeof createAppDeepTaskController>,
-    "submitDeepInput" | "startConfirmedDeepRun" | "stopDeepTask" | "sendDeepChildMessage" | "decideDeepChild" | "resynthesizeDeepRun"
-  >;
+  readonly deepEntryActions: {
+    openNormalAgentEntry: () => void;
+    openNormalTaskEntry: () => void;
+    openNormalConversation: (conversationId: string) => void;
+    openAgentClusterRun: (runId: string) => void;
+    openAgentClusterConversation: (conversationId: string) => void;
+    openAgentClusterEntry: () => void;
+  };
+  readonly deepTaskActions: {
+    submitDeepInput: () => void;
+    startConfirmedDeepRun: () => void;
+    stopDeepTask: () => void;
+    sendDeepChildMessage: (message: string) => void;
+    decideDeepChild: (decision: string) => void;
+    resynthesizeDeepRun: () => void;
+  };
   readonly sidebarActions: Pick<
     ReturnType<typeof createAppSidebarConversationController>,
-    "renameConversation" | "toggleConversationPinned" | "deleteConversation" | "renameDeepConversation" | "toggleDeepConversationPinned" | "deleteDeepConversation"
+    "renameConversation" | "toggleConversationPinned" | "deleteConversation"
   >;
   readonly settingsController: AppSettingsController;
   readonly composerActions: Pick<
@@ -106,8 +111,6 @@ export type AppWorkbenchRuntime = {
 
 export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): AppWorkbenchRuntime {
   const [confirmationBusy, setConfirmationBusy] = useState(false);
-  const [deepChildOperationBusyId, setDeepChildOperationBusyId] = useState<string | undefined>(undefined);
-  const [deepResynthesisBusy, setDeepResynthesisBusy] = useState(false);
   const [contextBusy, setContextBusy] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
   const [savingWorkspace, setSavingWorkspace] = useState(false);
@@ -120,9 +123,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const streamRef = useRef<EventSource | undefined>(undefined);
   const activeRunIdRef = useRef<string | undefined>(undefined);
   const viewEpochRef = useRef(0);
-  const deepPollTimerRef = useRef<number | undefined>(undefined);
-  const deepStreamRef = useRef<EventSource | undefined>(undefined);
-  const deepOpenEpochRef = useRef(0);
+
   const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
   const pinningConversationIdsRef = useRef<Set<string>>(new Set());
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -159,14 +160,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
       conversationLoadAbortRef.current?.abort();
       conversationLoadAbortRef.current = undefined;
       stopLiveUpdates(pollTimer, streamRef);
-      if (deepPollTimerRef.current !== undefined) {
-        window.clearInterval(deepPollTimerRef.current);
-        deepPollTimerRef.current = undefined;
-      }
-      if (deepStreamRef.current !== undefined) {
-        deepStreamRef.current.close();
-        deepStreamRef.current = undefined;
-      }
+
     };
   }, [options.setApp]);
 
@@ -246,70 +240,24 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.toolConfirmationPolicy,
   ]);
 
-  const deepRunUpdateController = useMemo(() => createDeepRunUpdateController({
-    setApp: options.setApp,
-    mountedRef,
-    pollTimerRef: deepPollTimerRef,
-    streamRef: deepStreamRef,
-  }), [options.setApp]);
-
-  const deepEntryController = useMemo(() => createAppDeepEntryController({
-    app: options.app,
-    setApp: options.setApp,
-    setScreen: options.setScreen,
-    setGoal: options.setGoal,
-    setAttachments: options.setAttachments,
-    setSelectedWorkspaceDirectory: options.setSelectedWorkspaceDirectory,
-    setInputCloseSignal: options.setInputCloseSignal,
-    loadConversation: runController.loadConversation,
-    resetChat: runController.resetChat,
-    mountedRef,
-    deepOpenEpochRef,
-    deepRunUpdateController,
-  }), [
-    deepRunUpdateController,
-    options.app,
-    options.setApp,
-    options.setAttachments,
-    options.setGoal,
-    options.setInputCloseSignal,
-    options.setScreen,
-    options.setSelectedWorkspaceDirectory,
-    runController.loadConversation,
-    runController.resetChat,
-  ]);
-
-  const deepTaskController = useMemo(() => createAppDeepTaskController({
-    app: options.app,
-    setApp: options.setApp,
-    setScreen: options.setScreen,
-    setGoal: options.setGoal,
-    setAttachments: options.setAttachments,
-    attachments: options.attachments,
-    selectedWorkspaceDirectory: options.selectedWorkspaceDirectory,
-    goal: options.goal,
-    aiMode: options.aiMode,
-    mountedRef,
-    deepOpenEpochRef,
-    deepRunUpdateController,
-    deepChildOperationBusyId,
-    setDeepChildOperationBusyId,
-    deepResynthesisBusy,
-    setDeepResynthesisBusy,
-  }), [
-    deepChildOperationBusyId,
-    deepResynthesisBusy,
-    deepRunUpdateController,
-    options.aiMode,
-    options.app,
-    options.attachments,
-    options.goal,
-    options.selectedWorkspaceDirectory,
-    options.setApp,
-    options.setAttachments,
-    options.setGoal,
-    options.setScreen,
-  ]);
+  // Deep/Multi-Agent 已从运行时剥离（后端返回 410），保留空操作桩维持接口稳定。
+  const noop = () => undefined;
+  const deepEntryActions = {
+    openNormalAgentEntry: () => { runController.resetChat(); options.setScreen("chat-empty"); },
+    openNormalTaskEntry: noop,
+    openNormalConversation: (conversationId: string) => { void runController.loadConversation(conversationId); },
+    openAgentClusterRun: noop,
+    openAgentClusterConversation: noop,
+    openAgentClusterEntry: noop,
+  };
+  const deepTaskActions = {
+    submitDeepInput: noop,
+    startConfirmedDeepRun: noop,
+    stopDeepTask: noop,
+    sendDeepChildMessage: noop,
+    decideDeepChild: noop,
+    resynthesizeDeepRun: noop,
+  };
 
   const sidebarConversationController = useMemo(() => createAppSidebarConversationController({
     app: options.app,
@@ -323,9 +271,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     setGoal: options.setGoal,
     setAttachments: options.setAttachments,
     setScreen: options.setScreen,
-    deepRunUpdateController,
   }), [
-    deepRunUpdateController,
     options.app,
     options.setApp,
     options.setAttachments,
@@ -409,8 +355,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     pendingCount,
     confirmationBusy,
     contextBusy,
-    deepChildOperationBusyId,
-    deepResynthesisBusy,
+
     savingModel,
     savingWorkspace,
     savingDesktopAgent,
@@ -422,29 +367,12 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
       decideConfirmation: runController.decideConfirmation,
       resetChat: runController.resetChat,
     },
-    deepEntryActions: {
-      openNormalAgentEntry: deepEntryController.openNormalAgentEntry,
-      openNormalTaskEntry: deepEntryController.openNormalTaskEntry,
-      openNormalConversation: deepEntryController.openNormalConversation,
-      openAgentClusterRun: deepEntryController.openAgentClusterRun,
-      openAgentClusterConversation: deepEntryController.openAgentClusterConversation,
-      openAgentClusterEntry: deepEntryController.openAgentClusterEntry,
-    },
-    deepTaskActions: {
-      submitDeepInput: deepTaskController.submitDeepInput,
-      startConfirmedDeepRun: deepTaskController.startConfirmedDeepRun,
-      stopDeepTask: deepTaskController.stopDeepTask,
-      sendDeepChildMessage: deepTaskController.sendDeepChildMessage,
-      decideDeepChild: deepTaskController.decideDeepChild,
-      resynthesizeDeepRun: deepTaskController.resynthesizeDeepRun,
-    },
+    deepEntryActions,
+    deepTaskActions,
     sidebarActions: {
       renameConversation: sidebarConversationController.renameConversation,
       toggleConversationPinned: sidebarConversationController.toggleConversationPinned,
       deleteConversation: sidebarConversationController.deleteConversation,
-      renameDeepConversation: sidebarConversationController.renameDeepConversation,
-      toggleDeepConversationPinned: sidebarConversationController.toggleDeepConversationPinned,
-      deleteDeepConversation: sidebarConversationController.deleteDeepConversation,
     },
     settingsController,
     composerActions: {

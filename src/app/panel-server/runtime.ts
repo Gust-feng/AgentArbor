@@ -143,6 +143,8 @@ export type PanelRuntime = {
   readonly workbenchDatabase: SqliteRuntimeDatabase;
   readonly fileMutationCoordinator: LocalWorkspaceMutationCoordinator;
   readonly knowledgeAssetRoot?: string;
+  /** Host-owned root for physical directories created from Space. */
+  readonly managedSpaceFolderRoot: string;
   readonly knowledgeAssetsReady: Promise<void>;
   readonly flushSpaceKnowledgeSync: () => Promise<void>;
   readonly releaseAgentSessionStorage: () => Promise<void>;
@@ -288,6 +290,7 @@ function assemblePanelRuntime(input: {
     removeManagedAsset: async (itemId) => await removeKnowledgeAsset(path.join(runtimeHome, "knowledge-assets"), itemId),
   });
   const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
+  const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
     await reconcileKnowledgeAssets(knowledgeAssetRoot, new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)));
   });
@@ -422,6 +425,7 @@ function assemblePanelRuntime(input: {
     workbenchDatabase,
     fileMutationCoordinator,
     knowledgeAssetRoot,
+    managedSpaceFolderRoot,
     knowledgeAssetsReady,
     flushSpaceKnowledgeSync: () => spaceKnowledgeSync,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),

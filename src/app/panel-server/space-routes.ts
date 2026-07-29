@@ -3,7 +3,8 @@ import { z } from "zod";
 import type { SpaceFeatureError, SpaceReference, SpaceReferenceItem, SpaceTarget, SpaceTreeEntry } from "../spaces/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
-import { createPanelSpaceReferenceEntry, createPanelSpaceReferencePreview, deletePanelSpaceReferenceEntry, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
+import { createPanelSpaceReferenceEntry, createPanelSpaceReferencePreview, deletePanelSpaceReferenceEntry, deletePanelSpaceReferenceFile, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
 
 const titleSchema = z.string().trim().min(1).max(160);
 const referenceSchema = z.discriminatedUnion("kind", [
@@ -73,6 +74,26 @@ export async function handlePanelSpaceRoute(
     return true;
   }
 
+  const managedFolderMatch = /^\/api\/spaces\/([^/]+)\/managed-folders$/u.exec(url.pathname);
+  if (managedFolderMatch !== null && request.method === "POST") {
+    const input = parse(createFolderSchema, await readJsonBody(request), "空间文件夹信息无效。");
+    const folder = await createManagedSpaceFolder(runtime.managedSpaceFolderRoot);
+    try {
+      writeJson(response, 201, {
+        ok: true,
+        item: await feature.commands.addReference({
+          ...input,
+          spaceId: decode(managedFolderMatch[1]),
+          reference: { kind: "managed_folder", path: folder },
+        }),
+      });
+    } catch (error) {
+      await deleteManagedSpaceFolder(runtime.managedSpaceFolderRoot, folder).catch(() => undefined);
+      throw error;
+    }
+    return true;
+  }
+
   const referenceMatch = /^\/api\/spaces\/([^/]+)\/references$/u.exec(url.pathname);
   if (referenceMatch !== null && request.method === "POST") {
     const input = parse(addReferenceSchema, await readJsonBody(request), "空间引用信息无效。");
@@ -115,8 +136,34 @@ export async function handlePanelSpaceRoute(
 
   const removeReference = /^\/api\/spaces\/references\/([^/]+)$/u.exec(url.pathname);
   if (removeReference !== null && request.method === "DELETE") {
-    await feature.commands.removeReference(decode(removeReference[1]));
+    const itemId = decode(removeReference[1]);
+    const item = await feature.queries.getReference(itemId);
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    if (item.reference.kind === "managed_folder") {
+      throw new PanelHttpError(409, "space_managed_folder_requires_delete", "软件创建的文件夹必须使用删除操作，不能只取消链接。");
+    }
+    if (item.reference.kind === "local_file") {
+      await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => deletePanelSpaceReferenceFile(item));
+    }
+    await feature.commands.removeReference(itemId);
     await runtime.flushSpaceKnowledgeSync();
+    writeJson(response, 200, { ok: true });
+    return true;
+  }
+
+  const removeManagedFolder = /^\/api\/spaces\/managed-folders\/([^/]+)$/u.exec(url.pathname);
+  if (removeManagedFolder !== null && request.method === "DELETE") {
+    const itemId = decode(removeManagedFolder[1]);
+    const item = await feature.queries.getReference(itemId);
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    if (item.reference.kind !== "managed_folder") {
+      throw new PanelHttpError(409, "space_managed_folder_not_found", "这个空间项不是软件创建的文件夹。");
+    }
+    const folderPath = item.reference.path;
+    await runtime.fileMutationCoordinator.run(folderPath, async () => {
+      await deleteManagedSpaceFolder(runtime.managedSpaceFolderRoot, folderPath);
+    });
+    await feature.commands.removeReference(itemId);
     writeJson(response, 200, { ok: true });
     return true;
   }
@@ -207,7 +254,9 @@ async function assertWorkspaceMountWritable(feature: PanelRuntime["spaceFeature"
 }
 
 function referenceMutationRoot(item: SpaceReferenceItem): string {
-  return item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" ? item.reference.path : item.id;
+  return item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder"
+    ? item.reference.path
+    : item.id;
 }
 
 function treeContainsTarget(entries: readonly SpaceTreeEntry[], target: { readonly kind: "folder" | "reference"; readonly id: string }): boolean {

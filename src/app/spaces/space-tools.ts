@@ -12,7 +12,6 @@ export function createSpaceTools(options: SpaceToolOptions): readonly ToolExecut
   return [
     createSpaceListTool(options),
     createSpaceCreateTool(options),
-    createSpaceCreateFolderTool(options),
     createSpaceMoveTool(options),
     createSpaceAddReferenceTool(options),
     createSpaceRemoveReferenceTool(options),
@@ -54,25 +53,6 @@ export function createSpaceCreateTool(options: SpaceToolOptions): ToolExecutor {
       const title = stringOrUndefined(asRecord(input).title);
       if (title === undefined) return invalid("title must be a string.");
       return resultFor(() => options.spaces.commands.createSpace({ title }), (space) => ({ status: "created", space }));
-    },
-  });
-}
-
-export function createSpaceCreateFolderTool(options: SpaceToolOptions): ToolExecutor {
-  return tool({
-    name: "SpaceCreateFolder",
-    description: "Create a folder inside a SpaceTree. It only changes Space organization and does not create a local filesystem folder.",
-    metadata: writeMetadata,
-    inputSchema: requiredSchema({
-      spaceId: { type: "string" }, parentFolderId: { type: "string" }, title: { type: "string" },
-    }, ["spaceId", "title"]),
-    execute: async (input) => {
-      const record = asRecord(input);
-      const spaceId = stringOrUndefined(record.spaceId);
-      const title = stringOrUndefined(record.title);
-      const parentFolderId = optionalString(record.parentFolderId);
-      if (spaceId === undefined || title === undefined || parentFolderId === null) return invalid("spaceId and title must be strings; parentFolderId must be omitted or a string.");
-      return resultFor(() => options.spaces.commands.createFolder({ spaceId, parentFolderId, title }), (folder) => ({ status: "created", folder }));
     },
   });
 }

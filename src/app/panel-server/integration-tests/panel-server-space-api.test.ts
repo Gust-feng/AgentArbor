@@ -113,6 +113,82 @@ test("Space API deletes internal folders without deleting referenced disk conten
   }
 });
 
+test("Space API creates and physically deletes app-owned folders and files", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-managed-folder-"));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "本地资料" } });
+    const spaceId = created.body.space.id as string;
+    const folder = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
+      method: "POST",
+      body: { title: "我的文件" },
+    });
+    assert.equal(folder.status, 201);
+    assert.equal(folder.body.item.reference.kind, "managed_folder");
+    const itemId = folder.body.item.id as string;
+    const folderPath = folder.body.item.reference.path as string;
+    assert.equal(await fs.stat(folderPath).then((stat) => stat.isDirectory()), true);
+
+    const file = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
+      method: "POST",
+      body: { parentRelativePath: "", name: "draft.md", kind: "file" },
+    });
+    assert.equal(file.status, 201);
+    assert.equal(await fs.readFile(path.join(folderPath, "draft.md"), "utf8"), "");
+
+    const deletedFile = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
+      method: "DELETE",
+      body: { relativePath: "draft.md" },
+    });
+    assert.equal(deletedFile.status, 200);
+    assert.equal(await fs.stat(path.join(folderPath, "draft.md")).then(() => true, () => false), false);
+
+    const unlink = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+    assert.equal(unlink.status, 409);
+    assert.equal(await fs.stat(folderPath).then((stat) => stat.isDirectory()), true);
+
+    const deletedFolder = await requestJson(baseUrl, `/api/spaces/managed-folders/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+    assert.equal(deletedFolder.status, 200);
+    assert.equal(await fs.stat(folderPath).then(() => true, () => false), false);
+    assert.deepEqual((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`)).body.tree.entries, []);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Space API deletes a linked file but only unlinks a linked folder", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-delete-reference-"));
+  const linkedFile = path.join(directory, "linked.md");
+  const linkedFolder = path.join(directory, "linked-folder");
+  await fs.writeFile(linkedFile, "delete me", "utf8");
+  await fs.mkdir(linkedFolder);
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "文件删除" } });
+    const spaceId = created.body.space.id as string;
+    const fileReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "linked.md", reference: { kind: "local_file", path: linkedFile } },
+    });
+    const folderReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "linked-folder", reference: { kind: "workspace_folder", path: linkedFolder } },
+    });
+
+    const deletedFile = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(fileReference.body.item.id as string)}`, { method: "DELETE" });
+    assert.equal(deletedFile.status, 200);
+    assert.equal(await fs.stat(linkedFile).then(() => true, () => false), false);
+
+    const unlinkedFolder = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(folderReference.body.item.id as string)}`, { method: "DELETE" });
+    assert.equal(unlinkedFolder.status, 200);
+    assert.equal(await fs.stat(linkedFolder).then((stat) => stat.isDirectory(), () => false), true);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Space API validates the source Space when moving an entry", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-move-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
@@ -300,6 +376,7 @@ test("Space API browses and edits text inside a referenced folder without escapi
     assert.equal(collected.status, 201);
     const knowledgeRefId = collected.body.page.refId as string;
     await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+    assert.equal(await fs.stat(sourceRoot).then((stat) => stat.isDirectory()), true);
 
     const knowledge = await requestJson(baseUrl, "/api/personal-knowledge");
     const knowledgePage = (knowledge.body.snapshot.pages as Array<{ refId: string; asset?: { status: string } }>).find((page) => page.refId === knowledgeRefId);

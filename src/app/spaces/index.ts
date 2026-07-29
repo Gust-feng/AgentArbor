@@ -22,7 +22,6 @@ export { createSpaceFeature, type CreateSpaceFeatureInput } from "./space-featur
 export { validateSpaceReference } from "./space-validation.js";
 export {
   createSpaceAddReferenceTool,
-  createSpaceCreateFolderTool,
   createSpaceCreateTool,
   createSpaceListTool,
   createSpaceMoveTool,

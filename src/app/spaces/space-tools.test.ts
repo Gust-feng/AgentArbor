@@ -22,7 +22,7 @@ async function execute(tool: ToolExecutor, input: unknown): Promise<unknown> { r
 
 test("Space tools expose the complete factual operation set and object-root schemas", () => {
   const { tools } = toolsFixture();
-  assert.deepEqual([...tools.keys()], ["SpaceList", "SpaceCreate", "SpaceCreateFolder", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]);
+  assert.deepEqual([...tools.keys()], ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]);
   for (const tool of tools.values()) {
     assert.equal(tool.definition.inputSchema.type, "object");
     assert.equal(tool.definition.metadata?.requiresConfirmation, false);
@@ -34,16 +34,15 @@ test("Space contribution contributes all executors without owning ToolCenter ass
   const { spaces } = toolsFixture();
   const names: string[] = [];
   createSpaceToolRegistryContribution({ spaces })((entry) => names.push(entry.executor.definition.name));
-  assert.deepEqual(names, ["SpaceList", "SpaceCreate", "SpaceCreateFolder", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]);
+  assert.deepEqual(names, ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]);
 });
 
 test("Space tools organize references and preserve Ordinary conversation ownership", async () => {
   const { spaces, tools } = toolsFixture();
   const created = await execute(tools.get("SpaceCreate")!, { title: "工作" }) as { space: { id: string } };
   const spaceId = created.space.id;
-  const folder = await execute(tools.get("SpaceCreateFolder")!, { spaceId, title: "会话" }) as { folder: { id: string } };
   const added = await execute(tools.get("SpaceAddReference")!, {
-    spaceId, parentFolderId: folder.folder.id, title: "当前对话", reference: { kind: "conversation", conversationId: "ordinary-conversation-1", conversationTitle: "讨论" },
+    spaceId, title: "当前对话", reference: { kind: "conversation", conversationId: "ordinary-conversation-1", conversationTitle: "讨论" },
   }) as { item: { id: string } };
   assert.deepEqual(await execute(tools.get("SpaceRename")!, { targetKind: "reference", targetId: added.item.id, title: "已整理的对话" }), { status: "renamed", target: { kind: "reference", id: added.item.id }, title: "已整理的对话" });
   assert.deepEqual(await execute(tools.get("SpaceRemoveReference")!, { itemId: added.item.id }), { status: "removed", itemId: added.item.id });
@@ -51,7 +50,7 @@ test("Space tools organize references and preserve Ordinary conversation ownersh
     status: "found",
     tree: {
       space: { id: spaceId, title: "工作", createdAt: "2026-07-28T00:00:00.000Z", updatedAt: "2026-07-28T00:00:00.000Z" },
-      entries: [{ kind: "folder", folder: { id: folder.folder.id, spaceId, title: "会话", createdAt: "2026-07-28T00:00:00.000Z", updatedAt: "2026-07-28T00:00:00.000Z" }, children: [] }],
+      entries: [],
     },
   });
   await spaces.release();
@@ -62,7 +61,7 @@ test("Space tools return malformed and missing user inputs as factual outputs", 
   assert.deepEqual(await execute(tools.get("SpaceAddReference")!, { spaceId: "x", title: "bad", reference: { kind: "conversation" } }), {
     status: "invalid_input", message: "spaceId, title and a valid reference are required; parentFolderId must be omitted or a string.",
   });
-  assert.deepEqual(await execute(tools.get("SpaceCreateFolder")!, { spaceId: "missing", title: "folder" }), {
+  assert.deepEqual(await execute(tools.get("SpaceAddReference")!, { spaceId: "missing", title: "file", reference: { kind: "local_file", path: "C:/missing.txt" } }), {
     status: "space_not_found", message: "Space missing was not found",
   });
   await spaces.release();

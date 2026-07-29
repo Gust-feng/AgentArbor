@@ -30,6 +30,7 @@ export type PersonalSpaceItemProjection = {
     | "folder"
     | "local_file"
     | "workspace_folder"
+    | "managed_folder"
     | "web_reference"
     | "generated_artifact"
     | "conversation_reference";
@@ -55,7 +56,7 @@ export type PersonalSpaceProjection = {
 };
 
 export type PersonalSpaceActions = {
-  /** Creates an internal organization folder; it never creates an external directory. */
+  /** Creates an app-owned folder backed by a real directory. */
   readonly createFolder?: (spaceId: string, title: string, parentFolderId?: string) => void | Promise<void>;
   /** Opens a host-owned local-file picker, then adds the selected file as a reference. */
   readonly addLocalFile?: (spaceId: string, parentFolderId?: string) => void | Promise<void>;
@@ -74,8 +75,10 @@ export type PersonalSpaceActions = {
   readonly rename?: (target: PersonalSpaceRenameTarget, title: string) => void | Promise<void>;
   /** Removes an internal organization folder subtree without deleting referenced external objects. */
   readonly removeFolder?: (folderId: string) => void | Promise<void>;
-  /** Removes the Space reference only; it must never delete the external object. */
+  /** Removes non-file references, or physically deletes a linked local file. */
   readonly removeReference?: (itemId: string) => void | Promise<void>;
+  /** Deletes an app-owned directory and its contents, then removes its Space reference. */
+  readonly deleteManagedFolder?: (itemId: string) => void | Promise<void>;
 };
 
 /** Space mutations use its domain distinction, not a display-specific item icon kind. */
@@ -237,12 +240,15 @@ function SpaceTreeItem(props: {
 }): React.ReactElement {
   const hasChildren = props.item.children !== undefined && props.item.children.length > 0;
   const [expanded, setExpanded] = useState(true);
-  const isFolder = props.item.kind === "folder" || props.item.kind === "workspace_folder";
+  const isFolder = props.item.kind === "folder" || props.item.kind === "workspace_folder" || props.item.kind === "managed_folder";
   const isInternalFolder = props.item.kind === "folder";
+  const isManagedFolder = props.item.kind === "managed_folder";
+  const isLocalFile = props.item.kind === "local_file";
   const canOpen = props.onOpenItem !== undefined && props.item.openable !== false;
   const canOperate = props.actions?.rename !== undefined
     || (isInternalFolder && props.actions?.createFolder !== undefined)
     || (isInternalFolder && props.actions?.removeFolder !== undefined)
+    || (isManagedFolder && props.actions?.deleteManagedFolder !== undefined)
     || (!isInternalFolder && props.actions?.removeReference !== undefined);
   const icon = itemIcon(props.item.kind, expanded);
   const itemDetail = props.item.detail ?? itemKindLabel(props.item.kind);
@@ -300,9 +306,14 @@ function SpaceTreeItem(props: {
                     <Trash2 size={15} aria-hidden="true" />删除文件夹
                   </button>
                 )}
-                {!isInternalFolder && props.actions?.removeReference !== undefined && (
-                  <button type="button" role="menuitem" className="personal-space-action-menu__danger" onClick={() => props.onRun("正在移除引用…", () => props.actions?.removeReference?.(props.item.itemId))}>
-                    <Trash2 size={15} aria-hidden="true" />取消链接
+                {isManagedFolder && props.actions?.deleteManagedFolder !== undefined && (
+                  <button type="button" role="menuitem" className="personal-space-action-menu__danger" onClick={() => props.onRun("正在删除文件夹…", () => props.actions?.deleteManagedFolder?.(props.item.itemId))}>
+                    <Trash2 size={15} aria-hidden="true" />删除文件夹
+                  </button>
+                )}
+                {!isInternalFolder && !isManagedFolder && props.actions?.removeReference !== undefined && (
+                  <button type="button" role="menuitem" className="personal-space-action-menu__danger" onClick={() => props.onRun(isLocalFile ? "正在删除文件…" : "正在移除引用…", () => props.actions?.removeReference?.(props.item.itemId))}>
+                    <Trash2 size={15} aria-hidden="true" />{isLocalFile ? "删除" : "取消链接"}
                   </button>
                 )}
               </div>
@@ -476,6 +487,7 @@ function itemIcon(kind: PersonalSpaceItemProjection["kind"], expanded: boolean):
   switch (kind) {
     case "folder":
     case "workspace_folder":
+    case "managed_folder":
       return <Folder size={16} fill={expanded ? "currentColor" : undefined} />;
     case "local_file":
       return <File size={16} />;
@@ -494,6 +506,7 @@ function itemKindLabel(kind: PersonalSpaceItemProjection["kind"]): string {
   switch (kind) {
     case "folder": return "文件夹";
     case "workspace_folder": return "工作区文件夹";
+    case "managed_folder": return "软件文件夹";
     case "local_file": return "本地文件";
     case "web_reference": return "网页引用";
     case "generated_artifact": return "生成内容";

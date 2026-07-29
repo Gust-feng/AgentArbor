@@ -9,6 +9,7 @@ import {
   FileImage,
   FileVideo,
   File,
+  FilePlus,
   Globe,
   MessageSquare,
   Plus,
@@ -60,6 +61,12 @@ interface SpaceItem {
   externalChild?: boolean
 }
 
+type FileSystemFolderKind = Extract<PersonalSpaceItemProjection['kind'], 'workspace_folder' | 'managed_folder'>
+
+function isFileSystemFolderKind(kind: PersonalSpaceItemProjection['kind']): kind is FileSystemFolderKind {
+  return kind === 'workspace_folder' || kind === 'managed_folder'
+}
+
 /**
  * 空间里的材料 / 对话引用。引用保留外部来源身份，文本来源可在冲突保护下编辑。
  * (「我写的笔记」是另一类可写对象,来自 notesStore,不在这棵树里。)
@@ -102,9 +109,11 @@ function TreeNode({
   selectedId,
   onRename,
   onDelete,
+  onCreateEntry,
   renameEnabled,
   removeEnabled,
   removeFolderEnabled,
+  removeManagedFolderEnabled,
   isExpanded,
   onToggleExpand,
   onPrefetch,
@@ -118,9 +127,11 @@ function TreeNode({
   selectedId: string | null
   onRename: (item: SpaceItem, name: string) => void
   onDelete: (item: SpaceItem) => void
+  onCreateEntry: (item: SpaceItem) => void
   renameEnabled: boolean
   removeEnabled: boolean
   removeFolderEnabled: boolean
+  removeManagedFolderEnabled: boolean
   isExpanded: (id: string) => boolean
   onToggleExpand: (id: string) => void
   onPrefetch: (item: SpaceItem) => void
@@ -133,10 +144,13 @@ function TreeNode({
   const [editing, setEditing] = useState(false)
   const selected = selectedId === item.id
   const canMutateExternalEntry = item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined
+  const isManagedFolder = !item.externalChild && item.domainKind === 'managed_folder'
+  const canCreateExternalEntry = !item.demo && item.type === 'folder' && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)
   const canRename = !item.demo && (canMutateExternalEntry || (!item.externalChild && renameEnabled))
   const canRemove = !item.demo && (canMutateExternalEntry
     || (!item.externalChild && item.domainKind === 'folder' && removeFolderEnabled)
-    || (!item.externalChild && item.domainKind !== 'folder' && removeEnabled))
+    || (isManagedFolder && removeManagedFolderEnabled)
+    || (!item.externalChild && item.domainKind !== 'folder' && item.domainKind !== 'managed_folder' && removeEnabled))
   const pl = 10 + depth * 14
 
   return (
@@ -190,13 +204,14 @@ function TreeNode({
           </span>
         )}
 
-        {!editing && (canRename || canRemove) && (
+        {!editing && (canCreateExternalEntry || canRename || canRemove) && (
           <RowMenu
             label={`${item.name}操作`}
             visible={hovered}
             actions={[
+              ...(canCreateExternalEntry ? [{ label: '新建文件', icon: <FilePlus size={12} />, onClick: () => onCreateEntry(item) }] : []),
               ...(canRename ? [{ label: '重命名', icon: <Pencil size={12} />, onClick: () => setEditing(true) }] : []),
-              ...(canRemove ? [{ label: item.externalChild ? '删除' : item.domainKind === 'folder' ? '删除文件夹' : '取消链接', icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item) }] : []),
+              ...(canRemove ? [{ label: deleteLabelFor(item), icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item) }] : []),
             ]}
           />
         )}
@@ -223,9 +238,11 @@ function TreeNode({
               selectedId={selectedId}
               onRename={onRename}
               onDelete={onDelete}
+              onCreateEntry={onCreateEntry}
               renameEnabled={renameEnabled}
               removeEnabled={removeEnabled}
               removeFolderEnabled={removeFolderEnabled}
+              removeManagedFolderEnabled={removeManagedFolderEnabled}
               isExpanded={isExpanded}
               onToggleExpand={onToggleExpand}
               onPrefetch={onPrefetch}
@@ -275,7 +292,7 @@ function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
     conversationId: item.conversationId,
     openUrl: item.openUrl,
     openable: item.openable,
-    referenceId: item.kind === 'workspace_folder' ? item.itemId : undefined,
+    referenceId: isFileSystemFolderKind(item.kind) ? item.itemId : undefined,
   }
 }
 
@@ -286,12 +303,12 @@ function attachReferenceChildren(tree: SpaceItem[], childrenById: ReadonlyMap<st
   })
 }
 
-function projectReferenceChildren(referenceId: string, entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: 'file' | 'directory' | 'other' }[]): SpaceItem[] {
+function projectReferenceChildren(referenceId: string, sourceKind: FileSystemFolderKind, entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: 'file' | 'directory' | 'other' }[]): SpaceItem[] {
   return entries.map((entry) => ({
     id: referenceChildId(referenceId, entry.relativePath),
     name: entry.name,
     type: entry.kind === 'directory' ? 'folder' : 'file',
-    domainKind: entry.kind === 'directory' ? 'workspace_folder' : 'local_file',
+    domainKind: entry.kind === 'directory' ? sourceKind : 'local_file',
     referenceId,
     relativePath: entry.relativePath,
     externalChild: true,
@@ -306,10 +323,17 @@ function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['t
   switch (kind) {
     case 'folder':
     case 'workspace_folder': return 'folder'
+    case 'managed_folder': return 'folder'
     case 'web_reference': return 'web'
     case 'conversation_reference': return 'conversation'
     default: return 'file'
   }
+}
+
+function deleteLabelFor(item: SpaceItem): string {
+  if (item.externalChild) return item.type === 'folder' ? '删除文件夹' : '删除'
+  if (item.domainKind === 'folder' || item.domainKind === 'managed_folder') return '删除文件夹'
+  return item.domainKind === 'local_file' ? '删除' : '取消链接'
 }
 
 interface SpacePageProps {
@@ -436,13 +460,15 @@ export function SpacePage({
 
   function toggleExpanded(id: string) {
     const item = getItem(tree, id)
-    if (!expandedIds.has(id) && item?.referenceId !== undefined && !referenceChildren.has(id)) {
-      void fetchSpaceReferencePreview(item.referenceId, item.relativePath ?? '').then((preview) => {
+    if (!expandedIds.has(id) && item?.referenceId !== undefined && isFileSystemFolderKind(item.domainKind) && !referenceChildren.has(id)) {
+      const referenceId = item.referenceId
+      const sourceKind = item.domainKind
+      void fetchSpaceReferencePreview(referenceId, item.relativePath ?? '').then((preview) => {
         if (preview.content.kind !== 'directory') return
         const entries = preview.content.entries
         setReferenceChildren((current) => {
           const next = new Map(current)
-          next.set(id, projectReferenceChildren(item.referenceId!, entries))
+          next.set(id, projectReferenceChildren(referenceId, sourceKind, entries))
           return next
         })
       }, (error: unknown) => setActionError(actionErrorMessage(error)))
@@ -562,8 +588,23 @@ export function SpacePage({
       }
       return
     }
+    if (item.domainKind === 'managed_folder') {
+      if (actions?.deleteManagedFolder === undefined) return
+      if (!window.confirm(`确定删除“${item.name}”及其中的所有文件吗？此操作会从软件存储中物理删除。`)) return
+      setActionError(null)
+      try {
+        await actions.deleteManagedFolder(item.id)
+        setSelectedId((prev) => (prev === item.id ? null : prev))
+      } catch (error) {
+        setActionError(actionErrorMessage(error))
+      }
+      return
+    }
     if (actions?.removeReference === undefined) return
-    if (!window.confirm(`取消“${item.name}”与当前空间的链接吗？磁盘内容不会被删除。`)) return
+    const deletesLocalFile = item.domainKind === 'local_file'
+    if (!window.confirm(deletesLocalFile
+      ? `确定要删除“${item.name}”吗？此操作会从磁盘上删除该文件。`
+      : `取消“${item.name}”与当前空间的链接吗？磁盘内容不会被删除。`)) return
     setActionError(null)
     try {
       await actions.removeReference(item.id)
@@ -584,9 +625,11 @@ export function SpacePage({
     const preview = await fetchSpaceReferencePreview(referenceId, relativePath)
     if (preview.content.kind !== 'directory') return
     const entries = preview.content.entries
+    const root = getItem(tree, referenceId)
+    const sourceKind = root !== undefined && isFileSystemFolderKind(root.domainKind) ? root.domainKind : 'workspace_folder'
     setReferenceChildren((current) => {
       const next = new Map(current)
-      next.set(directoryId, projectReferenceChildren(referenceId, entries))
+      next.set(directoryId, projectReferenceChildren(referenceId, sourceKind, entries))
       return next
     })
   }
@@ -619,16 +662,19 @@ export function SpacePage({
     void runSpaceAction(() => actions.createFolder!(space.spaceId, title))
   }
 
-  function beginCreateReferenceFile() {
-    const root = tree.find((item) => item.domainKind === 'workspace_folder' && item.referenceId !== undefined)
+  function beginCreateReferenceFile(targetItem?: SpaceItem) {
+    const sourceReferenceId = targetItem?.referenceId
+    const root = sourceReferenceId === undefined
+      ? tree.find((item) => isFileSystemFolderKind(item.domainKind) && item.referenceId !== undefined)
+      : getItem(tree, sourceReferenceId)
     if (root === undefined) return
     let parent = root
-    if (selectedItem?.referenceId !== undefined) {
-      if (selectedItem.type === 'folder') parent = selectedItem
-      else if (selectedItem.relativePath !== undefined) {
-        const separator = selectedItem.relativePath.lastIndexOf('/')
-        const parentPath = separator < 0 ? '' : selectedItem.relativePath.slice(0, separator)
-        parent = parentPath.length === 0 ? getItem(tree, selectedItem.referenceId) ?? root : getItem(tree, referenceChildId(selectedItem.referenceId, parentPath)) ?? root
+    if (targetItem !== undefined && sourceReferenceId !== undefined) {
+      if (targetItem.type === 'folder') parent = targetItem
+      else if (targetItem.relativePath !== undefined) {
+        const separator = targetItem.relativePath.lastIndexOf('/')
+        const parentPath = separator < 0 ? '' : targetItem.relativePath.slice(0, separator)
+        parent = parentPath.length === 0 ? root : getItem(tree, referenceChildId(sourceReferenceId, parentPath)) ?? root
       }
     }
     const referenceId = parent.referenceId ?? parent.id
@@ -768,11 +814,6 @@ export function SpacePage({
                 visible
                 trigger={<Plus size={13} />}
                 actions={[
-                  ...(tree.some((item) => item.domainKind === 'workspace_folder') ? [{
-                    label: '新建文件',
-                    icon: <FileText size={12} />,
-                    onClick: beginCreateReferenceFile,
-                  }] : []),
                   ...(actions?.createFolder === undefined ? [] : [{
                     label: '新建文件夹',
                     icon: <Folder size={12} />,
@@ -822,9 +863,11 @@ export function SpacePage({
                 selectedId={selectedId}
                 onRename={handleRenameItem}
                 onDelete={handleDeleteItem}
+                onCreateEntry={beginCreateReferenceFile}
                 renameEnabled={actions?.rename !== undefined}
                 removeEnabled={actions?.removeReference !== undefined}
                 removeFolderEnabled={actions?.removeFolder !== undefined}
+                removeManagedFolderEnabled={actions?.deleteManagedFolder !== undefined}
                 isExpanded={(id) => expandedIds.has(id)}
                 onToggleExpand={toggleExpanded}
                 onPrefetch={prefetchTreeItem}

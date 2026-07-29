@@ -281,6 +281,8 @@ export function App(): React.ReactElement {
         move: spaceProjection.move,
         rename: spaceProjection.rename,
         removeReference: spaceProjection.removeReference,
+        deleteManagedFolder: spaceProjection.deleteManagedFolder,
+        removeFolder: spaceProjection.removeFolder,
       }}
       onOpenSettings={() => openSettings("models")}
       appUpdate={app.appUpdate}

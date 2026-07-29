@@ -380,8 +380,90 @@ test("routes real Space reference rename and removal through backend actions", a
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
   vi.spyOn(window, "confirm").mockReturnValue(true);
-  await user.click(screen.getByRole("button", { name: "取消链接" }));
+  await user.click(screen.getByRole("button", { name: "删除" }));
   expect(removeReference).toHaveBeenCalledWith("reference-material");
+});
+
+test("deletes app-owned folders and creates files from a linked workspace folder", async () => {
+  const user = userEvent.setup();
+  const deleteManagedFolder = vi.fn().mockResolvedValue(undefined);
+  const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "POST" && url.endsWith("/references/managed-folder/entry")) {
+      expect(JSON.parse(String(init.body))).toEqual({ parentRelativePath: "", name: "internal-note.md", kind: "file" });
+      return jsonResponse({ entry: { relativePath: "internal-note.md" } });
+    }
+    if (init?.method === "POST" && url.endsWith("/references/folder-reference/entry")) {
+      expect(JSON.parse(String(init.body))).toEqual({ parentRelativePath: "", name: "new-note.md", kind: "file" });
+      return jsonResponse({ entry: { relativePath: "new-note.md" } });
+    }
+    if (url.includes("/references/managed-folder/preview?path=internal-note.md")) {
+      return jsonResponse({ preview: {
+        itemId: "managed-folder",
+        title: "软件资料",
+        sourceKind: "managed_folder",
+        source: "C:/agentarbor/space-files/internal-note.md",
+        status: "ready",
+        content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
+      } });
+    }
+    if (url.includes("/references/folder-reference/preview?path=new-note.md")) {
+      return jsonResponse({ preview: {
+        itemId: "folder-reference",
+        title: "项目文件",
+        sourceKind: "workspace_folder",
+        source: "C:/project/new-note.md",
+        status: "ready",
+        content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
+      } });
+    }
+    if (url.endsWith("/references/folder-reference/preview")) {
+      return jsonResponse({ preview: directoryPreview("", [{ name: "new-note.md", relativePath: "new-note.md", kind: "file" }]) });
+    }
+    if (url.endsWith("/references/managed-folder/preview")) {
+      return jsonResponse({ preview: {
+        ...directoryPreview("", [{ name: "internal-note.md", relativePath: "internal-note.md", kind: "file" }]),
+        itemId: "managed-folder",
+        title: "软件资料",
+        sourceKind: "managed_folder",
+      } });
+    }
+    return jsonResponse({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  renderWorkbench({
+    spaces: [{
+      spaceId: "space-files",
+      title: "项目空间",
+      items: [
+        { itemId: "managed-folder", title: "软件资料", kind: "managed_folder" },
+        { itemId: "folder-reference", title: "项目文件", kind: "workspace_folder" },
+      ],
+    }],
+    spaceActions: { deleteManagedFolder },
+  });
+
+  await user.click(screen.getByRole("button", { name: "项目空间" }));
+  await user.click(await screen.findByRole("button", { name: "软件资料操作" }));
+  await user.click(screen.getByRole("button", { name: "新建文件" }));
+  await user.type(screen.getByRole("textbox", { name: "文件名称" }), "internal-note.md{Enter}");
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    "/api/spaces/references/managed-folder/entry",
+    expect.objectContaining({ method: "POST" }),
+  ));
+
+  await user.click(screen.getByRole("button", { name: "软件资料操作" }));
+  await user.click(screen.getByRole("button", { name: "删除文件夹" }));
+  expect(deleteManagedFolder).toHaveBeenCalledWith("managed-folder");
+
+  await user.click(screen.getByRole("button", { name: "项目文件操作" }));
+  await user.click(screen.getByRole("button", { name: "新建文件" }));
+  await user.type(screen.getByRole("textbox", { name: "文件名称" }), "new-note.md{Enter}");
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+    "/api/spaces/references/folder-reference/entry",
+    expect.objectContaining({ method: "POST" }),
+  ));
 });
 
 test("routes the Redesign material add menu through Space actions", async () => {

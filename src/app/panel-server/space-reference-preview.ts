@@ -38,7 +38,7 @@ export async function createPanelSpaceReferencePreview(
   if (item.reference.kind === "web_page") {
     return base(item, item.reference.url, "ready", { kind: "web", url: item.reference.url });
   }
-  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder") {
+  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
     return base(item, referenceSource(item), "unsupported", {
       kind: "unavailable",
       message: "这个引用需要由它的来源功能提供预览。",
@@ -130,7 +130,7 @@ export async function writePanelSpaceReferenceContent(
   relativePath = "",
   contentTypeHintPath?: string,
 ): Promise<void> {
-  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder") {
+  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
     throw new PanelHttpError(409, "space_reference_content_unavailable", "这个引用没有可读取的文件内容。");
   }
   const source = await resolvePanelSpaceReferencePath(item, relativePath);
@@ -227,12 +227,30 @@ export async function deletePanelSpaceReferenceEntry(
   });
 }
 
+/** Deletes the physical object behind a single-file Space reference. */
+export async function deletePanelSpaceReferenceFile(item: SpaceReferenceItem): Promise<void> {
+  if (item.reference.kind !== "local_file") {
+    throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "只有单文件引用可以执行此操作。");
+  }
+  const stat = await fs.lstat(item.reference.path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
+    throw error;
+  });
+  if (!stat.isFile() && !stat.isSymbolicLink()) {
+    throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "这个引用不再是可删除的单个文件。");
+  }
+  await fs.unlink(item.reference.path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
+    throw error;
+  });
+}
+
 export async function createPanelSpaceReferenceEntry(
   item: SpaceReferenceItem,
   input: { readonly parentRelativePath: string; readonly name: string; readonly kind: "file" | "directory" },
 ): Promise<{ readonly relativePath: string }> {
-  if (item.reference.kind !== "workspace_folder") {
-    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区文件夹中可以新建文件。");
+  if (item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
+    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区或软件受管文件夹中可以新建文件。");
   }
   const parentRelativePath = normalizeRelativePath(input.parentRelativePath);
   const relativePath = joinRelativePath(parentRelativePath, normalizeEntryName(input.name));
@@ -261,7 +279,8 @@ function base(
 function referenceSource(item: SpaceReferenceItem): string {
   switch (item.reference.kind) {
     case "local_file":
-    case "workspace_folder": return item.reference.path;
+    case "workspace_folder":
+    case "managed_folder": return item.reference.path;
     case "web_page": return item.reference.url;
     case "generated_artifact": return item.reference.artifactRef;
     case "conversation": return item.reference.conversationId;
@@ -269,7 +288,7 @@ function referenceSource(item: SpaceReferenceItem): string {
 }
 
 export async function resolvePanelSpaceReferencePath(item: SpaceReferenceItem, relativePath: string): Promise<string> {
-  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder") {
+  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
     throw new PanelHttpError(409, "space_reference_content_unavailable", "这个引用没有可读取的文件内容。");
   }
   const normalized = normalizeRelativePath(relativePath);
@@ -296,8 +315,8 @@ function normalizeRelativePath(value: string): string {
 }
 
 function normalizeMutableEntryPath(item: SpaceReferenceItem, value: string): string {
-  if (item.reference.kind !== "workspace_folder") {
-    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区文件夹中的条目可以执行此操作。");
+  if (item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
+    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区或软件受管文件夹中的条目可以执行此操作。");
   }
   const normalized = normalizeRelativePath(value);
   if (normalized.length === 0) throw new PanelHttpError(400, "invalid_space_reference_path", "不能修改工作区根目录。");
@@ -313,8 +332,8 @@ function normalizeEntryName(value: string): string {
 }
 
 async function resolveReferenceDestination(item: SpaceReferenceItem, relativePath: string): Promise<string> {
-  if (item.reference.kind !== "workspace_folder") {
-    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区文件夹中的条目可以执行此操作。");
+  if (item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
+    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区或软件受管文件夹中的条目可以执行此操作。");
   }
   const root = await fs.realpath(item.reference.path).catch(() => undefined);
   if (root === undefined) throw new PanelHttpError(404, "space_reference_source_missing", "工作区文件夹已不存在。");

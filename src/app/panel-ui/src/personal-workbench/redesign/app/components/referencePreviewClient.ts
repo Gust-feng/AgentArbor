@@ -1,7 +1,7 @@
 export type SpaceReferencePreview = {
   readonly itemId: string
   readonly title: string
-  readonly sourceKind: 'local_file' | 'workspace_folder' | 'web_page' | 'generated_artifact' | 'conversation'
+  readonly sourceKind: 'local_file' | 'workspace_folder' | 'managed_folder' | 'web_page' | 'generated_artifact' | 'conversation'
   readonly source: string
   readonly status: 'ready' | 'missing' | 'unsupported'
   readonly fingerprint?: string

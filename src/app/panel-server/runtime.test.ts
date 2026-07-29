@@ -55,7 +55,7 @@ test("Panel capability snapshots freeze Space tools so an Ordinary Agent can org
   try {
     runtime = createPanelRuntime({ configDirectory: directory });
     const snapshot = await runtime.capabilityCenter.snapshot();
-    for (const name of ["SpaceList", "SpaceCreate", "SpaceCreateFolder", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]) {
+    for (const name of ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]) {
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
     }
   } finally {

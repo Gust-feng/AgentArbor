@@ -9,6 +9,8 @@ export const SPACE_TREE_SCHEMA_VERSION = "space-tree/v1" as const;
 export type SpaceReference =
   | { readonly kind: "local_file"; readonly path: string }
   | { readonly kind: "workspace_folder"; readonly path: string }
+  /** App-owned directory created by Space; its contents are real files on disk. */
+  | { readonly kind: "managed_folder"; readonly path: string }
   | { readonly kind: "web_page"; readonly url: string }
   | { readonly kind: "generated_artifact"; readonly artifactRef: string }
   | {

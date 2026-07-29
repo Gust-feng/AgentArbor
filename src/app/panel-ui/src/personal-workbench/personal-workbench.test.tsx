@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { ChatInputProps } from "../components/chat-empty";
@@ -42,6 +42,35 @@ test("projects real Space references instead of substituting the demo library", 
 
   expect(await screen.findByText("阅读摘要.md")).toBeTruthy();
   expect(screen.queryByText("PyTorch 入门笔记.pdf")).toBeNull();
+});
+
+test("refreshes Personal Knowledge when entering a knowledge surface", async () => {
+  const user = userEvent.setup();
+  let serverNotes: unknown[] = [];
+  const fetchMock = vi.fn(async (path: string | URL | Request) => {
+    if (String(path) === "/api/personal-knowledge") {
+      return jsonResponse({ snapshot: { ...emptyKnowledgeSnapshot(), notes: serverNotes } });
+    }
+    return jsonResponse({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const rendered = renderWorkbench({ personalKnowledgePersistenceEnabled: true });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/personal-knowledge", expect.anything()));
+
+  serverNotes = [{
+    id: "agent-note",
+    spaceId: "space-study",
+    title: "Agent 新笔记",
+    bodyMarkdown: "由 Agent 写入",
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  }];
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+
+  expect(await screen.findByText("Agent 新笔记")).toBeTruthy();
+  expect(fetchMock.mock.calls.filter(([path]) => String(path) === "/api/personal-knowledge")).toHaveLength(2);
+  rendered.unmount();
 });
 
 test("switches the projected material tree with the active Space", async () => {
@@ -271,9 +300,10 @@ test("uses file-specific SVG icons for Space materials", async () => {
 
   await user.click(screen.getByRole("button", { name: "学习空间" }));
 
-  const imageRow = (await screen.findByText("神经网络结构图.png")).parentElement;
-  const videoRow = screen.getByText("梯度下降讲解.mp4").parentElement;
-  const pdfRow = screen.getByText("PyTorch 入门笔记.pdf").parentElement;
+  const tree = await screen.findByRole("tree", { name: "学习空间资料" });
+  const imageRow = within(tree).getByText("神经网络结构图.png").parentElement;
+  const videoRow = within(tree).getByText("梯度下降讲解.mp4").parentElement;
+  const pdfRow = within(tree).getByText("PyTorch 入门笔记.pdf").parentElement;
   expect(imageRow?.querySelector(".lucide-file-image")).not.toBeNull();
   expect(videoRow?.querySelector(".lucide-file-video")).not.toBeNull();
   expect(pdfRow?.querySelector(".lucide-file-text")).not.toBeNull();
@@ -533,5 +563,24 @@ function inputProps(overrides: Partial<ChatInputProps> = {}): ChatInputProps {
     onSelectAttachment: vi.fn(),
     onRemoveAttachment: vi.fn(),
     ...overrides,
+  };
+}
+
+function jsonResponse(body: unknown): Response {
+  return {
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(body),
+  } as Response;
+}
+
+function emptyKnowledgeSnapshot() {
+  return {
+    notes: [],
+    pages: [],
+    links: [],
+    themes: [],
+    assignments: [],
+    recentlyOpened: {},
   };
 }

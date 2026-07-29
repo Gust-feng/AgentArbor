@@ -1,5 +1,5 @@
 import { AlertCircle, Check, FileSearch, RotateCcw, Wrench } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
 import type { ChatInputProps } from "../../components/chat-empty";
@@ -109,6 +109,7 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   const [spaceTargetId, setSpaceTargetId] = useState<string | null>(null);
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [pendingRuntimePrompt, setPendingRuntimePrompt] = useState<string | undefined>();
+  const observedViewRef = useRef(view);
   const knowledgeLoadState = useSyncExternalStore(
     subscribePersonalKnowledge,
     getPersonalKnowledgeLoadState,
@@ -141,6 +142,18 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   useEffect(() => {
     if (activeSpaceId !== null) setActivePersonalKnowledgeSpace(activeSpaceId);
   }, [activeSpaceId]);
+
+  useEffect(() => {
+    const viewChanged = observedViewRef.current !== view;
+    observedViewRef.current = view;
+    if (
+      !viewChanged
+      || !props.personalKnowledgePersistenceEnabled
+      || !isKnowledgeView(view)
+      || knowledgeLoadState.status !== "ready"
+    ) return;
+    void refreshPersonalKnowledge().catch(() => undefined);
+  }, [knowledgeLoadState.status, props.personalKnowledgePersistenceEnabled, view]);
 
   useEffect(() => {
     if (hasAttention) setView("conv-active");

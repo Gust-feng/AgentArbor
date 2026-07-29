@@ -34,6 +34,7 @@ let authoritativeSnapshot: Snapshot = snapshot
 let activeSpaceId = 'personal-unassigned'
 let loaded = false
 let loading: Promise<void> | undefined
+let refreshing: Promise<void> | undefined
 let persistenceEnabled = false
 let mutationQueue = Promise.resolve()
 let lastError: string | undefined
@@ -130,12 +131,16 @@ export function initializePersonalKnowledge(spaceId?: string): Promise<void> {
   return loading
 }
 
-export async function refreshPersonalKnowledge(): Promise<void> {
-  await mutationQueue
-  authoritativeSnapshot = await fetchPersonalKnowledgeSnapshot()
-  replayPendingMutations()
-  lastError = undefined
-  emit()
+export function refreshPersonalKnowledge(): Promise<void> {
+  if (refreshing !== undefined) return refreshing
+  refreshing = (async () => {
+    await mutationQueue
+    authoritativeSnapshot = await fetchPersonalKnowledgeSnapshot()
+    replayPendingMutations()
+    lastError = undefined
+    emit()
+  })().finally(() => { refreshing = undefined })
+  return refreshing
 }
 
 export function setActivePersonalKnowledgeSpace(spaceId: string): void {
@@ -155,6 +160,7 @@ export function resetPersonalKnowledgeForTesting(): void {
   activeSpaceId = 'personal-unassigned'
   loaded = false
   loading = undefined
+  refreshing = undefined
   persistenceEnabled = false
   mutationQueue = Promise.resolve()
   pendingMutations.length = 0

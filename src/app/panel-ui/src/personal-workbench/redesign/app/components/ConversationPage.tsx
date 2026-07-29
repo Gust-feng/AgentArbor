@@ -476,16 +476,22 @@ export function PrototypeConversationComposer({ input }: { readonly input: ChatI
         className="w-full resize-none px-4 pt-3 text-sm outline-none disabled:cursor-not-allowed"
         style={{ color: 'var(--aa-text-1)', background: 'transparent', lineHeight: 1.65 }}
       />
-      <div className="flex items-center justify-between px-4 py-2.5">
-        <button
-          type="button"
-          onClick={input.onSelectAttachment}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-black/5"
-          style={{ color: 'var(--aa-text-3)' }}
-        >
-          <FileText size={11} />
-          添加引用
-        </button>
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={input.onSelectAttachment}
+            className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-black/5"
+            style={{ color: 'var(--aa-text-3)' }}
+          >
+            <FileText size={11} />
+            添加引用
+          </button>
+          <span className="h-3 w-px shrink-0" style={{ background: 'var(--aa-border)' }} aria-hidden="true" />
+          <ComposerModelSelect input={input} />
+          {input.contextUsage !== undefined && <ComposerContextUsage usage={input.contextUsage} />}
+          {input.reasoningEffortEnabled && <ComposerReasoningSelect input={input} />}
+        </div>
         <div className="flex items-center gap-2">
           {input.running && input.onCancel !== undefined && (
             <button
@@ -518,6 +524,100 @@ export function PrototypeConversationComposer({ input }: { readonly input: ChatI
         </div>
       </div>
     </div>
+  )
+}
+
+function ComposerModelSelect({ input }: { readonly input: ChatInputProps }) {
+  if (input.models.length === 0) {
+    return (
+      <button
+        type="button"
+        onClick={input.onOpenSettings}
+        className="shrink-0 rounded-md px-2 py-1 text-[11px] transition-colors hover:bg-black/5"
+        style={{ color: 'var(--aa-text-2)' }}
+      >
+        配置模型
+      </button>
+    )
+  }
+  return (
+    <label className="relative min-w-0 max-w-36 shrink">
+      <span className="sr-only">模型</span>
+      <select
+        aria-label="模型"
+        value={input.selectedModelId}
+        onChange={(event) => void input.onModelSelect(event.target.value)}
+        className="h-6 w-full appearance-none truncate rounded-md bg-transparent py-0 pl-2 pr-6 text-[11px] outline-none transition-colors hover:bg-black/5 focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
+        style={{ color: 'var(--aa-text-2)' }}
+      >
+        <option value="" disabled>选择模型</option>
+        {input.models.map((model) => (
+          <option key={model.id} value={model.id}>{model.label}</option>
+        ))}
+      </select>
+      <ChevronDown
+        size={10}
+        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
+        style={{ color: 'var(--aa-text-3)' }}
+        aria-hidden="true"
+      />
+    </label>
+  )
+}
+
+function ComposerContextUsage({ usage }: { readonly usage: NonNullable<ChatInputProps['contextUsage']> }) {
+  const percent = usage.percent ?? usage.ringPercent
+  const warning = percent > 80
+  const progress = Math.min(100, Math.max(0, usage.ringPercent))
+  return (
+    <div
+      className="hidden min-w-24 max-w-28 shrink items-center gap-1.5 sm:flex"
+      title={usage.label}
+      role="progressbar"
+      aria-label={usage.label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={usage.percent === undefined ? undefined : Math.round(percent)}
+    >
+      <span className="truncate text-[10px]" style={{ color: warning ? 'var(--aa-status-wait)' : 'var(--aa-text-3)' }}>
+        {usage.percent === undefined ? '上下文 --' : `上下文 ${Math.round(percent)}%`}
+      </span>
+      <span className="h-1 min-w-8 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--aa-surface-hover)' }}>
+        <span
+          className="block h-full rounded-full transition-[width,background-color] duration-200"
+          style={{
+            width: `${progress}%`,
+            background: warning ? 'var(--aa-status-wait)' : 'var(--aa-accent)',
+          }}
+        />
+      </span>
+    </div>
+  )
+}
+
+function ComposerReasoningSelect({ input }: { readonly input: ChatInputProps }) {
+  return (
+    <label className="relative shrink-0">
+      <span className="sr-only">推理力度</span>
+      <select
+        aria-label="推理力度"
+        value={input.reasoningEffort}
+        onChange={(event) => input.onReasoningEffortChange(event.target.value as ChatInputProps['reasoningEffort'])}
+        className="h-6 appearance-none rounded-md bg-transparent py-0 pl-2 pr-6 text-[11px] outline-none transition-colors hover:bg-black/5 focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
+        style={{ color: 'var(--aa-text-2)' }}
+      >
+        <option value="">自动</option>
+        <option value="low">轻量</option>
+        <option value="medium">标准</option>
+        <option value="high">深入</option>
+      </select>
+      <ChevronDown
+        size={10}
+        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
+        style={{ color: 'var(--aa-text-3)' }}
+        aria-hidden="true"
+      />
+    </label>
   )
 }
 
@@ -571,7 +671,7 @@ function AgentRunningView({
   const [isReplying, setIsReplying] = useState(false)
 
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
-  const streamRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const streamRef = useRef<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const queuedRef = useRef<string[]>([])
   queuedRef.current = queued
@@ -582,7 +682,10 @@ function AgentRunningView({
   function haltTimers() {
     timersRef.current.forEach(clearTimeout)
     timersRef.current = []
-    if (streamRef.current) clearInterval(streamRef.current)
+    if (streamRef.current !== null) {
+      cancelAnimationFrame(streamRef.current)
+      streamRef.current = null
+    }
   }
 
   function setStep(i: number, patch: Partial<RunStep>) {
@@ -599,17 +702,22 @@ function AgentRunningView({
     push(() => {
       setStep(2, { status: 'done', detail: PLAN_STEPS[2].detail })
       setStep(3, { status: 'active' })
-      // 开始流式写作
+      const charactersPerSecond = 300
       let i = 0
-      streamRef.current = setInterval(() => {
-        i += 5
-        setStreamedText(AGENT_RESPONSE.slice(0, i))
+      let lastFrame = performance.now()
+      const tick = (now: number) => {
+        i += Math.max(1, Math.round(((now - lastFrame) / 1000) * charactersPerSecond))
+        lastFrame = now
         if (i >= AGENT_RESPONSE.length) {
           setStreamedText(AGENT_RESPONSE)
-          if (streamRef.current) clearInterval(streamRef.current)
+          streamRef.current = null
           finish('done')
+          return
         }
-      }, 16)
+        setStreamedText(AGENT_RESPONSE.slice(0, i))
+        streamRef.current = requestAnimationFrame(tick)
+      }
+      streamRef.current = requestAnimationFrame(tick)
     }, 3500)
 
     return () => haltTimers()
@@ -651,8 +759,8 @@ function AgentRunningView({
   }
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [steps, streamedText, messages, isReplying, queued])
+    bottomRef.current?.scrollIntoView({ behavior: running ? 'auto' : 'smooth', block: 'nearest' })
+  }, [steps, streamedText, messages, isReplying, queued, running])
 
   const shortTitle = initialMessage.length > 36 ? initialMessage.slice(0, 36) + '…' : initialMessage
 

@@ -5,6 +5,13 @@ import {
   conversationSummaryNeedsRefresh,
   type RefreshableConversationSummary,
 } from "./conversation-refresh-policy.js";
+import {
+  INITIAL_VISIBLE_TRANSCRIPT_TURNS,
+  LONG_TRANSCRIPT_PROGRESSIVE_THRESHOLD,
+  initialVisibleTranscriptTurnCount,
+  reconcileTranscriptVisibilityState,
+  runIdsForTurnWindow,
+} from "./transcript-window.js";
 
 test("conversation summary refresh follows active and actionable task states", () => {
   assert.equal(conversationSummaryNeedsRefresh(conversation({ status: "running" })), true);
@@ -30,6 +37,28 @@ test("conversation summary refresh stops for terminal quiet task states", () => 
     conversation({ conversationId: "done", status: "completed" }),
     conversation({ conversationId: "running", status: "running" }),
   ]), true);
+});
+
+test("long transcripts use a stable recent-turn window", () => {
+  assert.equal(
+    initialVisibleTranscriptTurnCount(LONG_TRANSCRIPT_PROGRESSIVE_THRESHOLD),
+    LONG_TRANSCRIPT_PROGRESSIVE_THRESHOLD,
+  );
+  assert.equal(
+    initialVisibleTranscriptTurnCount(LONG_TRANSCRIPT_PROGRESSIVE_THRESHOLD + 1),
+    INITIAL_VISIBLE_TRANSCRIPT_TURNS,
+  );
+  assert.equal(reconcileTranscriptVisibilityState({
+    previous: { conversationId: "conversation-1", totalTurns: 96, visibleCount: 96 },
+    conversationId: "conversation-1",
+    totalTurns: 97,
+  }).visibleCount, 97);
+  assert.deepEqual(runIdsForTurnWindow([
+    { role: "assistant" as const, runId: "hidden-run" },
+    { role: "user" as const },
+    { role: "assistant" as const, runId: "visible-run" },
+    { role: "assistant" as const, runId: "visible-run" },
+  ], 1), ["visible-run"]);
 });
 
 function conversation(

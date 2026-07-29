@@ -49,6 +49,8 @@ export type PersonalSpaceProjection = {
   readonly itemCount?: number;
   readonly description?: string;
   readonly color?: string;
+  /** Explicit prototype content retained for a designated demo Space only. */
+  readonly demoDataset?: "learning-workspace";
   readonly items: readonly PersonalSpaceItemProjection[];
 };
 
@@ -56,11 +58,19 @@ export type PersonalSpaceActions = {
   /** Creates an internal organization folder; it never creates an external directory. */
   readonly createFolder?: (spaceId: string, title: string, parentFolderId?: string) => void | Promise<void>;
   /** Opens a host-owned local-file picker, then adds the selected file as a reference. */
-  readonly addLocalFile?: (spaceId: string) => void | Promise<void>;
+  readonly addLocalFile?: (spaceId: string, parentFolderId?: string) => void | Promise<void>;
   /** Opens a host-owned directory picker, then adds the selection as a reference. */
-  readonly addWorkspaceFolder?: (spaceId: string) => void | Promise<void>;
+  readonly addWorkspaceFolder?: (spaceId: string, parentFolderId?: string) => void | Promise<void>;
+  /** Adds a validated web-page reference without fetching or copying its content. */
+  readonly addWebReference?: (spaceId: string, title: string, url: string, parentFolderId?: string) => void | Promise<void>;
   /** Adds an explicit reference to the current Ordinary conversation, if one exists. */
-  readonly addConversation?: (spaceId: string, conversationId: string, title: string) => void | Promise<void>;
+  readonly addConversation?: (spaceId: string, conversationId: string, title: string, parentFolderId?: string) => void | Promise<void>;
+  readonly move?: (
+    sourceSpaceId: string,
+    target: { readonly kind: "folder" | "reference"; readonly id: string },
+    destinationSpaceId: string,
+    destinationFolderId?: string,
+  ) => void | Promise<void>;
   readonly rename?: (target: PersonalSpaceRenameTarget, title: string) => void | Promise<void>;
   /** Removes the Space reference only; it must never delete the external object. */
   readonly removeReference?: (itemId: string) => void | Promise<void>;

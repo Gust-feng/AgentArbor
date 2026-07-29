@@ -19,7 +19,7 @@ import type { BasicAgentRun } from "./contracts/run";
 export type AppRunController = {
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
-  readonly loadConversation: (conversationId: string) => Promise<void>;
+  readonly loadConversation: (conversationId: string) => Promise<boolean>;
   readonly startTask: (explicitGoal?: string) => Promise<void>;
   readonly refreshConversations: () => Promise<void>;
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
@@ -65,12 +65,23 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     refreshConversations,
   });
 
-  async function loadConversation(conversationId: string): Promise<void> {
-    await loadConversationSession({
-      ...options,
-      refreshConversations,
-      startLiveUpdates: liveUpdates.startLiveUpdates,
-    }, conversationId);
+  async function loadConversation(conversationId: string): Promise<boolean> {
+    try {
+      return await loadConversationSession({
+        ...options,
+        refreshConversations,
+        startLiveUpdates: liveUpdates.startLiveUpdates,
+      }, conversationId);
+    } catch (error: unknown) {
+      if (isAbortError(error)) return false;
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "加载对话失败。",
+        }));
+      }
+      return false;
+    }
   }
 
   async function startTask(explicitGoal?: string): Promise<void> {
@@ -166,4 +177,10 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     decideConfirmation,
     resetChat,
   };
+}
+
+function isAbortError(reason: unknown): boolean {
+  return reason instanceof DOMException
+    ? reason.name === "AbortError"
+    : reason instanceof Error && reason.name === "AbortError";
 }

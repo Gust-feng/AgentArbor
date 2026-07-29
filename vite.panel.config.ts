@@ -12,6 +12,25 @@ export default defineConfig({
     outDir: "../../../dist/app/panel-ui",
     emptyOutDir: true,
     sourcemap: true,
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          const normalized = id.replaceAll("\\", "/");
+          if (!normalized.includes("/node_modules/")) return undefined;
+          if (normalized.includes("/prosemirror-")) return "editor-prosemirror";
+          if (normalized.includes("/@tiptap+") || normalized.includes("/tiptap-markdown")) return "editor-tiptap";
+          if (
+            normalized.includes("/markdown-it/")
+            || normalized.includes("/linkify-it/")
+            || normalized.includes("/linkifyjs/")
+            || normalized.includes("/entities/")
+            || normalized.includes("/punycode.js/")
+            || normalized.includes("/uc.micro/")
+          ) return "editor-markdown";
+          return undefined;
+        },
+      },
+    },
   },
 });
 

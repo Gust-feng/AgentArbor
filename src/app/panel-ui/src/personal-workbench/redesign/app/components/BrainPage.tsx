@@ -28,6 +28,7 @@ import { MaterialBody, renderMarkdown } from './MaterialView'
 import { useBrain, type ResolvedPage } from './brainStore'
 import { useThemes, type Theme } from './themesStore'
 import { ImageWithFallback } from './figma/ImageWithFallback'
+import type { PersonalSpaceProjection } from '../../../space'
 
 /**
  * 知识库 —— 顶层场所(见 docs/概念与设计.md §5)。
@@ -40,11 +41,12 @@ import { ImageWithFallback } from './figma/ImageWithFallback'
  * 链接 / 反向链接(第二大脑的核心机制)才作为右栏透镜出现。
  */
 
-type Kind = 'all' | 'note' | 'pdf' | 'web' | 'image' | 'video' | 'audio' | 'code'
+type Kind = 'all' | 'note' | 'file' | 'pdf' | 'web' | 'image' | 'video' | 'audio' | 'code'
 
 const FILTERS: { key: Kind; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'note', label: '笔记' },
+  { key: 'file', label: '文件' },
   { key: 'pdf', label: 'PDF' },
   { key: 'web', label: '网页' },
   { key: 'image', label: '图片' },
@@ -86,14 +88,14 @@ function pageIcon(p: ResolvedPage, size = 13) {
 const kindLabel = (p: ResolvedPage) =>
   p.kind === 'note'
     ? '笔记'
-    : { pdf: 'PDF', web: '网页', image: '图片', video: '视频', markdown: 'Markdown', audio: '音频', code: '代码' }[
+    : { file: '文件', pdf: 'PDF', web: '网页', image: '图片', video: '视频', markdown: 'Markdown', audio: '音频', code: '代码' }[
         p.materialKind ?? 'pdf'
       ]
 
 function matchesFilter(p: ResolvedPage, f: Kind): boolean {
   if (f === 'all') return true
   if (f === 'note') return p.kind === 'note'
-  return p.kind === 'material' && p.materialKind === f
+  return p.kind !== 'note' && p.materialKind === f
 }
 
 function clean(src: string | undefined): string {
@@ -109,6 +111,7 @@ function clean(src: string | undefined): string {
 /** 一段如实的文字摘要:笔记 / Markdown / 网页 / PDF 都取各自真实正文。 */
 function previewText(p: ResolvedPage): string {
   if (p.kind === 'note') return clean(getNote(p.refId)?.body).slice(0, 100)
+  if (p.kind === 'space_reference') return clean(p.detail).slice(0, 100)
   const m = getMaterial(p.refId)
   if (!m) return ''
   switch (m.kind) {
@@ -130,12 +133,16 @@ function previewText(p: ResolvedPage): string {
 export function BrainPage({
   selectedId,
   onSelect,
+  spaces,
+  onOpenSpaceReference,
 }: {
   // 当前打开的文件 id 提升到 App 管理,好让顶栏渲染「知识库 › 文件」的路径面包屑。
   selectedId: string | null
   onSelect: (id: string | null) => void
+  spaces: readonly PersonalSpaceProjection[]
+  onOpenSpaceReference: (spaceId: string, itemId: string) => void
 }) {
-  const brain = useBrain()
+  const brain = useBrain(spaces)
   const themeApi = useThemes()
   const [filter, setFilter] = useState<Kind>('all')
   const [query, setQuery] = useState('')
@@ -190,6 +197,7 @@ export function BrainPage({
         brain={brain}
         onBack={() => onSelect(null)}
         onOpen={openCard}
+        onOpenSpaceReference={onOpenSpaceReference}
       />
     )
   }
@@ -673,12 +681,14 @@ function ReadingView({
   brain,
   onBack,
   onOpen,
+  onOpenSpaceReference,
 }: {
   page: ResolvedPage
   resolved: ResolvedPage[]
   brain: ReturnType<typeof useBrain>
   onBack: () => void
   onOpen: (id: string) => void
+  onOpenSpaceReference: (spaceId: string, itemId: string) => void
 }) {
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
   const outIds = brain.outgoing(page.refId)
@@ -705,7 +715,7 @@ function ReadingView({
         </header>
 
         <div className="flex-1 overflow-y-auto">
-          <PageContent page={page} />
+          <PageContent page={page} onOpenSpaceReference={onOpenSpaceReference} />
         </div>
       </div>
 
@@ -1156,7 +1166,13 @@ function RelRow({
 }
 /* ------------------------------ 内容渲染 ------------------------------ */
 
-function PageContent({ page }: { page: ResolvedPage }) {
+function PageContent({
+  page,
+  onOpenSpaceReference,
+}: {
+  page: ResolvedPage
+  onOpenSpaceReference?: (spaceId: string, itemId: string) => void
+}) {
   if (!page.exists) {
     return (
       <div
@@ -1177,6 +1193,27 @@ function PageContent({ page }: { page: ResolvedPage }) {
           <p className="text-sm" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
             这篇笔记还没有内容。
           </p>
+        )}
+      </div>
+    )
+  }
+  if (page.kind === 'space_reference') {
+    return (
+      <div className="mx-auto px-6 py-10" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
+        <h1 className="text-lg font-semibold m-0" style={{ color: 'var(--aa-text-1, #292722)' }}>{page.title}</h1>
+        <p className="text-sm mt-3 break-all" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
+          {page.detail || '这是一个空间引用，原始内容仍由对应来源持有。'}
+        </p>
+        {page.spaceId !== undefined && onOpenSpaceReference !== undefined && (
+          <button
+            type="button"
+            className="mt-5 flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-white"
+            style={{ background: 'var(--aa-accent, #6865a7)' }}
+            onClick={() => onOpenSpaceReference(page.spaceId!, page.refId)}
+          >
+            在空间中打开
+            <CornerUpLeft size={12} style={{ transform: 'scaleX(-1)' }} />
+          </button>
         )}
       </div>
     )
@@ -1213,7 +1250,7 @@ function Card({
   const [hovered, setHovered] = useState(false)
   const [tagOpen, setTagOpen] = useState(false)
   const cover = pageHasCover(page)
-  const isWeb = page.kind === 'material' && page.materialKind === 'web'
+  const isWeb = page.kind !== 'note' && page.materialKind === 'web'
   // 有封面的格式不再重复正文;文字类才配摘要。
   const preview = cover ? '' : previewText(page)
 

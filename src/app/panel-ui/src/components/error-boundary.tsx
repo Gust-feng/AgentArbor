@@ -1,4 +1,5 @@
 import React from "react"
+import { AlertCircle, RotateCcw } from "lucide-react"
 
 type ErrorBoundaryState = {
   readonly error?: Error
@@ -32,18 +33,19 @@ export class ErrorBoundary extends React.Component<
 
 function ErrorFallback({ error }: { readonly error: Error }): React.ReactElement {
   return (
-    <div className="app-error-boundary">
-      <div className="app-error-boundary-card">
-        <h1 className="app-error-boundary-title">工作台遇到问题</h1>
-        <p className="app-error-boundary-message">
+    <div className="aa-global-error">
+      <div className="aa-global-error__panel" role="alert">
+        <AlertCircle className="aa-global-error__icon" size={18} />
+        <h1>工作台遇到问题</h1>
+        <p>
           页面发生了意外错误，可以尝试刷新恢复。
         </p>
-        <pre className="app-error-boundary-detail">{error.message}</pre>
+        <pre>{error.message}</pre>
         <button
           type="button"
-          className="app-error-boundary-retry"
           onClick={() => window.location.reload()}
         >
+          <RotateCcw size={13} />
           刷新页面
         </button>
       </div>

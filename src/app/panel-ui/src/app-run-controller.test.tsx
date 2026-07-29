@@ -2,6 +2,7 @@ import type React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInitialAppState, type AppState } from "./app-state";
 import { createAppRunController } from "./app-run-controller";
+import { createAppSidebarConversationController } from "./app-sidebar-conversation-controller";
 import type { BasicAgentRun, BasicAgentRunView } from "./contracts/run";
 
 const statisticsMocks = vi.hoisted(() => ({
@@ -92,6 +93,138 @@ describe("ordinary run cancellation", () => {
   });
 });
 
+describe("sidebar conversation mutations", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("deletes inactive history without resetting the active conversation", async () => {
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: conversation(runView(run("completed"))),
+      conversations: [
+        { conversationId: "conversation-1", title: "Active" },
+        { conversationId: "conversation-history", title: "History" },
+      ],
+    };
+    const resetChat = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      conversations: [{ conversationId: "conversation-1", title: "Active" }],
+    })));
+    const controller = sidebarController(() => app, (next) => { app = next; }, resetChat);
+
+    await controller.deleteConversation("conversation-history");
+
+    expect(resetChat).not.toHaveBeenCalled();
+    expect(app.conversation?.conversationId).toBe("conversation-1");
+    expect(app.conversations.map((item) => item.conversationId)).toEqual(["conversation-1"]);
+  });
+
+  it("does not reset a newer active conversation when an earlier delete finishes late", async () => {
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: conversation(runView(run("completed"))),
+      conversations: [{ conversationId: "conversation-1", title: "Deleting" }],
+    };
+    let resolveDelete!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { resolveDelete = resolve; })));
+    const resetChat = vi.fn();
+    const controller = sidebarController(() => app, (next) => { app = next; }, resetChat);
+
+    const deleting = controller.deleteConversation("conversation-1");
+    app = {
+      ...app,
+      conversation: { ...conversation(runView(run("completed"))), conversationId: "conversation-2", title: "Current" },
+      conversations: [{ conversationId: "conversation-2", title: "Current" }],
+    };
+    resolveDelete(jsonResponse({ conversations: [{ conversationId: "conversation-2", title: "Current" }] }));
+    await deleting;
+
+    expect(resetChat).not.toHaveBeenCalled();
+    expect(app.conversation?.conversationId).toBe("conversation-2");
+  });
+
+  it("deduplicates concurrent mutations for one conversation and clears pending state", async () => {
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversations: [{ conversationId: "conversation-1", title: "Before" }],
+    };
+    let resolveRequest!: (response: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveRequest = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const pendingRef = { current: new Set<string>() };
+    let pending: ReadonlySet<string> = new Set();
+    const controller = sidebarController(
+      () => app,
+      (next) => { app = next; },
+      vi.fn(),
+      pendingRef,
+      (next) => { pending = next; },
+    );
+
+    const first = controller.renameConversation("conversation-1", "After");
+    const duplicate = controller.renameConversation("conversation-1", "Duplicate");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(pending.has("conversation-1")).toBe(true);
+
+    resolveRequest(jsonResponse({
+      conversation: { conversationId: "conversation-1", title: "After", turns: [] },
+    }));
+    await Promise.all([first, duplicate]);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(pending.size).toBe(0);
+    expect(app.conversations[0]?.title).toBe("After");
+  });
+});
+
+describe("conversation switching", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps a stale first load from winning after a second conversation is opened", async () => {
+    const requests: Array<{ path: string; signal?: AbortSignal | null; resolve: (response: Response) => void }> = [];
+    vi.stubGlobal("fetch", vi.fn((path: string | URL | Request, init?: RequestInit) => new Promise<Response>((resolve) => {
+      requests.push({ path: String(path), signal: init?.signal, resolve });
+    })));
+    let app = createInitialAppState();
+    const controller = createAppRunController({
+      app,
+      setApp: dispatch((next) => { app = next; }, () => app),
+      setScreen: () => undefined,
+      setGoal: () => undefined,
+      attachments: [],
+      setAttachments: () => undefined,
+      goal: "",
+      aiMode: "openai-responses",
+      composerReasoningEffort: "",
+      toolConfirmationPolicy: "full_access",
+      selectedModelId: "model-1",
+      selectedModelSupportsReasoningEffort: false,
+      confirmationBusy: false,
+      setConfirmationBusy: () => undefined,
+      mountedRef: { current: true },
+      pollTimer: { current: undefined },
+      streamRef: { current: undefined },
+      activeRunIdRef: { current: undefined },
+      viewEpochRef: { current: 0 },
+      conversationLoadAbortRef: { current: undefined },
+      setCancellingRunId: () => undefined,
+    });
+
+    const first = controller.loadConversation("conversation-first");
+    const second = controller.loadConversation("conversation-second");
+    expect(requests[0]?.signal?.aborted).toBe(true);
+    requests[0]?.resolve(jsonResponse({ conversation: emptyConversation("conversation-first") }));
+    requests[1]?.resolve(jsonResponse({ conversation: emptyConversation("conversation-second") }));
+
+    await expect(first).resolves.toBe(false);
+    await expect(second).resolves.toBe(true);
+    expect(app.conversation?.conversationId).toBe("conversation-second");
+  });
+});
+
 function dispatch<T>(
   write: (value: T) => void,
   read?: () => T | undefined,
@@ -103,6 +236,32 @@ function dispatch<T>(
       : action;
     write(next);
   };
+}
+
+function sidebarController(
+  readApp: () => AppState,
+  writeApp: (app: AppState) => void,
+  resetChat: () => void,
+  mutationConversationIdsRef = { current: new Set<string>() },
+  writePending: (pending: ReadonlySet<string>) => void = () => undefined,
+) {
+  return createAppSidebarConversationController({
+    app: readApp(),
+    appRef: {
+      get current() { return readApp(); },
+      set current(value: AppState) { writeApp(value); },
+    },
+    setApp: dispatch(writeApp, readApp),
+    mountedRef: { current: true },
+    mutationConversationIdsRef,
+    setMutationConversationIds: dispatch(writePending),
+    resetChat,
+    setSelectedWorkspaceDirectory: () => undefined,
+    setInputCloseSignal: () => undefined,
+    setGoal: () => undefined,
+    setAttachments: () => undefined,
+    setScreen: () => undefined,
+  });
 }
 
 function runView(value: BasicAgentRun): BasicAgentRunView {
@@ -158,6 +317,10 @@ function conversation(currentRun: BasicAgentRunView) {
       runId: currentRun.run.runId,
     }],
   };
+}
+
+function emptyConversation(conversationId: string) {
+  return { conversationId, title: conversationId, turns: [] };
 }
 
 function run(status: BasicAgentRun["status"]): BasicAgentRun {

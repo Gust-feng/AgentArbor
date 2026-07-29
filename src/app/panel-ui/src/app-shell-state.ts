@@ -4,7 +4,7 @@ import {
   saveModelUsageDisplayEnabled,
 } from "./app-model-usage-display";
 import { type SettingsGroup } from "./components/settings-types";
-import { type Screen } from "./components/sidebar";
+import type { Screen } from "./app-screen";
 import type { AgentMode } from "./app-config-projection";
 import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
 import { isMultiAgentEntryEnabled } from "./app-multi-agent-availability";

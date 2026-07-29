@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { DndProvider, useDrag, useDrop } from 'react-dnd'
 import { HTML5Backend, getEmptyImage } from 'react-dnd-html5-backend'
 import {
@@ -6,6 +6,9 @@ import {
   ChevronDown,
   Folder,
   FileText,
+  FileImage,
+  FileVideo,
+  File,
   Globe,
   MessageSquare,
   Plus,
@@ -20,11 +23,22 @@ import {
   GripVertical,
 } from 'lucide-react'
 import { type View } from './Sidebar'
+import type {
+  PersonalSpaceActions,
+  PersonalSpaceItemProjection,
+  PersonalSpaceProjection,
+} from '../../../space'
 import { getMaterial, KIND_META } from './materials'
 import { MaterialView, MaterialBody } from './MaterialView'
-import { NoteEditor } from './NoteEditor'
+import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
+import { LEARNING_DEMO_SPACE_TREE } from './learningDemoDataset'
 import { getAllNotes, useNotes } from './notesStore'
-import { useBrain } from './brainStore'
+import { useBrain, type PageKind } from './brainStore'
+
+const LazyNoteEditor = lazy(async () => {
+  const module = await import('./NoteEditor')
+  return { default: module.NoteEditor }
+})
 
 /**
  * 学习空间 —— VS Code 式分栏:左侧资源管理器(我的笔记 + 资料),右侧书写/查看。
@@ -35,49 +49,44 @@ interface SpaceItem {
   id: string
   name: string
   type: 'folder' | 'file' | 'web' | 'conversation'
+  domainKind: PersonalSpaceItemProjection['kind']
   meta?: string
   defaultExpanded?: boolean
   children?: SpaceItem[]
+  demo?: boolean
+  conversationId?: string
+  openUrl?: string
+  openable?: boolean
 }
 
 /**
  * 空间里「读进来的材料 / 对话引用」—— 只读参考,服务于书写。
  * (「我写的笔记」是另一类可写对象,来自 notesStore,不在这棵树里。)
- * 接后端后,这份 mock 会被空间的真实内容列表替换。
+ * 这份数据只在明确标记为 learning-workspace 的演示空间中展示。
  */
-const SPACE_TREE: SpaceItem[] = [
-  {
-    id: 'f1',
-    name: '2026年学习资料',
-    type: 'folder',
-    defaultExpanded: true,
-    children: [
-      { id: 'f1-1', name: 'PyTorch 入门笔记.pdf', type: 'file', meta: '2.4 MB' },
-      { id: 'f1-2', name: 'CS231n 课程主页', type: 'web', meta: 'cs231n.stanford.edu' },
-      { id: 'f1-3', name: '关于梯度下降的讨论', type: 'conversation', meta: '昨天' },
-      { id: 'f1-5', name: '神经网络结构图.png', type: 'file', meta: '1.8 MB' },
-      { id: 'f1-6', name: '梯度下降讲解.mp4', type: 'file', meta: '08:24' },
-    ],
-  },
-  {
-    id: 'f2',
-    name: '阅读笔记',
-    type: 'folder',
-    defaultExpanded: false,
-    children: [
-      { id: 'f2-2', name: '卡片笔记法完整介绍', type: 'web', meta: 'zettelkasten.de' },
-      { id: 'f2-3', name: '认知偏见与阅读整理', type: 'conversation', meta: '3天前' },
-    ],
-  },
-  { id: 'f4', name: '学习框架制定对话', type: 'conversation', meta: '1周前' },
-]
+function fileIcon(name: string, size: number) {
+  const extension = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'heic'].includes(extension)) {
+    return <FileImage size={size} style={{ color: '#6f8778' }} />
+  }
+  if (['mp4', 'mov', 'webm', 'avi', 'mkv'].includes(extension)) {
+    return <FileVideo size={size} style={{ color: '#9a7fae' }} />
+  }
+  if (extension === 'pdf') {
+    return <FileText size={size} style={{ color: '#c25b45' }} />
+  }
+  if (['doc', 'docx', 'txt', 'md', 'rtf'].includes(extension)) {
+    return <FileText size={size} style={{ color: '#87827c' }} />
+  }
+  return <File size={size} style={{ color: '#87827c' }} />
+}
 
-function itemIcon(type: SpaceItem['type'], size = 13) {
-  switch (type) {
+function itemIcon(item: SpaceItem, size = 13) {
+  switch (item.type) {
     case 'folder':
       return <Folder size={size} style={{ color: 'var(--aa-accent, #6865a7)' }} />
     case 'file':
-      return <FileText size={size} style={{ color: '#87827c' }} />
+      return fileIcon(item.name, size)
     case 'web':
       return <Globe size={size} style={{ color: '#a8c4b4' }} />
     case 'conversation':
@@ -92,18 +101,28 @@ function TreeNode({
   selectedId,
   onRename,
   onDelete,
+  renameEnabled,
+  removeEnabled,
+  isExpanded,
+  onToggleExpand,
 }: {
   item: SpaceItem
   depth: number
   onSelect: (id: string) => void
   selectedId: string | null
-  onRename: (id: string, name: string) => void
-  onDelete: (id: string) => void
+  onRename: (item: SpaceItem, name: string) => void
+  onDelete: (item: SpaceItem) => void
+  renameEnabled: boolean
+  removeEnabled: boolean
+  isExpanded: (id: string) => boolean
+  onToggleExpand: (id: string) => void
 }) {
-  const [expanded, setExpanded] = useState(item.defaultExpanded ?? false)
+  const expanded = isExpanded(item.id)
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
   const selected = selectedId === item.id
+  const canRename = !item.demo && renameEnabled
+  const canRemove = !item.demo && item.domainKind !== 'folder' && removeEnabled
   const pl = 10 + depth * 14
 
   return (
@@ -126,7 +145,7 @@ function TreeNode({
         onClick={() => {
           if (editing) return
           onSelect(item.id)
-          if (item.type === 'folder') setExpanded(!expanded)
+          if (item.type === 'folder') onToggleExpand(item.id)
         }}
       >
         {item.type === 'folder' ? (
@@ -137,13 +156,14 @@ function TreeNode({
           <span style={{ width: 12, flexShrink: 0 }} />
         )}
 
-        {itemIcon(item.type)}
+        {itemIcon(item)}
 
         {editing ? (
           <InlineName
             value={item.name}
+            label={`重命名${item.name}`}
             onCommit={(t) => {
-              onRename(item.id, t)
+              onRename(item, t)
               setEditing(false)
             }}
             onCancel={() => setEditing(false)}
@@ -154,12 +174,13 @@ function TreeNode({
           </span>
         )}
 
-        {!editing && (
+        {!editing && (canRename || canRemove) && (
           <RowMenu
+            label={`${item.name}操作`}
             visible={hovered}
             actions={[
-              { label: '重命名', icon: <Pencil size={12} />, onClick: () => setEditing(true) },
-              { label: '移除', icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item.id) },
+              ...(canRename ? [{ label: '重命名', icon: <Pencil size={12} />, onClick: () => setEditing(true) }] : []),
+              ...(canRemove ? [{ label: '移除', icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item) }] : []),
             ]}
           />
         )}
@@ -176,6 +197,10 @@ function TreeNode({
               selectedId={selectedId}
               onRename={onRename}
               onDelete={onDelete}
+              renameEnabled={renameEnabled}
+              removeEnabled={removeEnabled}
+              isExpanded={isExpanded}
+              onToggleExpand={onToggleExpand}
             />
           ))}
         </div>
@@ -199,40 +224,94 @@ function getItem(tree: SpaceItem[], id: string): SpaceItem | undefined {
   return undefined
 }
 
-/** 递归删除:返回一棵移除了 id 的新树(含其后代)。 */
-function filterTree(tree: SpaceItem[], id: string): SpaceItem[] {
-  return tree
-    .filter((it) => it.id !== id)
-    .map((it) => (it.children ? { ...it, children: filterTree(it.children, id) } : it))
+function projectSpaceTree(space: PersonalSpaceProjection | undefined): SpaceItem[] {
+  if (space === undefined) return []
+  const realItems = space.items.map(projectSpaceItem)
+  return space.demoDataset === 'learning-workspace'
+    ? [...LEARNING_DEMO_SPACE_TREE, ...realItems]
+    : realItems
 }
 
-/** 递归改写:对命中 id 的节点应用 fn,返回新树。 */
-function mapTree(tree: SpaceItem[], id: string, fn: (it: SpaceItem) => SpaceItem): SpaceItem[] {
-  return tree.map((it) => {
-    const next = it.id === id ? fn(it) : it
-    return next.children ? { ...next, children: mapTree(next.children, id, fn) } : next
-  })
+function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
+  return {
+    id: item.itemId,
+    name: item.title,
+    type: visualItemType(item.kind),
+    domainKind: item.kind,
+    meta: item.detail ?? item.updatedAtLabel,
+    defaultExpanded: item.kind === 'folder',
+    children: item.children?.map(projectSpaceItem),
+    conversationId: item.conversationId,
+    openUrl: item.openUrl,
+    openable: item.openable,
+  }
+}
+
+function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['type'] {
+  switch (kind) {
+    case 'folder':
+    case 'workspace_folder': return 'folder'
+    case 'web_reference': return 'web'
+    case 'conversation_reference': return 'conversation'
+    default: return 'file'
+  }
 }
 
 interface SpacePageProps {
   onNavigate: (v: View) => void
+  space?: PersonalSpaceProjection
+  actions?: PersonalSpaceActions
+  currentConversation?: { conversationId: string; title: string }
+  onOpenItem?: (spaceId: string, itemId: string) => void | Promise<void>
+  onOpenConversation?: (conversationId: string) => boolean | Promise<boolean>
   /** 从搜索等入口跳转时,要求空间预先选中并打开的对象 id。 */
   targetId?: string | null
 }
 
-export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
-  const { notes, create, update, remove, reorder } = useNotes()
-  const brain = useBrain()
+interface SpaceViewMemory {
+  selectedId: string | null
+  expandedIds: Set<string>
+  scrollTop: number
+}
+
+const spaceViewMemory = new Map<string, SpaceViewMemory>()
+
+function collectDefaultExpanded(tree: SpaceItem[], result = new Set<string>()): Set<string> {
+  for (const item of tree) {
+    if (item.type === 'folder' && item.defaultExpanded) result.add(item.id)
+    if (item.children !== undefined) collectDefaultExpanded(item.children, result)
+  }
+  return result
+}
+
+export function SpacePage({
+  onNavigate,
+  targetId,
+  space,
+  actions,
+  currentConversation,
+  onOpenItem,
+  onOpenConversation,
+}: SpacePageProps) {
+  const noteStore = useNotes()
+  const spaceId = space?.spaceId
+  const notes = useMemo(
+    () => spaceId === undefined ? noteStore.notes : noteStore.notes.filter((note) => note.spaceId === spaceId),
+    [noteStore.notes, spaceId],
+  )
+  const { create, update, remove, reorder } = noteStore
+  const brain = useBrain(space === undefined ? [] : [space])
 
   // Store order is the normal render source. A separate order exists only
   // during a drag gesture; keeping a permanent duplicate made creation render
   // against two different snapshots and visibly moved the selection.
   const [dragOrder, setDragOrder] = useState<string[] | null>(null)
   const dragOrderRef = useRef<string[] | null>(null)
-  const orderedNoteIds = dragOrder ?? notes.map((note) => note.id)
-  const orderedNotes = orderedNoteIds
-    .map((id) => notes.find((n) => n.id === id))
-    .filter((n): n is NonNullable<typeof n> => Boolean(n))
+  const orderedNotes = useMemo(() => {
+    const notesById = new Map(notes.map((note) => [note.id, note]))
+    const orderedNoteIds = dragOrder ?? notes.map((note) => note.id)
+    return orderedNoteIds.flatMap((id) => notesById.get(id) ?? [])
+  }, [dragOrder, notes])
   const moveNote = (from: number, to: number) => {
     const previous = dragOrderRef.current ?? notes.map((note) => note.id)
     const next = [...previous]
@@ -251,13 +330,46 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
   }
 
   // 书写为中心:默认打开最近编辑的笔记(有 targetId 则优先)。
-  const [selectedId, setSelectedId] = useState<string | null>(
-    () => targetId ?? getAllNotes()[0]?.id ?? 'f1-1'
+  const tree = useMemo(() => projectSpaceTree(space), [space])
+  const memoryKey = spaceId ?? 'prototype-space'
+  const rememberedView = spaceViewMemory.get(memoryKey)
+  const [selectedId, setSelectedId] = useState<string | null>(() => (
+    targetId
+      ?? rememberedView?.selectedId
+      ?? getAllNotes().find((note) => spaceId === undefined || note.spaceId === spaceId)?.id
+      ?? tree[0]?.id
+      ?? null
+  ))
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(
+    () => new Set(rememberedView?.expandedIds ?? collectDefaultExpanded(tree)),
   )
   const [creatingNoteId, setCreatingNoteId] = useState<string | null>(null)
   const [fullscreenId, setFullscreenId] = useState<string | null>(null)
-  // 资料树改为可变状态,才能支持重命名 / 移除(原型阶段;接后端后由空间内容接口驱动)。
-  const [tree, setTree] = useState<SpaceItem[]>(SPACE_TREE)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [creatingFolder, setCreatingFolder] = useState(false)
+  const explorerRef = useRef<HTMLDivElement>(null)
+
+  function toggleExpanded(id: string) {
+    setExpandedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  useEffect(() => {
+    const current = spaceViewMemory.get(memoryKey)
+    spaceViewMemory.set(memoryKey, {
+      selectedId,
+      expandedIds,
+      scrollTop: current?.scrollTop ?? 0,
+    })
+  }, [expandedIds, memoryKey, selectedId])
+  useLayoutEffect(() => {
+    const explorer = explorerRef.current
+    if (explorer !== null) explorer.scrollTop = spaceViewMemory.get(memoryKey)?.scrollTop ?? 0
+  }, [memoryKey])
 
   // 外部要求打开某个对象(搜索跳转)。
   useEffect(() => {
@@ -266,7 +378,7 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
 
   const selectedNote = notes.find((n) => n.id === selectedId)
   const selectedItem = selectedId ? getItem(tree, selectedId) : null
-  const selectedMaterial = selectedId ? getMaterial(selectedId) : undefined
+  const selectedMaterial = selectedItem?.demo ? getMaterial(selectedItem.id) : undefined
   const fullscreenMaterial = fullscreenId ? getMaterial(fullscreenId) : undefined
   const itemCount = notes.length + countItems(tree)
 
@@ -305,13 +417,53 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
     setSelectedId((prev) => (prev === id ? null : prev))
   }
 
-  // 资料树:重命名 / 移除(递归定位)。
-  function handleRenameItem(id: string, name: string) {
-    setTree((t) => mapTree(t, id, (it) => ({ ...it, name })))
+  // Space feature owns mutations; this page only translates prototype intent.
+  async function handleRenameItem(item: SpaceItem, name: string) {
+    if (actions?.rename === undefined) return
+    setActionError(null)
+    try {
+      await actions.rename({ kind: item.domainKind === 'folder' ? 'folder' : 'reference', id: item.id }, name)
+    } catch (error) {
+      setActionError(actionErrorMessage(error))
+    }
   }
-  function handleDeleteItem(id: string) {
-    setTree((t) => filterTree(t, id))
-    setSelectedId((prev) => (prev === id ? null : prev))
+  async function handleDeleteItem(item: SpaceItem) {
+    if (item.domainKind === 'folder' || actions?.removeReference === undefined) return
+    setActionError(null)
+    try {
+      await actions.removeReference(item.id)
+      setSelectedId((prev) => (prev === item.id ? null : prev))
+    } catch (error) {
+      setActionError(actionErrorMessage(error))
+    }
+  }
+
+  async function handleOpenReference(item: SpaceItem) {
+    if (item.conversationId !== undefined && onOpenConversation !== undefined) {
+      const opened = await onOpenConversation(item.conversationId)
+      if (opened !== false) onNavigate('conv-done')
+      return
+    }
+    if (space !== undefined && onOpenItem !== undefined) {
+      await onOpenItem(space.spaceId, item.id)
+      return
+    }
+    if (item.openUrl !== undefined) window.open(item.openUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  async function runSpaceAction(operation: () => void | Promise<void>) {
+    setActionError(null)
+    try {
+      await operation()
+    } catch (error) {
+      setActionError(actionErrorMessage(error))
+    }
+  }
+
+  function handleCreateFolder(title: string) {
+    setCreatingFolder(false)
+    if (space === undefined || actions?.createFolder === undefined) return
+    void runSpaceAction(() => actions.createFolder!(space.spaceId, title))
   }
 
   // 就着一份材料新建笔记:带上 materialRefs(对象层),并在正文留下出处引子。
@@ -345,9 +497,9 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
         {/* 空间头 */}
         <header className="px-4 pt-4 pb-3 shrink-0">
           <div className="flex items-center gap-2.5 mb-1">
-            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#a8c4b4' }} />
+            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: space?.color ?? '#a8c4b4' }} />
             <h1 className="text-sm font-semibold m-0 flex-1" style={{ color: 'var(--aa-text-1, #292722)' }}>
-              学习空间
+              {space?.title ?? '空间'}
             </h1>
             <button
               onClick={() => onNavigate('search')}
@@ -360,9 +512,21 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
           <p className="text-xs m-0 pl-[22px]" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
             {itemCount} 个对象
           </p>
+          {actionError && <p role="alert" className="text-xs mt-2 mb-0 pl-[22px]" style={{ color: '#b3543f' }}>{actionError}</p>}
         </header>
 
-        <div className="flex-1 overflow-y-auto px-2 pb-3">
+        <div
+          ref={explorerRef}
+          onScroll={(event) => {
+            const current = spaceViewMemory.get(memoryKey)
+            spaceViewMemory.set(memoryKey, {
+              selectedId: current?.selectedId ?? selectedId,
+              expandedIds: current?.expandedIds ?? expandedIds,
+              scrollTop: event.currentTarget.scrollTop,
+            })
+          }}
+          className="flex-1 overflow-y-auto px-2 pb-3"
+        >
           {/* 我的笔记(可写) */}
           <div className="flex items-center justify-between px-2.5 mt-1 mb-1">
             <span className="text-xs font-medium" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
@@ -408,12 +572,56 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
           ))}
 
           {/* 资料(只读参考) */}
-          <div className="px-2.5 mt-4 mb-1">
+          <div className="flex items-center justify-between px-2.5 mt-4 mb-1">
             <span className="text-xs font-medium" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
               资料
             </span>
+            {space !== undefined && hasMaterialCreateAction(actions, currentConversation) && (
+              <RowMenu
+                label="添加资料"
+                visible
+                trigger={<Plus size={13} />}
+                actions={[
+                  ...(actions?.createFolder === undefined ? [] : [{
+                    label: '新建文件夹',
+                    icon: <Folder size={12} />,
+                    onClick: () => setCreatingFolder(true),
+                  }]),
+                  ...(actions?.addLocalFile === undefined ? [] : [{
+                    label: '添加本地文件',
+                    icon: <FileText size={12} />,
+                    onClick: () => void runSpaceAction(() => actions.addLocalFile!(space.spaceId)),
+                  }]),
+                  ...(actions?.addWorkspaceFolder === undefined ? [] : [{
+                    label: '添加工作区文件夹',
+                    icon: <Folder size={12} />,
+                    onClick: () => void runSpaceAction(() => actions.addWorkspaceFolder!(space.spaceId)),
+                  }]),
+                  ...(actions?.addConversation === undefined || currentConversation === undefined ? [] : [{
+                    label: '加入当前对话',
+                    icon: <MessageSquare size={12} />,
+                    onClick: () => void runSpaceAction(() => actions.addConversation!(
+                      space.spaceId,
+                      currentConversation.conversationId,
+                      currentConversation.title,
+                    )),
+                  }]),
+                ]}
+              />
+            )}
           </div>
-          <div role="tree">
+          {creatingFolder && (
+            <div className="flex items-center gap-2 rounded-md" style={{ padding: '5px 8px 5px 32px' }}>
+              <Folder size={13} style={{ color: 'var(--aa-accent, #6865a7)' }} />
+              <InlineName
+                value=""
+                label="文件夹名称"
+                onCommit={handleCreateFolder}
+                onCancel={() => setCreatingFolder(false)}
+              />
+            </div>
+          )}
+          <div role="tree" aria-label={`${space?.title ?? '空间'}资料`}>
             {tree.map((item) => (
               <TreeNode
                 key={item.id}
@@ -423,6 +631,10 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
                 selectedId={selectedId}
                 onRename={handleRenameItem}
                 onDelete={handleDeleteItem}
+                renameEnabled={actions?.rename !== undefined}
+                removeEnabled={actions?.removeReference !== undefined}
+                isExpanded={(id) => expandedIds.has(id)}
+                onToggleExpand={toggleExpanded}
               />
             ))}
           </div>
@@ -431,10 +643,14 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
 
       {/* 右侧预览 / 编辑主区 */}
       {selectedNote ? (
-        <NoteEditor
-          note={selectedNote}
-          onSave={update}
-        />
+        <DeferredSurfaceBoundary resetKey={selectedNote.id} label="笔记编辑器暂时无法打开">
+          <Suspense fallback={<NoteEditorLoading />}>
+            <LazyNoteEditor
+              note={selectedNote}
+              onSave={update}
+            />
+          </Suspense>
+        </DeferredSurfaceBoundary>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {selectedMaterial ? (
@@ -493,19 +709,21 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
                 {selectedItem.name}
               </p>
               <p className="text-xs mb-5" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                对话引用 · {selectedItem.meta}
+                对话引用{selectedItem.meta ? ` · ${selectedItem.meta}` : ''}
               </p>
-              <button
-                onClick={() => onNavigate('conv-done')}
+              {(selectedItem.demo || selectedItem.conversationId !== undefined || onOpenItem !== undefined) && <button
+                onClick={() => selectedItem.demo ? onNavigate('conv-done') : void handleOpenReference(selectedItem)}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-white transition-opacity hover:opacity-90"
                 style={{ background: 'var(--aa-accent, #6865a7)' }}
               >
                 打开对话
                 <ArrowRight size={12} />
-              </button>
-            </CenteredCard>
-          ) : selectedItem?.type === 'folder' ? (
+              </button>}
+          </CenteredCard>
+          ) : selectedItem?.domainKind === 'folder' ? (
             <FolderPane folder={selectedItem} onSelect={setSelectedId} />
+          ) : selectedItem ? (
+            <ReferencePane item={selectedItem} brain={brain} onOpen={() => void handleOpenReference(selectedItem)} />
           ) : (
             <CenteredCard>
               <p className="text-xs leading-relaxed text-center" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
@@ -519,6 +737,17 @@ export function SpacePage({ onNavigate, targetId }: SpacePageProps) {
       )}
     </section>
     </DndProvider>
+  )
+}
+
+function NoteEditorLoading() {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col px-12 py-10" aria-label="正在打开笔记">
+      <span className="mb-8 h-7 w-2/5 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+      <span className="mb-3 h-3 w-full animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+      <span className="mb-3 h-3 w-5/6 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+      <span className="h-3 w-2/3 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+    </div>
   )
 }
 
@@ -626,6 +855,7 @@ function NoteRow({
       {editing ? (
         <InlineName
           value={title}
+          label={creating ? '笔记名称' : `重命名${title}`}
           onCommit={(t) => {
             if (creating) onCreateCommit?.(t)
             else onRename(t)
@@ -643,6 +873,7 @@ function NoteRow({
       )}
       {!editing && (
         <RowMenu
+          label={`${title}操作`}
           visible={hovered}
           actions={[
             { label: '重命名', icon: <Pencil size={12} />, onClick: () => setEditing(true) },
@@ -657,10 +888,12 @@ function NoteRow({
 /** 行内重命名输入:回车/失焦提交,Esc 取消。 */
 function InlineName({
   value,
+  label,
   onCommit,
   onCancel,
 }: {
   value: string
+  label: string
   onCommit: (v: string) => void
   onCancel: () => void
 }) {
@@ -683,6 +916,7 @@ function InlineName({
   return (
     <input
       ref={ref}
+      aria-label={label}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onClick={(e) => e.stopPropagation()}
@@ -704,11 +938,15 @@ function InlineName({
 
 /** 行尾「⋯」菜单:悬停时浮现,点开一个小下拉。 */
 function RowMenu({
+  label,
   visible,
   actions,
+  trigger,
 }: {
+  label: string
   visible: boolean
   actions: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }[]
+  trigger?: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -723,11 +961,13 @@ function RowMenu({
   return (
     <div ref={ref} className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
       <button
+        type="button"
+        aria-label={label}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center justify-center rounded transition-colors hover:bg-black/10"
         style={{ width: 20, height: 20, color: 'var(--aa-text-3, #aba39b)', opacity: visible || open ? 1 : 0 }}
       >
-        <MoreHorizontal size={14} />
+        {trigger ?? <MoreHorizontal size={14} />}
       </button>
       {open && (
         <div
@@ -765,6 +1005,70 @@ function CenteredCard({ children }: { children: ReactNode }) {
   )
 }
 
+function ReferencePane({
+  item,
+  brain,
+  onOpen,
+}: {
+  item: SpaceItem
+  brain: ReturnType<typeof useBrain>
+  onOpen: () => void
+}) {
+  const canOpen = item.openable === true || item.openUrl !== undefined
+  return (
+    <CenteredCard>
+      {itemIcon(item, 24)}
+      <p className="text-sm mt-3 mb-1 font-medium" style={{ color: 'var(--aa-text-1, #292722)' }}>
+        {item.name}
+      </p>
+      <p className="text-xs mb-5 max-w-md break-all" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
+        {referenceKindLabel(item.domainKind)}{item.meta ? ` · ${item.meta}` : ''}
+      </p>
+      <div className="flex items-center gap-2">
+        <CollectButton refId={item.id} kind="space_reference" brain={brain} />
+        {canOpen && (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-white transition-opacity hover:opacity-90"
+            style={{ background: 'var(--aa-accent, #6865a7)' }}
+          >
+            打开引用
+            <ArrowRight size={12} />
+          </button>
+        )}
+      </div>
+    </CenteredCard>
+  )
+}
+
+function referenceKindLabel(kind: PersonalSpaceItemProjection['kind']): string {
+  switch (kind) {
+    case 'folder': return '文件夹'
+    case 'local_file': return '本地文件引用'
+    case 'workspace_folder': return '工作区文件夹引用'
+    case 'web_reference': return '网页引用'
+    case 'generated_artifact': return '生成内容引用'
+    case 'conversation_reference': return '对话引用'
+  }
+}
+
+function actionErrorMessage(error: unknown): string {
+  return error instanceof Error && error.message.trim().length > 0
+    ? error.message
+    : '空间操作没有完成，请重试。'
+}
+
+function hasMaterialCreateAction(
+  actions: PersonalSpaceActions | undefined,
+  currentConversation: SpacePageProps['currentConversation'],
+): boolean {
+  return actions?.createFolder !== undefined
+    || actions?.addLocalFile !== undefined
+    || actions?.addWorkspaceFolder !== undefined
+    || (actions?.addConversation !== undefined && currentConversation !== undefined)
+}
+
 function FolderPane({ folder, onSelect }: { folder: SpaceItem; onSelect: (id: string) => void }) {
   const children = folder.children ?? []
   return (
@@ -788,7 +1092,7 @@ function FolderPane({ folder, onSelect }: { folder: SpaceItem; onSelect: (id: st
               className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md text-left transition-colors hover:bg-black/5"
               style={{ border: '1px solid var(--aa-border, rgba(45,40,34,0.09))' }}
             >
-              {itemIcon(child.type, 14)}
+              {itemIcon(child, 14)}
               <span className="flex-1 text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>
                 {child.name}
               </span>
@@ -815,7 +1119,7 @@ function CollectButton({
   brain,
 }: {
   refId: string
-  kind: 'note' | 'material'
+  kind: PageKind
   brain: ReturnType<typeof useBrain>
 }) {
   const collected = brain.isCollected(refId)

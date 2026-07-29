@@ -32,7 +32,7 @@ type WorkbenchSettingsDialogSavingState = {
   readonly tools?: boolean;
 };
 
-type WorkbenchSettingsDialogProps = {
+export type WorkbenchSettingsDialogProps = {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly initialGroup?: SettingsGroup;

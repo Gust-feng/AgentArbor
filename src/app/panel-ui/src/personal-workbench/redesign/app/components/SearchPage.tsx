@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { Search, FileText, Globe, MessageSquare, NotebookPen, ArrowRight, X } from 'lucide-react'
 import { type View } from './Sidebar'
+import type { ConversationSummary } from '../../../../contracts/conversation'
+import type { PersonalSpaceItemProjection, PersonalSpaceProjection } from '../../../space'
 import { GUTTER, READING_WIDTH, composerSurface } from './tokens'
-import { getAllNotes } from './notesStore'
+import { useNotes } from './notesStore'
 import { getAllMaterials, materialSearchText } from './materials'
+import { LEARNING_DEMO_CONVERSATION_RESULTS, LEARNING_DEMO_MATERIAL_IDS } from './learningDemoDataset'
+import { searchPersonalKnowledge, type PersonalKnowledgeSearchHit } from './personalKnowledgeClient'
 
 /**
  * 全局检索 —— 覆盖「我写的笔记」与「读进来的材料」,以及对话引用。
@@ -23,27 +27,10 @@ interface SearchResult {
   snippet: string
   /** 搜索命中所用的全文(标题+正文),不展示。 */
   haystack: string
+  spaceId?: string
+  conversationId?: string
+  demo?: boolean
 }
-
-/** 对话引用暂用静态占位(对话本身的数据层尚未建立)。 */
-const CONVERSATION_RESULTS: SearchResult[] = [
-  {
-    id: 'conv-grad',
-    name: '关于梯度下降的讨论',
-    type: 'conversation',
-    space: '学习空间',
-    snippet: '…反向传播的核心是梯度的链式法则,每一层的梯度都依赖更深层的计算结果…',
-    haystack: '关于梯度下降的讨论 反向传播 链式法则 梯度',
-  },
-  {
-    id: 'conv-bias',
-    name: '认知偏见与阅读整理',
-    type: 'conversation',
-    space: '学习空间',
-    snippet: '整合了《思考,快与慢》与认知偏见的研究框架…',
-    haystack: '认知偏见与阅读整理 思考快与慢 系统1 系统2',
-  },
-]
 
 /** 从一段正文里,围绕命中词截取一小段摘要。 */
 function makeSnippet(text: string, query: string, fallback = ''): string {
@@ -63,6 +50,27 @@ function makeSnippet(text: string, query: string, fallback = ''): string {
 /** 材料 kind → 搜索结果类型(供筛选与图标)。 */
 function materialResultType(kind: string): ResultType {
   return kind === 'web' ? 'web' : 'file'
+}
+
+function flattenSpaceItems(items: readonly PersonalSpaceItemProjection[]): PersonalSpaceItemProjection[] {
+  return items.flatMap((item) => [item, ...flattenSpaceItems(item.children ?? [])])
+}
+
+function spaceReferenceResultType(kind: PersonalSpaceItemProjection['kind']): ResultType {
+  if (kind === 'web_reference') return 'web'
+  if (kind === 'conversation_reference') return 'conversation'
+  return 'file'
+}
+
+function spaceReferenceKindLabel(kind: PersonalSpaceItemProjection['kind']): string {
+  switch (kind) {
+    case 'folder': return '文件夹'
+    case 'local_file': return '本地文件引用'
+    case 'workspace_folder': return '工作区文件夹引用'
+    case 'web_reference': return '网页引用'
+    case 'generated_artifact': return '生成内容引用'
+    case 'conversation_reference': return '对话引用'
+  }
 }
 
 const FILTER_LABELS: { key: FilterType; label: string }[] = [
@@ -97,47 +105,125 @@ function typeLabel(type: ResultType) {
 
 interface SearchPageProps {
   onNavigate: (v: View) => void
+  spaces: readonly PersonalSpaceProjection[]
+  conversations: readonly ConversationSummary[]
   /** 在空间里打开某个笔记/材料。 */
-  onOpenInSpace: (id: string) => void
+  onOpenInSpace: (spaceId: string, id: string) => void
+  onOpenConversation: (conversationId: string) => boolean | Promise<boolean>
 }
 
-export function SearchPage({ onNavigate, onOpenInSpace }: SearchPageProps) {
-  const [query, setQuery] = useState('')
-  const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [filter, setFilter] = useState<FilterType>('all')
+const searchMemory: { query: string; filter: FilterType } = { query: '', filter: 'all' }
+
+export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spaces, conversations }: SearchPageProps) {
+  const { notes } = useNotes()
+  const [query, setQuery] = useState(searchMemory.query)
+  const [debouncedQuery, setDebouncedQuery] = useState(searchMemory.query)
+  const [filter, setFilter] = useState<FilterType>(searchMemory.filter)
+  const [remoteNotes, setRemoteNotes] = useState<readonly PersonalKnowledgeSearchHit[] | undefined>()
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { inputRef.current?.focus() }, [])
+  useEffect(() => { searchMemory.query = query }, [query])
+  useEffect(() => { searchMemory.filter = filter }, [filter])
+  useEffect(() => {
+    const input = inputRef.current
+    if (input === null) return
+    input.focus()
+    const length = input.value.length
+    input.setSelectionRange(length, length)
+  }, [])
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQuery(query), 150)
     return () => clearTimeout(t)
   }, [query])
 
+  useEffect(() => {
+    const normalized = debouncedQuery.trim()
+    if (!normalized) {
+      setRemoteNotes(undefined)
+      return undefined
+    }
+    setRemoteNotes(undefined)
+    const abortController = new AbortController()
+    void searchPersonalKnowledge(normalized, 50, abortController.signal).then(
+      (results) => setRemoteNotes(results),
+      (error: unknown) => {
+        if (!isAbortError(error)) setRemoteNotes(undefined)
+      },
+    )
+    return () => abortController.abort()
+  }, [debouncedQuery])
+
   // 构建索引:笔记 + 材料 + 对话。debouncedQuery 变化时重算摘要。
   const index = useMemo<SearchResult[]>(() => {
-    const notes: SearchResult[] = getAllNotes().map((n) => ({
-      id: n.id,
-      name: n.title || '无标题',
-      type: 'note',
-      space: '学习空间',
-      snippet: makeSnippet(n.body, debouncedQuery, '(空笔记)'),
-      haystack: `${n.title} ${n.body}`,
+    const spaceTitles = new Map(spaces.map((space) => [space.spaceId, space.title]))
+    const noteResults: SearchResult[] = remoteNotes === undefined
+      ? notes.map((n) => ({
+          id: n.id,
+          name: n.title || '无标题',
+          type: 'note',
+          space: spaceTitles.get(n.spaceId) ?? '未归属空间',
+          snippet: makeSnippet(n.body, debouncedQuery, '(空笔记)'),
+          haystack: `${n.title} ${n.body}`,
+          spaceId: n.spaceId,
+        }))
+      : remoteNotes.map(({ note, snippet }) => ({
+          id: note.id,
+          name: note.title || '无标题',
+          type: 'note',
+          space: spaceTitles.get(note.spaceId) ?? '未归属空间',
+          snippet: snippet || '(空笔记)',
+          haystack: `${note.title} ${debouncedQuery}`,
+          spaceId: note.spaceId,
+        }))
+    const spaceReferences = spaces.flatMap((space) => flattenSpaceItems(space.items).map((item) => ({
+      id: item.itemId,
+      name: item.title,
+      type: spaceReferenceResultType(item.kind),
+      space: space.title,
+      snippet: makeSnippet(item.detail ?? '', debouncedQuery, spaceReferenceKindLabel(item.kind)),
+      haystack: `${item.title} ${item.detail ?? ''} ${space.title}`,
+      spaceId: space.spaceId,
+      conversationId: item.conversationId,
+    } satisfies SearchResult)))
+    const demoSpace = spaces.find((space) => space.demoDataset === 'learning-workspace')
+    const demoMaterials: SearchResult[] = demoSpace === undefined ? [] : getAllMaterials()
+      .filter((material) => LEARNING_DEMO_MATERIAL_IDS.has(material.id))
+      .map((m) => {
+        const text = materialSearchText(m)
+        return {
+          id: m.id,
+          name: m.title,
+          type: materialResultType(m.kind),
+          space: demoSpace.title,
+          snippet: makeSnippet(text, debouncedQuery, m.meta ?? ''),
+          haystack: `${m.title} ${text}`,
+          spaceId: demoSpace.spaceId,
+          demo: true,
+        }
+      })
+    const referencedConversationIds = new Set(spaceReferences.flatMap((result) => result.conversationId ?? []))
+    const conversationResults: SearchResult[] = conversations
+      .filter((conversation) => !referencedConversationIds.has(conversation.conversationId))
+      .map((conversation) => ({
+        id: conversation.conversationId,
+        name: conversation.title,
+        type: 'conversation',
+        space: '对话',
+        snippet: makeSnippet(conversation.preview ?? '', debouncedQuery, conversation.status ?? '对话'),
+        haystack: `${conversation.title} ${conversation.preview ?? ''}`,
+        conversationId: conversation.conversationId,
+      }))
+    const demoConversations: SearchResult[] = demoSpace === undefined ? [] : LEARNING_DEMO_CONVERSATION_RESULTS.map((result) => ({
+      ...result,
+      type: 'conversation',
+      space: demoSpace.title,
+      spaceId: demoSpace.spaceId,
+      demo: true,
     }))
-    const materials: SearchResult[] = getAllMaterials().map((m) => {
-      const text = materialSearchText(m)
-      return {
-        id: m.id,
-        name: m.title,
-        type: materialResultType(m.kind),
-        space: '学习空间',
-        snippet: makeSnippet(text, debouncedQuery, m.meta ?? ''),
-        haystack: `${m.title} ${text}`,
-      }
-    })
-    return [...notes, ...materials, ...CONVERSATION_RESULTS]
-  }, [debouncedQuery])
+    return [...noteResults, ...spaceReferences, ...demoMaterials, ...conversationResults, ...demoConversations]
+  }, [conversations, debouncedQuery, notes, remoteNotes, spaces])
 
   const filtered = useMemo(
     () =>
@@ -162,11 +248,14 @@ export function SearchPage({ onNavigate, onOpenInSpace }: SearchPageProps) {
     } as Record<FilterType, number>
   }, [index, debouncedQuery])
 
-  function handleResultClick(result: SearchResult) {
-    if (result.type === 'conversation') {
+  async function handleResultClick(result: SearchResult) {
+    if (result.conversationId !== undefined) {
+      const opened = await onOpenConversation(result.conversationId)
+      if (opened !== false) onNavigate('conv-done')
+    } else if (result.demo && result.type === 'conversation') {
       onNavigate('conv-done')
-    } else {
-      onOpenInSpace(result.id)
+    } else if (result.spaceId !== undefined) {
+      onOpenInSpace(result.spaceId, result.id)
     }
   }
 
@@ -240,7 +329,7 @@ export function SearchPage({ onNavigate, onOpenInSpace }: SearchPageProps) {
                 style={{ background: hoveredId === result.id ? 'var(--aa-surface-hover)' : 'transparent' }}
                 onMouseEnter={() => setHoveredId(result.id)}
                 onMouseLeave={() => setHoveredId(null)}
-                onClick={() => handleResultClick(result)}
+                onClick={() => void handleResultClick(result)}
               >
                 <div className="mt-0.5 shrink-0">{resultIcon(result.type)}</div>
                 <div className="flex-1 min-w-0">
@@ -258,6 +347,7 @@ export function SearchPage({ onNavigate, onOpenInSpace }: SearchPageProps) {
                   <p className="text-xs" style={{ color: 'var(--aa-text-3)', lineHeight: 1.65 }}>
                     {result.snippet}
                   </p>
+                  <p className="text-[10px] mt-1" style={{ color: 'var(--aa-text-3)' }}>{result.space}</p>
                 </div>
                 <div
                   className="mt-0.5 shrink-0 transition-opacity"
@@ -283,4 +373,10 @@ export function SearchPage({ onNavigate, onOpenInSpace }: SearchPageProps) {
       </div>
     </div>
   )
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError'
 }

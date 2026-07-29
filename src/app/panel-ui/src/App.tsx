@@ -5,18 +5,16 @@ import { persistSidebarCollapsedPreference, useAppShellState } from "./app-shell
 import { useAppQueuedMessages } from "./app-queued-message-state";
 import { useAppWorkbenchConfigState } from "./app-workbench-config-state";
 import { useAppWorkbenchRuntime } from "./app-workbench-runtime";
-import {
-  buildWorkbenchSettingsDialogProps,
-  isBootstrappingApp,
-} from "./app-workbench-shell-props";
+import { buildWorkbenchSettingsDialogProps } from "./app-settings-dialog-props";
 import { useAppWorkbenchTaskState } from "./app-workbench-task-state";
 import { buildWorkbenchInputProps } from "./app-workbench-input-props";
 import { createInitialAppState } from "./app-state";
+import { useSpaceProjection } from "./app-space-state";
 
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
-  const isBootstrapping = isBootstrappingApp(app);
   const taskState = useAppWorkbenchTaskState(app);
+  const spaceProjection = useSpaceProjection();
   const {
     goal,
     setGoal,
@@ -66,7 +64,6 @@ export function App(): React.ReactElement {
     modelUsageDisplayEnabled,
     setModelUsageDisplayEnabled,
     agentClusterEnabled,
-    setPinningConversationIds,
     inputCloseSignal,
     setInputCloseSignal,
     openSettings,
@@ -106,15 +103,17 @@ export function App(): React.ReactElement {
     selectedModelContextWindowTokens,
     agentClusterActive,
     setInputCloseSignal,
-    setPinningConversationIds,
   });
   const {
+    bootstrap,
+    retryBootstrap,
     currentRun,
     contextUsage,
     modelResponding,
     pendingConfirmation,
     confirmationBusy,
     contextBusy,
+    pendingConversationIds,
     savingModel,
     savingWorkspace,
     savingDesktopAgent,
@@ -122,6 +121,7 @@ export function App(): React.ReactElement {
     runActions,
     deepEntryActions,
     deepTaskActions,
+    sidebarActions,
     settingsController,
     composerActions,
   } = runtime;
@@ -241,7 +241,12 @@ export function App(): React.ReactElement {
   });
   return (
     <PersonalWorkbench
-      isBootstrapping={isBootstrapping}
+      personalKnowledgePersistenceEnabled
+      bootstrapState={{
+        status: bootstrap.status,
+        ...(bootstrap.status === "error" ? { error: bootstrap.message } : {}),
+        onRetry: retryBootstrap,
+      }}
       sidebarCollapsed={sidebarCollapsed}
       onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
       conversation={app.conversation}
@@ -254,6 +259,29 @@ export function App(): React.ReactElement {
       confirmationBusy={confirmationBusy}
       onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
       onOpenConversation={openNormalConversation}
+      pendingConversationIds={pendingConversationIds}
+      onRenameConversation={sidebarActions.renameConversation}
+      onToggleConversationPinned={sidebarActions.toggleConversationPinned}
+      onDeleteConversation={sidebarActions.deleteConversation}
+      spaces={spaceProjection.spaces}
+      spaceLoadState={{
+        loading: spaceProjection.loading,
+        mutationPending: spaceProjection.mutationPending,
+        error: spaceProjection.error,
+        onRetry: spaceProjection.refresh,
+      }}
+      onOpenSpaceItem={spaceProjection.openReference}
+      onCreateSpace={spaceProjection.createSpace}
+      spaceActions={{
+        createFolder: spaceProjection.createFolder,
+        addLocalFile: spaceProjection.addLocalFile,
+        addWorkspaceFolder: spaceProjection.addWorkspaceFolder,
+        addWebReference: spaceProjection.addWebReference,
+        addConversation: spaceProjection.addConversation,
+        move: spaceProjection.move,
+        rename: spaceProjection.rename,
+        removeReference: spaceProjection.removeReference,
+      }}
       onOpenSettings={() => openSettings("models")}
       appUpdate={app.appUpdate}
       onInstallAppUpdate={() => void settingsController.installAppUpdate()}

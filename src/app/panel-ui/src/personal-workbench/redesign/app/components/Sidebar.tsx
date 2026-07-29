@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ChevronRight,
   Home,
@@ -11,9 +11,15 @@ import {
   Pin,
   PinOff,
   Plus,
+  AlertCircle,
+  RotateCcw,
+  LoaderCircle,
   X,
 } from 'lucide-react'
 import { SidebarAnimation } from './SidebarAnimation'
+import type { ConversationSummary } from '../../../../contracts/conversation'
+import type { PersonalSpaceProjection } from '../../../space'
+import { useModalA11y } from './useModalA11y'
 
 export type View = 'home' | 'conv-active' | 'conv-done' | 'conv-new' | 'space' | 'search' | 'focus' | 'brain'
 
@@ -22,6 +28,25 @@ interface SidebarProps {
   onNavigate: (v: View) => void
   onOpenSettings: () => void
   collapsed: boolean
+  conversations: readonly ConversationSummary[]
+  spaces: readonly PersonalSpaceProjection[]
+  spaceLoadState?: {
+    readonly loading: boolean
+    readonly mutationPending?: boolean
+    readonly error?: string
+    readonly onRetry: () => void | Promise<void>
+  }
+  activeSpaceId: string | null
+  activeConversationId?: string
+  onOpenConversation: (conversationId: string) => boolean | Promise<boolean>
+  pendingConversationIds: ReadonlySet<string>
+  onRenameConversation: (conversationId: string, title: string) => void | Promise<void>
+  onToggleConversationPinned: (conversationId: string, pinned: boolean) => void | Promise<void>
+  onDeleteConversation: (conversationId: string) => void | Promise<void>
+  onOpenSpace?: (spaceId: string) => void | Promise<void>
+  onActiveSpaceChange: (spaceId: string) => void
+  onCreateSpace?: (title: string) => void | Promise<void>
+  onRenameSpace?: (spaceId: string, title: string) => void | Promise<void>
 }
 
 const SIDEBAR_W           = 236
@@ -32,27 +57,9 @@ interface SpaceItem {
   label: string
   dot: string
 }
-interface ConvItem {
-  id: string
-  title: string
-  time: string
-  view: View
-  /** 每条会话一个专属点色,取代重复的对话气泡图标(重复太丑)。 */
-  dot: string
-  pinned?: boolean
-}
 
-// 原型阶段的种子数据(接后端后由空间/会话接口驱动)。
-const SEED_SPACES: SpaceItem[] = [
-  { id: 'space-study', label: '学习空间', dot: '#a8c4b4' },
-  { id: 'space-proj',  label: '项目空间', dot: '#a8b8c8' },
-]
-
-const SEED_CONVS: ConvItem[] = [
-  { id: 'rc1', title: '整理机器学习学习路径', time: '今天',  view: 'conv-active', dot: '#6865a7' },
-  { id: 'rc2', title: '认知偏见与阅读整理',   time: '昨天',  view: 'conv-done',   dot: '#a8c4b4' },
-  { id: 'rc3', title: '卡片笔记法讨论',       time: '3天前', view: 'conv-done',   dot: '#d49020' },
-]
+const CONVERSATION_DOT_PALETTE = ['#6865a7', '#6f9279', '#c18a42', '#6f84a5', '#a66f66'] as const
+const SPACE_DOT_FALLBACK = '#a8c4b4'
 
 // ── NavRow ──────────────────────────────────────────────────────────────────
 // icon:  always rendered in a fixed-width 20px slot → icon NEVER moves
@@ -181,21 +188,22 @@ interface ListRowProps {
   label: string
   meta?: ReactNode
   editing: boolean
-  onStartRename: () => void
+  editSelectAll?: boolean
   onRename: (v: string) => void
   onCancelRename: () => void
   actions: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }[]
+  pending?: boolean
 }
 
-function ListRow({ active, onClick, dot, label, meta, editing, onRename, onCancelRename, actions }: ListRowProps) {
+function ListRow({ active, onClick, dot, label, meta, editing, editSelectAll, onRename, onCancelRename, actions, pending = false }: ListRowProps) {
   const [hovered, setHovered] = useState(false)
   return (
     <div
       role="button"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      onClick={() => { if (!editing) onClick() }}
-      className="group/row flex items-center gap-2 rounded-lg cursor-pointer text-sm"
+      onClick={() => { if (!editing && !pending) onClick() }}
+      className="group/row relative flex items-center gap-2 rounded-lg cursor-pointer text-sm"
       style={{
         height: 32,
         paddingLeft: 12,
@@ -207,17 +215,22 @@ function ListRow({ active, onClick, dot, label, meta, editing, onRename, onCance
     >
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flexShrink: 0 }}/>
       {editing ? (
-        <InlineName value={label} onCommit={onRename} onCancel={onCancelRename}/>
+        <InlineName value={label} onCommit={onRename} onCancel={onCancelRename} selectAll={editSelectAll}/>
       ) : (
         <span className="flex-1 text-left truncate">{label}</span>
       )}
-      {!editing && (
+      {!editing && pending && (
+        <LoaderCircle aria-label="处理中" size={13} className="animate-spin shrink-0" />
+      )}
+      {!editing && !pending && (
         <>
-          {/* 悬停时用「⋯」菜单替换右侧信息;不悬停时显示时间/箭头。 */}
-          {hovered ? (
-            <RowMenu actions={actions}/>
-          ) : (
-            meta && <span style={{ flexShrink: 0 }}>{meta}</span>
+          {meta && (
+            <span style={{ flexShrink: 0, opacity: hovered && actions.length > 0 ? 0 : 1 }}>
+              {meta}
+            </span>
+          )}
+          {actions.length > 0 && (
+            <RowMenu actions={actions} visible={hovered}/>
           )}
         </>
       )}
@@ -226,16 +239,19 @@ function ListRow({ active, onClick, dot, label, meta, editing, onRename, onCance
 }
 
 // 行内重命名输入:回车/失焦提交,Esc 取消。淡下划线示意,不套原生蓝框。
-function InlineName({ value, onCommit, onCancel }: { value: string; onCommit: (v: string) => void; onCancel: () => void }) {
+function InlineName({ value, onCommit, onCancel, selectAll }: { value: string; onCommit: (v: string) => void; onCancel: () => void; selectAll?: boolean }) {
   const [draft, setDraft] = useState(value)
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => {
     const el = ref.current
     if (!el) return
     el.focus()
-    const len = el.value.length
-    el.setSelectionRange(len, len)
-  }, [])
+    if (selectAll) el.select()
+    else {
+      const len = el.value.length
+      el.setSelectionRange(len, len)
+    }
+  }, [selectAll])
   function commit() {
     const t = draft.trim()
     if (t) onCommit(t)
@@ -263,9 +279,16 @@ function InlineName({ value, onCommit, onCancel }: { value: string; onCommit: (v
 }
 
 // 行尾「⋯」菜单:点开一个小下拉,点外部关闭。
-function RowMenu({ actions }: { actions: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }[] }) {
+function RowMenu({
+  actions,
+  visible,
+}: {
+  actions: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }[]
+  visible: boolean
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const shown = visible || open
   useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
@@ -273,9 +296,17 @@ function RowMenu({ actions }: { actions: { label: string; icon: ReactNode; dange
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
   return (
-    <div ref={ref} className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+    <div
+      ref={ref}
+      className="absolute right-2 shrink-0"
+      style={{ opacity: shown ? 1 : 0, pointerEvents: shown ? 'auto' : 'none' }}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-label="更多操作"
+        aria-hidden={!shown}
+        tabIndex={shown ? 0 : -1}
         className="flex items-center justify-center rounded transition-colors hover:bg-black/10"
         style={{ width: 20, height: 20, color: 'var(--aa-text-3)' }}
       >
@@ -328,51 +359,144 @@ function SectionLabel({ label, labelsVisible, action }: { label: string; labelsV
   )
 }
 
+const CONVERSATION_FADE_TOP = 20
+const CONVERSATION_FADE_BOTTOM = 24
+
+function ConversationScrollArea({ maxHeight, children }: { maxHeight: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [fadeTop, setFadeTop] = useState(0)
+  const [fadeBottom, setFadeBottom] = useState(0)
+
+  const measureMask = useCallback(() => {
+    const element = ref.current
+    if (element === null) return
+    const distanceFromTop = element.scrollTop
+    const distanceFromBottom = element.scrollHeight - element.clientHeight - element.scrollTop
+    const easeOut = (value: number): number => 1 - Math.pow(1 - value, 2)
+    setFadeTop((previous) => {
+      const next = Math.round(CONVERSATION_FADE_TOP * easeOut(Math.min(distanceFromTop / CONVERSATION_FADE_TOP, 1)))
+      return next === previous ? previous : next
+    })
+    setFadeBottom((previous) => {
+      const next = Math.round(CONVERSATION_FADE_BOTTOM * easeOut(
+        Math.min(Math.max(distanceFromBottom, 0) / CONVERSATION_FADE_BOTTOM, 1),
+      ))
+      return next === previous ? previous : next
+    })
+  }, [])
+
+  const rafRef = useRef<number | null>(null)
+  const handleScroll = useCallback(() => {
+    if (rafRef.current !== null) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      measureMask()
+    })
+  }, [measureMask])
+  useEffect(() => () => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+  }, [])
+
+  useLayoutEffect(measureMask, [children, measureMask])
+
+  const mask = `linear-gradient(to bottom, transparent 0px, #000 ${fadeTop}px, #000 calc(100% - ${fadeBottom}px), transparent 100%)`
+  return (
+    <div
+      ref={ref}
+      onScroll={handleScroll}
+      className="aa-conversation-scroll space-y-0.5 overflow-y-auto"
+      style={{ maxHeight, WebkitMaskImage: mask, maskImage: mask }}
+      data-conversation-scroll
+    >
+      {children}
+    </div>
+  )
+}
+
 // ── Sidebar ──────────────────────────────────────────────────────────────────
-export function Sidebar({ view, onNavigate, onOpenSettings, collapsed }: SidebarProps) {
+export function Sidebar({
+  view,
+  onNavigate,
+  onOpenSettings,
+  collapsed,
+  conversations,
+  spaces,
+  spaceLoadState,
+  activeSpaceId,
+  activeConversationId,
+  onOpenConversation,
+  pendingConversationIds,
+  onRenameConversation,
+  onToggleConversationPinned,
+  onDeleteConversation,
+  onOpenSpace,
+  onActiveSpaceChange,
+  onCreateSpace,
+  onRenameSpace,
+}: SidebarProps) {
   // Structural state changes are intentionally atomic. The previous staged
   // label/width timers left the sidebar in a visible in-between geometry, which
   // read as horizontal drift. Only the contained mist mark retains motion.
   const labelsVisible = !collapsed
 
-  // 空间 / 最近对话改为本地状态,支持重命名、删除、置顶(原型阶段;接后端后由接口驱动)。
-  const [spaces, setSpaces] = useState<SpaceItem[]>(SEED_SPACES)
-  const [convs, setConvs] = useState<ConvItem[]>(SEED_CONVS)
-  // 当前激活的空间 —— 点击不同空间时切换,给出「点了有反应」的视觉反馈。
-  const [activeSpaceId, setActiveSpaceId] = useState<string>(SEED_SPACES[0]?.id ?? '')
-  // 新建空间后要立即进入重命名的目标 id。
+  const projectedSpaces = useMemo(() => spaces.map((space) => ({
+    id: space.spaceId,
+    label: space.title,
+    dot: space.color ?? SPACE_DOT_FALLBACK,
+  })), [spaces])
+  const orderedConversations = useMemo(
+    () => [...conversations].sort(compareConversations),
+    [conversations],
+  )
   const [renamingId, setRenamingId] = useState<string | null>(null)
-  // 「管理空间」管理面板的开合。
+  const [renameSelectAll, setRenameSelectAll] = useState(false)
+  const pendingSpaceIdsRef = useRef<Set<string> | null>(null)
   const [showManager, setShowManager] = useState(false)
+  const [openingConversationId, setOpeningConversationId] = useState<string | null>(null)
+
+  async function openConversation(conversationId: string) {
+    if (openingConversationId === conversationId || pendingConversationIds.has(conversationId)) return
+    setOpeningConversationId(conversationId)
+    try {
+      const opened = await onOpenConversation(conversationId)
+      if (opened !== false) onNavigate('conv-active')
+    } catch {
+      // The runtime owns the visible load error; the sidebar only prevents a false navigation.
+    } finally {
+      setOpeningConversationId((current) => current === conversationId ? null : current)
+    }
+  }
+
+  useEffect(() => {
+    const previousIds = pendingSpaceIdsRef.current
+    if (previousIds === null) return
+    const created = projectedSpaces.find((space) => !previousIds.has(space.id))
+    if (created === undefined) return
+    pendingSpaceIdsRef.current = null
+    setRenamingId(created.id)
+    setRenameSelectAll(true)
+  }, [projectedSpaces])
+
+  function finishRename() {
+    setRenamingId(null)
+    setRenameSelectAll(false)
+  }
 
   function selectSpace(id: string) {
-    setActiveSpaceId(id)
+    onActiveSpaceChange(id)
     onNavigate('space')
+    void onOpenSpace?.(id)
   }
   function renameSpace(id: string, label: string) {
-    setSpaces((s) => s.map((it) => (it.id === id ? { ...it, label } : it)))
-  }
-  function deleteSpace(id: string) {
-    setSpaces((s) => s.filter((it) => it.id !== id))
+    void Promise.resolve().then(() => onRenameSpace?.(id, label)).catch(() => undefined)
   }
   function addSpace() {
-    const id = `space-${Date.now().toString(36)}`
-    const palette = ['#a8c4b4', '#a8b8c8', '#c8b0a0', '#b0a8c8', '#c8c0a0']
-    setSpaces((s) => [...s, { id, label: '新空间', dot: palette[s.length % palette.length] }])
-    setRenamingId(id) // 建好即进入重命名
+    if (onCreateSpace === undefined) return
+    pendingSpaceIdsRef.current = new Set(projectedSpaces.map((space) => space.id))
+    void Promise.resolve().then(() => onCreateSpace('新空间')).catch(() => {
+      pendingSpaceIdsRef.current = null
+    })
   }
-
-  function renameConv(id: string, title: string) {
-    setConvs((c) => c.map((it) => (it.id === id ? { ...it, title } : it)))
-  }
-  function deleteConv(id: string) {
-    setConvs((c) => c.filter((it) => it.id !== id))
-  }
-  function togglePinConv(id: string) {
-    setConvs((c) => c.map((it) => (it.id === id ? { ...it, pinned: !it.pinned } : it)))
-  }
-  // 置顶的排在前面,其余保持原有顺序。
-  const orderedConvs = [...convs].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
 
   return (
     <aside
@@ -389,6 +513,10 @@ export function Sidebar({ view, onNavigate, onOpenSettings, collapsed }: Sidebar
         transition: 'width 260ms cubic-bezier(0.4,0,0.2,1), min-width 260ms cubic-bezier(0.4,0,0.2,1)',
       }}
     >
+      <style>{`
+        .aa-conversation-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+        .aa-conversation-scroll::-webkit-scrollbar { display: none; }
+      `}</style>
       {/* Full-height line-art backdrop — sits behind everything (山雾远岫 · 水月孤舟).
           Kept faint so nav labels stay legible; clipped by the rail when collapsed. */}
       <SidebarAnimation collapsed={collapsed} />
@@ -446,6 +574,7 @@ export function Sidebar({ view, onNavigate, onOpenSettings, collapsed }: Sidebar
           action={
             <button
               onClick={addSpace}
+              disabled={onCreateSpace === undefined || spaceLoadState?.mutationPending === true}
               aria-label="新建空间"
               className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/spaces:opacity-50 hover:!opacity-100"
               style={{ width: 16, height: 16, color: 'var(--aa-text-3)', marginRight: -3 }}
@@ -455,7 +584,8 @@ export function Sidebar({ view, onNavigate, onOpenSettings, collapsed }: Sidebar
           }
         />
         <div className="space-y-0.5">
-          {spaces.map((s) => (
+          {spaceLoadState?.loading === true && projectedSpaces.length === 0 && <SpaceLoadingRows />}
+          {projectedSpaces.map((s) => (
             <ListRow
               key={s.id}
               active={view === 'space' && activeSpaceId === s.id}
@@ -463,16 +593,18 @@ export function Sidebar({ view, onNavigate, onOpenSettings, collapsed }: Sidebar
               dot={s.dot}
               label={s.label}
               editing={renamingId === s.id}
-              onStartRename={() => setRenamingId(s.id)}
-              onRename={(t) => { renameSpace(s.id, t); setRenamingId(null) }}
-              onCancelRename={() => setRenamingId(null)}
+              editSelectAll={renamingId === s.id && renameSelectAll}
+              onRename={(t) => { renameSpace(s.id, t); finishRename() }}
+              onCancelRename={finishRename}
               meta={<ChevronRight size={11} style={{ color: 'var(--aa-text-3)' }}/>}
-              actions={[
-                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => setRenamingId(s.id) },
-                { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => deleteSpace(s.id) },
+              actions={onRenameSpace === undefined ? [] : [
+                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => { setRenameSelectAll(false); setRenamingId(s.id) } },
               ]}
             />
           ))}
+          {spaceLoadState?.error !== undefined && (
+            <SpaceLoadFailure message={spaceLoadState.error} onRetry={spaceLoadState.onRetry} />
+          )}
           <div style={{
             opacity: labelsVisible ? 1 : 0,
             transition: 'opacity 140ms ease',
@@ -507,39 +639,45 @@ export function Sidebar({ view, onNavigate, onOpenSettings, collapsed }: Sidebar
             </button>
           }
         />
-        <div className="space-y-0.5">
-          {orderedConvs.map((c) => (
+        <ConversationScrollArea maxHeight={170}>
+          {orderedConversations.map((conversation, index) => (
             <ListRow
-              key={c.id}
-              active={
-                (view === 'conv-active' && c.id === 'rc1') ||
-                (view === 'conv-done'   && c.id === 'rc2')
-              }
-              onClick={() => onNavigate(c.view)}
-              dot={c.dot}
-              label={c.title}
-              editing={renamingId === c.id}
-              onStartRename={() => setRenamingId(c.id)}
-              onRename={(t) => { renameConv(c.id, t); setRenamingId(null) }}
-              onCancelRename={() => setRenamingId(null)}
+              key={conversation.conversationId}
+              active={view === 'conv-active' && activeConversationId === conversation.conversationId}
+              onClick={() => void openConversation(conversation.conversationId)}
+              dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
+              label={conversation.title}
+              editing={renamingId === conversation.conversationId}
+              editSelectAll={false}
+              onRename={(title) => {
+                void onRenameConversation(conversation.conversationId, title)
+                finishRename()
+              }}
+              onCancelRename={finishRename}
               meta={
                 <span className="flex items-center gap-1">
-                  {c.pinned && <Pin size={9} style={{ color: 'var(--aa-accent)' }}/>}
-                  <span className="text-[10px]" style={{ color: 'var(--aa-text-3)' }}>{c.time}</span>
+                  {conversation.pinnedAt !== undefined && (
+                    <Pin size={9} style={{ color: 'var(--aa-accent)' }}/>
+                  )}
+                  <span className="text-[10px]" style={{ color: 'var(--aa-text-3)' }}>{conversationTimeLabel(conversation.updatedAt)}</span>
                 </span>
               }
               actions={[
                 {
-                  label: c.pinned ? '取消置顶' : '置顶',
-                  icon: c.pinned ? <PinOff size={12}/> : <Pin size={12}/>,
-                  onClick: () => togglePinConv(c.id),
+                  label: conversation.pinnedAt !== undefined ? '取消置顶' : '置顶',
+                  icon: conversation.pinnedAt !== undefined ? <PinOff size={12}/> : <Pin size={12}/>,
+                  onClick: () => void onToggleConversationPinned(
+                    conversation.conversationId,
+                    conversation.pinnedAt === undefined,
+                  ),
                 },
-                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => setRenamingId(c.id) },
-                { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => deleteConv(c.id) },
+                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => { setRenameSelectAll(false); setRenamingId(conversation.conversationId) } },
+                { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => void onDeleteConversation(conversation.conversationId) },
               ]}
+              pending={openingConversationId === conversation.conversationId || pendingConversationIds.has(conversation.conversationId)}
             />
           ))}
-        </div>
+        </ConversationScrollArea>
         </div>
 
         {/* 知识库 */}
@@ -604,14 +742,44 @@ export function Sidebar({ view, onNavigate, onOpenSettings, collapsed }: Sidebar
 
       {showManager && (
         <SpaceManagerModal
-          spaces={spaces}
+          spaces={projectedSpaces}
           onClose={() => setShowManager(false)}
           onRename={renameSpace}
-          onDelete={deleteSpace}
           onAdd={addSpace}
         />
       )}
     </aside>
+  )
+}
+
+function SpaceLoadingRows() {
+  return (
+    <div className="space-y-2 px-3 py-1" role="status" aria-label="正在加载空间">
+      <span className="block h-2.5 w-24 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+      <span className="block h-2.5 w-16 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+    </div>
+  )
+}
+
+function SpaceLoadFailure(props: {
+  readonly message: string
+  readonly onRetry: () => void | Promise<void>
+}) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5" role="alert" title={props.message}>
+      <AlertCircle size={12} className="shrink-0" style={{ color: 'var(--aa-status-error)' }} />
+      <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: 'var(--aa-text-3)' }}>空间同步失败</span>
+      <button
+        type="button"
+        aria-label="重新加载空间"
+        title="重新加载空间"
+        onClick={() => void props.onRetry()}
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-black/5"
+        style={{ color: 'var(--aa-text-3)' }}
+      >
+        <RotateCcw size={11} />
+      </button>
+    </div>
   )
 }
 
@@ -621,31 +789,30 @@ function SpaceManagerModal({
   spaces,
   onClose,
   onRename,
-  onDelete,
   onAdd,
 }: {
   spaces: SpaceItem[]
   onClose: () => void
   onRename: (id: string, label: string) => void
-  onDelete: (id: string) => void
   onAdd: () => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const modalRef = useModalA11y(onClose)
 
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-6"
       style={{ background: 'rgba(45,40,34,0.28)' }}
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="管理空间"
     >
       <div
+        ref={modalRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="w-full rounded-xl overflow-hidden"
+        className="w-full rounded-xl overflow-hidden outline-none"
         style={{
           maxWidth: 440,
           background: 'var(--aa-surface)',
@@ -692,14 +859,6 @@ function SpaceManagerModal({
                   >
                     <Pencil size={13}/>
                   </button>
-                  <button
-                    onClick={() => onDelete(s.id)}
-                    title="删除"
-                    className="p-1.5 rounded-md hover:bg-black/10"
-                    style={{ color: '#b3543f' }}
-                  >
-                    <Trash2 size={13}/>
-                  </button>
                 </div>
               )}
             </div>
@@ -719,4 +878,31 @@ function SpaceManagerModal({
       </div>
     </div>
   )
+}
+
+function compareConversations(left: ConversationSummary, right: ConversationSummary): number {
+  const leftPinned = left.pinnedAt !== undefined
+  const rightPinned = right.pinnedAt !== undefined
+  if (leftPinned !== rightPinned) return rightPinned ? 1 : -1
+  if (leftPinned && rightPinned) {
+    const pinnedOrder = timestampValue(right.pinnedAt) - timestampValue(left.pinnedAt)
+    if (pinnedOrder !== 0) return pinnedOrder
+  }
+  return timestampValue(right.updatedAt) - timestampValue(left.updatedAt)
+}
+
+function conversationTimeLabel(value: string | undefined): string {
+  const timestamp = timestampValue(value)
+  if (timestamp === 0) return ''
+  const elapsed = Math.max(0, Date.now() - timestamp)
+  if (elapsed < 60_000) return '刚刚'
+  if (elapsed < 3_600_000) return `${Math.max(1, Math.floor(elapsed / 60_000))}分钟前`
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}小时前`
+  return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+}
+
+function timestampValue(value: string | undefined): number {
+  if (value === undefined) return 0
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : 0
 }

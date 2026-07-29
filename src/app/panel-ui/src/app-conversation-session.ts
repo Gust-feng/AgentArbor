@@ -37,11 +37,11 @@ export type ConversationSessionControllerOptions = {
 export async function loadConversationSession(
   options: ConversationSessionControllerOptions,
   conversationId: string
-): Promise<void> {
+): Promise<boolean> {
   const currentLoad = options.conversationLoadAbortRef.current;
   if (currentLoad !== undefined && !currentLoad.signal.aborted) {
     if (options.app.conversation?.conversationId === conversationId) {
-      return;
+      return true;
     }
     currentLoad.abort();
     options.conversationLoadAbortRef.current = undefined;
@@ -53,7 +53,7 @@ export async function loadConversationSession(
   const abortController = new AbortController();
   options.conversationLoadAbortRef.current = abortController;
   if (abortController.signal.aborted) {
-    return;
+    return false;
   }
   const epoch = options.viewEpochRef.current + 1;
   options.viewEpochRef.current = epoch;
@@ -66,7 +66,7 @@ export async function loadConversationSession(
       { signal: abortController.signal }
     );
   } catch (error) {
-    if (abortController.signal.aborted) return;
+    if (abortController.signal.aborted) return false;
     if (isMissingConversationError(error)) {
       resetConversationSession(options);
       options.setApp((previous) => ({
@@ -79,11 +79,11 @@ export async function loadConversationSession(
       } catch {
         // The main screen is already valid; a later refresh can reconcile the list.
       }
-      return;
+      return false;
     }
     throw error;
   }
-  if (abortController.signal.aborted) return;
+  if (abortController.signal.aborted) return false;
   const currentRun = response.conversation.currentRun;
   const latestRunId = currentRun?.run.runId ?? response.conversation.activeRunId ?? response.conversation.latestRunId;
   options.activeRunIdRef.current = latestRunId;
@@ -93,7 +93,7 @@ export async function loadConversationSession(
   const workView = ordinaryWorkViewFromRunView(currentRun);
   const capabilityResolution = currentRun?.capabilityResolution;
   const transcriptNodes = transcriptNodesFrom(workView);
-  if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+  if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
 
   // ── Phase 1: Switch to the new conversation immediately ──────────────
   //
@@ -167,7 +167,7 @@ export async function loadConversationSession(
     if (options.conversationLoadAbortRef.current === abortController) {
       options.conversationLoadAbortRef.current = undefined;
     }
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return;
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return false;
     const patch: Record<string, readonly TranscriptNode[]> = {};
     for (const [runId, nodes] of entries) {
       patch[runId] = nodes;
@@ -178,6 +178,7 @@ export async function loadConversationSession(
       options.conversationLoadAbortRef.current = undefined;
     }
   }
+  return true;
 }
 
 function isMissingConversationError(error: unknown): boolean {

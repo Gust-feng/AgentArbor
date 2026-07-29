@@ -1,29 +1,69 @@
-import { Check, FileSearch, Wrench } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertCircle, Check, FileSearch, RotateCcw, Wrench } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
 import type { ChatInputProps } from "../../components/chat-empty";
-import { WorkbenchSettingsDialog } from "../../components/workbench-settings-dialog";
+import type { WorkbenchSettingsDialogProps } from "../../components/workbench-settings-dialog";
 import type { AppUpdateInfo } from "../../contracts/app-update";
 import type { Conversation, ConversationSummary } from "../../contracts/conversation";
 import type { PendingConfirmation, TranscriptNode } from "../../contracts/run";
 import type { ConfirmationProjection } from "../../components/transcript-timeline";
 import type { PersonalSpaceActions, PersonalSpaceProjection } from "../space";
-import { BrainPage } from "./app/components/BrainPage";
-import { ConversationPage, PrototypeConversationComposer, type LiveConversationState } from "./app/components/ConversationPage";
+import type { LiveConversationState } from "./app/components/ConversationPage";
+import { ConversationComposer } from "./app/components/ConversationComposer";
+import { DeferredSurfaceBoundary } from "./app/components/DeferredSurfaceBoundary";
 import { FocusMode } from "./app/components/FocusMode";
-import { HomePage } from "./app/components/HomePage";
 import { type View, Sidebar } from "./app/components/Sidebar";
-import { SpacePage } from "./app/components/SpacePage";
 import { TopBar } from "./app/components/TopBar";
-import { SearchPage } from "./app/components/SearchPage";
 import { resolveById } from "./app/components/brainStore";
 import { applyPrefs, loadPrefs } from "./app/components/readingPrefs";
 import { RunPanel, type RunStep } from "./app/components/RunPanel";
-import { RedesignTranscript } from "./app/components/RedesignTranscript";
+import {
+  initializePersonalKnowledge,
+  getPersonalKnowledgeError,
+  getPersonalKnowledgeLoadState,
+  refreshPersonalKnowledge,
+  subscribePersonalKnowledge,
+  setActivePersonalKnowledgeSpace,
+  setPersonalKnowledgePersistenceEnabled,
+} from "./app/components/personalKnowledgeClient";
+
+const LazySpacePage = lazy(async () => {
+  const module = await import("./app/components/SpacePage");
+  return { default: module.SpacePage };
+});
+const LazyHomePage = lazy(async () => {
+  const module = await import("./app/components/HomePage");
+  return { default: module.HomePage };
+});
+const LazyConversationPage = lazy(async () => {
+  const module = await import("./app/components/ConversationPage");
+  return { default: module.ConversationPage };
+});
+const LazyRedesignTranscript = lazy(async () => {
+  const module = await import("./app/components/RedesignTranscript");
+  return { default: module.RedesignTranscript };
+});
+const LazyBrainPage = lazy(async () => {
+  const module = await import("./app/components/BrainPage");
+  return { default: module.BrainPage };
+});
+const LazySearchPage = lazy(async () => {
+  const module = await import("./app/components/SearchPage");
+  return { default: module.SearchPage };
+});
+const LazyWorkbenchSettingsDialog = lazy(async () => {
+  const module = await import("../../components/workbench-settings-dialog");
+  return { default: module.WorkbenchSettingsDialog };
+});
 
 export type RedesignWorkbenchProps = {
-  readonly isBootstrapping: boolean;
+  readonly personalKnowledgePersistenceEnabled?: boolean;
+  readonly bootstrapState: {
+    readonly status: "loading" | "ready" | "retrying" | "error";
+    readonly error?: string;
+    readonly onRetry: () => void;
+  };
   readonly sidebarCollapsed: boolean;
   readonly onToggleSidebar: () => void;
   readonly conversation?: Conversation;
@@ -35,14 +75,24 @@ export type RedesignWorkbenchProps = {
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<CurrentRunProjection["workView"]>["pendingConfirmation"];
   readonly confirmationBusy: boolean;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
-  readonly onOpenConversation: (conversationId: string) => void | Promise<void>;
+  readonly onOpenConversation: (conversationId: string) => boolean | Promise<boolean>;
+  readonly pendingConversationIds?: ReadonlySet<string>;
+  readonly onRenameConversation: (conversationId: string, title: string) => void | Promise<void>;
+  readonly onToggleConversationPinned: (conversationId: string, pinned: boolean) => void | Promise<void>;
+  readonly onDeleteConversation: (conversationId: string) => void | Promise<void>;
   readonly spaces?: readonly PersonalSpaceProjection[];
+  readonly spaceLoadState?: {
+    readonly loading: boolean;
+    readonly mutationPending?: boolean;
+    readonly error?: string;
+    readonly onRetry: () => void | Promise<void>;
+  };
   readonly onOpenSpace?: (spaceId: string) => void | Promise<void>;
   readonly onOpenSpaceItem?: (spaceId: string, itemId: string) => void | Promise<void>;
   readonly onCreateSpace?: (title: string) => void | Promise<void>;
   readonly spaceActions?: PersonalSpaceActions;
   readonly onOpenSettings: () => void;
-  readonly settingsDialogProps?: React.ComponentProps<typeof WorkbenchSettingsDialog>;
+  readonly settingsDialogProps?: WorkbenchSettingsDialogProps;
   readonly appUpdate?: AppUpdateInfo;
   readonly onInstallAppUpdate: () => void;
 };
@@ -57,10 +107,40 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   const [previousView, setPreviousView] = useState<View>("home");
   const [brainSelectedId, setBrainSelectedId] = useState<string | null>(null);
   const [spaceTargetId, setSpaceTargetId] = useState<string | null>(null);
+  const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [pendingRuntimePrompt, setPendingRuntimePrompt] = useState<string | undefined>();
+  const knowledgeLoadState = useSyncExternalStore(
+    subscribePersonalKnowledge,
+    getPersonalKnowledgeLoadState,
+    getPersonalKnowledgeLoadState,
+  );
+  const knowledgeError = useSyncExternalStore(
+    subscribePersonalKnowledge,
+    getPersonalKnowledgeError,
+    getPersonalKnowledgeError,
+  );
 
   const activeConversation = props.conversation;
   const hasAttention = needsConversationAttention(props);
+
+  useEffect(() => {
+    setPersonalKnowledgePersistenceEnabled(props.personalKnowledgePersistenceEnabled === true);
+  }, [props.personalKnowledgePersistenceEnabled]);
+
+  useEffect(() => {
+    const spaces = props.spaces ?? [];
+    const firstSpaceId = spaces[0]?.spaceId;
+    setActiveSpaceId((current) => current !== null && spaces.some((space) => space.spaceId === current)
+      ? current
+      : firstSpaceId ?? null);
+    if (props.personalKnowledgePersistenceEnabled && props.spaceLoadState?.loading !== true) {
+      void initializePersonalKnowledge(firstSpaceId).catch(() => undefined);
+    }
+  }, [props.personalKnowledgePersistenceEnabled, props.spaceLoadState?.loading, props.spaces]);
+
+  useEffect(() => {
+    if (activeSpaceId !== null) setActivePersonalKnowledgeSpace(activeSpaceId);
+  }, [activeSpaceId]);
 
   useEffect(() => {
     if (hasAttention) setView("conv-active");
@@ -127,7 +207,23 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
       <Sidebar
         view={view}
         collapsed={props.sidebarCollapsed}
+        conversations={props.conversations}
+        spaces={props.spaces ?? []}
+        spaceLoadState={props.spaceLoadState}
+        activeSpaceId={activeSpaceId}
+        activeConversationId={props.conversation?.conversationId}
         onNavigate={navigate}
+        onOpenConversation={props.onOpenConversation}
+        pendingConversationIds={props.pendingConversationIds ?? EMPTY_ID_SET}
+        onRenameConversation={props.onRenameConversation}
+        onToggleConversationPinned={props.onToggleConversationPinned}
+        onDeleteConversation={props.onDeleteConversation}
+        onOpenSpace={props.onOpenSpace}
+        onActiveSpaceChange={setActiveSpaceId}
+        onCreateSpace={props.onCreateSpace}
+        onRenameSpace={props.spaceActions?.rename === undefined
+          ? undefined
+          : (spaceId, title) => props.spaceActions?.rename?.({ kind: "space", id: spaceId }, title)}
         onOpenSettings={props.onOpenSettings}
       />
 
@@ -138,34 +234,94 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
           onSearch={() => navigate("search")}
           sidebarCollapsed={props.sidebarCollapsed}
           onToggleSidebar={props.onToggleSidebar}
-          brainFileTitle={brainSelectedId === null ? null : resolveById(brainSelectedId)?.title ?? null}
+          brainFileTitle={brainSelectedId === null ? null : resolveById(brainSelectedId, props.spaces ?? [])?.title ?? null}
           onBrainRoot={() => setBrainSelectedId(null)}
         />
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <main
+          aria-label={viewLabel(view)}
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
           <div className="view-enter flex min-h-0 flex-1 flex-col overflow-hidden" key={view}>
-            {props.isBootstrapping ? <PrototypeRuntimeLoading /> : renderView({
-              view,
-              props,
-              activeConversation,
-              conversationInput,
-              brainSelectedId,
-              spaceTargetId,
-              onBrainSelect: setBrainSelectedId,
-              navigate,
-              onOpenInSpace: (id) => {
-                setSpaceTargetId(id);
-                setView("space");
-              },
-              startRuntime,
-            })}
+            {props.bootstrapState.status === "loading" || (
+              isKnowledgeView(view) && (knowledgeLoadState.status === "loading" || knowledgeLoadState.status === "retrying")
+            ) ? <PrototypeRuntimeLoading /> : (
+              <DeferredSurfaceBoundary resetKey={view} label="这个视图暂时无法打开">
+                <Suspense fallback={<DeferredViewLoading />}>
+                  {renderView({
+                    view,
+                    props,
+                    activeConversation,
+                    conversationInput,
+                    brainSelectedId,
+                    spaceTargetId,
+                    activeSpaceId,
+                    onBrainSelect: setBrainSelectedId,
+                    navigate,
+                    onOpenInSpace: (spaceId, id) => {
+                      setActiveSpaceId(spaceId);
+                      setSpaceTargetId(id);
+                      setView("space");
+                    },
+                    startRuntime,
+                  })}
+                </Suspense>
+              </DeferredSurfaceBoundary>
+            )}
           </div>
         </main>
       </div>
 
-      {props.settingsDialogProps !== undefined && <WorkbenchSettingsDialog {...props.settingsDialogProps} />}
+      {props.bootstrapState.status === "error" && (
+        <WorkbenchStatusNotice
+          message={props.bootstrapState.error ?? "工作台启动数据加载失败。"}
+          onRetry={props.bootstrapState.onRetry}
+          retrying={false}
+        />
+      )}
+
+      {props.bootstrapState.status === "retrying" && (
+        <WorkbenchStatusNotice message="正在重新连接工作台..." retrying />
+      )}
+
+      {props.bootstrapState.status === "ready" && knowledgeLoadState.status === "error" && (
+        <WorkbenchStatusNotice
+          message={knowledgeLoadState.message}
+          onRetry={() => void initializePersonalKnowledge(activeSpaceId ?? undefined).catch(() => undefined)}
+        />
+      )}
+
+      {props.bootstrapState.status === "ready" && knowledgeLoadState.status === "ready" && knowledgeError !== undefined && (
+        <WorkbenchStatusNotice
+          message={knowledgeError}
+          onRetry={() => void refreshPersonalKnowledge().catch(() => undefined)}
+        />
+      )}
+
+      {props.error !== undefined && !isConversationView(view) && props.bootstrapState.status === "ready" && knowledgeError === undefined && (
+        <WorkbenchStatusNotice message={props.error} />
+      )}
+
+      {props.settingsDialogProps?.open === true && (
+        <Suspense fallback={null}>
+          <LazyWorkbenchSettingsDialog {...props.settingsDialogProps} />
+        </Suspense>
+      )}
     </div>
   );
+}
+
+function viewLabel(view: View): string {
+  switch (view) {
+    case "home": return "个人首页";
+    case "space": return "空间";
+    case "brain": return "知识库";
+    case "search": return "搜索";
+    case "focus": return "专注模式";
+    case "conv-active":
+    case "conv-done":
+    case "conv-new": return "对话工作台";
+  }
 }
 
 function renderView(input: {
@@ -175,27 +331,52 @@ function renderView(input: {
   readonly conversationInput: ChatInputProps;
   readonly brainSelectedId: string | null;
   readonly spaceTargetId: string | null;
+  readonly activeSpaceId: string | null;
   readonly onBrainSelect: (id: string | null) => void;
   readonly navigate: (view: View) => void;
-  readonly onOpenInSpace: (id: string) => void;
+  readonly onOpenInSpace: (spaceId: string, id: string) => void;
   readonly startRuntime: (message: string) => void;
 }) {
   if (input.view === "home") {
-    return <HomePage
+    return <LazyHomePage
       onNavigate={input.navigate}
       onStartConversation={input.startRuntime}
+      onOpenConversation={input.props.onOpenConversation}
+      conversations={input.props.conversations}
+      spaces={input.props.spaces ?? []}
     />;
   }
   if (input.view === "space") {
-    return <SpacePage onNavigate={input.navigate} targetId={input.spaceTargetId} />;
+    const activeSpace = input.props.spaces?.find((space) => space.spaceId === input.activeSpaceId);
+    return <LazySpacePage
+      key={activeSpace?.spaceId ?? "space-empty"}
+      onNavigate={input.navigate}
+      targetId={input.spaceTargetId}
+      space={activeSpace}
+      actions={input.props.spaceActions}
+      currentConversation={input.activeConversation === undefined ? undefined : {
+        conversationId: input.activeConversation.conversationId,
+        title: input.activeConversation.title,
+      }}
+      onOpenItem={input.props.onOpenSpaceItem}
+      onOpenConversation={input.props.onOpenConversation}
+    />;
   }
   if (input.view === "brain") {
-    return <BrainPage selectedId={input.brainSelectedId} onSelect={input.onBrainSelect} />;
+    return <LazyBrainPage
+      selectedId={input.brainSelectedId}
+      onSelect={input.onBrainSelect}
+      spaces={input.props.spaces ?? []}
+      onOpenSpaceReference={input.onOpenInSpace}
+    />;
   }
   if (input.view === "search") {
-    return <SearchPage
+    return <LazySearchPage
       onNavigate={input.navigate}
       onOpenInSpace={input.onOpenInSpace}
+      onOpenConversation={input.props.onOpenConversation}
+      spaces={input.props.spaces ?? []}
+      conversations={input.props.conversations}
     />;
   }
   if (input.view === "focus") {
@@ -204,10 +385,26 @@ function renderView(input: {
   return <ConversationSurface props={input.props} conversation={input.activeConversation} input={input.conversationInput} onEnterFocus={() => input.navigate("focus")} />;
 }
 
+const EMPTY_ID_SET: ReadonlySet<string> = new Set();
+
 function PrototypeRuntimeLoading() {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center" style={{ color: "var(--aa-text-3)" }}>
       <span className="text-sm">正在准备工作台</span>
+    </div>
+  );
+}
+
+function DeferredViewLoading() {
+  return (
+    <div
+      aria-label="正在打开视图"
+      className="flex min-h-0 flex-1 items-center justify-center"
+      style={{ color: "var(--aa-text-3)" }}
+    >
+      <span className="h-1.5 w-16 overflow-hidden rounded-full" style={{ background: "var(--aa-border)" }}>
+        <span className="block h-full w-1/2 animate-pulse rounded-full" style={{ background: "var(--aa-accent)" }} />
+      </span>
     </div>
   );
 }
@@ -246,7 +443,9 @@ function ConversationSurface(props: {
           ? "completed"
           : "initial";
   const content = active.hasVisibleContent ? (
-    <RedesignTranscript
+    <DeferredSurfaceBoundary resetKey={props.props.currentRun.run?.runId ?? props.conversation?.conversationId ?? "transcript"} label="对话内容暂时无法显示">
+      <Suspense fallback={<TranscriptLoading />}>
+        <LazyRedesignTranscript
       conversationId={props.conversation?.conversationId}
       projectedTurns={active.workline.turns}
       turns={props.conversation?.turns ?? []}
@@ -269,7 +468,9 @@ function ConversationSurface(props: {
       selectedModelId={props.input.selectedModelId}
       onDecision={props.props.onDecision}
       confirmationBusy={props.props.confirmationBusy}
-    />
+        />
+      </Suspense>
+    </DeferredSurfaceBoundary>
   ) : undefined;
   const activity = runActivity(props.props.currentRun, active.running, props.input.onCancel);
 
@@ -290,12 +491,54 @@ function ConversationSurface(props: {
         state: pageProps.state,
         content: pageProps.content,
         activity: pageProps.activity,
-        composer: <PrototypeConversationComposer input={pageProps.input} />,
+        composer: <ConversationComposer input={pageProps.input} />,
       }}
       onExit={props.onExitFocus ?? (() => undefined)}
     />;
   }
-  return <ConversationPage live={{ ...pageProps, onFocus: props.onEnterFocus }} />;
+  return <LazyConversationPage live={{ ...pageProps, onFocus: props.onEnterFocus }} />;
+}
+
+function TranscriptLoading() {
+  return <div className="mx-auto h-24 w-full max-w-3xl animate-pulse rounded-md" style={{ background: "var(--aa-surface-hover)" }} />;
+}
+
+function isConversationView(view: View): boolean {
+  return view === "conv-active" || view === "conv-done" || view === "conv-new" || view === "focus";
+}
+
+function isKnowledgeView(view: View): boolean {
+  return view === "space" || view === "brain" || view === "search";
+}
+
+function WorkbenchStatusNotice(props: {
+  readonly message: string;
+  readonly onRetry?: () => void;
+  readonly retrying?: boolean;
+}) {
+  return (
+    <div
+      className="fixed bottom-5 right-5 z-50 flex max-w-sm items-start gap-2.5 rounded-md px-3 py-2.5 shadow-sm"
+      style={{ background: "var(--aa-surface)", border: "1px solid var(--aa-border)", color: "var(--aa-text-2)" }}
+      role="alert"
+    >
+      <AlertCircle className="mt-0.5 shrink-0" size={14} style={{ color: "var(--aa-status-error)" }} />
+      <span className="min-w-0 flex-1 break-words text-xs leading-5">{props.message}</span>
+      {props.onRetry !== undefined && (
+        <button
+          type="button"
+          aria-label="重新加载工作台数据"
+          title="重新加载工作台数据"
+          onClick={props.onRetry}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-black/5 disabled:opacity-40"
+          style={{ color: "var(--aa-text-3)" }}
+          disabled={props.retrying}
+        >
+          <RotateCcw className={props.retrying ? "animate-spin" : undefined} size={12} />
+        </button>
+      )}
+    </div>
+  );
 }
 
 function runActivity(currentRun: CurrentRunProjection, running: boolean, onStop: ChatInputProps["onCancel"]) {

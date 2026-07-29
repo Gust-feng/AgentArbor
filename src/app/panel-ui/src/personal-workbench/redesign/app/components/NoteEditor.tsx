@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Check, Code2, Maximize2, Brain } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -9,6 +9,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
 import { useBrain } from './brainStore'
 import type { Note } from './notesStore'
+import { getPersonalNoteSaveState, subscribePersonalKnowledge } from './personalKnowledgeClient'
 
 /**
  * 笔记编辑器 —— 所见即所得书写面。
@@ -37,6 +38,11 @@ export function NoteEditor({ note, onSave, onOpenFocus }: NoteEditorProps) {
   const [sourceMode, setSourceMode] = useState(false)
   const [sourceBody, setSourceBody] = useState(note.body)
   const brain = useBrain()
+  const durableSaveState = useSyncExternalStore(
+    subscribePersonalKnowledge,
+    () => getPersonalNoteSaveState(note.id),
+    () => 'saved',
+  )
   const collected = brain.isCollected(note.id)
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -154,8 +160,8 @@ export function NoteEditor({ note, onSave, onOpenFocus }: NoteEditorProps) {
           className="flex items-center gap-1 text-xs shrink-0"
           style={{ color: 'var(--aa-text-3, #aba39b)' }}
         >
-          {saved ? <Check size={12} /> : <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--aa-accent, #6865a7)' }} />}
-          {saved ? '已保存' : '保存中…'}
+          {saved && durableSaveState === 'saved' ? <Check size={12} /> : <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: durableSaveState.startsWith('error:') ? '#b85c52' : 'var(--aa-accent, #6865a7)' }} />}
+          {durableSaveState.startsWith('error:') ? '保存失败' : saved && durableSaveState === 'saved' ? '已保存' : '保存中…'}
         </span>
 
         <div className="flex-1" />

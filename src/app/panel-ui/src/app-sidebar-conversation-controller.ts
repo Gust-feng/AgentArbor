@@ -18,10 +18,11 @@ export type AppSidebarConversationController = {
 
 export type AppSidebarConversationControllerOptions = {
   readonly app: AppState;
+  readonly appRef: React.MutableRefObject<AppState>;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
   readonly mountedRef: React.MutableRefObject<boolean>;
-  readonly pinningConversationIdsRef: React.MutableRefObject<Set<string>>;
-  readonly setPinningConversationIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
+  readonly mutationConversationIdsRef: React.MutableRefObject<Set<string>>;
+  readonly setMutationConversationIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
   readonly resetChat: () => void;
   readonly setSelectedWorkspaceDirectory: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly setInputCloseSignal: React.Dispatch<React.SetStateAction<number>>;
@@ -34,66 +35,52 @@ export function createAppSidebarConversationController(
   options: AppSidebarConversationControllerOptions,
 ): AppSidebarConversationController {
   async function renameConversation(conversationId: string, title: string): Promise<void> {
-    try {
+    await runConversationMutation(conversationId, async () => {
       const response = await renameConversationTitle(conversationId, title);
       if (!options.mountedRef.current) return;
       applyConversationManagementResponse(response);
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, error: errorText(error, "重命名会话失败。") }));
-      }
-    }
+    }, "重命名会话失败。");
   }
 
   async function toggleConversationPinned(conversationId: string, pinned: boolean): Promise<void> {
-    if (options.pinningConversationIdsRef.current.has(conversationId)) return;
-    const previousPinnedAt = conversationPinnedAt(options.app, conversationId);
+    const previousPinnedAt = conversationPinnedAt(options.appRef.current, conversationId);
     const optimisticPinnedAt = pinned ? new Date().toISOString() : undefined;
-    setConversationPinning(conversationId, true);
-    options.setApp((previous) => patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt));
-    try {
+    await runConversationMutation(conversationId, async () => {
+      options.setApp((previous) => patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt));
       const response = await updateConversationPinnedState(conversationId, pinned);
       if (!options.mountedRef.current) return;
       applyConversationManagementResponse(response);
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...patchConversationPinnedAt(previous, conversationId, previousPinnedAt),
-          error: errorText(error, "更新会话置顶失败。"),
-        }));
-      }
-    } finally {
-      if (!options.mountedRef.current) return;
-      setConversationPinning(conversationId, false);
-    }
+    }, "更新会话置顶失败。", (previous) => patchConversationPinnedAt(previous, conversationId, previousPinnedAt));
   }
 
   async function deleteConversation(conversationId: string): Promise<void> {
-    try {
+    await runConversationMutation(conversationId, async () => {
       const response = await removeConversation(conversationId);
       if (!options.mountedRef.current) return;
-      options.setSelectedWorkspaceDirectory(undefined);
-      options.resetChat();
+      if (options.appRef.current.conversation?.conversationId === conversationId) {
+        options.setSelectedWorkspaceDirectory(undefined);
+        options.resetChat();
+      }
       options.setApp((previous) => ({
         ...previous,
         conversations: (response.conversations ?? previous.conversations).filter((item) => item.conversationId !== conversationId),
         error: undefined,
       }));
-    } catch (error) {
-      if (options.mountedRef.current) {
-        if (isMissingConversationError(error)) {
+    }, "删除会话失败。", undefined, (error) => {
+      if (isMissingConversationError(error)) {
+        if (options.appRef.current.conversation?.conversationId === conversationId) {
           options.setSelectedWorkspaceDirectory(undefined);
           options.resetChat();
-          options.setApp((previous) => ({
-            ...previous,
-            conversations: previous.conversations.filter((item) => item.conversationId !== conversationId),
-            error: undefined,
-          }));
-        } else {
-          options.setApp((previous) => ({ ...previous, error: errorText(error, "删除会话失败。") }));
         }
+        options.setApp((previous) => ({
+          ...previous,
+          conversations: previous.conversations.filter((item) => item.conversationId !== conversationId),
+          error: undefined,
+        }));
+        return true;
       }
-    }
+      return false;
+    });
   }
 
   function applyConversationManagementResponse(response: ConversationManagementResponse): void {
@@ -108,15 +95,37 @@ export function createAppSidebarConversationController(
     }));
   }
 
-  function setConversationPinning(conversationId: string, pinning: boolean): void {
-    const next = new Set(options.pinningConversationIdsRef.current);
-    if (pinning) {
+  async function runConversationMutation(
+    conversationId: string,
+    operation: () => Promise<void>,
+    fallbackError: string,
+    rollback?: (previous: AppState) => AppState,
+    recover?: (error: unknown) => boolean,
+  ): Promise<void> {
+    if (options.mutationConversationIdsRef.current.has(conversationId)) return;
+    setConversationMutation(conversationId, true);
+    try {
+      await operation();
+    } catch (error: unknown) {
+      if (!options.mountedRef.current || recover?.(error) === true) return;
+      options.setApp((previous) => ({
+        ...(rollback?.(previous) ?? previous),
+        error: errorText(error, fallbackError),
+      }));
+    } finally {
+      if (options.mountedRef.current) setConversationMutation(conversationId, false);
+    }
+  }
+
+  function setConversationMutation(conversationId: string, pending: boolean): void {
+    const next = new Set(options.mutationConversationIdsRef.current);
+    if (pending) {
       next.add(conversationId);
     } else {
       next.delete(conversationId);
     }
-    options.pinningConversationIdsRef.current = next;
-    options.setPinningConversationIds(next);
+    options.mutationConversationIdsRef.current = next;
+    options.setMutationConversationIds(next);
   }
 
   return {

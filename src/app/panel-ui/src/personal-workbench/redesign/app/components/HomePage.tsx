@@ -1,12 +1,18 @@
-import { useRef, useEffect, useState } from 'react'
+import { useCallback, useRef, useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { ArrowUp, BookOpen, Compass, FileText, Globe, MessageSquare, Zap } from 'lucide-react'
 import { type View } from './Sidebar'
 import { RADII, composerSurface } from './tokens'
+import type { ConversationSummary } from '../../../../contracts/conversation'
+import type { PersonalSpaceProjection } from '../../../space'
+import { LEARNING_DEMO_TIMELINE } from './learningDemoDataset'
 
 interface HomePageProps {
   onNavigate: (v: View) => void
   onStartConversation: (message: string) => void
+  onOpenConversation: (conversationId: string) => boolean | Promise<boolean>
+  conversations: readonly ConversationSummary[]
+  spaces: readonly PersonalSpaceProjection[]
 }
 
 /* ─── ambient light ───────────────────────────────────────────────────────────
@@ -104,6 +110,7 @@ interface TimelineEntry {
   title: string
   detail: string
   navigateTo?: View
+  conversationId?: string
 }
 
 const ENTRY_ICON: Record<EntryType, React.ReactNode> = {
@@ -118,16 +125,6 @@ const ENTRY_COLOR: Record<EntryType, string> = {
   web: '#6686a2',
 }
 
-// 以发生顺序保存。时间线的浏览位置和操作都由这组事件记录驱动。
-const TIMELINE_EVENTS: TimelineEntry[] = [
-  { id: 'e1', type: 'conversation', date: '7 月 25 日', time: '09:18', action: '发起对话', title: '建立机器学习学习计划', detail: '学习空间 · 新建会话', navigateTo: 'conv-done' },
-  { id: 'e2', type: 'file', date: '7 月 26 日', time: '19:42', action: '加入资料', title: 'PyTorch 入门笔记.pdf', detail: '学习空间 · 12 页', navigateTo: 'space' },
-  { id: 'e3', type: 'web', date: '7 月 27 日', time: '16:47', action: '保存链接', title: 'CS231n 课程主页', detail: '项目空间 · 网页摘录', navigateTo: 'space' },
-  { id: 'e4', type: 'conversation', date: '7 月 28 日', time: '09:12', action: '继续对话', title: '认知偏见与阅读整理', detail: '对话已归档 · 18 条消息', navigateTo: 'conv-done' },
-  { id: 'e5', type: 'file', date: '今天', time: '11:08', action: '更新笔记', title: '反向传播推导笔记.md', detail: '学习空间 · 已同步', navigateTo: 'space' },
-  { id: 'e6', type: 'conversation', date: '今天', time: '14:32', action: '正在进行', title: '整理机器学习学习路径', detail: '对话中 · 6 条消息', navigateTo: 'conv-active' },
-]
-
 /* ─── suggestions ─── */
 const SUGGESTIONS = [
   { icon: <BookOpen size={11} />, label: '整理笔记', prompt: '帮我整理最近的学习笔记，提炼核心要点。' },
@@ -136,10 +133,14 @@ const SUGGESTIONS = [
 ]
 
 /* ─── main ─── */
-export function HomePage({ onNavigate, onStartConversation }: HomePageProps) {
+export function HomePage({ onNavigate, onStartConversation, onOpenConversation, conversations, spaces }: HomePageProps) {
   const [inputValue, setInputValue] = useState('')
   const [focused, setFocused] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const timelineEntries = useMemo(
+    () => homeTimelineEntries(conversations, spaces.some((space) => space.demoDataset === 'learning-workspace')),
+    [conversations, spaces],
+  )
 
   const now = new Date()
   const h = now.getHours()
@@ -153,6 +154,19 @@ export function HomePage({ onNavigate, onStartConversation }: HomePageProps) {
     onStartConversation(t)
   }
 
+  async function openTimelineEntry(entry: TimelineEntry) {
+    if (entry.conversationId !== undefined) {
+      try {
+        const opened = await onOpenConversation(entry.conversationId)
+        if (opened !== false) onNavigate('conv-done')
+      } catch {
+        // Conversation loading owns the visible error state.
+      }
+      return
+    }
+    if (entry.navigateTo !== undefined) onNavigate(entry.navigateTo)
+  }
+
   useEffect(() => {
     const ta = textareaRef.current
     if (!ta) return
@@ -161,7 +175,7 @@ export function HomePage({ onNavigate, onStartConversation }: HomePageProps) {
   }, [inputValue])
 
   return (
-    <main className="relative flex-1 overflow-hidden" style={{ background: 'var(--aa-canvas)', minHeight: '100%' }}>
+    <div className="relative flex-1 overflow-hidden" style={{ background: 'var(--aa-canvas)', minHeight: '100%' }}>
       <HomeBackdrop />
       <AmbientLight />
 
@@ -227,9 +241,9 @@ export function HomePage({ onNavigate, onStartConversation }: HomePageProps) {
         </div>
 
         {/* ── 下区：活动小径 ── */}
-        <ActivityTrail entries={TIMELINE_EVENTS} onNavigate={onNavigate} />
+        {timelineEntries.length > 0 && <ActivityTrail entries={timelineEntries} onSelect={(entry) => void openTimelineEntry(entry)} />}
       </div>
-    </main>
+    </div>
   )
 }
 
@@ -267,7 +281,7 @@ function smoothPath(pts: { x: number; y: number }[]) {
   return d
 }
 
-function ActivityTrail({ entries, onNavigate }: { entries: TimelineEntry[]; onNavigate: (v: View) => void }) {
+function ActivityTrail({ entries, onSelect }: { entries: readonly TimelineEntry[]; onSelect: (entry: TimelineEntry) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hoverId, setHoverId] = useState<string | null>(null)
   const [scrollX, setScrollX] = useState(0)
@@ -299,6 +313,20 @@ function ActivityTrail({ entries, onNavigate }: { entries: TimelineEntry[]; onNa
     el.scrollLeft += e.deltaY
   }
 
+  const rafRef = useRef<number | null>(null)
+  const latestScrollXRef = useRef(0)
+  const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    latestScrollXRef.current = event.currentTarget.scrollLeft
+    if (rafRef.current !== null) return
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null
+      setScrollX(latestScrollXRef.current)
+    })
+  }, [])
+  useEffect(() => () => {
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+  }, [])
+
   return (
     <div style={{ flexShrink: 0, paddingBottom: 8 }}>
       <style>{`@keyframes aa-breath{0%,100%{box-shadow:0 0 0 0 var(--c),0 0 0 0 transparent}50%{box-shadow:0 0 0 5px color-mix(in srgb,var(--c) 20%,transparent),0 0 22px 3px color-mix(in srgb,var(--c) 32%,transparent)}}.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}`}</style>
@@ -307,7 +335,7 @@ function ActivityTrail({ entries, onNavigate }: { entries: TimelineEntry[]; onNa
       <div
         ref={scrollRef}
         onWheel={handleWheel}
-        onScroll={(e) => setScrollX((e.currentTarget as HTMLDivElement).scrollLeft)}
+        onScroll={handleScroll}
         className="overflow-x-auto overflow-y-hidden no-scrollbar"
         style={{
           paddingTop: 4,
@@ -387,7 +415,7 @@ function ActivityTrail({ entries, onNavigate }: { entries: TimelineEntry[]; onNa
             return (
               <motion.button
                 key={entry.id}
-                onClick={() => entry.navigateTo && onNavigate(entry.navigateTo)}
+                onClick={() => onSelect(entry)}
                 onMouseEnter={() => setHoverId(entry.id)}
                 onMouseLeave={() => setHoverId(null)}
                 aria-label={`${entry.date} ${entry.time}：${entry.title}`}
@@ -444,3 +472,40 @@ function ActivityTrail({ entries, onNavigate }: { entries: TimelineEntry[]; onNa
   )
 }
 
+function homeTimelineEntries(conversations: readonly ConversationSummary[], hasLearningDemo: boolean): TimelineEntry[] {
+  if (conversations.length === 0) return hasLearningDemo ? [...LEARNING_DEMO_TIMELINE] : []
+  return [...conversations]
+    .sort((left, right) => timestamp(right.updatedAt) - timestamp(left.updatedAt))
+    .slice(0, 6)
+    .reverse()
+    .map((conversation) => {
+      const updatedAt = validDate(conversation.updatedAt)
+      return {
+        id: conversation.conversationId,
+        type: 'conversation',
+        date: updatedAt === undefined ? '最近' : formatDate(updatedAt),
+        time: updatedAt === undefined ? '' : updatedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        action: conversation.status === 'running' ? '正在进行' : '继续对话',
+        title: conversation.title,
+        detail: conversation.preview?.trim() || conversation.currentAction?.trim() || '对话',
+        conversationId: conversation.conversationId,
+      }
+    })
+}
+
+function timestamp(value: string | undefined): number {
+  return validDate(value)?.getTime() ?? 0
+}
+
+function validDate(value: string | undefined): Date | undefined {
+  if (value === undefined) return undefined
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+function formatDate(date: Date): string {
+  const today = new Date()
+  return date.toDateString() === today.toDateString()
+    ? '今天'
+    : `${date.getMonth() + 1} 月 ${date.getDate()} 日`
+}

@@ -17,21 +17,21 @@ export type AppBootstrapState = Pick<
   "config" | "tools" | "appUpdate" | "skills" | "subAgents" | "conversations" | "deepConversations" | "deepRuns"
 >;
 
-export async function loadAppBootstrap(): Promise<AppBootstrapState> {
+export async function loadAppBootstrap(signal?: AbortSignal): Promise<AppBootstrapState> {
   const deepConversationsRequest = MULTI_AGENT_ENTRY_AVAILABLE
-    ? getJson<ListDeepConversationSummariesResponse>("/api/deep/conversations?limit=50")
+    ? getJson<ListDeepConversationSummariesResponse>("/api/deep/conversations?limit=50", { signal })
     : Promise.resolve<ListDeepConversationSummariesResponse>({ ok: true, conversations: [] });
   const deepRunsRequest = MULTI_AGENT_ENTRY_AVAILABLE
-    ? getJson<ListDeepRunSummariesResponse>("/api/deep/runs?limit=50")
+    ? getJson<ListDeepRunSummariesResponse>("/api/deep/runs?limit=50", { signal })
     : Promise.resolve<ListDeepRunSummariesResponse>({ ok: true, runs: [] });
   const [config, tools, mcp, appUpdate, skills, subAgents, conversations, deepConversations, deepRuns] = await Promise.all([
-    getJson<ConfigResponse>("/api/config"),
-    getJson<ToolsResponse>("/api/config/tools"),
-    getJson<{ readonly catalog?: readonly McpServerCatalogItem[] }>("/api/config/mcp"),
-    getJson<AppUpdateInfo>("/api/app/update"),
-    getJson<{ readonly skills: readonly SkillDefinition[] }>("/api/skills"),
-    getJson<{ readonly subAgents: readonly SubAgentDefinition[] }>("/api/config/sub-agents"),
-    getJson<{ readonly conversations: readonly ConversationSummary[] }>("/api/conversations"),
+    getJson<ConfigResponse>("/api/config", { signal }),
+    getJson<ToolsResponse>("/api/config/tools", { signal }),
+    getJson<{ readonly catalog?: readonly McpServerCatalogItem[] }>("/api/config/mcp", { signal }),
+    getJson<AppUpdateInfo>("/api/app/update", { signal }),
+    getJson<{ readonly skills: readonly SkillDefinition[] }>("/api/skills", { signal }),
+    getJson<{ readonly subAgents: readonly SubAgentDefinition[] }>("/api/config/sub-agents", { signal }),
+    getJson<{ readonly conversations: readonly ConversationSummary[] }>("/api/conversations", { signal }),
     deepConversationsRequest,
     deepRunsRequest,
   ]);

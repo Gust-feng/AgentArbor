@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConversationSummaryRefresh } from "./app-conversation-refresh";
 import { createAppRunController } from "./app-run-controller";
 import {
@@ -26,7 +26,7 @@ import type {
   ComposerToolConfirmationPolicy,
   VisibleAiMode,
 } from "./app-config-projection";
-import type { Screen } from "./components/sidebar";
+import type { Screen } from "./app-screen";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
@@ -62,10 +62,11 @@ export type AppWorkbenchRuntimeOptions = {
   readonly selectedModelContextWindowTokens?: number;
   readonly agentClusterActive: boolean;
   readonly setInputCloseSignal: React.Dispatch<React.SetStateAction<number>>;
-  readonly setPinningConversationIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
 };
 
 export type AppWorkbenchRuntime = {
+  readonly bootstrap: AppBootstrapLoadState;
+  readonly retryBootstrap: () => void;
   readonly currentRun: CurrentRunProjection;
   readonly contextUsage?: ContextWindowUsage;
   readonly modelResponding: boolean;
@@ -73,6 +74,7 @@ export type AppWorkbenchRuntime = {
   readonly pendingCount: number;
   readonly confirmationBusy: boolean;
   readonly contextBusy: boolean;
+  readonly pendingConversationIds: ReadonlySet<string>;
 
   readonly savingModel: boolean;
   readonly savingWorkspace: boolean;
@@ -85,7 +87,7 @@ export type AppWorkbenchRuntime = {
   readonly deepEntryActions: {
     openNormalAgentEntry: () => void;
     openNormalTaskEntry: () => void;
-    openNormalConversation: (conversationId: string) => void;
+    openNormalConversation: (conversationId: string) => Promise<boolean>;
     openAgentClusterRun: (runId: string) => void;
     openAgentClusterConversation: (conversationId: string) => void;
     openAgentClusterEntry: () => void;
@@ -109,7 +111,14 @@ export type AppWorkbenchRuntime = {
   >;
 };
 
+export type AppBootstrapLoadState =
+  | { readonly status: "loading" }
+  | { readonly status: "ready" }
+  | { readonly status: "retrying" }
+  | { readonly status: "error"; readonly message: string };
+
 export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): AppWorkbenchRuntime {
+  const [bootstrap, setBootstrap] = useState<AppBootstrapLoadState>({ status: "loading" });
   const [confirmationBusy, setConfirmationBusy] = useState(false);
   const [contextBusy, setContextBusy] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
@@ -117,15 +126,20 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const [savingDesktopAgent, setSavingDesktopAgent] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | undefined>(undefined);
+  const [pendingConversationIds, setPendingConversationIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const mountedRef = useRef(true);
+  const appRef = useRef(options.app);
+  appRef.current = options.app;
   const pollTimer = useRef<number | undefined>(undefined);
   const streamRef = useRef<EventSource | undefined>(undefined);
   const activeRunIdRef = useRef<string | undefined>(undefined);
   const viewEpochRef = useRef(0);
 
   const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
-  const pinningConversationIdsRef = useRef<Set<string>>(new Set());
+  const bootstrapAbortRef = useRef<AbortController | undefined>(undefined);
+  const bootstrapEpochRef = useRef(0);
+  const mutationConversationIdsRef = useRef<Set<string>>(new Set());
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const toolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mcpToolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -142,27 +156,42 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mcpToolCatalogDraftRef.current = options.app.tools?.mcpCatalog;
   }, [options.app.tools?.mcpCatalog]);
 
-  useEffect(() => {
-    void loadAppBootstrap().then((bootstrap) => {
-      if (mountedRef.current) {
-        options.setApp((previous) => applyAppBootstrap(previous, bootstrap));
-      }
-    }).catch((error) => {
-      if (mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          error: error instanceof Error ? error.message : "工作台启动数据加载失败。",
-        }));
-      }
+  const loadBootstrap = useCallback((retry: boolean): void => {
+    const epoch = ++bootstrapEpochRef.current;
+    bootstrapAbortRef.current?.abort();
+    const abortController = new AbortController();
+    bootstrapAbortRef.current = abortController;
+    setBootstrap({ status: retry ? "retrying" : "loading" });
+    void loadAppBootstrap(abortController.signal).then((loaded) => {
+      if (!mountedRef.current || bootstrapEpochRef.current !== epoch) return;
+      options.setApp((previous) => applyAppBootstrap(previous, loaded));
+      setBootstrap({ status: "ready" });
+    }).catch((error: unknown) => {
+      if (!mountedRef.current || bootstrapEpochRef.current !== epoch || abortController.signal.aborted) return;
+      setBootstrap({
+        status: "error",
+        message: error instanceof Error ? error.message : "工作台启动数据加载失败。",
+      });
+    }).finally(() => {
+      if (bootstrapAbortRef.current === abortController) bootstrapAbortRef.current = undefined;
     });
+  }, [options.setApp]);
+
+  const retryBootstrap = useCallback((): void => loadBootstrap(true), [loadBootstrap]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    loadBootstrap(false);
     return () => {
       mountedRef.current = false;
+      bootstrapAbortRef.current?.abort();
+      bootstrapAbortRef.current = undefined;
       conversationLoadAbortRef.current?.abort();
       conversationLoadAbortRef.current = undefined;
       stopLiveUpdates(pollTimer, streamRef);
 
     };
-  }, [options.setApp]);
+  }, [loadBootstrap]);
 
   const currentRun = useMemo(() => projectCurrentRun(options.app), currentRunProjectionDeps(options.app));
   const hasNormalConversationContext =
@@ -245,7 +274,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const deepEntryActions = {
     openNormalAgentEntry: () => { runController.resetChat(); options.setScreen("chat-empty"); },
     openNormalTaskEntry: noop,
-    openNormalConversation: (conversationId: string) => { void runController.loadConversation(conversationId); },
+    openNormalConversation: runController.loadConversation,
     openAgentClusterRun: noop,
     openAgentClusterConversation: noop,
     openAgentClusterEntry: noop,
@@ -261,10 +290,11 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
 
   const sidebarConversationController = useMemo(() => createAppSidebarConversationController({
     app: options.app,
+    appRef,
     setApp: options.setApp,
     mountedRef,
-    pinningConversationIdsRef,
-    setPinningConversationIds: options.setPinningConversationIds,
+    mutationConversationIdsRef,
+    setMutationConversationIds: setPendingConversationIds,
     resetChat: runController.resetChat,
     setSelectedWorkspaceDirectory: options.setSelectedWorkspaceDirectory,
     setInputCloseSignal: options.setInputCloseSignal,
@@ -277,7 +307,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setAttachments,
     options.setGoal,
     options.setInputCloseSignal,
-    options.setPinningConversationIds,
     options.setScreen,
     options.setSelectedWorkspaceDirectory,
     runController.resetChat,
@@ -348,6 +377,8 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   ]);
 
   return {
+    bootstrap,
+    retryBootstrap,
     currentRun,
     contextUsage,
     modelResponding,
@@ -355,6 +386,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     pendingCount,
     confirmationBusy,
     contextBusy,
+    pendingConversationIds,
 
     savingModel,
     savingWorkspace,

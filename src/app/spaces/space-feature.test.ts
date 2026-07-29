@@ -89,6 +89,27 @@ test("moving a folder moves its complete metadata subtree atomically between Spa
   await spaces.feature.release();
 });
 
+test("removing an internal folder deletes only its Space metadata subtree", async (t) => {
+  const spaces = await fixture(t);
+  const space = await spaces.feature.commands.createSpace({ title: "整理" });
+  const parent = await spaces.feature.commands.createFolder({ spaceId: space.id, title: "父文件夹" });
+  const child = await spaces.feature.commands.createFolder({ spaceId: space.id, parentFolderId: parent.id, title: "子文件夹" });
+  const externalFile = path.join(spaces.root, "external.txt");
+  await fs.writeFile(externalFile, "keep", "utf8");
+  await spaces.feature.commands.addReference({
+    spaceId: space.id,
+    parentFolderId: child.id,
+    title: "外部文件",
+    reference: { kind: "local_file", path: externalFile },
+  });
+
+  await spaces.feature.commands.removeFolder(parent.id);
+
+  assert.deepEqual((await spaces.feature.queries.getTree(space.id))?.entries, []);
+  assert.equal(await fs.readFile(externalFile, "utf8"), "keep");
+  await spaces.feature.release();
+});
+
 test("SpaceTree rejects invalid hierarchy moves and later commands after release", async (t) => {
   const spaces = await fixture(t);
   const space = await spaces.feature.commands.createSpace({ title: "整理" });
@@ -100,4 +121,24 @@ test("SpaceTree rejects invalid hierarchy moves and later commands after release
   );
   await spaces.feature.release();
   assert.throws(() => spaces.feature.queries.list(), (error: unknown) => error instanceof SpaceFeatureError && error.code === "space_feature_released");
+});
+
+test("SpaceTree rejects duplicate writable workspace mounts across Spaces", async (t) => {
+  const spaces = await fixture(t);
+  const first = await spaces.feature.commands.createSpace({ title: "一" });
+  const second = await spaces.feature.commands.createSpace({ title: "二" });
+  await spaces.feature.commands.addReference({
+    spaceId: first.id,
+    title: "工作区",
+    reference: { kind: "workspace_folder", path: "E:\\Project" },
+  });
+  await assert.rejects(
+    spaces.feature.commands.addReference({
+      spaceId: second.id,
+      title: "同一工作区",
+      reference: { kind: "workspace_folder", path: "e:/project/" },
+    }),
+    (error: unknown) => error instanceof SpaceFeatureError && error.code === "space_workspace_mount_conflict",
+  );
+  await spaces.feature.release();
 });

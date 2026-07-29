@@ -5,9 +5,9 @@ import path from "node:path";
 import test from "node:test";
 
 import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
-import { createSqliteSpaceRepository, importLegacySpaceSnapshot } from "./sqlite-repository.js";
+import { createSqliteSpaceRepository } from "./sqlite-repository.js";
 
-test("SpaceTree imports the legacy JSON snapshot once and then uses SQLite", async (t) => {
+test("SpaceTree persists its current SQLite snapshot without inferring demo data", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-spaces-sqlite-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   const repository = createSqliteSpaceRepository(database);
@@ -21,12 +21,9 @@ test("SpaceTree imports the legacy JSON snapshot once and then uses SQLite", asy
     folders: [],
     referenceItems: [],
   };
-  assert.equal(importLegacySpaceSnapshot(database, snapshot), true);
-  assert.equal(importLegacySpaceSnapshot(database, { ...snapshot, spaces: [] }), false);
-  assert.deepEqual((await repository.read()).spaces[0], {
-    ...snapshot.spaces[0],
-    demoDataset: "learning-workspace",
-  });
+  assert.deepEqual((await repository.read()).spaces, []);
+  await repository.write(snapshot);
+  assert.deepEqual((await repository.read()).spaces[0], snapshot.spaces[0]);
 
   await repository.write({ ...snapshot, spaces: [{ ...snapshot.spaces[0], title: "新标题", demoDataset: "learning-workspace" }] });
   assert.deepEqual((await repository.read()).spaces[0], {

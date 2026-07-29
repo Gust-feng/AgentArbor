@@ -1,8 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import type { SpaceFeatureError, SpaceReference, SpaceTarget, SpaceTreeEntry } from "../spaces/index.js";
+import type { SpaceFeatureError, SpaceReference, SpaceReferenceItem, SpaceTarget, SpaceTreeEntry } from "../spaces/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
+import { createPanelSpaceReferenceEntry, createPanelSpaceReferencePreview, deletePanelSpaceReferenceEntry, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
 
 const titleSchema = z.string().trim().min(1).max(160);
 const referenceSchema = z.discriminatedUnion("kind", [
@@ -21,8 +22,20 @@ const moveSchema = z.object({
   destinationSpaceId: z.string().min(1),
   destinationFolderId: z.string().min(1).optional(),
 }).strict();
+const updateTextSchema = z.object({
+  relativePath: z.string().max(4_096).optional(),
+  expectedFingerprint: z.string().min(1).max(512),
+  text: z.string().max(512 * 1024),
+}).strict();
+const referenceEntrySchema = z.object({ relativePath: z.string().min(1).max(4_096) }).strict();
+const renameReferenceEntrySchema = referenceEntrySchema.extend({ name: z.string().trim().min(1).max(255) }).strict();
+const createReferenceEntrySchema = z.object({
+  parentRelativePath: z.string().max(4_096),
+  name: z.string().trim().min(1).max(255),
+  kind: z.enum(["file", "directory"]),
+}).strict();
 
-/** HTTP adapter for SpaceFeature. It never resolves or mutates referenced external resources. */
+/** HTTP adapter for SpaceFeature and explicitly authorized local reference operations. */
 export async function handlePanelSpaceRoute(
   runtime: PanelRuntime,
   request: IncomingMessage,
@@ -108,6 +121,13 @@ export async function handlePanelSpaceRoute(
     return true;
   }
 
+  const removeFolder = /^\/api\/spaces\/folders\/([^/]+)$/u.exec(url.pathname);
+  if (removeFolder !== null && request.method === "DELETE") {
+    await feature.commands.removeFolder(decode(removeFolder[1]));
+    writeJson(response, 200, { ok: true });
+    return true;
+  }
+
   const openReference = /^\/api\/spaces\/references\/([^/]+)\/open$/u.exec(url.pathname);
   if (openReference !== null && request.method === "POST") {
     const item = await feature.queries.getReference(decode(openReference[1]));
@@ -126,7 +146,68 @@ export async function handlePanelSpaceRoute(
     return true;
   }
 
+  const previewReference = /^\/api\/spaces\/references\/([^/]+)\/preview$/u.exec(url.pathname);
+  if (previewReference !== null && request.method === "GET") {
+    const item = await feature.queries.getReference(decode(previewReference[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    writeJson(response, 200, { ok: true, preview: await createPanelSpaceReferencePreview(item, url.searchParams.get("path") ?? "") });
+    return true;
+  }
+
+  const referenceContent = /^\/api\/spaces\/references\/([^/]+)\/content$/u.exec(url.pathname);
+  if (referenceContent !== null && request.method === "GET") {
+    const item = await feature.queries.getReference(decode(referenceContent[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    await writePanelSpaceReferenceContent(item, request, response, url.searchParams.get("path") ?? "");
+    return true;
+  }
+  if (referenceContent !== null && request.method === "PUT") {
+    const item = await feature.queries.getReference(decode(referenceContent[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    await assertWorkspaceMountWritable(feature, item.id);
+    const input = parse(updateTextSchema, await readJsonBody(request), "引用文件内容无效。");
+    writeJson(response, 200, { ok: true, preview: await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => updatePanelSpaceReferenceText(item, input)) });
+    return true;
+  }
+
+  const referenceEntry = /^\/api\/spaces\/references\/([^/]+)\/entry$/u.exec(url.pathname);
+  if (referenceEntry !== null && request.method === "POST") {
+    const item = await feature.queries.getReference(decode(referenceEntry[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    await assertWorkspaceMountWritable(feature, item.id);
+    const input = parse(createReferenceEntrySchema, await readJsonBody(request), "新建文件信息无效。");
+    writeJson(response, 201, { ok: true, entry: await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => createPanelSpaceReferenceEntry(item, input)) });
+    return true;
+  }
+  if (referenceEntry !== null && request.method === "PATCH") {
+    const item = await feature.queries.getReference(decode(referenceEntry[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    await assertWorkspaceMountWritable(feature, item.id);
+    const input = parse(renameReferenceEntrySchema, await readJsonBody(request), "文件重命名信息无效。");
+    writeJson(response, 200, { ok: true, entry: await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => renamePanelSpaceReferenceEntry(item, input)) });
+    return true;
+  }
+  if (referenceEntry !== null && request.method === "DELETE") {
+    const item = await feature.queries.getReference(decode(referenceEntry[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    await assertWorkspaceMountWritable(feature, item.id);
+    const input = parse(referenceEntrySchema, await readJsonBody(request), "文件删除信息无效。");
+    await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => deletePanelSpaceReferenceEntry(item, input.relativePath));
+    writeJson(response, 200, { ok: true });
+    return true;
+  }
+
   return false;
+}
+
+async function assertWorkspaceMountWritable(feature: PanelRuntime["spaceFeature"], itemId: string): Promise<void> {
+  if (await feature.queries.hasWorkspaceMountConflict(itemId)) {
+    throw new PanelHttpError(409, "space_workspace_mount_conflict", "同一个工作区文件夹已链接到多个空间。为避免交叉修改，请先取消其中一个链接。");
+  }
+}
+
+function referenceMutationRoot(item: SpaceReferenceItem): string {
+  return item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" ? item.reference.path : item.id;
 }
 
 function treeContainsTarget(entries: readonly SpaceTreeEntry[], target: { readonly kind: "folder" | "reference"; readonly id: string }): boolean {
@@ -159,6 +240,7 @@ export function spaceFeatureHttpError(error: SpaceFeatureError): PanelHttpError 
       return new PanelHttpError(404, error.code, error.message);
     case "space_invalid_move":
     case "space_id_collision":
+    case "space_workspace_mount_conflict":
       return new PanelHttpError(409, error.code, error.message);
     case "space_invalid_input":
       return new PanelHttpError(400, error.code, error.message);

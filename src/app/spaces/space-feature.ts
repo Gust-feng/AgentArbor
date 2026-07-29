@@ -20,6 +20,7 @@ export type CreateSpaceFeatureInput = {
   readonly repository: SpaceRepository;
   readonly now?: () => string;
   readonly idFactory?: () => string;
+  readonly workspaceMountIdentity?: (workspacePath: string) => Promise<string>;
 };
 
 /** Owns SpaceTree commands, durable snapshots and read-model projection. */
@@ -101,6 +102,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           const snapshot = await input.repository.read();
           requireSpace(snapshot, spaceId);
           requireParent(snapshot, spaceId, parentFolderId);
+          await assertWorkspaceMountAvailable(snapshot, reference, input.workspaceMountIdentity);
           const at = now();
           const item: SpaceReferenceItem = {
             id: newId(snapshot), spaceId, ...parentFolder(parentFolderId), title: titleFor(title), reference: validateSpaceReference(reference), createdAt: at, updatedAt: at,
@@ -135,6 +137,23 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           return target;
         });
       },
+      removeFolder(folderId) {
+        assertUsable("remove a folder");
+        return serialize(async () => {
+          const snapshot = await input.repository.read();
+          const folder = snapshot.folders.find((entry) => entry.id === folderId);
+          if (folder === undefined) throw new SpaceFeatureError("space_folder_not_found", `Space folder ${folderId} was not found`);
+          const removedFolderIds = collectFolderSubtreeIds(snapshot.folders, folderId);
+          const at = now();
+          await input.repository.write({
+            ...snapshot,
+            folders: snapshot.folders.filter((entry) => !removedFolderIds.has(entry.id)),
+            referenceItems: snapshot.referenceItems.filter((entry) => entry.parentFolderId === undefined || !removedFolderIds.has(entry.parentFolderId)),
+            spaces: touchSpaces(snapshot.spaces, [folder.spaceId], at),
+          });
+          publish({ type: "space.folder_removed", folderId });
+        });
+      },
       removeReference(itemId) {
         assertUsable("remove a reference");
         return serialize(async () => {
@@ -165,6 +184,20 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         assertUsable("read a space reference");
         return track(input.repository.read().then((snapshot) => snapshot.referenceItems.find((item) => item.id === itemId)));
       },
+      hasWorkspaceMountConflict(itemId) {
+        assertUsable("check a workspace mount");
+        return track(input.repository.read().then(async (snapshot) => {
+          const item = snapshot.referenceItems.find((entry) => entry.id === itemId);
+          if (item === undefined) throw new SpaceFeatureError("space_reference_not_found", `Space reference ${itemId} was not found`);
+          if (item.reference.kind !== "workspace_folder") return false;
+          const identity = await workspaceMountIdentity(item.reference.path, input.workspaceMountIdentity);
+          for (const candidate of snapshot.referenceItems) {
+            if (candidate.id === item.id || candidate.reference.kind !== "workspace_folder") continue;
+            if (await workspaceMountIdentity(candidate.reference.path, input.workspaceMountIdentity) === identity) return true;
+          }
+          return false;
+        }));
+      },
     },
     events: {
       subscribe(listener) {
@@ -180,6 +213,43 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       while (pending.size > 0) await Promise.allSettled([...pending]);
     },
   };
+}
+
+function collectFolderSubtreeIds(folders: readonly SpaceFolder[], rootId: string): Set<string> {
+  const result = new Set([rootId]);
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const parentId = queue.shift()!;
+    for (const folder of folders) {
+      if (folder.parentFolderId !== parentId || result.has(folder.id)) continue;
+      result.add(folder.id);
+      queue.push(folder.id);
+    }
+  }
+  return result;
+}
+
+async function assertWorkspaceMountAvailable(
+  snapshot: SpaceTreeSnapshot,
+  reference: import("./contracts.js").SpaceReference,
+  identify: CreateSpaceFeatureInput["workspaceMountIdentity"],
+): Promise<void> {
+  if (reference.kind !== "workspace_folder") return;
+  const identity = await workspaceMountIdentity(reference.path, identify);
+  for (const item of snapshot.referenceItems) {
+    if (item.reference.kind !== "workspace_folder") continue;
+    if (await workspaceMountIdentity(item.reference.path, identify) === identity) {
+      throw new SpaceFeatureError("space_workspace_mount_conflict", "This workspace folder is already linked to another Space");
+    }
+  }
+}
+
+async function workspaceMountIdentity(
+  value: string,
+  identify: CreateSpaceFeatureInput["workspaceMountIdentity"],
+): Promise<string> {
+  if (identify !== undefined) return await identify(value);
+  return value.trim().replaceAll("\\", "/").replace(/\/+$/u, "").toLocaleLowerCase("en-US");
 }
 
 function titleFor(value: string): string {

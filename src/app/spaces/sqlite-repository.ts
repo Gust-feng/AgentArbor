@@ -44,8 +44,6 @@ const MIGRATIONS = [{
   version: 2,
   sql: `
     ALTER TABLE spaces ADD COLUMN demo_dataset TEXT CHECK(demo_dataset IN ('learning-workspace'));
-    UPDATE spaces SET demo_dataset = 'learning-workspace'
-      WHERE title = '学习空间' AND demo_dataset IS NULL;
   `,
 }] as const;
 
@@ -94,24 +92,6 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
       }
     },
   };
-}
-
-/** Remove with the next release after the JSON-to-SQLite compatibility window closes. */
-export function importLegacySpaceSnapshot(database: SqliteRuntimeDatabase, snapshot: unknown): boolean {
-  const importKey = "v0.4-space-tree-json";
-  if (database.hasCompatibilityImport(importKey)) return false;
-  const existing = database.connection.prepare("SELECT COUNT(*) AS count FROM spaces").get() as { readonly count: number };
-  if (Number(existing.count) === 0) {
-    const value = validateSpaceTreeSnapshot(snapshot);
-    writeSnapshot(database, {
-      ...value,
-      spaces: value.spaces.map((space) => space.title === "学习空间"
-        ? { ...space, demoDataset: "learning-workspace" as const }
-        : space),
-    });
-  }
-  database.recordCompatibilityImport(importKey);
-  return Number(existing.count) === 0;
 }
 
 function writeSnapshot(database: SqliteRuntimeDatabase, value: SpaceTreeSnapshot): void {

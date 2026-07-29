@@ -17,7 +17,7 @@ export {
   type SpaceTreeSnapshot,
 } from "./contracts.js";
 export { createFileSystemSpaceRepository, validateSpaceTreeSnapshot } from "./file-system-repository.js";
-export { createSqliteSpaceRepository, importLegacySpaceSnapshot } from "./sqlite-repository.js";
+export { createSqliteSpaceRepository } from "./sqlite-repository.js";
 export { createSpaceFeature, type CreateSpaceFeatureInput } from "./space-feature.js";
 export { validateSpaceReference } from "./space-validation.js";
 export {

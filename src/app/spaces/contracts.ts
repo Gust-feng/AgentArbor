@@ -93,6 +93,7 @@ export type SpaceFeatureErrorCode =
   | "space_reference_not_found"
   | "space_parent_not_found"
   | "space_invalid_move"
+  | "space_workspace_mount_conflict"
   | "space_invalid_input"
   | "space_id_collision"
   | "space_snapshot_incompatible"
@@ -116,6 +117,8 @@ export type SpaceEvent =
   | { readonly type: "space.reference_added"; readonly item: SpaceReferenceItem }
   | { readonly type: "space.renamed"; readonly target: SpaceTarget }
   | { readonly type: "space.moved"; readonly target: SpaceMovableTarget; readonly destinationSpaceId: string; readonly destinationFolderId?: string }
+  /** Removes an internal organization subtree. External objects referenced by that subtree remain untouched. */
+  | { readonly type: "space.folder_removed"; readonly folderId: string }
   /** This only removes the SpaceTree reference; the referenced external object is untouched. */
   | { readonly type: "space.reference_removed"; readonly itemId: string };
 
@@ -135,6 +138,8 @@ export type SpaceFeature = {
       readonly destinationSpaceId: string;
       readonly destinationFolderId?: string;
     }): Promise<SpaceMovableTarget>;
+    /** Removes an internal folder subtree and its metadata edges without deleting external resources. */
+    removeFolder(folderId: string): Promise<void>;
     /** Removes only the SpaceTree entry; it must never delete the external resource. */
     removeReference(itemId: string): Promise<void>;
   };
@@ -142,6 +147,8 @@ export type SpaceFeature = {
     list(): Promise<readonly SpaceSummary[]>;
     getTree(spaceId: string): Promise<SpaceTree | undefined>;
     getReference(itemId: string): Promise<SpaceReferenceItem | undefined>;
+    /** True when the same physical workspace root is linked by another Space reference. */
+    hasWorkspaceMountConflict(itemId: string): Promise<boolean>;
   };
   readonly events: {
     subscribe(listener: (event: SpaceEvent) => void): () => void;

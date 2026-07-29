@@ -116,6 +116,9 @@ export function createPersonalKnowledgeFeature(options: {
             throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "Space references must be collected through managed asset capture.");
           }
           await repository.execute(validated);
+          if (validated.type === "knowledge.uncollect") {
+            await options.removeManagedAsset?.(validated.refId);
+          }
         });
       },
     },

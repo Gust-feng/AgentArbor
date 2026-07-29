@@ -125,6 +125,8 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       body: { type: "knowledge.uncollect", refId: knowledgeRefId },
     });
     assert.equal(uncollected.status, 200);
+    const removedAsset = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview`);
+    assert.equal(removedAsset.status, 404);
 
     await closePanelServer(server.httpServer, server.runtime);
     server = await start(directory);

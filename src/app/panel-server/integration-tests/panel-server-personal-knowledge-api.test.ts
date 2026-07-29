@@ -97,11 +97,52 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     assert.equal(snapshot.body.snapshot.notes[0].revision, 2);
     assert.equal(snapshot.body.snapshot.notes[0].title, "第一篇笔记");
     assert.deepEqual(snapshot.body.snapshot.pages, [{ refId: persistentReferenceId, kind: "space_reference", collectedAt: 3 }]);
+
+    const restartedSearch = await requestJson(
+      server.baseUrl,
+      `/api/personal-knowledge/search?q=${encodeURIComponent("更新")}&limit=10`,
+    );
+    assert.equal(restartedSearch.body.results[0].note.id, noteId);
+    const restartedSpaces = await requestJson(server.baseUrl, "/api/spaces");
+    assert.equal(restartedSpaces.body.spaces[0].id, space.body.space.id);
+
+    const deletedNote = await requestJson(server.baseUrl, `/api/personal-knowledge/notes/${encodeURIComponent(noteId)}?expectedRevision=2`, {
+      method: "DELETE",
+    });
+    assert.equal(deletedNote.status, 200);
+    const deletedReference = await requestJson(
+      server.baseUrl,
+      `/api/spaces/references/${encodeURIComponent(persistentReferenceId)}`,
+      { method: "DELETE" },
+    );
+    assert.equal(deletedReference.status, 200);
+
+    await closePanelServer(server.httpServer, server.runtime);
+    server = await start(directory);
+    const afterSecondRestart = await requestJson(server.baseUrl, "/api/personal-knowledge");
+    assert.deepEqual(afterSecondRestart.body.snapshot.notes, []);
+    assert.deepEqual(afterSecondRestart.body.snapshot.pages, []);
+    const emptySearch = await requestJson(
+      server.baseUrl,
+      `/api/personal-knowledge/search?q=${encodeURIComponent("更新")}&limit=10`,
+    );
+    assert.deepEqual(emptySearch.body.results, []);
+    const persistedTree = await requestJson(
+      server.baseUrl,
+      `/api/spaces/${encodeURIComponent(space.body.space.id as string)}`,
+    );
+    assert.equal(treeContainsItem(persistedTree.body.tree.entries, persistentReferenceId), false);
   } finally {
     await closePanelServer(server.httpServer, server.runtime).catch(() => undefined);
     await removeTemporaryTree(directory);
   }
 });
+
+function treeContainsItem(entries: readonly any[], itemId: string): boolean {
+  return entries.some((entry) => entry.kind === "reference"
+    ? entry.item.id === itemId
+    : treeContainsItem(entry.children, itemId));
+}
 
 async function start(
   directory: string,

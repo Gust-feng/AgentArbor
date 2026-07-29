@@ -376,20 +376,7 @@ export async function closePanelServer(
   const runtimeCleanup = (async () => {
     await cleanupPanelRuntimeOwnedProcesses(runtime);
     await waitForPanelRequestIdle(server, runtime);
-    await ordinaryDisposal;
-    // The connector stays subscribed until Ordinary has produced its final
-    // stable terminal facts; memory drain failures are shutdown diagnostics
-    // and never rewrite committed Ordinary terminal state.
-    await runtime.ordinaryPathMemoryConnector.release();
-    await runtime.pathMemoryFeature.release();
-    await runtime.experienceCandidateFeature.release();
-    await releaseWorkbenchStorage(runtime);
-    await runtime.releaseAgentSessionStorage();
-    if (runtime.toolOutputStore.close !== undefined) {
-      await runtime.toolOutputStore.close();
-    } else {
-      await runtime.toolOutputStore.clear();
-    }
+    await releasePanelRuntimeResources(runtime, ordinaryDisposal);
   })();
   // A forced timeout may return while a broken provider promise is still
   // pending. Own its eventual rejection so shutdown never creates an unhandled
@@ -423,40 +410,39 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
   runtime.isQuiescing = true;
   const cleanupResults = await Promise.allSettled([
     cleanupPanelRuntimeOwnedProcesses(runtime),
-    runtime.ordinaryAgentFeature.release(),
+    releasePanelRuntimeResources(runtime),
   ]);
   const cleanupErrors = cleanupResults.flatMap((result) =>
     result.status === "rejected" ? [result.reason] : []
   );
-  const memoryCleanup = await Promise.allSettled([
-    runtime.ordinaryPathMemoryConnector.release()
-      .then(() => runtime.pathMemoryFeature.release())
-      .then(() => runtime.experienceCandidateFeature.release()),
-  ]);
-  cleanupErrors.push(...memoryCleanup.flatMap((result) =>
-    result.status === "rejected" ? [result.reason] : []
-  ));
-  try {
-    await releaseWorkbenchStorage(runtime);
-  } catch (error) {
-    cleanupErrors.push(error);
-  }
-  try {
-    await runtime.releaseAgentSessionStorage();
-  } catch (error) {
-    cleanupErrors.push(error);
-  }
-  try {
-    if (runtime.toolOutputStore.close !== undefined) {
-      await runtime.toolOutputStore.close();
-    } else {
-      await runtime.toolOutputStore.clear();
-    }
-  } catch (error) {
-    cleanupErrors.push(error);
-  }
   if (cleanupErrors.length > 0) {
     throw new AggregateError(cleanupErrors, "Panel runtime cleanup after failed startup did not complete.");
+  }
+}
+
+/** Releases every resource owned by the Panel composition root, without server transport cleanup. */
+export async function releasePanelRuntimeResources(
+  runtime: PanelRuntime,
+  ordinaryDisposal: Promise<void> = runtime.ordinaryAgentFeature.release(),
+): Promise<void> {
+  runtime.isQuiescing = true;
+  const errors: unknown[] = [];
+  await captureCleanupError(errors, () => ordinaryDisposal);
+  // Keep the connector subscribed until Ordinary has produced its final stable facts.
+  await captureCleanupError(errors, () => runtime.ordinaryPathMemoryConnector.release());
+  await captureCleanupError(errors, () => runtime.pathMemoryFeature.release());
+  await captureCleanupError(errors, () => runtime.experienceCandidateFeature.release());
+  await captureCleanupError(errors, () => releaseWorkbenchStorage(runtime));
+  await captureCleanupError(errors, () => runtime.releaseAgentSessionStorage());
+  await captureCleanupError(errors, () => runtime.toolOutputStore.close?.() ?? runtime.toolOutputStore.clear());
+  if (errors.length > 0) throw new AggregateError(errors, "Panel runtime resource cleanup did not complete.");
+}
+
+async function captureCleanupError(errors: unknown[], operation: () => Promise<void>): Promise<void> {
+  try {
+    await operation();
+  } catch (error) {
+    errors.push(error);
   }
 }
 

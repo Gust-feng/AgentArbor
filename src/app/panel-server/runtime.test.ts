@@ -5,7 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort } from "../ordinary-agent/contracts.js";
 import { ordinaryAgentSessionRef, ordinaryRunBirth, ordinaryRunTurn } from "../ordinary-agent/test-support.js";
-import { createPanelRuntime } from "./runtime.js";
+import { releasePanelRuntimeResources } from "./request-handler.js";
+import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
 
 test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary capability discovery", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-capability-root-"));
@@ -28,8 +29,7 @@ test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary c
     assert.equal(ordinarySnapshot.toolCatalog.tools.find((tool) => tool.name === "AgentSpawn")?.catalogOnly, true);
 
   } finally {
-    await runtime?.ordinaryAgentFeature.release();
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    await cleanupRuntime(runtime, directory);
   }
 });
 
@@ -45,12 +45,7 @@ test("Panel capability snapshots freeze NoteWrite so the model can actually use 
     assert.equal(noteWrite?.scopes.includes("desktop-basic"), true);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("NoteWrite"), true);
   } finally {
-    await runtime?.ordinaryAgentFeature.release();
-    await runtime?.ordinaryPathMemoryConnector.release();
-    await runtime?.pathMemoryFeature.release();
-    await runtime?.releaseAgentSessionStorage();
-    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await cleanupRuntime(runtime, directory);
   }
 });
 
@@ -64,13 +59,7 @@ test("Panel capability snapshots freeze Space tools so an Ordinary Agent can org
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
     }
   } finally {
-    await runtime?.ordinaryAgentFeature.release();
-    await runtime?.ordinaryPathMemoryConnector.release();
-    await runtime?.pathMemoryFeature.release();
-    await runtime?.spaceFeature.release();
-    await runtime?.releaseAgentSessionStorage();
-    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await cleanupRuntime(runtime, directory);
   }
 });
 
@@ -84,16 +73,7 @@ test("Panel capability snapshots freeze Personal Knowledge tools for Ordinary ru
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
     }
   } finally {
-    await runtime?.ordinaryAgentFeature.release();
-    await runtime?.ordinaryPathMemoryConnector.release();
-    await runtime?.pathMemoryFeature.release();
-    await runtime?.experienceCandidateFeature.release();
-    await runtime?.personalKnowledgeFeature.release();
-    await runtime?.spaceFeature.release();
-    await runtime?.releaseAgentSessionStorage();
-    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
-    runtime?.workbenchDatabase.close();
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await cleanupRuntime(runtime, directory);
   }
 });
 
@@ -135,12 +115,7 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
     const files = await fs.readdir(path.join(directory, "runtime", "path-memory", "records"));
     assert.equal(files.filter((name) => name.endsWith(".json")).length, 1);
   } finally {
-    await runtime?.ordinaryAgentFeature.release();
-    await runtime?.ordinaryPathMemoryConnector.release();
-    await runtime?.pathMemoryFeature.release();
-    await runtime?.releaseAgentSessionStorage();
-    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    await cleanupRuntime(runtime, directory);
   }
 });
 
@@ -172,14 +147,14 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
     assert.match(otherBirth.instructions, /Reply in Chinese/u);
     assert.doesNotMatch(otherBirth.instructions, /pnpm build/u);
   } finally {
-    await runtime?.ordinaryAgentFeature.release();
-    await runtime?.ordinaryPathMemoryConnector.release();
-    await runtime?.pathMemoryFeature.release();
-    await runtime?.releaseAgentSessionStorage();
-    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await cleanupRuntime(runtime, directory);
   }
 });
+
+async function cleanupRuntime(runtime: PanelRuntime | undefined, directory: string): Promise<void> {
+  if (runtime !== undefined) await releasePanelRuntimeResources(runtime);
+  await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
 
 function completedExecution(answer: string): OrdinaryExecutionPort {
   return {

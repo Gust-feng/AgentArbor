@@ -74,6 +74,29 @@ test("Panel capability snapshots freeze Space tools so an Ordinary Agent can org
   }
 });
 
+test("Panel capability snapshots freeze Personal Knowledge tools for Ordinary runs", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-personal-knowledge-catalog-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory });
+    const snapshot = await runtime.capabilityCenter.snapshot();
+    for (const name of ["KnowledgeSearch", "KnowledgeRead", "KnowledgeCreateNote", "KnowledgeUpdateNote", "KnowledgeCollect"]) {
+      assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
+    }
+  } finally {
+    await runtime?.ordinaryAgentFeature.release();
+    await runtime?.ordinaryPathMemoryConnector.release();
+    await runtime?.pathMemoryFeature.release();
+    await runtime?.experienceCandidateFeature.release();
+    await runtime?.personalKnowledgeFeature.release();
+    await runtime?.spaceFeature.release();
+    await runtime?.releaseAgentSessionStorage();
+    if (runtime !== undefined && runtime.toolOutputStore.close !== undefined) await runtime.toolOutputStore.close();
+    runtime?.workbenchDatabase.close();
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test("Panel composition wires Ordinary terminal runs into durable PathMemory records", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-path-memory-wiring-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;

@@ -15,6 +15,8 @@ export type PanelServerOptions = {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
+  readonly workbenchRestorePicker?: () => Promise<string | undefined>;
+  readonly externalResourceOpener?: (target: PanelExternalResourceTarget) => Promise<void>;
   readonly additionalSkillRoots?: readonly SkillRootInput[];
   readonly skillRoots?: readonly SkillRootInput[];
   readonly additionalSubAgentRoots?: readonly SubAgentRootInput[];
@@ -30,6 +32,10 @@ export type PanelServerOptions = {
   /** Explicit test seam for deterministic provider-backed runtime tests. */
   readonly testOnlyAllowFakeModel?: boolean;
 };
+
+export type PanelExternalResourceTarget =
+  | { readonly kind: "path"; readonly value: string }
+  | { readonly kind: "url"; readonly value: string };
 
 export type PanelContextAttachmentSelection = {
   readonly kind: "file" | "project";

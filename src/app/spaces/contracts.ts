@@ -21,6 +21,7 @@ export type SpaceReference =
 export type Space = {
   readonly id: string;
   readonly title: string;
+  readonly demoDataset?: "learning-workspace";
   readonly createdAt: string;
   readonly updatedAt: string;
 };
@@ -140,6 +141,7 @@ export type SpaceFeature = {
   readonly queries: {
     list(): Promise<readonly SpaceSummary[]>;
     getTree(spaceId: string): Promise<SpaceTree | undefined>;
+    getReference(itemId: string): Promise<SpaceReferenceItem | undefined>;
   };
   readonly events: {
     subscribe(listener: (event: SpaceEvent) => void): () => void;

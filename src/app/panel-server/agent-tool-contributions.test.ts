@@ -35,3 +35,24 @@ test("Host contributes NoteWrite to every desktop-basic Agent run when notes are
     enabledByDefault: true,
   });
 });
+
+test("Host contributes Personal Knowledge tools without owning their feature state", () => {
+  const registrations: string[] = [];
+  const contributions = createHostAgentToolContributions({
+    runtime: { constraints: [] },
+    resources: { aiEnvironment: {}, workspaceRoot: "/workspace" } as never,
+    personalKnowledge: { commands: {}, queries: {} } as never,
+  });
+
+  for (const contribution of contributions) {
+    contribution((entry) => registrations.push(entry.executor.definition.name));
+  }
+
+  assert.deepEqual(registrations.filter((name) => name.startsWith("Knowledge")), [
+    "KnowledgeSearch",
+    "KnowledgeRead",
+    "KnowledgeCreateNote",
+    "KnowledgeUpdateNote",
+    "KnowledgeCollect",
+  ]);
+});

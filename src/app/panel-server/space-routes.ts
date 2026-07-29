@@ -103,6 +103,25 @@ export async function handlePanelSpaceRoute(
   const removeReference = /^\/api\/spaces\/references\/([^/]+)$/u.exec(url.pathname);
   if (removeReference !== null && request.method === "DELETE") {
     await feature.commands.removeReference(decode(removeReference[1]));
+    await runtime.flushSpaceKnowledgeSync();
+    writeJson(response, 200, { ok: true });
+    return true;
+  }
+
+  const openReference = /^\/api\/spaces\/references\/([^/]+)\/open$/u.exec(url.pathname);
+  if (openReference !== null && request.method === "POST") {
+    const item = await feature.queries.getReference(decode(openReference[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    if (runtime.externalResourceOpener === undefined) {
+      throw new PanelHttpError(501, "external_resource_open_unavailable", "当前运行方式不支持打开外部资源。");
+    }
+    if (item.reference.kind === "local_file" || item.reference.kind === "workspace_folder") {
+      await runtime.externalResourceOpener({ kind: "path", value: item.reference.path });
+    } else if (item.reference.kind === "web_page") {
+      await runtime.externalResourceOpener({ kind: "url", value: item.reference.url });
+    } else {
+      throw new PanelHttpError(409, "space_reference_not_openable", "这个引用需要由它的来源功能打开。");
+    }
     writeJson(response, 200, { ok: true });
     return true;
   }

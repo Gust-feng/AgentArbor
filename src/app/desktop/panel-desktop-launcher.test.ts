@@ -348,15 +348,23 @@ test("panel desktop session shares an in-flight server close across quit signals
   assert.equal(calls.closes, 1);
 });
 
-test("panel desktop session injects workspace picker only outside smoke mode", async () => {
-  const calls: Array<{ readonly hasPicker: boolean }> = [];
+test("panel desktop session injects host pickers only outside smoke mode", async () => {
+  const calls: Array<{ readonly hasWorkspacePicker: boolean; readonly hasRestorePicker: boolean }> = [];
   let pickerCalls = 0;
+  let restorePickerCalls = 0;
   const dependencies: PanelDesktopDependencies = {
     startPanelServer: async (options) => {
-      calls.push({ hasPicker: options.workspaceDirectoryPicker !== undefined });
+      calls.push({
+        hasWorkspacePicker: options.workspaceDirectoryPicker !== undefined,
+        hasRestorePicker: options.workbenchRestorePicker !== undefined,
+      });
       if (options.workspaceDirectoryPicker !== undefined) {
         const selected = await options.workspaceDirectoryPicker();
         assert.equal(selected, "C:/picked-workspace");
+      }
+      if (options.workbenchRestorePicker !== undefined) {
+        const selected = await options.workbenchRestorePicker();
+        assert.equal(selected, "C:/backup/workbench.sqlite3");
       }
       return {
         url: "http://127.0.0.1:54326/",
@@ -367,6 +375,10 @@ test("panel desktop session injects workspace picker only outside smoke mode", a
     selectWorkspaceDirectory: async () => {
       pickerCalls += 1;
       return "C:/picked-workspace";
+    },
+    selectWorkbenchRestore: async () => {
+      restorePickerCalls += 1;
+      return "C:/backup/workbench.sqlite3";
     },
     whenReady: Promise.resolve(),
     onBeforeQuit: () => undefined,
@@ -393,8 +405,12 @@ test("panel desktop session injects workspace picker only outside smoke mode", a
     dependencies
   );
 
-  assert.deepEqual(calls, [{ hasPicker: false }, { hasPicker: true }]);
+  assert.deepEqual(calls, [
+    { hasWorkspacePicker: false, hasRestorePicker: false },
+    { hasWorkspacePicker: true, hasRestorePicker: true },
+  ]);
   assert.equal(pickerCalls, 1);
+  assert.equal(restorePickerCalls, 1);
 });
 
 test("panel desktop session keeps ready-to-show and load fallback display idempotent", async () => {

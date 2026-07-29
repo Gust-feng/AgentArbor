@@ -7,7 +7,7 @@ import {
   type StartupThemeSnapshot,
 } from "./panel-startup-theme.js";
 import type { PanelLaunchArgs } from "../panel-server/panel-launch-args.js";
-import type { PanelContextAttachmentSelection, PanelServerOptions, StartedPanelServer } from "../panel-server.js";
+import type { PanelContextAttachmentSelection, PanelExternalResourceTarget, PanelServerOptions, StartedPanelServer } from "../panel-server.js";
 
 export type PanelDesktopWindowKind = "startup" | "main";
 
@@ -61,6 +61,8 @@ export type PanelDesktopDependencies = {
   readonly appUpdateService?: PanelServerOptions["appUpdateService"];
   readonly selectWorkspaceDirectory?: () => Promise<string | undefined>;
   readonly selectContextAttachment?: () => Promise<PanelContextAttachmentSelection | undefined>;
+  readonly selectWorkbenchRestore?: () => Promise<string | undefined>;
+  readonly openExternalResource?: (target: PanelExternalResourceTarget) => Promise<void>;
   readonly whenReady: Promise<void>;
   readonly onWindowAllClosed: (handler: () => void) => void;
   readonly onBeforeQuit: (handler: () => Promise<void>) => void;
@@ -78,6 +80,8 @@ export async function startPanelDesktopSession(
     configDirectory: args.configDirectory,
     workspaceDirectoryPicker: args.smoke ? undefined : dependencies.selectWorkspaceDirectory,
     contextAttachmentPicker: args.smoke ? undefined : dependencies.selectContextAttachment,
+    workbenchRestorePicker: args.smoke ? undefined : dependencies.selectWorkbenchRestore,
+    externalResourceOpener: args.smoke ? undefined : dependencies.openExternalResource,
     appUpdateService: args.smoke || args.windowSmoke || args.devUrl !== undefined ? undefined : dependencies.appUpdateService,
   });
   const panelUrl = args.devUrl ?? server.url;

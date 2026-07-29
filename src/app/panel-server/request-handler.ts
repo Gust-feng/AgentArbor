@@ -39,7 +39,11 @@ import {
   handlePanelExperienceCandidateRoute,
 } from "./experience-candidate-routes.js";
 import { handlePanelSpaceRoute, spaceFeatureHttpError } from "./space-routes.js";
+import { PersonalKnowledgeError } from "../personal-knowledge/index.js";
+import { handlePanelPersonalKnowledgeRoute, personalKnowledgeHttpError } from "./personal-knowledge-routes.js";
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
+import { handlePanelWorkbenchDataRoute, workbenchDataHttpError } from "./workbench-data-routes.js";
+import { WorkbenchDataMaintenanceError } from "./workbench-data-maintenance.js";
 import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
 import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
 import { acquirePanelRuntimeDirectoryLease } from "./runtime-directory-lease.js";
@@ -155,6 +159,14 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         writePanelError(response, spaceFeatureHttpError(error));
         return;
       }
+      if (error instanceof PersonalKnowledgeError) {
+        writePanelError(response, personalKnowledgeHttpError(error));
+        return;
+      }
+      if (error instanceof WorkbenchDataMaintenanceError) {
+        writePanelError(response, workbenchDataHttpError(error));
+        return;
+      }
       logUnhandledPanelRequestError(request, error);
       writePanelError(response, new PanelHttpError(500, "panel_internal_error", "面板请求失败。"));
     }).finally(() => {
@@ -268,6 +280,14 @@ async function handlePanelRequest(
     return;
   }
 
+  if (await handlePanelPersonalKnowledgeRoute(runtime, request, response, url)) {
+    return;
+  }
+
+  if (await handlePanelWorkbenchDataRoute(runtime, request, response, url)) {
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/skills") {
     writeJson(response, 200, {
       ok: true,
@@ -363,7 +383,7 @@ export async function closePanelServer(
     await runtime.ordinaryPathMemoryConnector.release();
     await runtime.pathMemoryFeature.release();
     await runtime.experienceCandidateFeature.release();
-    await runtime.spaceFeature.release();
+    await releaseWorkbenchStorage(runtime);
     await runtime.releaseAgentSessionStorage();
     if (runtime.toolOutputStore.close !== undefined) {
       await runtime.toolOutputStore.close();
@@ -417,7 +437,7 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
     result.status === "rejected" ? [result.reason] : []
   ));
   try {
-    await runtime.spaceFeature.release();
+    await releaseWorkbenchStorage(runtime);
   } catch (error) {
     cleanupErrors.push(error);
   }
@@ -438,6 +458,26 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
   if (cleanupErrors.length > 0) {
     throw new AggregateError(cleanupErrors, "Panel runtime cleanup after failed startup did not complete.");
   }
+}
+
+async function releaseWorkbenchStorage(runtime: PanelRuntime): Promise<void> {
+  const errors: unknown[] = [];
+  try {
+    await runtime.flushSpaceKnowledgeSync();
+  } catch (error) {
+    errors.push(error);
+  }
+  const results = await Promise.allSettled([
+    runtime.personalKnowledgeFeature.release(),
+    runtime.spaceFeature.release(),
+  ]);
+  errors.push(...results.flatMap((result) => result.status === "rejected" ? [result.reason] : []));
+  try {
+    runtime.workbenchDatabase.close();
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length > 0) throw new AggregateError(errors, "Workbench storage cleanup did not complete.");
 }
 
 function ordinaryFeatureHttpError(error: OrdinaryFeatureError): PanelHttpError {

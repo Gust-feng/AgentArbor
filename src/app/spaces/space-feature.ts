@@ -161,6 +161,10 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         assertUsable("read a space");
         return track(input.repository.read().then((snapshot) => treeFor(snapshot, spaceId)));
       },
+      getReference(itemId) {
+        assertUsable("read a space reference");
+        return track(input.repository.read().then((snapshot) => snapshot.referenceItems.find((item) => item.id === itemId)));
+      },
     },
     events: {
       subscribe(listener) {

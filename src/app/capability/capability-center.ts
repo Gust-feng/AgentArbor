@@ -52,6 +52,7 @@ import { registerSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import { createNoteWriteTool, type AgentNotesFeature } from "../agent-notes/index.js";
 import { createSpaceTools, type SpaceFeature } from "../spaces/index.js";
+import { createPersonalKnowledgeTools, type PersonalKnowledgeFeature } from "../personal-knowledge/index.js";
 import { createMcpToolRegistryContribution } from "../mcp/mcp-tool-contribution.js";
 import { toolCatalogContractHash } from "./tool-definition-contract.js";
 
@@ -77,6 +78,8 @@ export type CapabilityCenterOptions = {
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
   /** Reference-only content organization available to the model through Space tools. */
   readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
+  /** Persisted personal knowledge definitions included in the frozen run catalog. */
+  readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
   readonly resolveModelCapabilities?: typeof resolveModelCapabilities;
 };
 
@@ -230,6 +233,7 @@ export class CapabilityCenter {
     });
     const agentNotes = this.options.agentNotes;
     const spaces = this.options.spaces;
+    const personalKnowledge = this.options.personalKnowledge;
     const hostContributions: AgentToolRegistryContribution[] = [
       createResearchToolRegistryContribution({
         env,
@@ -248,6 +252,11 @@ export class CapabilityCenter {
       }) as AgentToolRegistryContribution]),
       ...(spaces === undefined ? [] : [((register) => {
         for (const executor of createSpaceTools({ spaces })) {
+          register({ executor, scopes: ["desktop-basic"], enabledByDefault: true });
+        }
+      }) as AgentToolRegistryContribution]),
+      ...(personalKnowledge === undefined ? [] : [((register) => {
+        for (const executor of createPersonalKnowledgeTools({ knowledge: personalKnowledge })) {
           register({ executor, scopes: ["desktop-basic"], enabledByDefault: true });
         }
       }) as AgentToolRegistryContribution]),

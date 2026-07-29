@@ -4,6 +4,7 @@ import {
   dialog,
   ipcMain,
   screen,
+  shell,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
   type OpenDialogOptions,
@@ -201,6 +202,8 @@ async function main(): Promise<void> {
       appUpdateService,
       selectWorkspaceDirectory: selectWorkspaceDirectory,
       selectContextAttachment: selectContextAttachment,
+      selectWorkbenchRestore: selectWorkbenchRestore,
+      openExternalResource: openExternalResource,
       whenReady: app.whenReady(),
       onWindowAllClosed: (handler) => {
         app.on("window-all-closed", () => {
@@ -327,6 +330,29 @@ async function selectContextAttachment(): Promise<{ readonly kind: "file" | "pro
     kind: selectedStat?.isDirectory() === true ? "project" : "file",
     path: selectedPath,
   };
+}
+
+async function selectWorkbenchRestore(): Promise<string | undefined> {
+  await app.whenReady();
+  const window = currentPanelDialogWindow();
+  const options: OpenDialogOptions = {
+    title: "选择 Workbench 数据备份",
+    properties: ["openFile"],
+    filters: [{ name: "SQLite 数据库", extensions: ["sqlite3", "sqlite", "db"] }],
+  };
+  const result = window === undefined
+    ? await dialog.showOpenDialog(options)
+    : await dialog.showOpenDialog(window, options);
+  return result.canceled ? undefined : result.filePaths[0];
+}
+
+async function openExternalResource(target: { readonly kind: "path" | "url"; readonly value: string }): Promise<void> {
+  if (target.kind === "url") {
+    await shell.openExternal(target.value);
+    return;
+  }
+  const error = await shell.openPath(target.value);
+  if (error.length > 0) throw new Error(error);
 }
 
 function currentPanelDialogWindow(): BrowserWindow | undefined {

@@ -5,6 +5,7 @@ export {
 
 export type {
   PanelContextAttachmentSelection,
+  PanelExternalResourceTarget,
   PanelModelCatalogFetch,
   PanelProviderFetch,
   PanelServerOptions,

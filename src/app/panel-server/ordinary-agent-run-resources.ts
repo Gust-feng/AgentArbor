@@ -40,6 +40,7 @@ import { OrdinaryToolMetricsCollector } from "../ordinary-agent/tool-runtime-met
 import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
 import type { AgentNotesFeature } from "../agent-notes/index.js";
 import type { SpaceFeature } from "../spaces/index.js";
+import type { PersonalKnowledgeFeature } from "../personal-knowledge/index.js";
 import {
   createSubAgentAgentToolCatalogContribution,
   createSubAgentAgentTools,
@@ -87,6 +88,8 @@ export type CreateOrdinaryAgentRunResourceAcquirerInput = {
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
   /** Feature-owned reference tree exposed through ordinary Agent tools. */
   readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
+  /** Feature-owned personal knowledge exposed only through its Agent tools. */
+  readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
   readonly resolveSubAgentRoots: (workspaceRoot: string) => readonly SubAgentRootInput[];
 };
 
@@ -196,6 +199,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
               providerFetch: options.host.providerFetch,
               agentNotes: options.agentNotes,
               spaces: options.spaces,
+              personalKnowledge: options.personalKnowledge,
             }),
             createSkillToolRegistryContribution(skillContexts),
           ],

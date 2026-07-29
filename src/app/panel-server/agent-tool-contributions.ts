@@ -1,6 +1,7 @@
 import { createResearchToolRegistryContribution } from "../research/research-tool-contribution.js";
 import { createNoteWriteTool, type AgentNotesFeature } from "../agent-notes/index.js";
 import { createSpaceTools, type SpaceFeature } from "../spaces/index.js";
+import { createPersonalKnowledgeTools, type PersonalKnowledgeFeature } from "../personal-knowledge/index.js";
 import type {
   AgentToolProviderFetch,
   AgentToolRegistryContribution,
@@ -17,6 +18,8 @@ export function createHostAgentToolContributions(input: {
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
   /** SpaceFeature owns reference organization; ToolCenter only executes its commands. */
   readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
+  /** PersonalKnowledge owns persisted user notes and Brain references. */
+  readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
 }): readonly AgentToolRegistryContribution[] {
   const contributions: AgentToolRegistryContribution[] = [createResearchToolRegistryContribution({
     constraints: input.runtime.constraints,
@@ -41,6 +44,14 @@ export function createHostAgentToolContributions(input: {
     const spaces = input.spaces;
     contributions.push((register) => {
       for (const executor of createSpaceTools({ spaces })) {
+        register({ executor, scopes: ["desktop-basic"], enabledByDefault: true });
+      }
+    });
+  }
+  if (input.personalKnowledge !== undefined) {
+    const personalKnowledge = input.personalKnowledge;
+    contributions.push((register) => {
+      for (const executor of createPersonalKnowledgeTools({ knowledge: personalKnowledge })) {
         register({ executor, scopes: ["desktop-basic"], enabledByDefault: true });
       }
     });

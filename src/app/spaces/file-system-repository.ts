@@ -10,6 +10,7 @@ import { spaceReferenceSchema } from "./space-validation.js";
 const spaceSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
+  demoDataset: z.literal("learning-workspace").optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 }).strict();

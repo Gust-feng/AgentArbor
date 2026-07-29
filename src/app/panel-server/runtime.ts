@@ -8,6 +8,7 @@ import {
 import {
   FileSystemToolOutputStore,
   resolveAgentArborRuntimePaths,
+  SqliteRuntimeDatabase,
   type AgentArborRuntimePaths,
 } from "../../adapters/runtime-storage/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
@@ -59,10 +60,21 @@ import {
   type AgentNotesFeature,
 } from "../agent-notes/index.js";
 import {
-  createFileSystemSpaceRepository,
+  createSqliteSpaceRepository,
   createSpaceFeature,
   type SpaceFeature,
+  type SpaceTreeEntry,
 } from "../spaces/index.js";
+import {
+  createPersonalKnowledgeFeature,
+  createSqlitePersonalKnowledgeRepository,
+  type PersonalKnowledgeFeature,
+} from "../personal-knowledge/index.js";
+import {
+  applyPendingWorkbenchRestore,
+  createWorkbenchDataMaintenance,
+  type WorkbenchDataMaintenance,
+} from "./workbench-data-maintenance.js";
 import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
@@ -80,6 +92,7 @@ import type { ToolOutputStore } from "../tool-center/tool-output-store.js";
 import type {
   PanelContextAttachmentMediaEntry,
   PanelContextAttachmentSelection,
+  PanelExternalResourceTarget,
   PanelModelCatalogFetch,
   PanelProviderFetch,
   PanelServerOptions,
@@ -90,6 +103,7 @@ import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-res
 import { resolveTriggeredSkillContexts } from "./skill-service.js";
 import type { PanelRunInput } from "./request-parsers.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
+import { importNextReleaseWorkbenchFiles } from "./compat/v-next-workbench-import.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -104,6 +118,7 @@ export type PanelRuntime = {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
+  readonly externalResourceOpener?: (target: PanelExternalResourceTarget) => Promise<void>;
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
   readonly activeRequestJobs: Set<Promise<void>>;
   readonly runtimePaths?: AgentArborRuntimePaths;
@@ -116,11 +131,15 @@ export type PanelRuntime = {
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
   readonly agentNotesFeature: AgentNotesFeature;
   readonly spaceFeature: SpaceFeature;
+  readonly personalKnowledgeFeature: PersonalKnowledgeFeature;
+  readonly workbenchDataMaintenance: WorkbenchDataMaintenance;
   readonly pathMemoryFeature: PathMemoryFeature;
   readonly experienceCandidateFeature: ExperienceCandidateFeature;
   readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
+  readonly workbenchDatabase: SqliteRuntimeDatabase;
+  readonly flushSpaceKnowledgeSync: () => Promise<void>;
   readonly releaseAgentSessionStorage: () => Promise<void>;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
@@ -149,6 +168,8 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       modelCatalogFetch: options.modelCatalogFetch,
       workspaceDirectoryPicker: options.workspaceDirectoryPicker,
       contextAttachmentPicker: options.contextAttachmentPicker,
+      workbenchRestorePicker: options.workbenchRestorePicker,
+      externalResourceOpener: options.externalResourceOpener,
       skillRoots: resolveSkillRoots(options),
       resolveSkillRoots: (input) => resolveSkillRoots(options, input),
       subAgentRoots: resolveSubAgentRoots(options),
@@ -172,6 +193,8 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     modelCatalogFetch: options.modelCatalogFetch,
     workspaceDirectoryPicker: options.workspaceDirectoryPicker,
     contextAttachmentPicker: options.contextAttachmentPicker,
+    workbenchRestorePicker: options.workbenchRestorePicker,
+    externalResourceOpener: options.externalResourceOpener,
     skillRoots: resolveSkillRoots(options),
     resolveSkillRoots: (input) => resolveSkillRoots(options, input),
     subAgentRoots: resolveSubAgentRoots(options),
@@ -203,6 +226,8 @@ function assemblePanelRuntime(input: {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
+  readonly workbenchRestorePicker?: () => Promise<string | undefined>;
+  readonly externalResourceOpener?: (target: PanelExternalResourceTarget) => Promise<void>;
   readonly runtimePaths?: AgentArborRuntimePaths;
   readonly skillRoots: readonly SkillRootInput[];
   readonly resolveSkillRoots?: (input: PanelSkillRootsInput) => readonly SkillRootInput[];
@@ -221,12 +246,42 @@ function assemblePanelRuntime(input: {
   const fileMutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
   const toolOutputStore = new FileSystemToolOutputStore(resolveToolEvidenceRoot(input));
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
+  const runtimeHome = resolveRuntimeHome(input);
+  applyPendingWorkbenchRestore(runtimeHome);
+  const workbenchDatabase = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
+  const workbenchDataMaintenance = createWorkbenchDataMaintenance({
+    database: workbenchDatabase,
+    runtimeHome,
+    restorePicker: input.workbenchRestorePicker,
+  });
+  const spaceRepository = createSqliteSpaceRepository(workbenchDatabase);
+  importNextReleaseWorkbenchFiles({ database: workbenchDatabase, runtimeHome });
   const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
   const agentNotesFeature = createAgentNotesFeature({
     repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
   });
   const spaceFeature = createSpaceFeature({
-    repository: createFileSystemSpaceRepository(resolveSpaceRoot(input)),
+    repository: spaceRepository,
+  });
+  const personalKnowledgeFeature = createPersonalKnowledgeFeature({
+    repository: createSqlitePersonalKnowledgeRepository(workbenchDatabase),
+    spaceExists: async (spaceId) => await spaceFeature.queries.getTree(spaceId) !== undefined,
+    spaceReferenceExists: async (itemId) => {
+      for (const space of await spaceFeature.queries.list()) {
+        const tree = await spaceFeature.queries.getTree(space.id);
+        if (tree !== undefined && tree.entries.some((entry) => spaceTreeEntryContainsReference(entry, itemId))) return true;
+      }
+      return false;
+    },
+  });
+  let spaceKnowledgeSync = Promise.resolve();
+  spaceFeature.events.subscribe((event) => {
+    if (event.type !== "space.reference_removed") return;
+    const cleanup = () => personalKnowledgeFeature.commands.execute({
+      type: "knowledge.uncollect",
+      refId: event.itemId,
+    });
+    spaceKnowledgeSync = spaceKnowledgeSync.then(cleanup, cleanup);
   });
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
@@ -239,6 +294,7 @@ function assemblePanelRuntime(input: {
     toolOutputStore,
     agentNotes: agentNotesFeature,
     spaces: spaceFeature,
+    personalKnowledge: personalKnowledgeFeature,
   });
   const agentSessionEnvironment = new NodeExecutionEnv({ cwd: ordinaryRuntimeRoot });
   const agentSessionRepository = new FileSystemAgentSessionRepository({
@@ -279,6 +335,7 @@ function assemblePanelRuntime(input: {
     ),
     agentNotes: agentNotesFeature,
     spaces: spaceFeature,
+    personalKnowledge: personalKnowledgeFeature,
     resolveSubAgentRoots: (workspaceRoot) =>
       input.resolveSubAgentRoots?.({ workspaceDirectory: workspaceRoot }) ?? input.subAgentRoots,
   });
@@ -332,6 +389,7 @@ function assemblePanelRuntime(input: {
     modelCatalogFetch: input.modelCatalogFetch,
     workspaceDirectoryPicker: input.workspaceDirectoryPicker,
     contextAttachmentPicker: input.contextAttachmentPicker,
+    externalResourceOpener: input.externalResourceOpener,
     contextAttachmentMedia,
     activeRequestJobs,
     runtimePaths: input.runtimePaths,
@@ -345,14 +403,28 @@ function assemblePanelRuntime(input: {
     ordinaryAgentFeature,
     agentNotesFeature,
     spaceFeature,
+    personalKnowledgeFeature,
+    workbenchDataMaintenance,
     pathMemoryFeature,
     experienceCandidateFeature,
     ordinaryPathMemoryConnector,
     prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
+    workbenchDatabase,
+    flushSpaceKnowledgeSync: () => spaceKnowledgeSync,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
   return runtime;
+}
+
+function resolveRuntimeHome(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  const runtimeHome = input.runtimePaths?.runtimeHome ??
+    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
+  if (runtimeHome === undefined) throw new Error("Panel runtime requires a runtime directory.");
+  return runtimeHome;
 }
 
 function resolveOrdinaryRuntimeRoot(input: {
@@ -401,18 +473,6 @@ function resolveExperienceCandidateRoot(input: {
     throw new Error("ExperienceCandidate requires a runtime directory.");
   }
   return path.join(runtimeHome, "experience-candidates");
-}
-
-function resolveSpaceRoot(input: {
-  readonly runtimePaths?: AgentArborRuntimePaths;
-  readonly configDirectory?: string;
-}): string {
-  const runtimeHome = input.runtimePaths?.runtimeHome ??
-    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
-  if (runtimeHome === undefined) {
-    throw new Error("Space feature requires a runtime directory.");
-  }
-  return path.join(runtimeHome, "spaces");
 }
 
 function resolveToolEvidenceRoot(input: {
@@ -661,4 +721,10 @@ function resolveSkillStateStore(configDirectory: string | undefined): SkillState
 
 function resolvePanelRuntimePaths(configDirectory: string | undefined): AgentArborRuntimePaths | undefined {
   return configDirectory === undefined ? undefined : resolveAgentArborRuntimePaths(configDirectory);
+}
+
+function spaceTreeEntryContainsReference(entry: SpaceTreeEntry, itemId: string): boolean {
+  return entry.kind === "reference"
+    ? entry.item.id === itemId
+    : entry.children.some((child) => spaceTreeEntryContainsReference(child, itemId));
 }

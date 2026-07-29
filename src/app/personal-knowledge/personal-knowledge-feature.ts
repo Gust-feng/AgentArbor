@@ -79,7 +79,7 @@ export function createPersonalKnowledgeFeature(options: {
       async collectSpaceReference(input) {
         return await run(async () => {
           const referenceId = required(input.referenceId, "referenceId");
-          const relativePath = input.relativePath?.trim() ?? "";
+          const relativePath = normalizeSpaceReferenceRelativePath(input.relativePath);
           if (!await options.spaceReferenceExists(referenceId)) {
             throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Space reference ${referenceId} does not exist.`);
           }
@@ -159,6 +159,10 @@ export function createPersonalKnowledgeFeature(options: {
 }
 
 const SYSTEM_ACTOR = { kind: "system" } as const;
+
+function normalizeSpaceReferenceRelativePath(value: string | undefined): string {
+  return (value ?? "").trim().replaceAll("\\", "/").replace(/^\/+|\/+$/gu, "");
+}
 
 function required(value: string, field: string): string {
   const normalized = value.trim();

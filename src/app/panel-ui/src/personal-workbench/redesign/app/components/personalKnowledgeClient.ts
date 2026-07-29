@@ -325,11 +325,12 @@ export function executePersonalKnowledgeCommand(
 }
 
 export function spaceReferenceSourceKey(referenceId: string, relativePath = ''): string {
-  return `space-reference:${referenceId}:${relativePath.replaceAll('\\', '/')}`
+  return `space-reference:${referenceId}:${normalizeSpaceReferenceRelativePath(relativePath)}`
 }
 
 export function collectManagedSpaceReference(referenceId: string, relativePath = ''): void {
-  const sourceKey = spaceReferenceSourceKey(referenceId, relativePath)
+  const normalizedRelativePath = normalizeSpaceReferenceRelativePath(relativePath)
+  const sourceKey = spaceReferenceSourceKey(referenceId, normalizedRelativePath)
   if (!persistenceEnabled) {
     const page: BrainPage = { refId: sourceKey, kind: 'space_reference', collectedAt: Date.now() }
     snapshot = upsertKnowledgePage(snapshot, page)
@@ -343,14 +344,20 @@ export function collectManagedSpaceReference(referenceId: string, relativePath =
     async () => {
       const response = await requestJson<{ page: BrainPage }>('/api/personal-knowledge/collect-space-reference', {
         method: 'POST',
-        body: JSON.stringify({ referenceId, relativePath }),
+        body: JSON.stringify({ referenceId, relativePath: normalizedRelativePath }),
       })
       managedPage = response.page
-      await fetchSpaceReferencePreview(response.page.refId, '', undefined, '/api/personal-knowledge/assets')
+      // The asset is already durable. A cache warm-up must not turn a successful
+      // collection into a false failure when the preview endpoint is unavailable.
+      await fetchSpaceReferencePreview(response.page.refId, '', undefined, '/api/personal-knowledge/assets').catch(() => undefined)
     },
     undefined,
     sourceKey,
   )
+}
+
+function normalizeSpaceReferenceRelativePath(relativePath: string): string {
+  return relativePath.trim().replaceAll('\\', '/').replace(/^\/+|\/+$/gu, '')
 }
 
 function emit(): void { listeners.forEach((listener) => listener()) }

@@ -28,9 +28,10 @@ export function collect(refId: string, kind: PageKind): void {
   executePersonalKnowledgeCommand(optimistic, { type: 'knowledge.collect', page }, refId)
 }
 export function findCollectedSpaceReference(referenceId: string, relativePath = ''): BrainPage | undefined {
+  const sourceKey = spaceReferenceSourceKey(referenceId, relativePath)
   return getPages().find((page) => page.kind === 'space_reference'
     && page.asset?.sourceReferenceId === referenceId
-    && page.asset.sourceRelativePath === relativePath)
+    && spaceReferenceSourceKey(referenceId, page.asset.sourceRelativePath) === sourceKey)
 }
 export function collectSpaceReference(referenceId: string, relativePath = ''): void {
   const sourceKey = spaceReferenceSourceKey(referenceId, relativePath)

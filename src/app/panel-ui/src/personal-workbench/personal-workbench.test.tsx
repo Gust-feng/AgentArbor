@@ -4,7 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { ChatInputProps } from "../components/chat-empty";
 import { PersonalWorkbench, type PersonalWorkbenchProps } from "./personal-workbench";
-import { resetPersonalKnowledgeForTesting } from "./redesign/app/components/personalKnowledgeClient";
+import {
+  collectManagedSpaceReference,
+  getPersonalKnowledgeError,
+  getPersonalKnowledgeSnapshot,
+  resetPersonalKnowledgeForTesting,
+  setPersonalKnowledgePersistenceEnabled,
+} from "./redesign/app/components/personalKnowledgeClient";
 import { resolvePage } from "./redesign/app/components/brainStore";
 
 beforeEach(() => resetPersonalKnowledgeForTesting());
@@ -129,6 +135,36 @@ test("prewarms managed knowledge assets before the user opens their cards", asyn
   renderWorkbench({ personalKnowledgePersistenceEnabled: true });
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(assetPath, expect.anything()));
+});
+
+test("keeps a managed asset when its non-blocking preview warm-up fails", async () => {
+  const page = {
+    refId: "asset-preview-unavailable",
+    kind: "space_reference" as const,
+    collectedAt: 1,
+    asset: {
+      status: "managed" as const,
+      title: "Readme.md",
+      sourceLabel: "E:/workspace/Readme.md",
+      contentKind: "file" as const,
+      sourceReferenceId: "source-readme",
+      sourceRelativePath: "Readme.md",
+    },
+  };
+  const fetchMock = vi.fn(async (path: string | URL | Request) => {
+    if (String(path) === "/api/personal-knowledge/collect-space-reference") return jsonResponse({ page });
+    if (String(path) === "/api/personal-knowledge/assets/asset-preview-unavailable/preview") {
+      return { ok: false, status: 503, json: async () => ({ message: "预览暂不可用" }) } as Response;
+    }
+    return jsonResponse({ snapshot: emptyKnowledgeSnapshot() });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  setPersonalKnowledgePersistenceEnabled(true);
+
+  collectManagedSpaceReference("source-readme", "Readme.md");
+
+  await waitFor(() => expect(getPersonalKnowledgeSnapshot().pages).toEqual([page]));
+  expect(getPersonalKnowledgeError()).toBeUndefined();
 });
 
 test("projects a managed Markdown asset as a Markdown card with its real summary", async () => {

@@ -13,11 +13,15 @@ import { createSqlitePersonalKnowledgeRepository } from "./sqlite-repository.js"
 test("Personal Knowledge tools search, read, create, update and collect through the feature", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-tools-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
+  let captureCount = 0;
   const feature = createPersonalKnowledgeFeature({
     repository: createSqlitePersonalKnowledgeRepository(database),
     spaceExists: async (spaceId) => spaceId === "space-one",
     spaceReferenceExists: async (itemId) => itemId === "reference-one",
-    captureSpaceReference: async () => ({ status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "file", sourceReferenceId: "reference-one", sourceRelativePath: "" }),
+    captureSpaceReference: async ({ relativePath }) => {
+      captureCount += 1;
+      return { status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "file", sourceReferenceId: "reference-one", sourceRelativePath: relativePath };
+    },
     removeManagedAsset: async () => undefined,
   });
   t.after(async () => {
@@ -66,6 +70,11 @@ test("Personal Knowledge tools search, read, create, update and collect through 
   assert.equal((await feature.queries.snapshot()).pages[0]?.refId, created.note.id);
   const collectedReference = await execute(tools.get("KnowledgeCollect")!, { refId: "reference-one", kind: "space_reference" }) as { page: { asset?: { status: string } } };
   assert.equal(collectedReference.page.asset?.status, "managed");
+  const collectedChild = await feature.commands.collectSpaceReference({ referenceId: "reference-one", relativePath: "docs\\guide.md" });
+  const duplicateChild = await feature.commands.collectSpaceReference({ referenceId: "reference-one", relativePath: "docs/guide.md" });
+  assert.equal(collectedChild.refId, duplicateChild.refId);
+  assert.equal(collectedChild.asset?.sourceRelativePath, "docs/guide.md");
+  assert.equal(captureCount, 2);
   const revisions = await feature.queries.noteRevisions(created.note.id);
   assert.equal(revisions[0]?.actor.kind, "agent");
   assert.equal(revisions[0]?.actor.actorId, "ordinary-agent");

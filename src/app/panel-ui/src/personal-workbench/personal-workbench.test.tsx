@@ -40,8 +40,25 @@ test("projects real Space references instead of substituting the demo library", 
 
   await user.click(screen.getByRole("button", { name: "阅读资料" }));
 
-  expect(await screen.findByText("阅读摘要.md")).toBeTruthy();
+  expect((await screen.findAllByText("阅读摘要.md")).length).toBeGreaterThan(0);
   expect(screen.queryByText("PyTorch 入门笔记.pdf")).toBeNull();
+});
+
+test("projects knowledge demo cards without importing them into persisted Personal Knowledge", async () => {
+  const user = userEvent.setup();
+  const fetchMock = vi.fn(async (path: string | URL | Request) => {
+    if (String(path) === "/api/personal-knowledge") {
+      return jsonResponse({ snapshot: emptyKnowledgeSnapshot() });
+    }
+    return jsonResponse({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderWorkbench({ personalKnowledgePersistenceEnabled: true });
+
+  await user.click(screen.getByRole("button", { name: "知识库" }));
+
+  expect(await screen.findByText("Attention Is All You Need.pdf")).toBeTruthy();
+  expect(fetchMock.mock.calls.filter(([path]) => String(path) === "/api/personal-knowledge")).not.toHaveLength(0);
 });
 
 test("refreshes Personal Knowledge when entering a knowledge surface", async () => {
@@ -73,6 +90,95 @@ test("refreshes Personal Knowledge when entering a knowledge surface", async () 
   rendered.unmount();
 });
 
+test("prewarms managed knowledge assets before the user opens their cards", async () => {
+  const assetPath = "/api/personal-knowledge/assets/asset-one/preview";
+  const fetchMock = vi.fn(async (path: string | URL | Request) => {
+    if (String(path) === "/api/personal-knowledge") {
+      return jsonResponse({ snapshot: {
+        ...emptyKnowledgeSnapshot(),
+        pages: [{
+          refId: "asset-one",
+          kind: "space_reference",
+          collectedAt: 1,
+          asset: {
+            status: "managed",
+            title: "托管笔记.md",
+            sourceLabel: "C:/source/托管笔记.md",
+            contentKind: "file",
+            sourceReferenceId: "source-one",
+            sourceRelativePath: "托管笔记.md",
+          },
+        }],
+      } });
+    }
+    if (String(path) === assetPath) {
+      return jsonResponse({ preview: {
+        itemId: "asset-one",
+        title: "托管笔记.md",
+        sourceKind: "local_file",
+        source: "managed/asset-one/content",
+        status: "ready",
+        fingerprint: "managed-one",
+        content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
+      } });
+    }
+    return jsonResponse({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderWorkbench({ personalKnowledgePersistenceEnabled: true });
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(assetPath, expect.anything()));
+});
+
+test("projects a managed Markdown asset as a Markdown card with its real summary", async () => {
+  const user = userEvent.setup();
+  const assetPath = "/api/personal-knowledge/assets/asset-card-markdown/preview";
+  const sourcePath = "E:/从记事本开始/Readme.md";
+  const markdown = "# 我的知识库\n\n这一段真实 Markdown 正文应当显示在知识库卡片中。";
+  const fetchMock = vi.fn(async (path: string | URL | Request) => {
+    if (String(path) === "/api/personal-knowledge") {
+      return jsonResponse({ snapshot: {
+        ...emptyKnowledgeSnapshot(),
+        pages: [{
+          refId: "asset-card-markdown",
+          kind: "space_reference",
+          collectedAt: 1,
+          asset: {
+            status: "managed",
+            title: "Readme.md",
+            sourceLabel: sourcePath,
+            contentKind: "file",
+            sourceReferenceId: "source-readme",
+            sourceRelativePath: "Readme.md",
+          },
+        }],
+      } });
+    }
+    if (String(path) === assetPath) {
+      return jsonResponse({ preview: {
+        itemId: "asset-card-markdown",
+        title: "Readme.md",
+        sourceKind: "local_file",
+        source: "managed/asset-card-markdown/content",
+        status: "ready",
+        fingerprint: "managed-markdown",
+        content: { kind: "text", text: markdown, truncated: false, editable: false, language: "md" },
+      } });
+    }
+    return jsonResponse({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderWorkbench({ personalKnowledgePersistenceEnabled: true, spaces: [] });
+
+  await user.click(screen.getByRole("button", { name: "知识库" }));
+
+  expect(await screen.findByText("Readme.md")).toBeTruthy();
+  expect(screen.getByText("Markdown")).toBeTruthy();
+  expect(screen.getByText(/这一段真实 Markdown 正文应当显示在知识库卡片中/u)).toBeTruthy();
+  expect(screen.queryByText(sourcePath)).toBeNull();
+});
+
 test("switches the projected material tree with the active Space", async () => {
   const user = userEvent.setup();
   renderWorkbench({
@@ -83,7 +189,7 @@ test("switches the projected material tree with the active Space", async () => {
   });
 
   await user.click(screen.getByRole("button", { name: "空间甲" }));
-  expect(await screen.findByText("甲资料.md")).toBeTruthy();
+  expect((await screen.findAllByText("甲资料.md")).length).toBeGreaterThan(0);
   expect(screen.queryByText("乙资料.pdf")).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "空间乙" }));
@@ -176,16 +282,43 @@ test("keeps folder expansion isolated per Space when switching projections", asy
   });
 
   await user.click(screen.getByRole("button", { name: "记忆空间甲" }));
-  await user.click(within(await screen.findByRole("tree", { name: "记忆空间甲资料" })).getByText("甲文件夹"));
-  expect(screen.getByText("甲材料.md")).toBeTruthy();
+  const treeA = await screen.findByRole("tree", { name: "记忆空间甲资料" });
+  expect(within(treeA).getByText("甲材料.md")).toBeTruthy();
+  await user.click(within(treeA).getByText("甲文件夹"));
+  expect(within(treeA).queryByText("甲材料.md")).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "记忆空间乙" }));
-  await user.click(within(await screen.findByRole("tree", { name: "记忆空间乙资料" })).getByText("乙文件夹"));
-  expect(screen.getByText("乙材料.md")).toBeTruthy();
+  const treeB = await screen.findByRole("tree", { name: "记忆空间乙资料" });
+  expect(within(treeB).getByText("乙材料.md")).toBeTruthy();
+  await user.click(within(treeB).getByText("乙文件夹"));
+  expect(within(treeB).queryByText("乙材料.md")).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "记忆空间甲" }));
-  expect(await screen.findByText("甲材料.md")).toBeTruthy();
+  expect(within(await screen.findByRole("tree", { name: "记忆空间甲资料" })).queryByText("甲材料.md")).toBeNull();
   expect(screen.queryByText("乙材料.md")).toBeNull();
+});
+
+test("prefetches nested local folder entries and keeps folders out of the preview pane", async () => {
+  const user = userEvent.setup();
+  const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.endsWith("/preview")) return jsonResponse({ preview: directoryPreview("", [{ name: "docs", relativePath: "docs", kind: "directory" }]) });
+    if (url.includes("path=docs")) return jsonResponse({ preview: directoryPreview("docs", [{ name: "note.md", relativePath: "docs/note.md", kind: "file" }]) });
+    return jsonResponse({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderWorkbench({
+    spaces: [{ spaceId: "space-folder", title: "本地项目", items: [{ itemId: "folder-reference", title: "项目文件", kind: "workspace_folder" }] }],
+  });
+
+  await user.click(screen.getByRole("button", { name: "本地项目" }));
+  const tree = await screen.findByRole("tree", { name: "本地项目资料" });
+  await user.click(within(tree).getByText("项目文件"));
+  await user.click(await within(tree).findByText("docs"));
+
+  expect(await within(tree).findByText("note.md")).toBeTruthy();
+  expect(screen.queryByText("返回上一级")).toBeNull();
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("path=docs"), expect.anything());
 });
 
 test("routes real Space reference rename and removal through backend actions", async () => {
@@ -210,7 +343,8 @@ test("routes real Space reference rename and removal through backend actions", a
   expect(rename).toHaveBeenCalledWith({ kind: "reference", id: "reference-material" }, "阅读摘录.md");
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
-  await user.click(screen.getByRole("button", { name: "移除" }));
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  await user.click(screen.getByRole("button", { name: "取消链接" }));
   expect(removeReference).toHaveBeenCalledWith("reference-material");
 });
 
@@ -276,19 +410,27 @@ test("opens a real conversation directly from Search", async () => {
   expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
 });
 
-test("resolves a persisted Brain Space reference from the current Space projection", () => {
+test("resolves a managed Brain asset without consulting the current Space projection", () => {
   expect(resolvePage(
-    { refId: "reference-brain", kind: "space_reference", collectedAt: 1 },
-    [{
-      spaceId: "space-reading",
-      title: "阅读资料",
-      items: [{ itemId: "reference-brain", title: "研究资料.pdf", kind: "local_file", detail: "C:/资料/研究资料.pdf" }],
-    }],
+    {
+      refId: "reference-brain",
+      kind: "space_reference",
+      collectedAt: 1,
+      asset: {
+        status: "managed",
+        title: "研究资料.pdf",
+        sourceLabel: "C:/资料/研究资料.pdf",
+        contentKind: "file",
+        sourceReferenceId: "space-reference-one",
+        sourceRelativePath: "研究资料.pdf",
+      },
+    },
+    [],
   )).toMatchObject({
     refId: "reference-brain",
     kind: "space_reference",
     title: "研究资料.pdf",
-    spaceId: "space-reading",
+    materialKind: "pdf",
     detail: "C:/资料/研究资料.pdf",
     exists: true,
   });
@@ -311,88 +453,76 @@ test("uses file-specific SVG icons for Space materials", async () => {
 
 test("creates the first Space note directly without entering inline naming", async () => {
   const user = userEvent.setup();
-  window.localStorage.setItem("aa.notes", "[]");
+  renderWorkbench();
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click(await screen.findByRole("button", { name: "写下第一篇笔记" }));
 
-  try {
-    renderWorkbench();
-    await user.click(screen.getByRole("button", { name: "学习空间" }));
-    await user.click(await screen.findByRole("button", { name: "写下第一篇笔记" }));
-
-    const row = document.querySelector<HTMLElement>("[data-note-row]");
-    expect(row).not.toBeNull();
-    expect(within(row!).getByText("写下第一篇笔记")).toBeTruthy();
-    expect(within(row!).queryByRole("textbox")).toBeNull();
-    expect(screen.getByDisplayValue("写下第一篇笔记")).toBeTruthy();
-  } finally {
-    window.localStorage.removeItem("aa.notes");
-  }
+  const row = document.querySelector<HTMLElement>("[data-note-row]");
+  expect(row).not.toBeNull();
+  expect(within(row!).getByText("写下第一篇笔记")).toBeTruthy();
+  expect(within(row!).queryByRole("textbox")).toBeNull();
+  expect(screen.getByDisplayValue("写下第一篇笔记")).toBeTruthy();
 });
 
 test("requires later Space notes to name inline and defaults an empty name to untitled", async () => {
   const user = userEvent.setup();
-  window.localStorage.setItem("aa.notes", JSON.stringify([{
+  resetPersonalKnowledgeForTesting({ notes: [{
     id: "note-first",
+    spaceId: "space-study",
     title: "第一篇笔记",
     body: "",
+    revision: 1,
     createdAt: 1,
     updatedAt: 1,
-  }]));
+  }] });
+  renderWorkbench(undefined, false);
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click(await screen.findByRole("button", { name: "新建笔记" }));
 
-  try {
-    renderWorkbench();
-    await user.click(screen.getByRole("button", { name: "学习空间" }));
-    await user.click(await screen.findByRole("button", { name: "新建笔记" }));
+  const newRow = document.querySelector<HTMLElement>("[data-note-row]");
+  expect(newRow).not.toBeNull();
+  const namingInput = within(newRow!).getByRole("textbox");
+  expect(namingInput.getAttribute("placeholder")).toBeNull();
+  await user.click(namingInput);
+  await user.keyboard("{Escape}");
 
-    const newRow = document.querySelector<HTMLElement>("[data-note-row]");
-    expect(newRow).not.toBeNull();
-    const namingInput = within(newRow!).getByRole("textbox");
-    expect(namingInput.getAttribute("placeholder")).toBeNull();
-    await user.click(namingInput);
-    await user.keyboard("{Escape}");
-
-    expect(within(newRow!).getByText("无标题")).toBeTruthy();
-    expect(screen.getAllByText("第一篇笔记")).toHaveLength(1);
-  } finally {
-    window.localStorage.removeItem("aa.notes");
-  }
+  expect(within(newRow!).getByText("无标题")).toBeTruthy();
+  expect(screen.getAllByText("第一篇笔记")).toHaveLength(1);
 });
 
 test("creates a second Space note from the store order without moving the existing selection first", async () => {
   const user = userEvent.setup();
-  window.localStorage.setItem("aa.notes", JSON.stringify([{
+  resetPersonalKnowledgeForTesting({ notes: [{
     id: "note-first",
+    spaceId: "space-study",
     title: "第一篇笔记",
     body: "",
+    revision: 1,
     createdAt: 1,
     updatedAt: 1,
-  }]));
+  }] });
+  renderWorkbench(undefined, false);
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click(await screen.findByRole("button", { name: "新建笔记" }));
 
-  try {
-    renderWorkbench();
-    await user.click(screen.getByRole("button", { name: "学习空间" }));
-    await user.click(await screen.findByRole("button", { name: "新建笔记" }));
+  const newRow = document.querySelector<HTMLElement>("[data-note-row]");
+  expect(newRow).not.toBeNull();
+  expect(newRow?.className).not.toContain("transition-colors");
+  const namingInput = within(newRow!).getByRole("textbox");
+  expect(namingInput.getAttribute("placeholder")).toBeNull();
+  expect(screen.getAllByText("第一篇笔记")).toHaveLength(1);
 
-    const newRow = document.querySelector<HTMLElement>("[data-note-row]");
-    expect(newRow).not.toBeNull();
-    expect(newRow?.className).not.toContain("transition-colors");
-    const namingInput = within(newRow!).getByRole("textbox");
-    expect(namingInput.getAttribute("placeholder")).toBeNull();
-    expect(screen.getAllByText("第一篇笔记")).toHaveLength(1);
+  await user.type(namingInput, "第二篇笔记");
+  await user.keyboard("{Enter}");
 
-    await user.type(namingInput, "第二篇笔记");
-    await user.keyboard("{Enter}");
+  const rows = [...document.querySelectorAll<HTMLElement>("[data-note-row]")];
+  expect(rows.map((row) => row.textContent)).toEqual([
+    expect.stringContaining("第二篇笔记"),
+    expect.stringContaining("第一篇笔记"),
+  ]);
 
-    const rows = [...document.querySelectorAll<HTMLElement>("[data-note-row]")];
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining("第二篇笔记"),
-      expect.stringContaining("第一篇笔记"),
-    ]);
-
-    await user.click(screen.getByText("第一篇笔记"));
-    expect(screen.getByDisplayValue("第一篇笔记")).toBeTruthy();
-  } finally {
-    window.localStorage.removeItem("aa.notes");
-  }
+  await user.click(screen.getByText("第一篇笔记"));
+  expect(screen.getByDisplayValue("第一篇笔记")).toBeTruthy();
 });
 
 test("keeps a recovered running Ordinary run visible after startup", async () => {
@@ -503,7 +633,8 @@ test("exposes model, context usage, and reasoning controls in the redesign compo
 
   await user.click(screen.getByRole("button", { name: "新对话" }));
   expect(await screen.findByRole("progressbar", { name: "上下文已用 85%" })).toBeTruthy();
-  await user.selectOptions(screen.getByRole("combobox", { name: "模型" }), "model-2");
+  await user.click(screen.getByRole("button", { name: "选择模型" }));
+  await user.click(screen.getByRole("option", { name: /Model 2/u }));
   await user.selectOptions(screen.getByRole("combobox", { name: "推理力度" }), "high");
 
   expect(onModelSelect).toHaveBeenCalledWith("model-2");
@@ -517,8 +648,8 @@ function ControlledWorkbench(props: { readonly onSubmit: () => void }) {
   })} />;
 }
 
-function renderWorkbench(overrides: Partial<PersonalWorkbenchProps> = {}) {
-  resetPersonalKnowledgeForTesting();
+function renderWorkbench(overrides: Partial<PersonalWorkbenchProps> = {}, reset = true) {
+  if (reset) resetPersonalKnowledgeForTesting();
   return render(<PersonalWorkbench {...baseProps(overrides)} />);
 }
 
@@ -570,8 +701,22 @@ function jsonResponse(body: unknown): Response {
   return {
     ok: true,
     status: 200,
+    json: async () => body,
     text: async () => JSON.stringify(body),
   } as Response;
+}
+
+function directoryPreview(relativePath: string, entries: readonly { name: string; relativePath: string; kind: "file" | "directory" | "other" }[]) {
+  return {
+    itemId: "folder-reference",
+    title: "项目文件",
+    sourceKind: "workspace_folder",
+    source: `C:/project/${relativePath}`,
+    status: "ready",
+    fingerprint: "1:0",
+    modifiedAt: 1,
+    content: { kind: "directory", relativePath, entries, truncated: false },
+  };
 }
 
 function emptyKnowledgeSnapshot() {

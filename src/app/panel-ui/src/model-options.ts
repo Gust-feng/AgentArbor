@@ -8,7 +8,8 @@ type ConfigModelProfileWithId = ConfigModelProfile & { readonly profileId: strin
 
 export function modelOptionsFromConfig(
   config: ConfigResponse | undefined,
-  catalogs: Readonly<Record<string, ModelProviderModelCatalog>>
+  catalogs: Readonly<Record<string, ModelProviderModelCatalog>>,
+  options: { readonly includeCapabilityProfileModels?: boolean } = {}
 ): readonly ChatModelOption[] {
   const order = config?.modelProviderOrder ?? [];
   const capabilityLookup = modelCapabilityLookup(config);
@@ -43,7 +44,12 @@ export function modelOptionsFromConfig(
         model: profile.model,
       });
       const label = profile.label ?? catalog?.label ?? profile.profileId;
-      return modelCatalogItemsWithConfiguredModel(catalog?.models ?? [], profile.model, label)
+      return modelCatalogItemsForProfile(
+        catalog?.models ?? [],
+        profile.model,
+        label,
+        capabilityProfileModelIds(config, profile.profileId, options.includeCapabilityProfileModels === true)
+      )
         .filter((model) => model.id.trim().length > 0)
         .map((model) => ({
           id: modelOptionId(profile.profileId, model.id),
@@ -137,23 +143,46 @@ function modelCapabilityLookup(config: ConfigResponse | undefined): ReadonlyMap<
   return lookup;
 }
 
-function modelCatalogItemsWithConfiguredModel(
+function modelCatalogItemsForProfile(
   models: readonly ModelProviderModelCatalog["models"][number][],
   configuredModel: string | undefined,
-  owner: string
+  owner: string,
+  capabilityProfileModels: readonly string[]
 ): readonly ModelProviderModelCatalog["models"][number][] {
+  const seen = new Set(models.map((model) => model.id));
   const modelId = configuredModel?.trim();
-  if (modelId === undefined || modelId.length === 0 || models.some((model) => model.id === modelId)) {
-    return models;
-  }
-  return [
-    {
+  const leading: ModelProviderModelCatalog["models"][number][] = [];
+  if (modelId !== undefined && modelId.length > 0 && !seen.has(modelId)) {
+    seen.add(modelId);
+    leading.push({
       id: modelId,
       displayName: modelId,
       owner,
-    },
-    ...models,
-  ];
+    });
+  }
+  const trailing: ModelProviderModelCatalog["models"][number][] = [];
+  for (const capabilityModel of capabilityProfileModels) {
+    const id = capabilityModel.trim();
+    if (id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    trailing.push({
+      id,
+      displayName: id,
+      owner,
+    });
+  }
+  return [...leading, ...models, ...trailing];
+}
+
+function capabilityProfileModelIds(
+  config: ConfigResponse | undefined,
+  profileId: string,
+  includeCapabilityProfileModels: boolean
+): readonly string[] {
+  if (!includeCapabilityProfileModels) return [];
+  return (config?.modelCapabilityProfiles ?? [])
+    .filter((item) => item.profileId === profileId)
+    .map((item) => item.model);
 }
 
 function modelOptionId(profileId: string, modelId: string): string {

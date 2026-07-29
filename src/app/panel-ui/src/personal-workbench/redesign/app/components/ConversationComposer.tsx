@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, FileText, Send, X } from 'lucide-react'
 import type { ChatInputProps } from '../../../../components/chat-empty'
+import { ModelOptionPicker } from '../../../../components/model-option-picker'
 import { RADII, composerSurface } from './tokens'
 
 export function ConversationComposer({ input }: { readonly input: ChatInputProps }) {
@@ -118,33 +119,17 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
 }
 
 function ComposerModelSelect({ input }: { readonly input: ChatInputProps }) {
-  if (input.models.length === 0) {
-    return (
-      <button
-        type="button"
-        onClick={input.onOpenSettings}
-        className="shrink-0 rounded-md px-2 py-1 text-[11px] transition-colors hover:bg-black/5"
-        style={{ color: 'var(--aa-text-2)' }}
-      >
-        配置模型
-      </button>
-    )
-  }
   return (
-    <label className="relative min-w-0 max-w-36 shrink">
-      <span className="sr-only">模型</span>
-      <select
-        aria-label="模型"
-        value={input.selectedModelId}
-        onChange={(event) => void input.onModelSelect(event.target.value)}
-        className="h-6 w-full appearance-none truncate rounded-md bg-transparent py-0 pl-2 pr-6 text-[11px] outline-none transition-colors hover:bg-black/5 focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
-        style={{ color: 'var(--aa-text-2)' }}
-      >
-        <option value="" disabled>选择模型</option>
-        {input.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-      </select>
-      <ChevronDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--aa-text-3)' }} aria-hidden="true" />
-    </label>
+    <ModelOptionPicker
+      options={input.models}
+      selectedId={input.selectedModelId}
+      onSelect={input.onModelSelect}
+      emptyLabel="配置模型"
+      onEmptyAction={input.onOpenSettings}
+      ariaLabel="选择模型"
+      variant="composer"
+      placement="top"
+    />
   )
 }
 

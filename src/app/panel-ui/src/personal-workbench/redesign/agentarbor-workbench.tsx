@@ -1,19 +1,24 @@
 import { AlertCircle, Check, FileSearch, RotateCcw, Wrench } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
 import type { ChatInputProps } from "../../components/chat-empty";
-import type { WorkbenchSettingsDialogProps } from "../../components/workbench-settings-dialog";
+import { WorkbenchSettingsDialog, type WorkbenchSettingsDialogProps } from "../../components/workbench-settings-dialog";
 import type { AppUpdateInfo } from "../../contracts/app-update";
 import type { Conversation, ConversationSummary } from "../../contracts/conversation";
 import type { PendingConfirmation, TranscriptNode } from "../../contracts/run";
 import type { ConfirmationProjection } from "../../components/transcript-timeline";
 import type { PersonalSpaceActions, PersonalSpaceProjection } from "../space";
-import type { LiveConversationState } from "./app/components/ConversationPage";
+import { ConversationPage, type LiveConversationState } from "./app/components/ConversationPage";
+import { BrainPage } from "./app/components/BrainPage";
 import { ConversationComposer } from "./app/components/ConversationComposer";
 import { DeferredSurfaceBoundary } from "./app/components/DeferredSurfaceBoundary";
 import { FocusMode } from "./app/components/FocusMode";
+import { HomePage } from "./app/components/HomePage";
+import { RedesignTranscript } from "./app/components/RedesignTranscript";
+import { SearchPage } from "./app/components/SearchPage";
 import { type View, Sidebar } from "./app/components/Sidebar";
+import { SpacePage } from "./app/components/SpacePage";
 import { TopBar } from "./app/components/TopBar";
 import { resolveById } from "./app/components/brainStore";
 import { applyPrefs, loadPrefs } from "./app/components/readingPrefs";
@@ -27,35 +32,6 @@ import {
   setActivePersonalKnowledgeSpace,
   setPersonalKnowledgePersistenceEnabled,
 } from "./app/components/personalKnowledgeClient";
-
-const LazySpacePage = lazy(async () => {
-  const module = await import("./app/components/SpacePage");
-  return { default: module.SpacePage };
-});
-const LazyHomePage = lazy(async () => {
-  const module = await import("./app/components/HomePage");
-  return { default: module.HomePage };
-});
-const LazyConversationPage = lazy(async () => {
-  const module = await import("./app/components/ConversationPage");
-  return { default: module.ConversationPage };
-});
-const LazyRedesignTranscript = lazy(async () => {
-  const module = await import("./app/components/RedesignTranscript");
-  return { default: module.RedesignTranscript };
-});
-const LazyBrainPage = lazy(async () => {
-  const module = await import("./app/components/BrainPage");
-  return { default: module.BrainPage };
-});
-const LazySearchPage = lazy(async () => {
-  const module = await import("./app/components/SearchPage");
-  return { default: module.SearchPage };
-});
-const LazyWorkbenchSettingsDialog = lazy(async () => {
-  const module = await import("../../components/workbench-settings-dialog");
-  return { default: module.WorkbenchSettingsDialog };
-});
 
 export type RedesignWorkbenchProps = {
   readonly personalKnowledgePersistenceEnabled?: boolean;
@@ -260,7 +236,6 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
               isKnowledgeView(view) && (knowledgeLoadState.status === "loading" || knowledgeLoadState.status === "retrying")
             ) ? <PrototypeRuntimeLoading /> : (
               <DeferredSurfaceBoundary resetKey={view} label="这个视图暂时无法打开">
-                <Suspense fallback={<DeferredViewLoading />}>
                   {renderView({
                     view,
                     props,
@@ -278,7 +253,6 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
                     },
                     startRuntime,
                   })}
-                </Suspense>
               </DeferredSurfaceBoundary>
             )}
           </div>
@@ -315,11 +289,7 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
         <WorkbenchStatusNotice message={props.error} />
       )}
 
-      {props.settingsDialogProps?.open === true && (
-        <Suspense fallback={null}>
-          <LazyWorkbenchSettingsDialog {...props.settingsDialogProps} />
-        </Suspense>
-      )}
+      {props.settingsDialogProps?.open === true && <WorkbenchSettingsDialog {...props.settingsDialogProps} />}
     </div>
   );
 }
@@ -351,7 +321,7 @@ function renderView(input: {
   readonly startRuntime: (message: string) => void;
 }) {
   if (input.view === "home") {
-    return <LazyHomePage
+    return <HomePage
       onNavigate={input.navigate}
       onStartConversation={input.startRuntime}
       onOpenConversation={input.props.onOpenConversation}
@@ -361,7 +331,7 @@ function renderView(input: {
   }
   if (input.view === "space") {
     const activeSpace = input.props.spaces?.find((space) => space.spaceId === input.activeSpaceId);
-    return <LazySpacePage
+    return <SpacePage
       key={activeSpace?.spaceId ?? "space-empty"}
       onNavigate={input.navigate}
       targetId={input.spaceTargetId}
@@ -376,7 +346,7 @@ function renderView(input: {
     />;
   }
   if (input.view === "brain") {
-    return <LazyBrainPage
+    return <BrainPage
       selectedId={input.brainSelectedId}
       onSelect={input.onBrainSelect}
       spaces={input.props.spaces ?? []}
@@ -384,7 +354,7 @@ function renderView(input: {
     />;
   }
   if (input.view === "search") {
-    return <LazySearchPage
+    return <SearchPage
       onNavigate={input.navigate}
       onOpenInSpace={input.onOpenInSpace}
       onOpenConversation={input.props.onOpenConversation}
@@ -404,20 +374,6 @@ function PrototypeRuntimeLoading() {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center" style={{ color: "var(--aa-text-3)" }}>
       <span className="text-sm">正在准备工作台</span>
-    </div>
-  );
-}
-
-function DeferredViewLoading() {
-  return (
-    <div
-      aria-label="正在打开视图"
-      className="flex min-h-0 flex-1 items-center justify-center"
-      style={{ color: "var(--aa-text-3)" }}
-    >
-      <span className="h-1.5 w-16 overflow-hidden rounded-full" style={{ background: "var(--aa-border)" }}>
-        <span className="block h-full w-1/2 animate-pulse rounded-full" style={{ background: "var(--aa-accent)" }} />
-      </span>
     </div>
   );
 }
@@ -457,8 +413,7 @@ function ConversationSurface(props: {
           : "initial";
   const content = active.hasVisibleContent ? (
     <DeferredSurfaceBoundary resetKey={props.props.currentRun.run?.runId ?? props.conversation?.conversationId ?? "transcript"} label="对话内容暂时无法显示">
-      <Suspense fallback={<TranscriptLoading />}>
-        <LazyRedesignTranscript
+        <RedesignTranscript
       conversationId={props.conversation?.conversationId}
       projectedTurns={active.workline.turns}
       turns={props.conversation?.turns ?? []}
@@ -482,7 +437,6 @@ function ConversationSurface(props: {
       onDecision={props.props.onDecision}
       confirmationBusy={props.props.confirmationBusy}
         />
-      </Suspense>
     </DeferredSurfaceBoundary>
   ) : undefined;
   const activity = runActivity(props.props.currentRun, active.running, props.input.onCancel);
@@ -509,11 +463,7 @@ function ConversationSurface(props: {
       onExit={props.onExitFocus ?? (() => undefined)}
     />;
   }
-  return <LazyConversationPage live={{ ...pageProps, onFocus: props.onEnterFocus }} />;
-}
-
-function TranscriptLoading() {
-  return <div className="mx-auto h-24 w-full max-w-3xl animate-pulse rounded-md" style={{ background: "var(--aa-surface-hover)" }} />;
+  return <ConversationPage live={{ ...pageProps, onFocus: props.onEnterFocus }} />;
 }
 
 function isConversationView(view: View): boolean {

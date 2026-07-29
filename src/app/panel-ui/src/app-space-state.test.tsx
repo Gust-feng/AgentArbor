@@ -144,6 +144,44 @@ test("persists a newly created note followed by an immediate edit in order", asy
   });
 });
 
+test("rebases a queued note edit after the previous write fails", async () => {
+  const note = serverNote({ bodyMarkdown: "服务端正文", revision: 1 });
+  const requests: Array<{ method: string; body?: string }> = [];
+  let patchCount = 0;
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    requests.push({ method, body: init?.body as string | undefined });
+    if (String(path) === "/api/personal-knowledge") {
+      return jsonResponse({ snapshot: { ...emptyServerSnapshot(), notes: [note] } });
+    }
+    if (method === "PATCH") {
+      patchCount += 1;
+      if (patchCount === 1) throw new Error("temporary write failure");
+      const body = JSON.parse(init?.body as string) as { expectedRevision: number };
+      if (body.expectedRevision !== 1) throw new Error(`stale revision ${body.expectedRevision}`);
+    }
+    return jsonResponse({ ok: true });
+  }));
+  setPersonalKnowledgePersistenceEnabled(true);
+  await initializePersonalKnowledge("space-1");
+
+  updatePersonalNote(note.id, { body: "第一次编辑" });
+  updatePersonalNote(note.id, { body: "第二次编辑" });
+
+  await waitFor(() => expect(getPersonalNoteSaveState(note.id)).toBe("saved"));
+  expect(getPersonalKnowledgeSnapshot().notes[0]).toMatchObject({
+    body: "第二次编辑",
+    revision: 2,
+  });
+  const patchBodies = requests
+    .filter((request) => request.method === "PATCH")
+    .map((request) => JSON.parse(request.body ?? "{}"));
+  expect(patchBodies).toMatchObject([
+    { expectedRevision: 1, bodyMarkdown: "第一次编辑" },
+    { expectedRevision: 1, bodyMarkdown: "第二次编辑" },
+  ]);
+});
+
 interface PendingRequest {
   readonly path: string;
   readonly method?: string;
@@ -168,5 +206,18 @@ function emptyServerSnapshot() {
     themes: [],
     assignments: [],
     recentlyOpened: {},
+  };
+}
+
+function serverNote(overrides: Partial<Record<"bodyMarkdown" | "revision", string | number>> = {}) {
+  return {
+    id: "note-1",
+    spaceId: "space-1",
+    title: "测试笔记",
+    bodyMarkdown: "",
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
   };
 }

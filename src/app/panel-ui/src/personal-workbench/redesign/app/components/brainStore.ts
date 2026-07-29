@@ -1,11 +1,16 @@
 import { useMemo, useSyncExternalStore } from 'react'
 import { getMaterial } from './materials'
 import { getNote } from './notesStore'
-import type { PersonalSpaceItemProjection, PersonalSpaceProjection } from '../../../space'
+import type { PersonalSpaceProjection } from '../../../space'
+import { LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS } from './learningDemoDataset'
+import { getCachedReferencePreview } from './referencePreviewClient'
 import {
   executePersonalKnowledgeCommand,
+  collectManagedSpaceReference,
   getPersonalKnowledgeSnapshot,
+  isPersonalKnowledgeMutationPending,
   subscribePersonalKnowledge,
+  spaceReferenceSourceKey,
   type BrainLink,
   type BrainPage,
   type PageKind,
@@ -16,14 +21,24 @@ export type { BrainLink, BrainPage, PageKind } from './personalKnowledgeClient'
 export function getPages(): BrainPage[] { return [...getPersonalKnowledgeSnapshot().pages].sort((a, b) => b.collectedAt - a.collectedAt) }
 export function isCollected(refId: string): boolean { return getPages().some((page) => page.refId === refId) }
 export function collect(refId: string, kind: PageKind): void {
-  if (isCollected(refId)) return
+  if (isCollected(refId) || isPersonalKnowledgeMutationPending(refId)) return
   const page = { refId, kind, collectedAt: Date.now() }
-  executePersonalKnowledgeCommand(
-    (value) => ({ ...value, pages: [page, ...value.pages] }),
-    { type: 'knowledge.collect', page },
-  )
+  const optimistic = (value: ReturnType<typeof getPersonalKnowledgeSnapshot>) => ({ ...value, pages: [page, ...value.pages] })
+  if (kind === 'space_reference') return
+  executePersonalKnowledgeCommand(optimistic, { type: 'knowledge.collect', page }, refId)
+}
+export function findCollectedSpaceReference(referenceId: string, relativePath = ''): BrainPage | undefined {
+  return getPages().find((page) => page.kind === 'space_reference'
+    && page.asset?.sourceReferenceId === referenceId
+    && page.asset.sourceRelativePath === relativePath)
+}
+export function collectSpaceReference(referenceId: string, relativePath = ''): void {
+  const sourceKey = spaceReferenceSourceKey(referenceId, relativePath)
+  if (findCollectedSpaceReference(referenceId, relativePath) !== undefined || isPersonalKnowledgeMutationPending(sourceKey)) return
+  collectManagedSpaceReference(referenceId, relativePath)
 }
 export function uncollect(refId: string): void {
+  if (isPersonalKnowledgeMutationPending(refId)) return
   executePersonalKnowledgeCommand(
     (value) => ({
       ...value,
@@ -32,6 +47,7 @@ export function uncollect(refId: string): void {
       assignments: value.assignments.filter((assignment) => assignment.refId !== refId),
     }),
     { type: 'knowledge.uncollect', refId },
+    refId,
   )
 }
 export function getLinks(): BrainLink[] { return getPersonalKnowledgeSnapshot().links }
@@ -72,8 +88,41 @@ export interface ResolvedPage {
   thumbnail?: string
   spaceId?: string
   detail?: string
-  referenceKind?: PersonalSpaceItemProjection['kind']
+  previewText?: string
+  managedAsset?: BrainPage['asset']
+  demo?: boolean
   exists: boolean
+}
+
+const MANAGED_ASSET_PREVIEW_BASE = '/api/personal-knowledge/assets'
+
+function managedAssetKind(page: BrainPage): NonNullable<ResolvedPage['materialKind']> {
+  const asset = page.asset
+  if (asset?.contentKind !== 'file') return 'file'
+  const preview = getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)
+  if (preview?.content.kind === 'media') return preview.content.mediaKind
+  if (preview?.content.kind === 'web') return 'web'
+  if (preview?.content.kind === 'text') {
+    if (preview.content.language === 'md' || preview.content.language === 'markdown') return 'markdown'
+  }
+  return materialKindFromSourceLabel(asset?.sourceLabel ?? asset?.title ?? '')
+}
+
+function materialKindFromSourceLabel(sourceLabel: string): NonNullable<ResolvedPage['materialKind']> {
+  const source = sourceLabel.toLowerCase()
+  if (/\.(?:md|markdown)$/u.test(source)) return 'markdown'
+  if (/\.pdf$/u.test(source)) return 'pdf'
+  if (/\.(?:png|jpe?g|gif|webp|svg|avif)$/u.test(source)) return 'image'
+  if (/\.(?:mp4|webm|mov|mkv)$/u.test(source)) return 'video'
+  if (/\.(?:mp3|wav|ogg|m4a|flac)$/u.test(source)) return 'audio'
+  if (/\.(?:jsonc?|jsonl|ya?ml|toml|ini|xml|csv|ts|tsx|js|mjs|cjs|jsx|py|java|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|ps1|sql|graphql|vue|svelte|css|html)$/u.test(source)
+    || /(?:^|[\\/])(?:\.gitignore|\.gitattributes|\.gitmodules|\.editorconfig|\.npmrc|\.nvmrc|\.env|dockerfile|makefile|license)$/u.test(source)) return 'code'
+  return 'file'
+}
+
+function managedAssetPreviewText(page: BrainPage): string | undefined {
+  const preview = getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)
+  return preview?.content.kind === 'text' ? preview.content.text : undefined
 }
 
 export function resolvePage(page: BrainPage, spaces: readonly PersonalSpaceProjection[] = []): ResolvedPage {
@@ -82,17 +131,16 @@ export function resolvePage(page: BrainPage, spaces: readonly PersonalSpaceProje
     return { refId: page.refId, kind: 'note', title: note?.title || '无标题笔记', collectedAt: page.collectedAt, exists: note !== undefined }
   }
   if (page.kind === 'space_reference') {
-    const resolved = findSpaceReference(spaces, page.refId)
     return {
       refId: page.refId,
       kind: 'space_reference',
-      title: resolved?.item.title ?? '(空间引用已不存在)',
+      title: page.asset?.title ?? '(知识资产不可用)',
       collectedAt: page.collectedAt,
-      materialKind: resolved?.item.kind === 'web_reference' ? 'web' : 'file',
-      spaceId: resolved?.space.spaceId,
-      detail: resolved?.item.detail,
-      referenceKind: resolved?.item.kind,
-      exists: resolved !== undefined,
+      materialKind: managedAssetKind(page),
+      detail: page.asset?.sourceLabel,
+      previewText: managedAssetPreviewText(page),
+      exists: page.asset?.status === 'managed',
+      managedAsset: page.asset,
     }
   }
   const material = spaces.some((space) => space.demoDataset === 'learning-workspace')
@@ -119,44 +167,42 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     getPersonalKnowledgeSnapshot,
     getPersonalKnowledgeSnapshot,
   )
-  const pages = useMemo(
-    () => [...snapshot.pages].sort((left, right) => right.collectedAt - left.collectedAt),
-    [snapshot.pages],
-  )
+  const hasLearningDemo = spaces.some((space) => space.demoDataset === 'learning-workspace')
+  const demoPages = useMemo<BrainPage[]>(() => hasLearningDemo
+    ? LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS.map((refId, index) => ({
+        refId,
+        kind: 'material',
+        collectedAt: Date.UTC(2026, 6, 29, 12, 0) - index * 60 * 60 * 1000,
+      }))
+    : [], [hasLearningDemo])
+  const pages = useMemo(() => {
+    const persistedIds = new Set(snapshot.pages.map((page) => page.refId))
+    return [...snapshot.pages, ...demoPages.filter((page) => !persistedIds.has(page.refId))]
+      .sort((left, right) => right.collectedAt - left.collectedAt)
+  }, [demoPages, snapshot.pages])
+  const demoIds = useMemo(() => new Set(demoPages.map((page) => page.refId)), [demoPages])
+  const pageById = useMemo(() => new Map(pages.map((page) => [page.refId, page])), [pages])
   return {
     pages,
-    isCollected,
-    collect,
-    uncollect,
+    isCollected: (refId: string) => pageById.has(refId),
+    isPending: isPersonalKnowledgeMutationPending,
+    findCollectedSpaceReference,
+    collectSpaceReference,
+    spaceReferenceSourceKey,
+    collect: (refId: string, kind: PageKind) => { if (!demoIds.has(refId)) collect(refId, kind) },
+    uncollect: (refId: string) => { if (!demoIds.has(refId)) uncollect(refId) },
     addLink,
     removeLink,
-    markOpened,
+    markOpened: (refId: string) => { if (!demoIds.has(refId)) markOpened(refId) },
     getLinks,
-    recentlyOpened,
-    recentlyCollected,
+    recentlyOpened: (limit = 6) => recentlyOpened(limit).filter((refId) => pageById.has(refId)),
+    recentlyCollected: (limit = 6) => pages.slice(0, limit).map((page) => page.refId),
     outgoing,
     backlinks,
-    resolvePage: (page: BrainPage) => resolvePage(page, spaces),
-    resolveById: (refId: string) => resolveById(refId, spaces),
+    resolvePage: (page: BrainPage) => ({ ...resolvePage(page, spaces), ...(demoIds.has(page.refId) ? { demo: true } : {}) }),
+    resolveById: (refId: string) => {
+      const page = pageById.get(refId)
+      return page === undefined ? undefined : { ...resolvePage(page, spaces), ...(demoIds.has(page.refId) ? { demo: true } : {}) }
+    },
   }
-}
-
-function findSpaceReference(
-  spaces: readonly PersonalSpaceProjection[],
-  refId: string,
-): { space: PersonalSpaceProjection; item: PersonalSpaceItemProjection } | undefined {
-  for (const space of spaces) {
-    const item = findItem(space.items, refId)
-    if (item !== undefined && item.kind !== 'folder') return { space, item }
-  }
-  return undefined
-}
-
-function findItem(items: readonly PersonalSpaceItemProjection[], refId: string): PersonalSpaceItemProjection | undefined {
-  for (const item of items) {
-    if (item.itemId === refId) return item
-    const child = findItem(item.children ?? [], refId)
-    if (child !== undefined) return child
-  }
-  return undefined
 }

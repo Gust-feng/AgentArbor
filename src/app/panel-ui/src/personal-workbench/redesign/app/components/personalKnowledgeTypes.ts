@@ -15,6 +15,14 @@ export interface BrainPage {
   refId: string
   kind: PageKind
   collectedAt: number
+  asset?: {
+    status: 'managed'
+    title: string
+    sourceLabel: string
+    contentKind: 'file' | 'directory'
+    sourceReferenceId: string
+    sourceRelativePath: string
+  }
 }
 
 export interface BrainLink {

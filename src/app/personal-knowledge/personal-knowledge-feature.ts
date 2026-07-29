@@ -11,6 +11,8 @@ export function createPersonalKnowledgeFeature(options: {
   readonly repository: PersonalKnowledgeRepository;
   readonly spaceExists: (spaceId: string) => Promise<boolean>;
   readonly spaceReferenceExists: (itemId: string) => Promise<boolean>;
+  readonly captureSpaceReference?: (input: { readonly assetId: string; readonly referenceId: string; readonly relativePath: string }) => Promise<NonNullable<import("./contracts.js").KnowledgePage["asset"]>>;
+  readonly removeManagedAsset?: (itemId: string) => Promise<void>;
 }): PersonalKnowledgeFeature {
   const repository = options.repository;
   let released = false;
@@ -45,7 +47,7 @@ export function createPersonalKnowledgeFeature(options: {
             updatedAt: now,
             revision: 1,
           };
-          await repository.execute({ type: "note.create", note });
+          await repository.execute({ type: "note.create", note, actor: noteInput.actor ?? SYSTEM_ACTOR, changeSummary: noteInput.changeSummary });
           return note;
         });
       },
@@ -57,31 +59,63 @@ export function createPersonalKnowledgeFeature(options: {
           ...(input.title === undefined ? {} : { title: input.title }),
           ...(input.bodyMarkdown === undefined ? {} : { bodyMarkdown: input.bodyMarkdown }),
           updatedAt: Date.now(),
+          actor: input.actor ?? SYSTEM_ACTOR,
+          changeSummary: input.changeSummary,
         }));
       },
       async deleteNote(input) {
-        await run(() => repository.execute({ type: "note.delete", id: required(input.id, "id"), expectedRevision: input.expectedRevision }));
+        await run(() => repository.execute({
+          type: "note.delete",
+          id: required(input.id, "id"),
+          expectedRevision: input.expectedRevision,
+          deletedAt: Date.now(),
+          actor: input.actor ?? SYSTEM_ACTOR,
+          changeSummary: input.changeSummary,
+        }));
       },
       async reorderNotes(orderedIds) {
         await run(() => repository.execute({ type: "note.reorder", orderedIds }));
       },
+      async collectSpaceReference(input) {
+        return await run(async () => {
+          const referenceId = required(input.referenceId, "referenceId");
+          const relativePath = input.relativePath?.trim() ?? "";
+          if (!await options.spaceReferenceExists(referenceId)) {
+            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Space reference ${referenceId} does not exist.`);
+          }
+          if (options.captureSpaceReference === undefined) {
+            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "Managed knowledge asset storage is unavailable.");
+          }
+          const existing = (await repository.readSnapshot()).pages.find((page) => page.kind === "space_reference"
+            && page.asset?.sourceReferenceId === referenceId
+            && page.asset.sourceRelativePath === relativePath);
+          if (existing !== undefined) return existing;
+          const refId = randomUUID();
+          const asset = await options.captureSpaceReference({ assetId: refId, referenceId, relativePath });
+          const page = { refId, kind: "space_reference" as const, collectedAt: Date.now(), asset };
+          try {
+            await repository.execute({ type: "knowledge.collect", page });
+          } catch (error) {
+            await options.removeManagedAsset?.(refId);
+            throw error;
+          }
+          return page;
+        });
+      },
+      async uncollect(refIdInput) {
+        await run(async () => {
+          const refId = required(refIdInput, "refId");
+          await repository.execute({ type: "knowledge.uncollect", refId });
+          await options.removeManagedAsset?.(refId);
+        });
+      },
       async execute(command) {
         await run(async () => {
           const validated = validateCommand(command);
-          if (validated.type === "knowledge.collect"
-            && validated.page.kind === "space_reference"
-            && !await options.spaceReferenceExists(validated.page.refId)) {
-            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Space reference ${validated.page.refId} does not exist.`);
+          if (validated.type === "knowledge.collect" && validated.page.kind === "space_reference") {
+            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "Space references must be collected through managed asset capture.");
           }
           await repository.execute(validated);
-        });
-      },
-      async importLegacy(legacyInput) {
-        return await run(async () => {
-          if (!await options.spaceExists(legacyInput.fallbackSpaceId)) {
-            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Space ${legacyInput.fallbackSpaceId} does not exist.`);
-          }
-          return await repository.importLegacy(legacyInput);
         });
       },
     },
@@ -95,6 +129,14 @@ export function createPersonalKnowledgeFeature(options: {
         ensureActive();
         await queue;
         return await repository.getNote(required(id, "id"));
+      },
+      async noteRevisions(id, limit = 50) {
+        ensureActive();
+        await queue;
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+          throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "limit must be an integer from 1 to 200.");
+        }
+        return await repository.listNoteRevisions(required(id, "id"), limit);
       },
       async search(input) {
         ensureActive();
@@ -115,6 +157,8 @@ export function createPersonalKnowledgeFeature(options: {
     },
   };
 }
+
+const SYSTEM_ACTOR = { kind: "system" } as const;
 
 function required(value: string, field: string): string {
   const normalized = value.trim();

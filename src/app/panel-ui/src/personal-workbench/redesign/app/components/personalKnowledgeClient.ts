@@ -1,5 +1,5 @@
-import { requestJson } from '../../../../api'
-import { readNextReleaseLegacyData, clearNextReleaseLegacyData } from './compat/v-next-local-storage-import'
+import { ApiError, requestJson } from '../../../../api'
+import { fetchSpaceReferencePreview } from './referencePreviewClient'
 import type { Assignment, BrainLink, BrainPage, Note, Theme } from './personalKnowledgeTypes'
 
 export type { Assignment, BrainLink, BrainPage, Note, PageKind, Theme } from './personalKnowledgeTypes'
@@ -25,11 +25,34 @@ export interface PersonalKnowledgeSearchHit {
   readonly snippet: string
 }
 
+export interface PersonalNoteRevision {
+  readonly noteId: string
+  readonly revision: number
+  readonly baseRevision?: number
+  readonly operation: 'create' | 'update' | 'delete' | 'snapshot'
+  readonly title: string
+  readonly bodyMarkdown: string
+  readonly actor: {
+    readonly kind: 'user' | 'agent' | 'system'
+    readonly actorId?: string
+    readonly traceId?: string
+    readonly goalId?: string
+    readonly toolCallId?: string
+  }
+  readonly changeSummary?: string
+  readonly createdAt: number
+}
+
+export type PersonalNoteRemoteState =
+  | { readonly status: 'current'; readonly note: Note; readonly latestRevision?: PersonalNoteRevision }
+  | { readonly status: 'deleted'; readonly latestRevision?: PersonalNoteRevision }
+
 type ServerSnapshot = Omit<Snapshot, 'notes'> & {
   notes: Array<Omit<Note, 'body'> & { bodyMarkdown: string }>
 }
 
-let snapshot: Snapshot = readNextReleaseLegacyData()
+const EMPTY_SNAPSHOT: Snapshot = { notes: [], pages: [], links: [], themes: [], assignments: [], recentlyOpened: {} }
+let snapshot: Snapshot = EMPTY_SNAPSHOT
 let authoritativeSnapshot: Snapshot = snapshot
 let activeSpaceId = 'personal-unassigned'
 let loaded = false
@@ -42,15 +65,26 @@ let loadState: PersonalKnowledgeLoadState = { status: 'idle' }
 const pendingMutations: PendingMutation[] = []
 const pendingNotes = new Map<string, number>()
 const noteErrors = new Map<string, string>()
+const blockedNoteIds = new Set<string>()
+const pendingKnowledgeRefs = new Map<string, number>()
 const listeners = new Set<() => void>()
 
 export function getPersonalKnowledgeSnapshot(): Snapshot { return snapshot }
 export function getPersonalKnowledgeError(): string | undefined { return lastError }
 export function getPersonalKnowledgeLoadState(): PersonalKnowledgeLoadState { return loadState }
+export function isPersonalKnowledgePersistenceEnabled(): boolean { return persistenceEnabled }
 export function getPersonalNoteSaveState(noteId: string): string {
   const error = noteErrors.get(noteId)
   if (error !== undefined) return `error:${error}`
   return (pendingNotes.get(noteId) ?? 0) > 0 ? 'saving' : 'saved'
+}
+export function isPersonalKnowledgeMutationPending(refId: string): boolean {
+  return (pendingKnowledgeRefs.get(refId) ?? 0) > 0
+}
+export function resolvePersonalNoteConflict(noteId: string): void {
+  blockedNoteIds.delete(noteId)
+  noteErrors.delete(noteId)
+  emit()
 }
 export function subscribePersonalKnowledge(listener: () => void): () => void {
   listeners.add(listener)
@@ -84,6 +118,34 @@ export async function searchPersonalKnowledge(
   return response.results
 }
 
+export async function fetchPersonalNoteRemoteState(noteId: string, signal?: AbortSignal): Promise<PersonalNoteRemoteState> {
+  if (!persistenceEnabled) {
+    const note = snapshot.notes.find((candidate) => candidate.id === noteId)
+    return note === undefined ? { status: 'deleted' } : { status: 'current', note }
+  }
+  const revisionsPromise = requestJson<{ revisions: readonly PersonalNoteRevision[] }>(
+    `/api/personal-knowledge/notes/${encodeURIComponent(noteId)}/revisions?limit=1`,
+    { signal },
+  )
+  try {
+    const [noteResponse, revisionsResponse] = await Promise.all([
+      requestJson<{ note: Omit<Note, 'body'> & { bodyMarkdown: string } }>(
+        `/api/personal-knowledge/notes/${encodeURIComponent(noteId)}`,
+        { signal },
+      ),
+      revisionsPromise,
+    ])
+    const { bodyMarkdown, ...note } = noteResponse.note
+    return { status: 'current', note: { ...note, body: bodyMarkdown }, latestRevision: revisionsResponse.revisions[0] }
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      const revisions = await revisionsPromise.catch(() => ({ revisions: [] as readonly PersonalNoteRevision[] }))
+      return { status: 'deleted', latestRevision: revisions.revisions[0] }
+    }
+    throw error
+  }
+}
+
 export function initializePersonalKnowledge(spaceId?: string): Promise<void> {
   if (spaceId !== undefined) activeSpaceId = spaceId
   if (!persistenceEnabled) {
@@ -102,22 +164,7 @@ export function initializePersonalKnowledge(spaceId?: string): Promise<void> {
   loadState = { status: loadState.status === 'error' ? 'retrying' : 'loading' }
   emit()
   loading = (async () => {
-    const legacy = readNextReleaseLegacyData()
-    await requestJson('/api/personal-knowledge/compat/import', {
-      method: 'POST',
-      body: JSON.stringify({
-        importKey: 'redesign-local-storage-v1',
-        fallbackSpaceId: activeSpaceId,
-        notes: legacy.notes.map(({ id, title, body, createdAt, updatedAt, materialRefs }) => ({ id, title, body, createdAt, updatedAt, materialRefs })),
-        pages: legacy.pages,
-        links: legacy.links,
-        themes: legacy.themes,
-        assignments: legacy.assignments,
-        recentlyOpened: legacy.recentlyOpened,
-      }),
-    })
     await refreshPersonalKnowledge()
-    clearNextReleaseLegacyData()
     loaded = true
     loadState = { status: 'ready' }
     emit()
@@ -154,8 +201,8 @@ export function setActivePersonalKnowledgeSpace(spaceId: string): void {
 }
 
 /** Test seam for component tests that intentionally run without Panel Server. */
-export function resetPersonalKnowledgeForTesting(): void {
-  snapshot = readNextReleaseLegacyData()
+export function resetPersonalKnowledgeForTesting(initial: Partial<Snapshot> = {}): void {
+  snapshot = { ...EMPTY_SNAPSHOT, ...initial }
   authoritativeSnapshot = snapshot
   activeSpaceId = 'personal-unassigned'
   loaded = false
@@ -168,12 +215,15 @@ export function resetPersonalKnowledgeForTesting(): void {
   loadState = { status: 'ready' }
   pendingNotes.clear()
   noteErrors.clear()
+  blockedNoteIds.clear()
+  pendingKnowledgeRefs.clear()
 }
 
 export function mutatePersonalKnowledge(
   optimistic: (current: Snapshot) => Snapshot,
   request: (authoritative: Snapshot) => Promise<unknown>,
   noteId?: string,
+  knowledgeRefId?: string,
 ): void {
   if (!persistenceEnabled) {
     snapshot = optimistic(snapshot)
@@ -182,18 +232,19 @@ export function mutatePersonalKnowledge(
     emit()
     return
   }
-  const mutation: PendingMutation = { optimistic, request, noteId }
+  const mutation: PendingMutation = { optimistic, request, noteId, knowledgeRefId }
   pendingMutations.push(mutation)
   replayPendingMutations()
   if (noteId !== undefined) {
     pendingNotes.set(noteId, (pendingNotes.get(noteId) ?? 0) + 1)
     noteErrors.delete(noteId)
   }
+  if (knowledgeRefId !== undefined) pendingKnowledgeRefs.set(knowledgeRefId, (pendingKnowledgeRefs.get(knowledgeRefId) ?? 0) + 1)
   emit()
   mutationQueue = mutationQueue.then(() => executeMutation(mutation))
 }
 
-export function createPersonalNote(init?: Partial<Pick<Note, 'title' | 'body' | 'materialRefs'>>): Note {
+export function createPersonalNote(init?: Partial<Pick<Note, 'spaceId' | 'title' | 'body' | 'materialRefs'>>): Note {
   const now = Date.now()
   const note: Note = {
     id: crypto.randomUUID(),
@@ -268,8 +319,38 @@ export function reorderPersonalNotes(orderedIds: string[]): void {
 export function executePersonalKnowledgeCommand(
   optimistic: (current: Snapshot) => Snapshot,
   command: Record<string, unknown>,
+  knowledgeRefId?: string,
 ): void {
-  mutatePersonalKnowledge(optimistic, () => requestJson('/api/personal-knowledge/commands', { method: 'POST', body: JSON.stringify(command) }))
+  mutatePersonalKnowledge(optimistic, () => requestJson('/api/personal-knowledge/commands', { method: 'POST', body: JSON.stringify(command) }), undefined, knowledgeRefId)
+}
+
+export function spaceReferenceSourceKey(referenceId: string, relativePath = ''): string {
+  return `space-reference:${referenceId}:${relativePath.replaceAll('\\', '/')}`
+}
+
+export function collectManagedSpaceReference(referenceId: string, relativePath = ''): void {
+  const sourceKey = spaceReferenceSourceKey(referenceId, relativePath)
+  if (!persistenceEnabled) {
+    const page: BrainPage = { refId: sourceKey, kind: 'space_reference', collectedAt: Date.now() }
+    snapshot = upsertKnowledgePage(snapshot, page)
+    authoritativeSnapshot = snapshot
+    emit()
+    return
+  }
+  let managedPage: BrainPage | undefined
+  mutatePersonalKnowledge(
+    (current) => managedPage === undefined ? current : upsertKnowledgePage(current, managedPage),
+    async () => {
+      const response = await requestJson<{ page: BrainPage }>('/api/personal-knowledge/collect-space-reference', {
+        method: 'POST',
+        body: JSON.stringify({ referenceId, relativePath }),
+      })
+      managedPage = response.page
+      await fetchSpaceReferencePreview(response.page.refId, '', undefined, '/api/personal-knowledge/assets')
+    },
+    undefined,
+    sourceKey,
+  )
 }
 
 function emit(): void { listeners.forEach((listener) => listener()) }
@@ -279,10 +360,12 @@ interface PendingMutation {
   readonly optimistic: (current: Snapshot) => Snapshot
   readonly request: (authoritative: Snapshot) => Promise<unknown>
   readonly noteId?: string
+  readonly knowledgeRefId?: string
 }
 
 async function executeMutation(mutation: PendingMutation): Promise<void> {
   try {
+    if (mutation.noteId !== undefined && blockedNoteIds.has(mutation.noteId)) return
     await mutation.request(authoritativeSnapshot)
     authoritativeSnapshot = mutation.optimistic(authoritativeSnapshot)
     lastError = undefined
@@ -291,22 +374,41 @@ async function executeMutation(mutation: PendingMutation): Promise<void> {
     const message = messageOf(error)
     try { authoritativeSnapshot = await fetchPersonalKnowledgeSnapshot() } catch { /* keep the last known server state */ }
     lastError = message
-    if (mutation.noteId !== undefined) noteErrors.set(mutation.noteId, message)
+    if (mutation.noteId !== undefined) {
+      noteErrors.set(mutation.noteId, message)
+      if (error instanceof ApiError && error.status === 409) blockedNoteIds.add(mutation.noteId)
+    }
   } finally {
     const index = pendingMutations.indexOf(mutation)
     if (index >= 0) pendingMutations.splice(index, 1)
     finishNoteMutation(mutation.noteId)
+    finishKnowledgeMutation(mutation.knowledgeRefId)
     replayPendingMutations()
     emit()
   }
 }
 
+function finishKnowledgeMutation(refId: string | undefined): void {
+  if (refId === undefined) return
+  const next = (pendingKnowledgeRefs.get(refId) ?? 1) - 1
+  if (next <= 0) pendingKnowledgeRefs.delete(refId)
+  else pendingKnowledgeRefs.set(refId, next)
+}
+
+function upsertKnowledgePage(value: Snapshot, page: BrainPage): Snapshot {
+  return { ...value, pages: [page, ...value.pages.filter((candidate) => candidate.refId !== page.refId)] }
+}
+
 async function fetchPersonalKnowledgeSnapshot(): Promise<Snapshot> {
   const response = await requestJson<{ snapshot: ServerSnapshot }>('/api/personal-knowledge')
-  return {
+  const next = {
     ...response.snapshot,
     notes: response.snapshot.notes.map(({ bodyMarkdown, ...note }) => ({ ...note, body: bodyMarkdown })),
   }
+  await Promise.allSettled(next.pages
+    .filter((page) => page.asset?.status === 'managed')
+    .map((page) => fetchSpaceReferencePreview(page.refId, '', undefined, '/api/personal-knowledge/assets')))
+  return next
 }
 
 function replayPendingMutations(): void {

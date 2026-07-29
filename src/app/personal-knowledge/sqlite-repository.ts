@@ -3,12 +3,12 @@ import type { SQLInputValue } from "node:sqlite";
 import type { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import {
   PersonalKnowledgeError,
-  type LegacyPersonalKnowledgeImport,
   type PersonalKnowledgeCommand,
   type PersonalKnowledgeRepository,
   type PersonalKnowledgeSearchResult,
   type PersonalKnowledgeSnapshot,
   type PersonalNote,
+  type PersonalNoteRevision,
 } from "./contracts.js";
 
 const MIGRATIONS = [{
@@ -94,6 +94,50 @@ const MIGRATIONS = [{
       VALUES (new.rowid, new.title, new.body_markdown);
     END;
   `,
+}, {
+  version: 4,
+  sql: `
+    CREATE TABLE personal_note_revisions (
+      note_id TEXT NOT NULL,
+      revision INTEGER NOT NULL CHECK(revision > 0),
+      base_revision INTEGER,
+      operation TEXT NOT NULL CHECK(operation IN ('create', 'update', 'delete', 'snapshot')),
+      title TEXT NOT NULL,
+      body_markdown TEXT NOT NULL,
+      actor_kind TEXT NOT NULL CHECK(actor_kind IN ('user', 'agent', 'system')),
+      actor_id TEXT,
+      trace_id TEXT,
+      goal_id TEXT,
+      tool_call_id TEXT,
+      change_summary TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY(note_id, revision)
+    ) STRICT;
+    CREATE INDEX personal_note_revisions_created_idx ON personal_note_revisions(note_id, created_at DESC);
+    INSERT INTO personal_note_revisions(
+      note_id, revision, base_revision, operation, title, body_markdown, actor_kind, created_at
+    )
+    SELECT id, revision, CASE WHEN revision > 1 THEN revision - 1 ELSE NULL END,
+           'snapshot', title, body_markdown, 'system', updated_at
+    FROM personal_notes;
+  `,
+}, {
+  version: 5,
+  sql: `ALTER TABLE knowledge_pages ADD COLUMN asset_json TEXT;`,
+}, {
+  version: 6,
+  sql: `DELETE FROM knowledge_pages WHERE kind = 'space_reference' AND asset_json IS NULL;`,
+}, {
+  version: 7,
+  sql: `
+    DELETE FROM knowledge_links
+      WHERE from_ref_id NOT IN (SELECT ref_id FROM knowledge_pages)
+         OR to_ref_id NOT IN (SELECT ref_id FROM knowledge_pages);
+    DELETE FROM knowledge_theme_assignments
+      WHERE ref_id NOT IN (SELECT ref_id FROM knowledge_pages);
+    DELETE FROM knowledge_recently_opened
+      WHERE ref_id NOT IN (SELECT ref_id FROM knowledge_pages);
+  `,
 }] as const;
 
 export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeDatabase): PersonalKnowledgeRepository {
@@ -120,8 +164,16 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
           };
         });
         const pages = database.connection.prepare(
-          "SELECT ref_id AS refId, kind, collected_at AS collectedAt FROM knowledge_pages ORDER BY collected_at DESC, ref_id",
-        ).all() as unknown as PersonalKnowledgeSnapshot["pages"];
+          "SELECT ref_id AS refId, kind, collected_at AS collectedAt, asset_json AS assetJson FROM knowledge_pages ORDER BY collected_at DESC, ref_id",
+        ).all().map((row) => {
+          const value = row as Record<string, SQLInputValue>;
+          return {
+            refId: String(value.refId),
+            kind: String(value.kind) as PersonalKnowledgeSnapshot["pages"][number]["kind"],
+            collectedAt: Number(value.collectedAt),
+            ...(value.assetJson === null ? {} : { asset: JSON.parse(String(value.assetJson)) }),
+          };
+        });
         const links = database.connection.prepare(
           "SELECT from_ref_id AS 'from', to_ref_id AS 'to' FROM knowledge_links ORDER BY from_ref_id, to_ref_id",
         ).all() as unknown as PersonalKnowledgeSnapshot["links"];
@@ -154,6 +206,21 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
         return row === undefined ? undefined : personalNoteFromRow(row as Record<string, SQLInputValue>);
       } catch (error) {
         throw repositoryError("Could not read the personal note from SQLite.", error);
+      }
+    },
+    async listNoteRevisions(id: string, limit: number): Promise<readonly PersonalNoteRevision[]> {
+      try {
+        return database.connection.prepare(`
+          SELECT note_id AS noteId, revision, base_revision AS baseRevision, operation,
+                 title, body_markdown AS bodyMarkdown, actor_kind AS actorKind,
+                 actor_id AS actorId, trace_id AS traceId, goal_id AS goalId,
+                 tool_call_id AS toolCallId, change_summary AS changeSummary,
+                 created_at AS createdAt
+          FROM personal_note_revisions WHERE note_id = ?
+          ORDER BY revision DESC LIMIT ?
+        `).all(id, limit).map((row) => personalNoteRevisionFromRow(row as Record<string, SQLInputValue>));
+      } catch (error) {
+        throw repositoryError("Could not read personal note revisions from SQLite.", error);
       }
     },
     async searchNotes(input): Promise<readonly PersonalKnowledgeSearchResult[]> {
@@ -200,30 +267,24 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
         throw repositoryError(`Could not execute ${command.type}.`, error);
       }
     },
-    async importLegacy(input: LegacyPersonalKnowledgeImport): Promise<boolean> {
-      try {
-        return database.transaction(() => {
-          if (database.hasCompatibilityImport(input.importKey)) return false;
-          importLegacy(database, input);
-          database.recordCompatibilityImport(input.importKey);
-          return true;
-        });
-      } catch (error) {
-        if (error instanceof PersonalKnowledgeError) throw error;
-        throw repositoryError("Could not import legacy personal knowledge.", error);
-      }
-    },
   };
 }
 
 function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowledgeCommand): void {
   switch (command.type) {
     case "note.create": {
-      const position = Number((database.connection.prepare("SELECT COALESCE(MIN(position), 0) - 1 AS value FROM personal_notes").get() as { value: number }).value);
-      database.connection.prepare(`
-        INSERT INTO personal_notes(id, space_id, title, body_markdown, material_refs_json, position, revision, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(command.note.id, command.note.spaceId, command.note.title, command.note.bodyMarkdown, JSON.stringify(command.note.materialRefs), position, command.note.revision, command.note.createdAt, command.note.updatedAt);
+      database.transaction(() => {
+        const position = Number((database.connection.prepare("SELECT COALESCE(MIN(position), 0) - 1 AS value FROM personal_notes").get() as { value: number }).value);
+        database.connection.prepare(`
+          INSERT INTO personal_notes(id, space_id, title, body_markdown, material_refs_json, position, revision, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(command.note.id, command.note.spaceId, command.note.title, command.note.bodyMarkdown, JSON.stringify(command.note.materialRefs), position, command.note.revision, command.note.createdAt, command.note.updatedAt);
+        insertNoteRevision(database, {
+          noteId: command.note.id, revision: 1, operation: "create", title: command.note.title,
+          bodyMarkdown: command.note.bodyMarkdown, actor: command.actor, changeSummary: command.changeSummary,
+          createdAt: command.note.createdAt,
+        });
+      });
       return;
     }
     case "note.update": {
@@ -234,14 +295,30 @@ function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowle
       if (columns.length === 0) return;
       columns.push("updated_at = ?", "revision = revision + 1");
       values.push(command.updatedAt, command.id, command.expectedRevision);
-      const result = database.connection.prepare(
-        `UPDATE personal_notes SET ${columns.join(", ")} WHERE id = ? AND revision = ?`,
-      ).run(...values);
-      if (Number(result.changes) === 0) throw noteWriteError(database, command.id);
+      database.transaction(() => {
+        const result = database.connection.prepare(
+          `UPDATE personal_notes SET ${columns.join(", ")} WHERE id = ? AND revision = ?`,
+        ).run(...values);
+        if (Number(result.changes) === 0) throw noteWriteError(database, command.id);
+        const note = database.connection.prepare("SELECT title, body_markdown AS bodyMarkdown, revision FROM personal_notes WHERE id = ?").get(command.id) as Record<string, SQLInputValue>;
+        insertNoteRevision(database, {
+          noteId: command.id, revision: Number(note.revision), baseRevision: command.expectedRevision,
+          operation: "update", title: String(note.title), bodyMarkdown: String(note.bodyMarkdown),
+          actor: command.actor, changeSummary: command.changeSummary, createdAt: command.updatedAt,
+        });
+      });
       return;
     }
     case "note.delete": {
       database.transaction(() => {
+        const note = database.connection.prepare("SELECT title, body_markdown AS bodyMarkdown FROM personal_notes WHERE id = ? AND revision = ?")
+          .get(command.id, command.expectedRevision) as Record<string, SQLInputValue> | undefined;
+        if (note === undefined) throw noteWriteError(database, command.id);
+        insertNoteRevision(database, {
+          noteId: command.id, revision: command.expectedRevision + 1, baseRevision: command.expectedRevision,
+          operation: "delete", title: String(note.title), bodyMarkdown: String(note.bodyMarkdown),
+          actor: command.actor, changeSummary: command.changeSummary, createdAt: command.deletedAt,
+        });
         const result = database.connection.prepare("DELETE FROM personal_notes WHERE id = ? AND revision = ?").run(command.id, command.expectedRevision);
         if (Number(result.changes) === 0) throw noteWriteError(database, command.id);
         removeKnowledgeReference(database, command.id);
@@ -265,8 +342,13 @@ function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowle
       if (command.page.kind === "note" && database.connection.prepare("SELECT 1 FROM personal_notes WHERE id = ?").get(command.page.refId) === undefined) {
         throw new PersonalKnowledgeError("personal_note_not_found", `Note ${command.page.refId} was not found.`);
       }
-      database.connection.prepare("INSERT OR IGNORE INTO knowledge_pages(ref_id, kind, collected_at) VALUES (?, ?, ?)")
-        .run(command.page.refId, command.page.kind, command.page.collectedAt);
+      database.connection.prepare(`
+        INSERT INTO knowledge_pages(ref_id, kind, collected_at, asset_json) VALUES (?, ?, ?, ?)
+        ON CONFLICT(ref_id) DO UPDATE SET
+          kind = excluded.kind,
+          collected_at = excluded.collected_at,
+          asset_json = COALESCE(excluded.asset_json, knowledge_pages.asset_json)
+      `).run(command.page.refId, command.page.kind, command.page.collectedAt, command.page.asset === undefined ? null : JSON.stringify(command.page.asset));
       return;
     case "knowledge.uncollect":
       database.transaction(() => removeKnowledgeReference(database, command.refId));
@@ -331,26 +413,6 @@ function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowle
   }
 }
 
-function importLegacy(database: SqliteRuntimeDatabase, input: LegacyPersonalKnowledgeImport): void {
-  const insertNote = database.connection.prepare(`
-    INSERT OR IGNORE INTO personal_notes(id, space_id, title, body_markdown, material_refs_json, position, revision, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-  `);
-  input.notes.forEach((note, position) => insertNote.run(note.id, input.fallbackSpaceId, note.title, note.body, JSON.stringify(note.materialRefs ?? []), position, note.createdAt, note.updatedAt));
-  const insertPage = database.connection.prepare("INSERT OR IGNORE INTO knowledge_pages(ref_id, kind, collected_at) VALUES (?, ?, ?)");
-  for (const page of input.pages) insertPage.run(page.refId, page.kind, page.collectedAt);
-  const insertLink = database.connection.prepare("INSERT OR IGNORE INTO knowledge_links(from_ref_id, to_ref_id) VALUES (?, ?)");
-  for (const link of input.links) if (link.from !== link.to) insertLink.run(link.from, link.to);
-  const insertTheme = database.connection.prepare("INSERT OR IGNORE INTO knowledge_themes(id, name, color, origin) VALUES (?, ?, ?, ?)");
-  for (const theme of input.themes) insertTheme.run(theme.id, theme.name, theme.color, theme.origin);
-  const insertAssignment = database.connection.prepare(`
-    INSERT OR IGNORE INTO knowledge_theme_assignments(ref_id, theme_id, assigned_by, locked) VALUES (?, ?, ?, ?)
-  `);
-  for (const assignment of input.assignments) insertAssignment.run(assignment.refId, assignment.themeId, assignment.by, assignment.locked ? 1 : 0);
-  const insertOpened = database.connection.prepare("INSERT OR REPLACE INTO knowledge_recently_opened(ref_id, opened_at) VALUES (?, ?)");
-  for (const [refId, openedAt] of Object.entries(input.recentlyOpened)) insertOpened.run(refId, openedAt);
-}
-
 function removeKnowledgeReference(database: SqliteRuntimeDatabase, refId: string): void {
   database.connection.prepare("DELETE FROM knowledge_pages WHERE ref_id = ?").run(refId);
   database.connection.prepare("DELETE FROM knowledge_links WHERE from_ref_id = ? OR to_ref_id = ?").run(refId, refId);
@@ -393,6 +455,40 @@ function personalNoteFromRow(value: Record<string, SQLInputValue>): PersonalNote
     createdAt: Number(value.createdAt),
     updatedAt: Number(value.updatedAt),
   };
+}
+
+function personalNoteRevisionFromRow(value: Record<string, SQLInputValue>): PersonalNoteRevision {
+  return {
+    noteId: String(value.noteId),
+    revision: Number(value.revision),
+    ...(value.baseRevision === null ? {} : { baseRevision: Number(value.baseRevision) }),
+    operation: String(value.operation) as PersonalNoteRevision["operation"],
+    title: String(value.title),
+    bodyMarkdown: String(value.bodyMarkdown),
+    actor: {
+      kind: String(value.actorKind) as PersonalNoteRevision["actor"]["kind"],
+      ...(value.actorId === null ? {} : { actorId: String(value.actorId) }),
+      ...(value.traceId === null ? {} : { traceId: String(value.traceId) }),
+      ...(value.goalId === null ? {} : { goalId: String(value.goalId) }),
+      ...(value.toolCallId === null ? {} : { toolCallId: String(value.toolCallId) }),
+    },
+    ...(value.changeSummary === null ? {} : { changeSummary: String(value.changeSummary) }),
+    createdAt: Number(value.createdAt),
+  };
+}
+
+function insertNoteRevision(database: SqliteRuntimeDatabase, revision: PersonalNoteRevision): void {
+  database.connection.prepare(`
+    INSERT INTO personal_note_revisions(
+      note_id, revision, base_revision, operation, title, body_markdown,
+      actor_kind, actor_id, trace_id, goal_id, tool_call_id, change_summary, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    revision.noteId, revision.revision, revision.baseRevision ?? null, revision.operation,
+    revision.title, revision.bodyMarkdown, revision.actor.kind, revision.actor.actorId ?? null,
+    revision.actor.traceId ?? null, revision.actor.goalId ?? null, revision.actor.toolCallId ?? null,
+    revision.changeSummary ?? null, revision.createdAt,
+  );
 }
 
 function searchResultFromRow(value: Record<string, SQLInputValue>): PersonalKnowledgeSearchResult {

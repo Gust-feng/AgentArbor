@@ -1,7 +1,8 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect } from 'react'
 import { X, Globe, ExternalLink, Music } from 'lucide-react'
 import { ImageWithFallback } from './figma/ImageWithFallback'
 import { KIND_META, type Material } from './materials'
+import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 
 /**
  * 材料视图 —— 只读全屏查看。
@@ -121,77 +122,9 @@ function MarkdownBody({ source }: { source: string }) {
       className="mx-auto px-6 py-12 reading-prose"
       style={{ maxWidth: 'var(--reading-width, 680px)' }}
     >
-      {renderMarkdown(source)}
+      <MarkdownDocumentSurface markdown={source} sourceVersion={source} />
     </div>
   )
-}
-
-/** 极简 Markdown 渲染：标题 / 粗体 / 无序列表 / 段落。 */
-export function renderMarkdown(src: string) {
-  const lines = src.split('\n')
-  const blocks: ReactNode[] = []
-  let list: string[] = []
-
-  const flushList = (key: string) => {
-    if (list.length === 0) return
-    blocks.push(
-      <ul key={key} className="my-3 space-y-1.5 pl-5" style={{ listStyle: 'disc' }}>
-        {list.map((li, i) => (
-          <li key={i} className="text-sm leading-relaxed" style={{ color: 'var(--aa-text-1, #292722)' }}>
-            {renderInline(li)}
-          </li>
-        ))}
-      </ul>
-    )
-    list = []
-  }
-
-  lines.forEach((raw, idx) => {
-    const line = raw.trimEnd()
-    if (line.startsWith('- ')) {
-      list.push(line.slice(2))
-      return
-    }
-    flushList(`ul-${idx}`)
-    if (line.startsWith('## ')) {
-      blocks.push(
-        <h2 key={idx} className="mt-8 mb-3 text-base font-semibold" style={{ color: 'var(--aa-text-1, #292722)' }}>
-          {renderInline(line.slice(3))}
-        </h2>
-      )
-    } else if (line.startsWith('# ')) {
-      blocks.push(
-        <h1 key={idx} className="mb-4 text-xl font-semibold" style={{ color: 'var(--aa-text-1, #292722)' }}>
-          {renderInline(line.slice(2))}
-        </h1>
-      )
-    } else if (line.trim() === '') {
-      // 空行 —— 跳过，段落间距由 margin 处理
-    } else {
-      blocks.push(
-        <p key={idx} className="my-3 text-sm leading-relaxed" style={{ color: 'var(--aa-text-1, #292722)' }}>
-          {renderInline(line)}
-        </p>
-      )
-    }
-  })
-  flushList('ul-end')
-  return blocks
-}
-
-/** 处理行内 **粗体**。 */
-function renderInline(text: string): ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((p, i) => {
-    if (p.startsWith('**') && p.endsWith('**')) {
-      return (
-        <strong key={i} style={{ fontWeight: 600 }}>
-          {p.slice(2, -2)}
-        </strong>
-      )
-    }
-    return <span key={i}>{p}</span>
-  })
 }
 
 /* --------------------------------- PDF ---------------------------------- */
@@ -260,7 +193,7 @@ function WebBody({ web, title }: { web: { url: string; site: string; body: strin
       <h1 className="mb-5 text-xl font-semibold reading-prose" style={{ color: 'var(--aa-text-1, #292722)' }}>
         {title}
       </h1>
-      <div className="reading-prose">{renderMarkdown(web.body)}</div>
+      <div className="reading-prose"><MarkdownDocumentSurface markdown={web.body} sourceVersion={web.body} /></div>
     </div>
   )
 }

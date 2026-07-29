@@ -4,6 +4,8 @@ import { z } from "zod";
 import { PersonalKnowledgeError, type PersonalKnowledgeCommand } from "../personal-knowledge/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
+import { managedKnowledgeReference } from "./knowledge-asset-store.js";
+import { createPanelSpaceReferencePreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
 
 const id = z.string().trim().min(1).max(512);
 const timestamp = z.number().int().nonnegative();
@@ -40,24 +42,6 @@ const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("theme.toggle_lock"), refId: id, themeId: id }).strict(),
 ]);
 
-const legacyImportSchema = z.object({
-  importKey: z.literal("redesign-local-storage-v1"),
-  fallbackSpaceId: id,
-  notes: z.array(z.object({
-    id,
-    title: z.string().max(1_000),
-    body: z.string().max(10_000_000),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    materialRefs: z.array(id).max(10_000).optional(),
-  }).strict()).max(100_000),
-  pages: z.array(z.object({ refId: id, kind: pageKind, collectedAt: timestamp }).strict()).max(100_000),
-  links: z.array(z.object({ from: id, to: id }).strict()).max(500_000),
-  themes: z.array(z.object({ id, name: z.string().max(200), color: z.string().max(100), origin }).strict()).max(10_000),
-  assignments: z.array(z.object({ refId: id, themeId: id, by: actor, locked: z.boolean() }).strict()).max(500_000),
-  recentlyOpened: z.record(id, timestamp),
-}).strict();
-
 export async function handlePanelPersonalKnowledgeRoute(
   runtime: PanelRuntime,
   request: IncomingMessage,
@@ -84,9 +68,45 @@ export async function handlePanelPersonalKnowledgeRoute(
     writeJson(response, 200, { ok: true, snapshot: await feature.queries.snapshot() });
     return true;
   }
+  if (url.pathname === "/api/personal-knowledge/collect-space-reference" && request.method === "POST") {
+    const input = parse(z.object({ referenceId: id, relativePath: z.string().max(4_096).optional() }).strict(), await readJsonBody(request));
+    const page = await feature.commands.collectSpaceReference(input);
+    writeJson(response, 201, { ok: true, page });
+    return true;
+  }
+  const assetPreview = /^\/api\/personal-knowledge\/assets\/([^/]+)\/preview$/u.exec(url.pathname);
+  if (assetPreview !== null && request.method === "GET") {
+    await runtime.knowledgeAssetsReady;
+    const refId = decode(assetPreview[1]);
+    const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
+    if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
+    const item = managedKnowledgeReference(requireAssetRoot(runtime), page);
+    writeJson(response, 200, { ok: true, preview: await createPanelSpaceReferencePreview(
+      item,
+      url.searchParams.get("path") ?? "",
+      `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`,
+      page.asset?.sourceLabel,
+    ) });
+    return true;
+  }
+  const assetContent = /^\/api\/personal-knowledge\/assets\/([^/]+)\/content$/u.exec(url.pathname);
+  if (assetContent !== null && request.method === "GET") {
+    await runtime.knowledgeAssetsReady;
+    const refId = decode(assetContent[1]);
+    const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
+    if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
+    await writePanelSpaceReferenceContent(
+      managedKnowledgeReference(requireAssetRoot(runtime), page),
+      request,
+      response,
+      url.searchParams.get("path") ?? "",
+      page.asset?.sourceLabel,
+    );
+    return true;
+  }
   if (url.pathname === "/api/personal-knowledge/notes" && request.method === "POST") {
     const input = parse(createNoteSchema, await readJsonBody(request));
-    writeJson(response, 201, { ok: true, note: await feature.commands.createNote(input) });
+    writeJson(response, 201, { ok: true, note: await feature.commands.createNote({ ...input, actor: USER_ACTOR }) });
     return true;
   }
   if (url.pathname === "/api/personal-knowledge/notes/reorder" && request.method === "POST") {
@@ -96,33 +116,48 @@ export async function handlePanelPersonalKnowledgeRoute(
     return true;
   }
   const noteMatch = /^\/api\/personal-knowledge\/notes\/([^/]+)$/u.exec(url.pathname);
+  const revisionsMatch = /^\/api\/personal-knowledge\/notes\/([^/]+)\/revisions$/u.exec(url.pathname);
+  if (revisionsMatch !== null && request.method === "GET") {
+    const limitValue = url.searchParams.get("limit");
+    const limit = limitValue === null ? undefined : Number(limitValue);
+    writeJson(response, 200, { ok: true, revisions: await feature.queries.noteRevisions(decode(revisionsMatch[1]), limit) });
+    return true;
+  }
+  if (noteMatch !== null && request.method === "GET") {
+    const note = await feature.queries.note(decode(noteMatch[1]));
+    if (note === undefined) throw new PersonalKnowledgeError("personal_note_not_found", "笔记已不存在。");
+    writeJson(response, 200, { ok: true, note });
+    return true;
+  }
   if (noteMatch !== null && request.method === "PATCH") {
     const input = parse(updateNoteSchema, await readJsonBody(request));
-    await feature.commands.updateNote({ id: decode(noteMatch[1]), ...input });
+    await feature.commands.updateNote({ id: decode(noteMatch[1]), ...input, actor: USER_ACTOR });
     writeJson(response, 200, { ok: true });
     return true;
   }
   if (noteMatch !== null && request.method === "DELETE") {
     const expectedRevision = Number(url.searchParams.get("expectedRevision"));
     if (!Number.isInteger(expectedRevision) || expectedRevision <= 0) throw invalidInput();
-    await feature.commands.deleteNote({ id: decode(noteMatch[1]), expectedRevision });
+    await feature.commands.deleteNote({ id: decode(noteMatch[1]), expectedRevision, actor: USER_ACTOR });
     writeJson(response, 200, { ok: true });
     return true;
   }
   if (url.pathname === "/api/personal-knowledge/commands" && request.method === "POST") {
     const command = parse(commandSchema, await readJsonBody(request)) as PersonalKnowledgeCommand;
-    await feature.commands.execute(command as Exclude<PersonalKnowledgeCommand, { readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" }>);
+    if (command.type === "knowledge.uncollect") await feature.commands.uncollect(command.refId);
+    else await feature.commands.execute(command as Exclude<PersonalKnowledgeCommand, { readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" }>);
     writeJson(response, 200, { ok: true });
-    return true;
-  }
-  // One-release compatibility route. Delete with v0.5 after v0.4 has shipped.
-  if (url.pathname === "/api/personal-knowledge/compat/import" && request.method === "POST") {
-    const imported = await feature.commands.importLegacy(parse(legacyImportSchema, await readJsonBody(request)));
-    writeJson(response, 200, { ok: true, imported });
     return true;
   }
   return false;
 }
+
+function requireAssetRoot(runtime: PanelRuntime): string {
+  if (runtime.knowledgeAssetRoot === undefined) throw new PanelHttpError(503, "knowledge_asset_storage_unavailable", "知识资产存储不可用。");
+  return runtime.knowledgeAssetRoot;
+}
+
+const USER_ACTOR = { kind: "user" } as const;
 
 export function personalKnowledgeHttpError(error: PersonalKnowledgeError): PanelHttpError {
   switch (error.code) {

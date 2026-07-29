@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   NotebookPen,
@@ -24,11 +24,14 @@ import {
 } from 'lucide-react'
 import { getNote } from './notesStore'
 import { getMaterial } from './materials'
-import { MaterialBody, renderMarkdown } from './MaterialView'
+import { MaterialBody } from './MaterialView'
+import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { useBrain, type ResolvedPage } from './brainStore'
 import { useThemes, type Theme } from './themesStore'
 import { ImageWithFallback } from './figma/ImageWithFallback'
 import type { PersonalSpaceProjection } from '../../../space'
+import { ReferencePreview } from './ReferencePreview'
+import { fetchSpaceReferencePreview, getCachedReferencePreview } from './referencePreviewClient'
 
 /**
  * 知识库 —— 顶层场所(见 docs/概念与设计.md §5)。
@@ -111,7 +114,7 @@ function clean(src: string | undefined): string {
 /** 一段如实的文字摘要:笔记 / Markdown / 网页 / PDF 都取各自真实正文。 */
 function previewText(p: ResolvedPage): string {
   if (p.kind === 'note') return clean(getNote(p.refId)?.body).slice(0, 100)
-  if (p.kind === 'space_reference') return clean(p.detail).slice(0, 100)
+  if (p.kind === 'space_reference') return clean(p.previewText).slice(0, 100)
   const m = getMaterial(p.refId)
   if (!m) return ''
   switch (m.kind) {
@@ -693,7 +696,7 @@ function ReadingView({
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
   const outIds = brain.outgoing(page.refId)
   const backIds = brain.backlinks(page.refId)
-  const linkableTargets = resolved.filter((p) => p.refId !== page.refId && !outIds.includes(p.refId))
+  const linkableTargets = resolved.filter((p) => !p.demo && p.refId !== page.refId && !outIds.includes(p.refId))
 
   return (
     <section className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
@@ -701,17 +704,19 @@ function ReadingView({
         {/* 路径面包屑(知识库 › 文件)已上移到顶栏;这里只留内容操作。 */}
         <header className="shrink-0 flex items-center gap-2 px-5" style={{ height: 44 }}>
           <div className="flex-1" />
-          <button
-            onClick={() => {
-              brain.uncollect(page.refId)
-              onBack()
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
-            style={{ color: 'var(--aa-text-3, #aba39b)' }}
-          >
-            <Trash2 size={12} />
-            移出
-          </button>
+          {!page.demo && (
+            <button
+              onClick={() => {
+                brain.uncollect(page.refId)
+                onBack()
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
+              style={{ color: 'var(--aa-text-3, #aba39b)' }}
+            >
+              <Trash2 size={12} />
+              移出
+            </button>
+          )}
         </header>
 
         <div className="flex-1 overflow-y-auto">
@@ -750,13 +755,13 @@ function ReadingView({
                   key={id}
                   page={rp}
                   onClick={() => onOpen(id)}
-                  onRemove={() => brain.removeLink(page.refId, id)}
+                  onRemove={page.demo ? undefined : () => brain.removeLink(page.refId, id)}
                 />
               )
             })}
           </div>
 
-          {linkPickerOpen ? (
+          {!page.demo && linkPickerOpen ? (
             <div className="mt-2 rounded-md p-1" style={{ border: '1px solid var(--aa-border, rgba(45,40,34,0.09))' }}>
               <div className="flex items-center justify-between px-1.5 py-1">
                 <span className="text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
@@ -789,7 +794,7 @@ function ReadingView({
                 )}
               </div>
             </div>
-          ) : (
+          ) : !page.demo ? (
             <button
               onClick={() => setLinkPickerOpen(true)}
               className="mt-2 w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
@@ -798,7 +803,7 @@ function ReadingView({
               <Plus size={12} />
               建立链接
             </button>
-          )}
+          ) : null}
         </div>
       </div>
     </section>
@@ -1173,6 +1178,18 @@ function PageContent({
   page: ResolvedPage
   onOpenSpaceReference?: (spaceId: string, itemId: string) => void
 }) {
+  const [managedPath, setManagedPath] = useState('')
+  useEffect(() => {
+    setManagedPath('')
+  }, [page.refId])
+  const navigateManagedPath = (relativePath: string) => {
+    const apiBase = '/api/personal-knowledge/assets'
+    if (getCachedReferencePreview(page.refId, relativePath, apiBase) !== undefined) {
+      setManagedPath(relativePath)
+      return
+    }
+    void fetchSpaceReferencePreview(page.refId, relativePath, undefined, apiBase).then(() => setManagedPath(relativePath))
+  }
   if (!page.exists) {
     return (
       <div
@@ -1188,7 +1205,7 @@ function PageContent({
     return (
       <div className="mx-auto px-6 py-10 reading-prose" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
         {note.body.trim() ? (
-          renderMarkdown(note.body)
+          <MarkdownDocumentSurface markdown={note.body} sourceVersion={`${note.id}:${note.updatedAt}`} />
         ) : (
           <p className="text-sm" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
             这篇笔记还没有内容。
@@ -1198,25 +1215,22 @@ function PageContent({
     )
   }
   if (page.kind === 'space_reference') {
-    return (
-      <div className="mx-auto px-6 py-10" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
-        <h1 className="text-lg font-semibold m-0" style={{ color: 'var(--aa-text-1, #292722)' }}>{page.title}</h1>
-        <p className="text-sm mt-3 break-all" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-          {page.detail || '这是一个空间引用，原始内容仍由对应来源持有。'}
-        </p>
-        {page.spaceId !== undefined && onOpenSpaceReference !== undefined && (
-          <button
-            type="button"
-            className="mt-5 flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-white"
-            style={{ background: 'var(--aa-accent, #6865a7)' }}
-            onClick={() => onOpenSpaceReference(page.spaceId!, page.refId)}
-          >
-            在空间中打开
-            <CornerUpLeft size={12} style={{ transform: 'scaleX(-1)' }} />
-          </button>
-        )}
-      </div>
-    )
+    if (page.managedAsset?.status === 'managed') {
+      return (
+        <ReferencePreview
+          itemId={page.refId}
+          fallbackTitle={page.title}
+          canOpen={false}
+          onOpen={() => undefined}
+          apiBase="/api/personal-knowledge/assets"
+          readOnly
+          initialRelativePath={managedPath}
+          onNavigatePath={navigateManagedPath}
+          embedded
+        />
+      )
+    }
+    return null
   }
   const material = getMaterial(page.refId)!
   return <MaterialBody material={material} />

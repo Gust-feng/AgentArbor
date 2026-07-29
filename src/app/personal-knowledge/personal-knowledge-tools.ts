@@ -79,7 +79,7 @@ export function createKnowledgeCreateNoteTool(options: PersonalKnowledgeToolOpti
       bodyMarkdown: { type: "string" },
       materialRefs: { type: "array", items: { type: "string" } },
     }, ["spaceId"]),
-    execute: async (input) => {
+    execute: async (input, context) => {
       const record = asRecord(input);
       const spaceId = stringOrUndefined(record.spaceId);
       const title = optionalString(record.title);
@@ -89,7 +89,7 @@ export function createKnowledgeCreateNoteTool(options: PersonalKnowledgeToolOpti
         return invalid("spaceId is required; title, bodyMarkdown and materialRefs must be omitted or valid values.");
       }
       return resultFor(
-        () => options.knowledge.commands.createNote({ spaceId, title, bodyMarkdown, materialRefs }),
+        () => options.knowledge.commands.createNote({ spaceId, title, bodyMarkdown, materialRefs, actor: agentActor(context) }),
         (note) => ({ status: "created", note }),
       );
     },
@@ -107,7 +107,7 @@ export function createKnowledgeUpdateNoteTool(options: PersonalKnowledgeToolOpti
       title: { type: "string" },
       bodyMarkdown: { type: "string" },
     }, ["noteId", "expectedRevision"]),
-    execute: async (input) => {
+    execute: async (input, context) => {
       const record = asRecord(input);
       const noteId = stringOrUndefined(record.noteId);
       const expectedRevision = integer(record.expectedRevision);
@@ -118,7 +118,7 @@ export function createKnowledgeUpdateNoteTool(options: PersonalKnowledgeToolOpti
       }
       if (title === undefined && bodyMarkdown === undefined) return invalid("title or bodyMarkdown is required.");
       return resultFor(
-        () => options.knowledge.commands.updateNote({ id: noteId, expectedRevision, title, bodyMarkdown }),
+        () => options.knowledge.commands.updateNote({ id: noteId, expectedRevision, title, bodyMarkdown, actor: agentActor(context) }),
         () => ({ status: "updated", noteId, revision: expectedRevision + 1 }),
       );
     },
@@ -128,7 +128,7 @@ export function createKnowledgeUpdateNoteTool(options: PersonalKnowledgeToolOpti
 export function createKnowledgeCollectTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
   return tool({
     name: "KnowledgeCollect",
-    description: "Collect an existing personal note or Space reference into Brain. This records a knowledge-page reference and does not copy or modify the source content.",
+    description: "Collect an existing personal note or Space reference into Brain. Space references are copied into AgentArbor-managed knowledge storage so the collected content remains readable independently of the source.",
     metadata: writeMetadata,
     inputSchema: schema({
       refId: { type: "string" },
@@ -141,8 +141,10 @@ export function createKnowledgeCollectTool(options: PersonalKnowledgeToolOptions
       if (refId === undefined || kind === undefined) return invalid("refId and a supported kind are required.");
       const page: KnowledgePage = { refId, kind, collectedAt: Date.now() };
       return resultFor(
-        () => options.knowledge.commands.execute({ type: "knowledge.collect", page }),
-        () => ({ status: "collected", page }),
+        () => kind === "space_reference"
+          ? options.knowledge.commands.collectSpaceReference({ referenceId: refId })
+          : options.knowledge.commands.execute({ type: "knowledge.collect", page }).then(() => page),
+        (collected) => ({ status: "collected", page: collected }),
       );
     },
   });
@@ -153,7 +155,7 @@ type ToolSpec = {
   readonly description: string;
   readonly metadata: NonNullable<ToolDefinition["metadata"]>;
   readonly inputSchema: ToolDefinition["inputSchema"];
-  readonly execute: (input: unknown) => Promise<unknown>;
+  readonly execute: (input: unknown, context: ToolExecutionContext) => Promise<unknown>;
 };
 
 function tool(spec: ToolSpec): ToolExecutor {
@@ -164,12 +166,22 @@ function tool(spec: ToolSpec): ToolExecutor {
       metadata: spec.metadata,
       inputSchema: spec.inputSchema,
     },
-    execute: (input: unknown, _context: ToolExecutionContext) => spec.execute(input),
+    execute: (input: unknown, context: ToolExecutionContext) => spec.execute(input, context),
   };
 }
 
 const readMetadata = { category: "workspace", riskLevel: "low", operationType: "read-only", requiresConfirmation: false } as const;
 const writeMetadata = { category: "workspace", riskLevel: "low", operationType: "read-write", requiresConfirmation: false } as const;
+
+function agentActor(context: ToolExecutionContext) {
+  return {
+    kind: "agent" as const,
+    actorId: context.callerAgentId,
+    traceId: context.traceId,
+    goalId: context.goalId,
+    ...(context.toolCallId === undefined ? {} : { toolCallId: context.toolCallId }),
+  };
+}
 
 function schema(
   properties: ToolDefinition["inputSchema"]["properties"],

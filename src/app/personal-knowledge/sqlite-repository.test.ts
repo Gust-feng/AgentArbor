@@ -5,18 +5,42 @@ import path from "node:path";
 import test from "node:test";
 
 import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
-import { PersonalKnowledgeError, type LegacyPersonalKnowledgeImport } from "./contracts.js";
+import { PersonalKnowledgeError } from "./contracts.js";
 import { createPersonalKnowledgeFeature } from "./personal-knowledge-feature.js";
 import { createSqlitePersonalKnowledgeRepository } from "./sqlite-repository.js";
 
 test("personal knowledge persists Markdown notes and rejects stale revisions", async (t) => {
   const { database, feature } = await fixture(t);
-  const note = await feature.commands.createNote({ spaceId: "space-one", title: "标题", bodyMarkdown: "# 正文" });
-  await feature.commands.updateNote({ id: note.id, expectedRevision: 1, bodyMarkdown: "# 新正文" });
+  const note = await feature.commands.createNote({ spaceId: "space-one", title: "标题", bodyMarkdown: "# 正文", actor: { kind: "user" } });
+  await feature.commands.updateNote({
+    id: note.id,
+    expectedRevision: 1,
+    bodyMarkdown: "# 新正文",
+    actor: { kind: "agent", actorId: "ordinary", traceId: "trace-1", goalId: "goal-1", toolCallId: "call-1" },
+  });
 
   const saved = (await feature.queries.snapshot()).notes[0];
   assert.equal(saved?.bodyMarkdown, "# 新正文");
   assert.equal(saved?.revision, 2);
+  assert.deepEqual((await feature.queries.noteRevisions(note.id)).map((revision) => ({
+    revision: revision.revision,
+    baseRevision: revision.baseRevision,
+    operation: revision.operation,
+    actor: revision.actor,
+    bodyMarkdown: revision.bodyMarkdown,
+  })), [{
+    revision: 2,
+    baseRevision: 1,
+    operation: "update",
+    actor: { kind: "agent", actorId: "ordinary", traceId: "trace-1", goalId: "goal-1", toolCallId: "call-1" },
+    bodyMarkdown: "# 新正文",
+  }, {
+    revision: 1,
+    baseRevision: undefined,
+    operation: "create",
+    actor: { kind: "user" },
+    bodyMarkdown: "# 正文",
+  }]);
   await assert.rejects(
     feature.commands.updateNote({ id: note.id, expectedRevision: 1, title: "过期写入" }),
     (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_note_revision_conflict",
@@ -60,36 +84,26 @@ test("deleting a note removes its knowledge relations in one transaction", async
   assert.equal(snapshot.links.length, 0);
   assert.equal(snapshot.assignments.length, 0);
   assert.equal(snapshot.themes.length, 1);
-});
-
-test("legacy import is idempotent and records the compatibility boundary", async (t) => {
-  const { feature } = await fixture(t);
-  const input: LegacyPersonalKnowledgeImport = {
-    importKey: "redesign-local-storage-v1",
-    fallbackSpaceId: "space-one",
-    notes: [{ id: "legacy-note", title: "旧笔记", body: "正文", createdAt: 1, updatedAt: 2 }],
-    pages: [{ refId: "legacy-note", kind: "note", collectedAt: 3 }],
-    links: [],
-    themes: [],
-    assignments: [],
-    recentlyOpened: { "legacy-note": 4 },
-  };
-  assert.equal(await feature.commands.importLegacy(input), true);
-  assert.equal(await feature.commands.importLegacy({ ...input, notes: [] }), false);
-  assert.equal((await feature.queries.snapshot()).notes.length, 1);
+  const revisions = await feature.queries.noteRevisions(note.id);
+  assert.equal(revisions[0]?.operation, "delete");
+  assert.equal(revisions[0]?.revision, 2);
+  assert.equal(revisions[0]?.bodyMarkdown, "");
 });
 
 test("persists only existing Space references as knowledge pages", async (t) => {
   const { feature } = await fixture(t);
-  await feature.commands.execute({
-    type: "knowledge.collect",
-    page: { refId: "reference-one", kind: "space_reference", collectedAt: 1 },
+  await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
+  const [managedPage] = (await feature.queries.snapshot()).pages;
+  assert.equal(managedPage?.kind, "space_reference");
+  assert.match(managedPage?.refId ?? "", /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(managedPage?.asset, {
+    status: "managed",
+    title: "参考资料",
+    sourceLabel: "C:/source",
+    contentKind: "directory",
+    sourceReferenceId: "reference-one",
+    sourceRelativePath: "",
   });
-  assert.deepEqual((await feature.queries.snapshot()).pages.map((page) => ({ ...page })), [{
-    refId: "reference-one",
-    kind: "space_reference",
-    collectedAt: 1,
-  }]);
   await assert.rejects(
     feature.commands.execute({
       type: "knowledge.collect",
@@ -102,6 +116,7 @@ test("persists only existing Space references as knowledge pages", async (t) => 
 test("migrates existing material knowledge pages before adding Space references", async (t) => {
   const { database } = await fixture(t);
   database.connection.exec(`
+    DROP TABLE personal_note_revisions;
     DROP TABLE knowledge_pages;
     CREATE TABLE knowledge_pages (
       ref_id TEXT PRIMARY KEY,
@@ -126,6 +141,24 @@ test("migrates existing material knowledge pages before adding Space references"
   assert.deepEqual((await migrated.readSnapshot()).pages.map((page) => page.kind), ["space_reference", "material"]);
 });
 
+test("migration removes relationships whose knowledge pages no longer exist", async (t) => {
+  const { database } = await fixture(t);
+  database.connection.exec(`
+    INSERT INTO knowledge_pages(ref_id, kind, collected_at, asset_json) VALUES ('alive', 'material', 1, NULL);
+    INSERT INTO knowledge_links(from_ref_id, to_ref_id) VALUES ('alive', 'missing');
+    INSERT INTO knowledge_themes(id, name, color, origin) VALUES ('theme-one', '主题', '#000000', 'user');
+    INSERT INTO knowledge_theme_assignments(ref_id, theme_id, assigned_by, locked) VALUES ('missing', 'theme-one', 'user', 0);
+    INSERT INTO knowledge_recently_opened(ref_id, opened_at) VALUES ('missing', 1);
+  `);
+  database.connection.prepare("UPDATE schema_migrations SET version = ? WHERE owner = ?").run(6, "personal-knowledge");
+
+  createSqlitePersonalKnowledgeRepository(database);
+
+  assert.equal(database.connection.prepare("SELECT COUNT(*) AS count FROM knowledge_links").get()?.count, 0);
+  assert.equal(database.connection.prepare("SELECT COUNT(*) AS count FROM knowledge_theme_assignments").get()?.count, 0);
+  assert.equal(database.connection.prepare("SELECT COUNT(*) AS count FROM knowledge_recently_opened").get()?.count, 0);
+});
+
 async function fixture(t: import("node:test").TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-personal-knowledge-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
@@ -133,6 +166,8 @@ async function fixture(t: import("node:test").TestContext) {
     repository: createSqlitePersonalKnowledgeRepository(database),
     spaceExists: async (spaceId) => spaceId === "space-one",
     spaceReferenceExists: async (itemId) => itemId === "reference-one",
+    captureSpaceReference: async () => ({ status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "directory", sourceReferenceId: "reference-one", sourceRelativePath: "" }),
+    removeManagedAsset: async () => undefined,
   });
   t.after(async () => {
     await feature.release();

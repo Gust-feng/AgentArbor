@@ -9,10 +9,38 @@ export type PersonalNote = {
   readonly revision: number;
 };
 
+export type PersonalKnowledgeActor = {
+  readonly kind: "user" | "agent" | "system";
+  readonly actorId?: string;
+  readonly traceId?: string;
+  readonly goalId?: string;
+  readonly toolCallId?: string;
+};
+
+export type PersonalNoteRevision = {
+  readonly noteId: string;
+  readonly revision: number;
+  readonly baseRevision?: number;
+  readonly operation: "create" | "update" | "delete" | "snapshot";
+  readonly title: string;
+  readonly bodyMarkdown: string;
+  readonly actor: PersonalKnowledgeActor;
+  readonly changeSummary?: string;
+  readonly createdAt: number;
+};
+
 export type KnowledgePage = {
   readonly refId: string;
   readonly kind: "note" | "material" | "space_reference";
   readonly collectedAt: number;
+  readonly asset?: {
+    readonly status: "managed";
+    readonly title: string;
+    readonly sourceLabel: string;
+    readonly contentKind: "file" | "directory";
+    readonly sourceReferenceId: string;
+    readonly sourceRelativePath: string;
+  };
 };
 
 export type KnowledgeLink = { readonly from: string; readonly to: string };
@@ -45,28 +73,10 @@ export type PersonalKnowledgeSearchResult = {
   readonly snippet: string;
 };
 
-export type LegacyPersonalKnowledgeImport = {
-  readonly importKey: string;
-  readonly fallbackSpaceId: string;
-  readonly notes: readonly {
-    readonly id: string;
-    readonly title: string;
-    readonly body: string;
-    readonly createdAt: number;
-    readonly updatedAt: number;
-    readonly materialRefs?: readonly string[];
-  }[];
-  readonly pages: readonly KnowledgePage[];
-  readonly links: readonly KnowledgeLink[];
-  readonly themes: readonly KnowledgeTheme[];
-  readonly assignments: readonly KnowledgeThemeAssignment[];
-  readonly recentlyOpened: Readonly<Record<string, number>>;
-};
-
 export type PersonalKnowledgeCommand =
-  | { readonly type: "note.create"; readonly note: PersonalNote }
-  | { readonly type: "note.update"; readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string; readonly updatedAt: number }
-  | { readonly type: "note.delete"; readonly id: string; readonly expectedRevision: number }
+  | { readonly type: "note.create"; readonly note: PersonalNote; readonly actor: PersonalKnowledgeActor; readonly changeSummary?: string }
+  | { readonly type: "note.update"; readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string; readonly updatedAt: number; readonly actor: PersonalKnowledgeActor; readonly changeSummary?: string }
+  | { readonly type: "note.delete"; readonly id: string; readonly expectedRevision: number; readonly deletedAt: number; readonly actor: PersonalKnowledgeActor; readonly changeSummary?: string }
   | { readonly type: "note.reorder"; readonly orderedIds: readonly string[] }
   | { readonly type: "knowledge.collect"; readonly page: KnowledgePage }
   | { readonly type: "knowledge.uncollect"; readonly refId: string }
@@ -84,23 +94,25 @@ export type PersonalKnowledgeCommand =
 export interface PersonalKnowledgeRepository {
   readSnapshot(): Promise<PersonalKnowledgeSnapshot>;
   getNote(id: string): Promise<PersonalNote | undefined>;
+  listNoteRevisions(id: string, limit: number): Promise<readonly PersonalNoteRevision[]>;
   searchNotes(input: { readonly query: string; readonly spaceId?: string; readonly limit: number }): Promise<readonly PersonalKnowledgeSearchResult[]>;
   execute(command: PersonalKnowledgeCommand): Promise<void>;
-  importLegacy(input: LegacyPersonalKnowledgeImport): Promise<boolean>;
 }
 
 export type PersonalKnowledgeFeature = {
   readonly commands: {
-    createNote(input: { readonly id?: string; readonly spaceId: string; readonly title?: string; readonly bodyMarkdown?: string; readonly materialRefs?: readonly string[] }): Promise<PersonalNote>;
-    updateNote(input: { readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string }): Promise<void>;
-    deleteNote(input: { readonly id: string; readonly expectedRevision: number }): Promise<void>;
+    createNote(input: { readonly id?: string; readonly spaceId: string; readonly title?: string; readonly bodyMarkdown?: string; readonly materialRefs?: readonly string[]; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<PersonalNote>;
+    updateNote(input: { readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
+    deleteNote(input: { readonly id: string; readonly expectedRevision: number; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
     reorderNotes(orderedIds: readonly string[]): Promise<void>;
+    collectSpaceReference(input: { readonly referenceId: string; readonly relativePath?: string }): Promise<KnowledgePage>;
+    uncollect(refId: string): Promise<void>;
     execute(command: Exclude<PersonalKnowledgeCommand, { readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" }>): Promise<void>;
-    importLegacy(input: LegacyPersonalKnowledgeImport): Promise<boolean>;
   };
   readonly queries: {
     snapshot(): Promise<PersonalKnowledgeSnapshot>;
     note(id: string): Promise<PersonalNote | undefined>;
+    noteRevisions(id: string, limit?: number): Promise<readonly PersonalNoteRevision[]>;
     search(input: { readonly query: string; readonly spaceId?: string; readonly limit?: number }): Promise<readonly PersonalKnowledgeSearchResult[]>;
   };
   release(): Promise<void>;

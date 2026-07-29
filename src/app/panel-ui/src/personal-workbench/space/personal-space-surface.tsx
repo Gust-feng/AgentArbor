@@ -72,6 +72,8 @@ export type PersonalSpaceActions = {
     destinationFolderId?: string,
   ) => void | Promise<void>;
   readonly rename?: (target: PersonalSpaceRenameTarget, title: string) => void | Promise<void>;
+  /** Removes an internal organization folder subtree without deleting referenced external objects. */
+  readonly removeFolder?: (folderId: string) => void | Promise<void>;
   /** Removes the Space reference only; it must never delete the external object. */
   readonly removeReference?: (itemId: string) => void | Promise<void>;
 };
@@ -240,6 +242,7 @@ function SpaceTreeItem(props: {
   const canOpen = props.onOpenItem !== undefined && props.item.openable !== false;
   const canOperate = props.actions?.rename !== undefined
     || (isInternalFolder && props.actions?.createFolder !== undefined)
+    || (isInternalFolder && props.actions?.removeFolder !== undefined)
     || (!isInternalFolder && props.actions?.removeReference !== undefined);
   const icon = itemIcon(props.item.kind, expanded);
   const itemDetail = props.item.detail ?? itemKindLabel(props.item.kind);
@@ -292,9 +295,14 @@ function SpaceTreeItem(props: {
                     <FolderPlus size={15} aria-hidden="true" />新建子文件夹
                   </button>
                 )}
+                {isInternalFolder && props.actions?.removeFolder !== undefined && (
+                  <button type="button" role="menuitem" className="personal-space-action-menu__danger" onClick={() => props.onRun("正在删除文件夹…", () => props.actions?.removeFolder?.(props.item.itemId))}>
+                    <Trash2 size={15} aria-hidden="true" />删除文件夹
+                  </button>
+                )}
                 {!isInternalFolder && props.actions?.removeReference !== undefined && (
                   <button type="button" role="menuitem" className="personal-space-action-menu__danger" onClick={() => props.onRun("正在移除引用…", () => props.actions?.removeReference?.(props.item.itemId))}>
-                    <Trash2 size={15} aria-hidden="true" />从空间移除
+                    <Trash2 size={15} aria-hidden="true" />取消链接
                   </button>
                 )}
               </div>

@@ -32,6 +32,21 @@ export const LEARNING_DEMO_SPACE_TREE: LearningDemoSpaceItem[] = [
 
 export const LEARNING_DEMO_MATERIAL_IDS = new Set(['f1-1', 'f1-2', 'f1-5', 'f1-6', 'f2-2'])
 
+// Knowledge demo cards are a read-only projection. They are never imported into
+// the user's Personal Knowledge SQLite database.
+export const LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS = [
+  'f1-1',
+  'f2-2',
+  'm-attn-pdf',
+  'm-transformer-md',
+  'm-loss-img',
+  'm-stanford-video',
+  'm-podcast-audio',
+  'm-train-code',
+  'm-distill-web',
+  'm-inspo-img',
+] as const
+
 export const LEARNING_DEMO_CONVERSATION_RESULTS = [
   {
     id: 'conv-grad', name: '关于梯度下降的讨论',

@@ -19,7 +19,7 @@ export function getNote(id: string): Note | undefined {
   return getAllNotes().find((note) => note.id === id)
 }
 
-export function createNote(init?: Partial<Pick<Note, 'title' | 'body' | 'materialRefs'>>): Note {
+export function createNote(init?: Partial<Pick<Note, 'spaceId' | 'title' | 'body' | 'materialRefs'>>): Note {
   return createPersonalNote(init)
 }
 

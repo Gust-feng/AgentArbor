@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { DndProvider, useDrag, useDrop } from 'react-dnd'
 import { HTML5Backend, getEmptyImage } from 'react-dnd-html5-backend'
 import {
@@ -30,19 +30,17 @@ import type {
 } from '../../../space'
 import { getMaterial, KIND_META } from './materials'
 import { MaterialView, MaterialBody } from './MaterialView'
+import { ReferencePreview } from './ReferencePreview'
+import { NoteEditor } from './NoteEditor'
+import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
 import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
 import { LEARNING_DEMO_SPACE_TREE } from './learningDemoDataset'
 import { getAllNotes, useNotes } from './notesStore'
 import { useBrain, type PageKind } from './brainStore'
 
-const LazyNoteEditor = lazy(async () => {
-  const module = await import('./NoteEditor')
-  return { default: module.NoteEditor }
-})
-
 /**
  * 学习空间 —— VS Code 式分栏:左侧资源管理器(我的笔记 + 资料),右侧书写/查看。
- * 单击进入,追求心流。笔记(可写)与资料(只读)分区呈现,层次清晰。
+ * 单击进入,追求心流。笔记与外部引用分区呈现；引用是否可编辑由来源能力决定。
  */
 
 interface SpaceItem {
@@ -57,10 +55,13 @@ interface SpaceItem {
   conversationId?: string
   openUrl?: string
   openable?: boolean
+  referenceId?: string
+  relativePath?: string
+  externalChild?: boolean
 }
 
 /**
- * 空间里「读进来的材料 / 对话引用」—— 只读参考,服务于书写。
+ * 空间里的材料 / 对话引用。引用保留外部来源身份，文本来源可在冲突保护下编辑。
  * (「我写的笔记」是另一类可写对象,来自 notesStore,不在这棵树里。)
  * 这份数据只在明确标记为 learning-workspace 的演示空间中展示。
  */
@@ -103,8 +104,13 @@ function TreeNode({
   onDelete,
   renameEnabled,
   removeEnabled,
+  removeFolderEnabled,
   isExpanded,
   onToggleExpand,
+  onPrefetch,
+  creatingEntry,
+  onCreateEntryCommit,
+  onCreateEntryCancel,
 }: {
   item: SpaceItem
   depth: number
@@ -114,15 +120,23 @@ function TreeNode({
   onDelete: (item: SpaceItem) => void
   renameEnabled: boolean
   removeEnabled: boolean
+  removeFolderEnabled: boolean
   isExpanded: (id: string) => boolean
   onToggleExpand: (id: string) => void
+  onPrefetch: (item: SpaceItem) => void
+  creatingEntry?: { readonly parentId: string }
+  onCreateEntryCommit: (name: string) => void
+  onCreateEntryCancel: () => void
 }) {
   const expanded = isExpanded(item.id)
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
   const selected = selectedId === item.id
-  const canRename = !item.demo && renameEnabled
-  const canRemove = !item.demo && item.domainKind !== 'folder' && removeEnabled
+  const canMutateExternalEntry = item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined
+  const canRename = !item.demo && (canMutateExternalEntry || (!item.externalChild && renameEnabled))
+  const canRemove = !item.demo && (canMutateExternalEntry
+    || (!item.externalChild && item.domainKind === 'folder' && removeFolderEnabled)
+    || (!item.externalChild && item.domainKind !== 'folder' && removeEnabled))
   const pl = 10 + depth * 14
 
   return (
@@ -130,22 +144,24 @@ function TreeNode({
       <div
         className="group/row flex items-center gap-2 rounded-md cursor-pointer transition-colors"
         style={{
+          height: 30,
           paddingLeft: pl,
           paddingRight: 8,
-          paddingTop: 5,
-          paddingBottom: 5,
           background: selected
             ? 'var(--aa-surface-active, #e5e1db)'
             : hovered
             ? 'var(--aa-surface-hover, #eeebe6)'
             : 'transparent',
         }}
-        onMouseEnter={() => setHovered(true)}
+        onMouseEnter={() => { setHovered(true); onPrefetch(item) }}
         onMouseLeave={() => setHovered(false)}
         onClick={() => {
           if (editing) return
+          if (item.type === 'folder') {
+            onToggleExpand(item.id)
+            return
+          }
           onSelect(item.id)
-          if (item.type === 'folder') onToggleExpand(item.id)
         }}
       >
         {item.type === 'folder' ? (
@@ -180,11 +196,21 @@ function TreeNode({
             visible={hovered}
             actions={[
               ...(canRename ? [{ label: '重命名', icon: <Pencil size={12} />, onClick: () => setEditing(true) }] : []),
-              ...(canRemove ? [{ label: '移除', icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item) }] : []),
+              ...(canRemove ? [{ label: item.externalChild ? '删除' : item.domainKind === 'folder' ? '删除文件夹' : '取消链接', icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item) }] : []),
             ]}
           />
         )}
+        {editing && <span style={{ width: 20, flexShrink: 0 }} />}
       </div>
+
+      {creatingEntry?.parentId === item.id && (
+        <div className="flex items-center gap-2" style={{ height: 30, paddingLeft: 10 + (depth + 1) * 14, paddingRight: 8 }}>
+          <span style={{ width: 12, flexShrink: 0 }} />
+          <FileText size={13} style={{ color: '#87827c' }} />
+          <InlineName value="" label="文件名称" onCommit={onCreateEntryCommit} onCancel={onCreateEntryCancel} />
+          <span style={{ width: 20, flexShrink: 0 }} />
+        </div>
+      )}
 
       {item.type === 'folder' && expanded && item.children && (
         <div role="group">
@@ -199,8 +225,13 @@ function TreeNode({
               onDelete={onDelete}
               renameEnabled={renameEnabled}
               removeEnabled={removeEnabled}
+              removeFolderEnabled={removeFolderEnabled}
               isExpanded={isExpanded}
               onToggleExpand={onToggleExpand}
+              onPrefetch={onPrefetch}
+              creatingEntry={creatingEntry}
+              onCreateEntryCommit={onCreateEntryCommit}
+              onCreateEntryCancel={onCreateEntryCancel}
             />
           ))}
         </div>
@@ -244,7 +275,31 @@ function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
     conversationId: item.conversationId,
     openUrl: item.openUrl,
     openable: item.openable,
+    referenceId: item.kind === 'workspace_folder' ? item.itemId : undefined,
   }
+}
+
+function attachReferenceChildren(tree: SpaceItem[], childrenById: ReadonlyMap<string, SpaceItem[]>): SpaceItem[] {
+  return tree.map((item) => {
+    const children = childrenById.get(item.id) ?? item.children
+    return { ...item, children: children === undefined ? undefined : attachReferenceChildren(children, childrenById) }
+  })
+}
+
+function projectReferenceChildren(referenceId: string, entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: 'file' | 'directory' | 'other' }[]): SpaceItem[] {
+  return entries.map((entry) => ({
+    id: referenceChildId(referenceId, entry.relativePath),
+    name: entry.name,
+    type: entry.kind === 'directory' ? 'folder' : 'file',
+    domainKind: entry.kind === 'directory' ? 'workspace_folder' : 'local_file',
+    referenceId,
+    relativePath: entry.relativePath,
+    externalChild: true,
+  }))
+}
+
+function referenceChildId(referenceId: string, relativePath: string): string {
+  return `${referenceId}::${encodeURIComponent(relativePath)}`
 }
 
 function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['type'] {
@@ -330,7 +385,9 @@ export function SpacePage({
   }
 
   // 书写为中心:默认打开最近编辑的笔记(有 targetId 则优先)。
-  const tree = useMemo(() => projectSpaceTree(space), [space])
+  const [referenceChildren, setReferenceChildren] = useState<ReadonlyMap<string, SpaceItem[]>>(new Map())
+  const projectedTree = useMemo(() => projectSpaceTree(space), [space])
+  const tree = useMemo(() => attachReferenceChildren(projectedTree, referenceChildren), [projectedTree, referenceChildren])
   const memoryKey = spaceId ?? 'prototype-space'
   const rememberedView = spaceViewMemory.get(memoryKey)
   const [selectedId, setSelectedId] = useState<string | null>(() => (
@@ -347,9 +404,49 @@ export function SpacePage({
   const [fullscreenId, setFullscreenId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [creatingFolder, setCreatingFolder] = useState(false)
+  const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
   const explorerRef = useRef<HTMLDivElement>(null)
 
+  function selectItem(id: string) {
+    setActionError(null)
+    setSelectedId(id)
+  }
+
+  function prefetchTreeItem(item: SpaceItem) {
+    if (item.demo || item.type === 'folder') return
+    const referenceId = item.referenceId ?? item.id
+    const relativePath = item.relativePath ?? ''
+    if (getCachedReferencePreview(referenceId, relativePath) !== undefined) return
+    void fetchSpaceReferencePreview(referenceId, relativePath).catch(() => undefined)
+  }
+
+  function selectTreeItem(id: string) {
+    const item = getItem(tree, id)
+    if (item === undefined || item.demo || item.type === 'folder') {
+      selectItem(id)
+      return
+    }
+    const referenceId = item.referenceId ?? item.id
+    const relativePath = item.relativePath ?? ''
+    if (getCachedReferencePreview(referenceId, relativePath) === undefined) {
+      void fetchSpaceReferencePreview(referenceId, relativePath).catch((error: unknown) => setActionError(actionErrorMessage(error)))
+    }
+    selectItem(id)
+  }
+
   function toggleExpanded(id: string) {
+    const item = getItem(tree, id)
+    if (!expandedIds.has(id) && item?.referenceId !== undefined && !referenceChildren.has(id)) {
+      void fetchSpaceReferencePreview(item.referenceId, item.relativePath ?? '').then((preview) => {
+        if (preview.content.kind !== 'directory') return
+        const entries = preview.content.entries
+        setReferenceChildren((current) => {
+          const next = new Map(current)
+          next.set(id, projectReferenceChildren(item.referenceId!, entries))
+          return next
+        })
+      }, (error: unknown) => setActionError(actionErrorMessage(error)))
+    }
     setExpandedIds((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
@@ -378,18 +475,19 @@ export function SpacePage({
 
   const selectedNote = notes.find((n) => n.id === selectedId)
   const selectedItem = selectedId ? getItem(tree, selectedId) : null
+  const selectedReferenceRoot = selectedItem?.referenceId === undefined ? undefined : getItem(tree, selectedItem.referenceId)
   const selectedMaterial = selectedItem?.demo ? getMaterial(selectedItem.id) : undefined
   const fullscreenMaterial = fullscreenId ? getMaterial(fullscreenId) : undefined
   const itemCount = notes.length + countItems(tree)
 
   function handleCreateNote() {
     if (notes.length === 0) {
-      const note = create({ title: '写下第一篇笔记' })
+      const note = create({ spaceId, title: '写下第一篇笔记' })
       setSelectedId(note.id)
       return
     }
 
-    const note = create()
+    const note = create({ spaceId })
     openNameDraft(note.id)
   }
 
@@ -419,6 +517,18 @@ export function SpacePage({
 
   // Space feature owns mutations; this page only translates prototype intent.
   async function handleRenameItem(item: SpaceItem, name: string) {
+    if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
+      setActionError(null)
+      try {
+        const nextRelativePath = await renameSpaceReferenceEntry(item.referenceId, item.relativePath, name)
+        await refreshReferenceParent(item.referenceId, item.relativePath)
+        await fetchSpaceReferencePreview(item.referenceId, nextRelativePath)
+        setSelectedId((current) => current === item.id ? referenceChildId(item.referenceId!, nextRelativePath) : current)
+      } catch (error) {
+        setActionError(actionErrorMessage(error))
+      }
+      return
+    }
     if (actions?.rename === undefined) return
     setActionError(null)
     try {
@@ -428,7 +538,32 @@ export function SpacePage({
     }
   }
   async function handleDeleteItem(item: SpaceItem) {
-    if (item.domainKind === 'folder' || actions?.removeReference === undefined) return
+    if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
+      if (!window.confirm(`确定要删除“${item.name}”吗？此操作会删除磁盘上的${item.type === 'folder' ? '文件夹及其内容' : '文件'}。`)) return
+      setActionError(null)
+      try {
+        await deleteSpaceReferenceEntry(item.referenceId, item.relativePath)
+        await refreshReferenceParent(item.referenceId, item.relativePath)
+        setSelectedId((current) => current === item.id ? null : current)
+      } catch (error) {
+        setActionError(actionErrorMessage(error))
+      }
+      return
+    }
+    if (item.domainKind === 'folder') {
+      if (actions?.removeFolder === undefined) return
+      if (!window.confirm(`确定删除“${item.name}”吗？其中的空间组织和引用会一并移除，但不会删除磁盘上的文件。`)) return
+      setActionError(null)
+      try {
+        await actions.removeFolder(item.id)
+        setSelectedId((prev) => prev === item.id ? null : prev)
+      } catch (error) {
+        setActionError(actionErrorMessage(error))
+      }
+      return
+    }
+    if (actions?.removeReference === undefined) return
+    if (!window.confirm(`取消“${item.name}”与当前空间的链接吗？磁盘内容不会被删除。`)) return
     setActionError(null)
     try {
       await actions.removeReference(item.id)
@@ -436,6 +571,24 @@ export function SpacePage({
     } catch (error) {
       setActionError(actionErrorMessage(error))
     }
+  }
+
+  async function refreshReferenceParent(referenceId: string, relativePath: string) {
+    const separator = relativePath.lastIndexOf('/')
+    const parentPath = separator < 0 ? '' : relativePath.slice(0, separator)
+    const parentId = parentPath.length === 0 ? referenceId : referenceChildId(referenceId, parentPath)
+    await refreshReferenceDirectory(referenceId, parentPath, parentId)
+  }
+
+  async function refreshReferenceDirectory(referenceId: string, relativePath: string, directoryId: string) {
+    const preview = await fetchSpaceReferencePreview(referenceId, relativePath)
+    if (preview.content.kind !== 'directory') return
+    const entries = preview.content.entries
+    setReferenceChildren((current) => {
+      const next = new Map(current)
+      next.set(directoryId, projectReferenceChildren(referenceId, entries))
+      return next
+    })
   }
 
   async function handleOpenReference(item: SpaceItem) {
@@ -466,10 +619,43 @@ export function SpacePage({
     void runSpaceAction(() => actions.createFolder!(space.spaceId, title))
   }
 
+  function beginCreateReferenceFile() {
+    const root = tree.find((item) => item.domainKind === 'workspace_folder' && item.referenceId !== undefined)
+    if (root === undefined) return
+    let parent = root
+    if (selectedItem?.referenceId !== undefined) {
+      if (selectedItem.type === 'folder') parent = selectedItem
+      else if (selectedItem.relativePath !== undefined) {
+        const separator = selectedItem.relativePath.lastIndexOf('/')
+        const parentPath = separator < 0 ? '' : selectedItem.relativePath.slice(0, separator)
+        parent = parentPath.length === 0 ? getItem(tree, selectedItem.referenceId) ?? root : getItem(tree, referenceChildId(selectedItem.referenceId, parentPath)) ?? root
+      }
+    }
+    const referenceId = parent.referenceId ?? parent.id
+    setExpandedIds((current) => new Set(current).add(parent.id))
+    setCreatingReferenceFile({ referenceId, parentId: parent.id, parentPath: parent.relativePath ?? '' })
+  }
+
+  async function finishCreateReferenceFile(name: string) {
+    const target = creatingReferenceFile
+    if (target === null) return
+    setCreatingReferenceFile(null)
+    setActionError(null)
+    try {
+      const relativePath = await createSpaceReferenceEntry(target.referenceId, target.parentPath, name)
+      await refreshReferenceDirectory(target.referenceId, target.parentPath, target.parentId)
+      await fetchSpaceReferencePreview(target.referenceId, relativePath)
+      setSelectedId(referenceChildId(target.referenceId, relativePath))
+    } catch (error) {
+      setActionError(actionErrorMessage(error))
+    }
+  }
+
   // 就着一份材料新建笔记:带上 materialRefs(对象层),并在正文留下出处引子。
   function handleNoteFromMaterial(material: { id: string; title: string }) {
     const firstNote = notes.length === 0
     const note = create({
+      spaceId,
       title: firstNote ? '无标题' : undefined,
       body: `来自《${material.title}》\n\n`,
       materialRefs: [material.id],
@@ -561,7 +747,7 @@ export function SpacePage({
               title={note.title}
               selected={selectedId === note.id}
               creating={creatingNoteId === note.id}
-              onSelect={() => setSelectedId(note.id)}
+              onSelect={() => selectItem(note.id)}
               onRename={(t) => update(note.id, { title: t })}
               onCreateCommit={(title) => finishCreatedNote(note.id, title)}
               onCreateCancel={() => finishCreatedNote(note.id, '无标题')}
@@ -571,7 +757,7 @@ export function SpacePage({
             />
           ))}
 
-          {/* 资料(只读参考) */}
+          {/* 外部资料引用 */}
           <div className="flex items-center justify-between px-2.5 mt-4 mb-1">
             <span className="text-xs font-medium" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
               资料
@@ -582,6 +768,11 @@ export function SpacePage({
                 visible
                 trigger={<Plus size={13} />}
                 actions={[
+                  ...(tree.some((item) => item.domainKind === 'workspace_folder') ? [{
+                    label: '新建文件',
+                    icon: <FileText size={12} />,
+                    onClick: beginCreateReferenceFile,
+                  }] : []),
                   ...(actions?.createFolder === undefined ? [] : [{
                     label: '新建文件夹',
                     icon: <Folder size={12} />,
@@ -627,14 +818,19 @@ export function SpacePage({
                 key={item.id}
                 item={item}
                 depth={0}
-                onSelect={setSelectedId}
+                onSelect={selectTreeItem}
                 selectedId={selectedId}
                 onRename={handleRenameItem}
                 onDelete={handleDeleteItem}
                 renameEnabled={actions?.rename !== undefined}
                 removeEnabled={actions?.removeReference !== undefined}
+                removeFolderEnabled={actions?.removeFolder !== undefined}
                 isExpanded={(id) => expandedIds.has(id)}
                 onToggleExpand={toggleExpanded}
+                onPrefetch={prefetchTreeItem}
+                creatingEntry={creatingReferenceFile ?? undefined}
+                onCreateEntryCommit={(name) => void finishCreateReferenceFile(name)}
+                onCreateEntryCancel={() => setCreatingReferenceFile(null)}
               />
             ))}
           </div>
@@ -644,12 +840,15 @@ export function SpacePage({
       {/* 右侧预览 / 编辑主区 */}
       {selectedNote ? (
         <DeferredSurfaceBoundary resetKey={selectedNote.id} label="笔记编辑器暂时无法打开">
-          <Suspense fallback={<NoteEditorLoading />}>
-            <LazyNoteEditor
+            <NoteEditor
               note={selectedNote}
               onSave={update}
+              onClose={() => setSelectedId(null)}
+              onRestoreAsNew={(draft) => {
+                const restored = create({ title: draft.title.trim() || '无标题', body: draft.body })
+                setSelectedId(restored.id)
+              }}
             />
-          </Suspense>
         </DeferredSurfaceBoundary>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
@@ -720,10 +919,21 @@ export function SpacePage({
                 <ArrowRight size={12} />
               </button>}
           </CenteredCard>
-          ) : selectedItem?.domainKind === 'folder' ? (
-            <FolderPane folder={selectedItem} onSelect={setSelectedId} />
-          ) : selectedItem ? (
-            <ReferencePane item={selectedItem} brain={brain} onOpen={() => void handleOpenReference(selectedItem)} />
+          ) : selectedItem?.type !== 'folder' && selectedItem ? (
+            <ReferencePreview
+              itemId={selectedItem.referenceId ?? selectedItem.id}
+              initialRelativePath={selectedItem.relativePath ?? ''}
+              fallbackTitle={selectedReferenceRoot?.name ?? selectedItem.name}
+              canOpen={selectedItem.openable === true || selectedItem.openUrl !== undefined}
+              onOpen={() => void handleOpenReference(selectedItem)}
+              actions={<CollectButton
+                refId={selectedItem.id}
+                kind="space_reference"
+                sourceReferenceId={selectedItem.referenceId ?? selectedItem.id}
+                sourceRelativePath={selectedItem.relativePath ?? ''}
+                brain={brain}
+              />}
+            />
           ) : (
             <CenteredCard>
               <p className="text-xs leading-relaxed text-center" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
@@ -737,17 +947,6 @@ export function SpacePage({
       )}
     </section>
     </DndProvider>
-  )
-}
-
-function NoteEditorLoading() {
-  return (
-    <div className="flex min-w-0 flex-1 flex-col px-12 py-10" aria-label="正在打开笔记">
-      <span className="mb-8 h-7 w-2/5 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
-      <span className="mb-3 h-3 w-full animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
-      <span className="mb-3 h-3 w-5/6 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
-      <span className="h-3 w-2/3 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
-    </div>
   )
 }
 
@@ -927,10 +1126,13 @@ function InlineName({
       onBlur={commit}
       className="flex-1 min-w-0 text-sm bg-transparent outline-none"
       style={{
+        height: 20,
+        lineHeight: '19px',
+        boxSizing: 'border-box',
         color: 'var(--aa-text-1, #292722)',
         // 只用一条淡淡的下划线示意「正在编辑」,不再整体套一个蓝框。
         borderBottom: '1px solid var(--aa-border, rgba(45,40,34,0.25))',
-        paddingBottom: 1,
+        padding: 0,
       }}
     />
   )
@@ -974,6 +1176,8 @@ function RowMenu({
           className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg"
           style={{
             minWidth: 120,
+            width: 'max-content',
+            maxWidth: 220,
             background: 'var(--aa-surface, #fff)',
             border: '1px solid var(--aa-border, rgba(45,40,34,0.09))',
             boxShadow: '0 6px 20px rgba(45,40,34,0.14)',
@@ -987,7 +1191,7 @@ function RowMenu({
                 a.onClick()
               }}
               className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors hover:bg-black/5"
-              style={{ color: a.danger ? '#b3543f' : 'var(--aa-text-1, #292722)' }}
+              style={{ color: a.danger ? '#b3543f' : 'var(--aa-text-1, #292722)', whiteSpace: 'nowrap' }}
             >
               {a.icon}
               {a.label}
@@ -1003,54 +1207,6 @@ function CenteredCard({ children }: { children: ReactNode }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">{children}</div>
   )
-}
-
-function ReferencePane({
-  item,
-  brain,
-  onOpen,
-}: {
-  item: SpaceItem
-  brain: ReturnType<typeof useBrain>
-  onOpen: () => void
-}) {
-  const canOpen = item.openable === true || item.openUrl !== undefined
-  return (
-    <CenteredCard>
-      {itemIcon(item, 24)}
-      <p className="text-sm mt-3 mb-1 font-medium" style={{ color: 'var(--aa-text-1, #292722)' }}>
-        {item.name}
-      </p>
-      <p className="text-xs mb-5 max-w-md break-all" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-        {referenceKindLabel(item.domainKind)}{item.meta ? ` · ${item.meta}` : ''}
-      </p>
-      <div className="flex items-center gap-2">
-        <CollectButton refId={item.id} kind="space_reference" brain={brain} />
-        {canOpen && (
-          <button
-            type="button"
-            onClick={onOpen}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-white transition-opacity hover:opacity-90"
-            style={{ background: 'var(--aa-accent, #6865a7)' }}
-          >
-            打开引用
-            <ArrowRight size={12} />
-          </button>
-        )}
-      </div>
-    </CenteredCard>
-  )
-}
-
-function referenceKindLabel(kind: PersonalSpaceItemProjection['kind']): string {
-  switch (kind) {
-    case 'folder': return '文件夹'
-    case 'local_file': return '本地文件引用'
-    case 'workspace_folder': return '工作区文件夹引用'
-    case 'web_reference': return '网页引用'
-    case 'generated_artifact': return '生成内容引用'
-    case 'conversation_reference': return '对话引用'
-  }
 }
 
 function actionErrorMessage(error: unknown): string {
@@ -1069,46 +1225,6 @@ function hasMaterialCreateAction(
     || (actions?.addConversation !== undefined && currentConversation !== undefined)
 }
 
-function FolderPane({ folder, onSelect }: { folder: SpaceItem; onSelect: (id: string) => void }) {
-  const children = folder.children ?? []
-  return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto px-6 py-10" style={{ maxWidth: 640 }}>
-        <div className="flex items-center gap-2.5 mb-1">
-          <Folder size={18} style={{ color: 'var(--aa-accent, #6865a7)' }} />
-          <h2 className="text-base font-semibold m-0" style={{ color: 'var(--aa-text-1, #292722)' }}>
-            {folder.name}
-          </h2>
-        </div>
-        <p className="text-xs mb-6 pl-[26px]" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-          {children.length} 个对象
-        </p>
-
-        <div className="space-y-1">
-          {children.map((child) => (
-            <button
-              key={child.id}
-              onClick={() => onSelect(child.id)}
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md text-left transition-colors hover:bg-black/5"
-              style={{ border: '1px solid var(--aa-border, rgba(45,40,34,0.09))' }}
-            >
-              {itemIcon(child, 14)}
-              <span className="flex-1 text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>
-                {child.name}
-              </span>
-              {child.meta && (
-                <span className="text-xs shrink-0" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                  {child.meta}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /**
  * 收藏进知识库 —— 把眼前这个对象从「空间里用得上」升格为「值得长期留下」。
  * 已收藏则显示为已入库状态,再点则移出。
@@ -1117,20 +1233,37 @@ function CollectButton({
   refId,
   kind,
   brain,
+  sourceReferenceId,
+  sourceRelativePath = '',
 }: {
   refId: string
   kind: PageKind
   brain: ReturnType<typeof useBrain>
+  sourceReferenceId?: string
+  sourceRelativePath?: string
 }) {
-  const collected = brain.isCollected(refId)
+  const sourcePage = sourceReferenceId === undefined ? undefined : brain.findCollectedSpaceReference(sourceReferenceId, sourceRelativePath)
+  const collected = sourceReferenceId === undefined ? brain.isCollected(refId) : sourcePage !== undefined
+  const pendingKey = sourceReferenceId === undefined ? refId : brain.spaceReferenceSourceKey(sourceReferenceId, sourceRelativePath)
+  const pending = brain.isPending(pendingKey)
   return (
     <button
-      onClick={() => (collected ? brain.uncollect(refId) : brain.collect(refId, kind))}
+      type="button"
+      disabled={pending}
+      onClick={() => {
+        if (sourceReferenceId !== undefined) {
+          if (sourcePage !== undefined) brain.uncollect(sourcePage.refId)
+          else brain.collectSpaceReference(sourceReferenceId, sourceRelativePath)
+          return
+        }
+        if (collected) brain.uncollect(refId)
+        else brain.collect(refId, kind)
+      }}
       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
       style={{ color: collected ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}
     >
       <Brain size={12} />
-      {collected ? '已收藏' : '收藏'}
+      {pending ? (collected ? '正在取消…' : '正在收藏…') : collected ? '已收藏' : '收藏'}
     </button>
   )
 }

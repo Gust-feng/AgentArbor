@@ -26,6 +26,18 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       body: { expectedRevision: 1, bodyMarkdown: "# 更新" },
     });
     assert.equal(updated.status, 200);
+    const revisions = await requestJson(
+      server.baseUrl,
+      `/api/personal-knowledge/notes/${encodeURIComponent(noteId)}/revisions`,
+    );
+    assert.deepEqual(revisions.body.revisions.map((revision: any) => ({
+      revision: revision.revision,
+      baseRevision: revision.baseRevision,
+      operation: revision.operation,
+      actor: revision.actor,
+    })), [{ revision: 2, baseRevision: 1, operation: "update", actor: { kind: "user" } }, {
+      revision: 1, baseRevision: undefined, operation: "create", actor: { kind: "user" },
+    }]);
     const stale = await requestJson(server.baseUrl, `/api/personal-knowledge/notes/${encodeURIComponent(noteId)}`, {
       method: "PATCH",
       body: { expectedRevision: 1, title: "过期标题" },
@@ -39,22 +51,25 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     assert.equal(searched.status, 200);
     assert.equal(searched.body.results[0].note.id, noteId);
 
+    const sourcePath = path.join(directory, "研究.md");
+    await fs.writeFile(sourcePath, "# 托管正文", "utf8");
     const reference = await requestJson(server.baseUrl, `/api/spaces/${encodeURIComponent(space.body.space.id as string)}/references`, {
       method: "POST",
-      body: { title: "研究资料", reference: { kind: "local_file", path: "C:/资料/研究.md" } },
+      body: { title: "研究资料", reference: { kind: "local_file", path: sourcePath } },
     });
     const referenceId = reference.body.item.id as string;
-    const collected = await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
+    const collected = await requestJson(server.baseUrl, "/api/personal-knowledge/collect-space-reference", {
       method: "POST",
-      body: { type: "knowledge.collect", page: { refId: referenceId, kind: "space_reference", collectedAt: 1 } },
+      body: { referenceId },
     });
-    assert.equal(collected.status, 200);
+    assert.equal(collected.status, 201);
+    const knowledgeRefId = collected.body.page.refId as string;
     const openedReference = await requestJson(server.baseUrl, `/api/spaces/references/${encodeURIComponent(referenceId)}/open`, {
       method: "POST",
       body: {},
     });
     assert.equal(openedReference.status, 200);
-    assert.deepEqual(opened, [{ kind: "path", value: "C:/资料/研究.md" }]);
+    assert.deepEqual(opened, [{ kind: "path", value: sourcePath }]);
 
     const generatedReference = await requestJson(server.baseUrl, `/api/spaces/${encodeURIComponent(space.body.space.id as string)}/references`, {
       method: "POST",
@@ -67,7 +82,7 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     );
     assert.equal(generatedOpen.status, 409);
     assert.equal(generatedOpen.body.error.code, "space_reference_not_openable");
-    assert.deepEqual(opened, [{ kind: "path", value: "C:/资料/研究.md" }]);
+    assert.deepEqual(opened, [{ kind: "path", value: sourcePath }]);
 
     const missingReference = await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
       method: "POST",
@@ -78,17 +93,7 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     const removed = await requestJson(server.baseUrl, `/api/spaces/references/${encodeURIComponent(referenceId)}`, { method: "DELETE" });
     assert.equal(removed.status, 200);
     const afterRemoval = await requestJson(server.baseUrl, "/api/personal-knowledge");
-    assert.deepEqual(afterRemoval.body.snapshot.pages, []);
-
-    const persistentReference = await requestJson(server.baseUrl, `/api/spaces/${encodeURIComponent(space.body.space.id as string)}/references`, {
-      method: "POST",
-      body: { title: "长期资料", reference: { kind: "web_page", url: "https://example.com/reference" } },
-    });
-    const persistentReferenceId = persistentReference.body.item.id as string;
-    await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
-      method: "POST",
-      body: { type: "knowledge.collect", page: { refId: persistentReferenceId, kind: "space_reference", collectedAt: 3 } },
-    });
+    assert.equal(afterRemoval.body.snapshot.pages[0].refId, knowledgeRefId);
 
     await closePanelServer(server.httpServer, server.runtime);
     server = await start(directory);
@@ -96,7 +101,12 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     assert.equal(snapshot.body.snapshot.notes[0].bodyMarkdown, "# 更新");
     assert.equal(snapshot.body.snapshot.notes[0].revision, 2);
     assert.equal(snapshot.body.snapshot.notes[0].title, "第一篇笔记");
-    assert.deepEqual(snapshot.body.snapshot.pages, [{ refId: persistentReferenceId, kind: "space_reference", collectedAt: 3 }]);
+    assert.equal(snapshot.body.snapshot.pages[0].refId, knowledgeRefId);
+    const managed = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview`);
+    assert.equal(managed.body.preview.content.text, "# 托管正文");
+    assert.equal(managed.body.preview.content.language, "md");
+    const managedContent = await fetch(`${server.baseUrl}/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/content`);
+    assert.equal(managedContent.headers.get("content-type"), "text/markdown; charset=utf-8");
 
     const restartedSearch = await requestJson(
       server.baseUrl,
@@ -110,12 +120,11 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       method: "DELETE",
     });
     assert.equal(deletedNote.status, 200);
-    const deletedReference = await requestJson(
-      server.baseUrl,
-      `/api/spaces/references/${encodeURIComponent(persistentReferenceId)}`,
-      { method: "DELETE" },
-    );
-    assert.equal(deletedReference.status, 200);
+    const uncollected = await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
+      method: "POST",
+      body: { type: "knowledge.uncollect", refId: knowledgeRefId },
+    });
+    assert.equal(uncollected.status, 200);
 
     await closePanelServer(server.httpServer, server.runtime);
     server = await start(directory);
@@ -131,7 +140,7 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       server.baseUrl,
       `/api/spaces/${encodeURIComponent(space.body.space.id as string)}`,
     );
-    assert.equal(treeContainsItem(persistedTree.body.tree.entries, persistentReferenceId), false);
+    assert.equal(treeContainsItem(persistedTree.body.tree.entries, referenceId), false);
   } finally {
     await closePanelServer(server.httpServer, server.runtime).catch(() => undefined);
     await removeTemporaryTree(directory);

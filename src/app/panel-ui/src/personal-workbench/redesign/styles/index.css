@@ -1,6 +1,12 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+@import '../../../styles/workspace.css';
+@import '../../../styles/settings.css';
+@import '../../../styles/settings-provider.css';
+@import '../../../styles/settings-model-list.css';
+@import '../../../styles/settings-forms.css';
+@import '../../../styles/theme-switcher.css';
 @import './runtime-settings.css';
 @import './editor.css';
 @import './recovery.css';

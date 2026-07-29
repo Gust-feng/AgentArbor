@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -27,6 +27,15 @@ test("Workbench data maintenance backs up, stages and atomically applies a valid
   createSqlitePersonalKnowledgeRepository(selected);
   selected.connection.exec("CREATE TABLE restore_probe(value TEXT NOT NULL) STRICT; INSERT INTO restore_probe(value) VALUES ('restored')");
   selected.close();
+  await mkdir(`${restorePath}.assets`, { recursive: true });
+  await writeFile(path.join(`${restorePath}.assets`, "restored.txt"), "restored asset", "utf8");
+  await writeFile(`${restorePath}.manifest.json`, JSON.stringify({
+    version: 1,
+    database: path.basename(restorePath),
+    assets: path.basename(`${restorePath}.assets`),
+  }), "utf8");
+  await mkdir(path.join(runtimeHome, "knowledge-assets"), { recursive: true });
+  await writeFile(path.join(runtimeHome, "knowledge-assets", "current.txt"), "current asset", "utf8");
 
   const maintenance = createWorkbenchDataMaintenance({
     database: current,
@@ -39,6 +48,8 @@ test("Workbench data maintenance backs up, stages and atomically applies a valid
     maintenance.createBackup(),
   ]);
   assert.equal(existsSync(backup.filePath), true);
+  assert.equal(existsSync(`${backup.filePath}.assets`), true);
+  assert.equal(existsSync(`${backup.filePath}.manifest.json`), true);
   assert.equal(backup.byteLength > 0, true);
   assert.notEqual(concurrentBackup.filePath, backup.filePath);
 
@@ -51,4 +62,5 @@ test("Workbench data maintenance backs up, stages and atomically applies a valid
   const restored = new SqliteRuntimeDatabase(currentPath);
   assert.equal(restored.connection.prepare("SELECT value FROM restore_probe").get()?.value, "restored");
   restored.close();
+  assert.equal(await readFile(path.join(runtimeHome, "knowledge-assets", "restored.txt"), "utf8"), "restored asset");
 });

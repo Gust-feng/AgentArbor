@@ -17,6 +17,8 @@ test("Personal Knowledge tools search, read, create, update and collect through 
     repository: createSqlitePersonalKnowledgeRepository(database),
     spaceExists: async (spaceId) => spaceId === "space-one",
     spaceReferenceExists: async (itemId) => itemId === "reference-one",
+    captureSpaceReference: async () => ({ status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "file", sourceReferenceId: "reference-one", sourceRelativePath: "" }),
+    removeManagedAsset: async () => undefined,
   });
   t.after(async () => {
     await feature.release();
@@ -62,8 +64,20 @@ test("Personal Knowledge tools search, read, create, update and collect through 
     kind: "note",
   }) as { readonly status: string }).status, "collected");
   assert.equal((await feature.queries.snapshot()).pages[0]?.refId, created.note.id);
+  const collectedReference = await execute(tools.get("KnowledgeCollect")!, { refId: "reference-one", kind: "space_reference" }) as { page: { asset?: { status: string } } };
+  assert.equal(collectedReference.page.asset?.status, "managed");
+  const revisions = await feature.queries.noteRevisions(created.note.id);
+  assert.equal(revisions[0]?.actor.kind, "agent");
+  assert.equal(revisions[0]?.actor.actorId, "ordinary-agent");
+  assert.equal(revisions[0]?.actor.traceId, "trace-one");
+  assert.equal(revisions[0]?.actor.toolCallId, "tool-call-one");
 });
 
 function execute(tool: ToolExecutor, input: unknown): Promise<unknown> {
-  return tool.execute(input, {} as never);
+  return tool.execute(input, {
+    callerAgentId: "ordinary-agent",
+    traceId: "trace-one",
+    goalId: "goal-one",
+    toolCallId: "tool-call-one",
+  });
 }

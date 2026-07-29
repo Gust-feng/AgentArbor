@@ -59,6 +59,7 @@ export function useSpaceProjection(enabled = true): {
   ) => Promise<void>;
   readonly rename: (target: { readonly kind: "space" | "folder" | "reference"; readonly id: string }, title: string) => Promise<void>;
   readonly removeReference: (itemId: string) => Promise<void>;
+  readonly removeFolder: (folderId: string) => Promise<void>;
   readonly openReference: (spaceId: string, itemId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
   readonly loading: boolean;
@@ -226,6 +227,10 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`remove-reference:${itemId}`, () => deleteJson(`/api/spaces/references/${encodeURIComponent(itemId)}`));
   }, [runMutation]);
 
+  const removeFolder = useCallback(async (folderId: string): Promise<void> => {
+    await runMutation(`remove-folder:${folderId}`, () => deleteJson(`/api/spaces/folders/${encodeURIComponent(folderId)}`));
+  }, [runMutation]);
+
   const openReference = useCallback(async (_spaceId: string, itemId: string): Promise<void> => {
     await postJson(`/api/spaces/references/${encodeURIComponent(itemId)}/open`, {});
   }, []);
@@ -241,6 +246,7 @@ export function useSpaceProjection(enabled = true): {
     move,
     rename,
     removeReference,
+    removeFolder,
     openReference,
     refresh,
     loading,

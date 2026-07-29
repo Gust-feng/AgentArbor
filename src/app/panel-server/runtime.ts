@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
@@ -26,6 +27,7 @@ import {
   type AppUpdateServiceLike,
 } from "../app-update/app-update-service.js";
 import { CapabilityCenter } from "../capability/capability-center.js";
+import { captureKnowledgeAsset, reconcileKnowledgeAssets, removeKnowledgeAsset } from "./knowledge-asset-store.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center/index.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import {
@@ -103,7 +105,7 @@ import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-res
 import { resolveTriggeredSkillContexts } from "./skill-service.js";
 import type { PanelRunInput } from "./request-parsers.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
-import { importNextReleaseWorkbenchFiles } from "./compat/v-next-workbench-import.js";
+import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -139,6 +141,9 @@ export type PanelRuntime = {
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
   readonly workbenchDatabase: SqliteRuntimeDatabase;
+  readonly fileMutationCoordinator: LocalWorkspaceMutationCoordinator;
+  readonly knowledgeAssetRoot?: string;
+  readonly knowledgeAssetsReady: Promise<void>;
   readonly flushSpaceKnowledgeSync: () => Promise<void>;
   readonly releaseAgentSessionStorage: () => Promise<void>;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
@@ -255,14 +260,15 @@ function assemblePanelRuntime(input: {
     restorePicker: input.workbenchRestorePicker,
   });
   const spaceRepository = createSqliteSpaceRepository(workbenchDatabase);
-  importNextReleaseWorkbenchFiles({ database: workbenchDatabase, runtimeHome });
   const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
   const agentNotesFeature = createAgentNotesFeature({
     repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
   });
   const spaceFeature = createSpaceFeature({
     repository: spaceRepository,
+    workspaceMountIdentity: canonicalWorkspaceMountIdentity,
   });
+  let knowledgeAssetsReady = Promise.resolve();
   const personalKnowledgeFeature = createPersonalKnowledgeFeature({
     repository: createSqlitePersonalKnowledgeRepository(workbenchDatabase),
     spaceExists: async (spaceId) => await spaceFeature.queries.getTree(spaceId) !== undefined,
@@ -273,16 +279,19 @@ function assemblePanelRuntime(input: {
       }
       return false;
     },
+    captureSpaceReference: async ({ assetId, referenceId, relativePath }) => {
+      await knowledgeAssetsReady;
+      const item = await spaceFeature.queries.getReference(referenceId);
+      if (item === undefined) throw new Error(`Space reference ${referenceId} does not exist.`);
+      return await captureKnowledgeAsset(path.join(runtimeHome, "knowledge-assets"), assetId, item, relativePath);
+    },
+    removeManagedAsset: async (itemId) => await removeKnowledgeAsset(path.join(runtimeHome, "knowledge-assets"), itemId),
   });
-  let spaceKnowledgeSync = Promise.resolve();
-  spaceFeature.events.subscribe((event) => {
-    if (event.type !== "space.reference_removed") return;
-    const cleanup = () => personalKnowledgeFeature.commands.execute({
-      type: "knowledge.uncollect",
-      refId: event.itemId,
-    });
-    spaceKnowledgeSync = spaceKnowledgeSync.then(cleanup, cleanup);
+  const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
+  knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
+    await reconcileKnowledgeAssets(knowledgeAssetRoot, new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)));
   });
+  const spaceKnowledgeSync = Promise.resolve();
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
     skillRoots: input.skillRoots,
@@ -411,10 +420,19 @@ function assemblePanelRuntime(input: {
     prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
     workbenchDatabase,
+    fileMutationCoordinator,
+    knowledgeAssetRoot,
+    knowledgeAssetsReady,
     flushSpaceKnowledgeSync: () => spaceKnowledgeSync,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
   return runtime;
+}
+
+async function canonicalWorkspaceMountIdentity(value: string): Promise<string> {
+  const absolute = path.resolve(value);
+  const canonical = await fs.realpath(absolute).catch(() => absolute);
+  return process.platform === "win32" ? canonical.toLocaleLowerCase("en-US") : canonical;
 }
 
 function resolveRuntimeHome(input: {

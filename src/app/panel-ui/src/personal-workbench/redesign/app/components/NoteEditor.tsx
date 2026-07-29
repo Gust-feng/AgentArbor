@@ -1,42 +1,40 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Check, Code2, Maximize2, Brain } from 'lucide-react'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import Link from '@tiptap/extension-link'
-import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
-import Placeholder from '@tiptap/extension-placeholder'
-import { Markdown } from 'tiptap-markdown'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { diffLines, type Change } from 'diff'
+import { AlertTriangle, Brain, Check, Code2, Maximize2 } from 'lucide-react'
+import { EditorContent, useEditor } from '@tiptap/react'
 import { useBrain } from './brainStore'
 import type { Note } from './notesStore'
-import { getPersonalNoteSaveState, subscribePersonalKnowledge } from './personalKnowledgeClient'
-
-/**
- * 笔记编辑器 —— 所见即所得书写面。
- *
- * 类 Typora 体验：输入 Markdown 语法即时渲染为格式化内容，无需切换预览。
- * 存储仍为纯 Markdown 文本（note.body），编辑器仅作为可视化视图层。
- *
- * 持久化交给上层（通过 onSave 落到 notesStore）。本组件只管书写体验：
- *  - 正文自动保存（去抖 500ms），右上角显示保存态。
- *  - 卸载 / 切换笔记时立即冲刷未保存的改动，避免丢字。
- *  - 提供「源码模式」切换，供需要直接看 Markdown 的用户使用。
- */
+import {
+  fetchPersonalNoteRemoteState,
+  getPersonalNoteSaveState,
+  isPersonalKnowledgePersistenceEnabled,
+  refreshPersonalKnowledge,
+  resolvePersonalNoteConflict,
+  subscribePersonalKnowledge,
+  type PersonalNoteRemoteState,
+  type PersonalNoteRevision,
+} from './personalKnowledgeClient'
+import './note-conflict.css'
+import { createMarkdownEditorExtensions, isEditorUsable, markdownFromEditor } from './markdownEditor'
 
 interface NoteEditorProps {
   note: Note
-  /** 持久化一次改动；显式带上目标 id，避免快速切换笔记时写错对象。 */
   onSave: (id: string, patch: { title?: string; body?: string }) => void
   onOpenFocus?: () => void
+  onClose?: () => void
+  onRestoreAsNew?: (draft: { title: string; body: string }) => void
 }
 
 const AUTOSAVE_MS = 500
+const REMOTE_CHECK_MS = 8_000
 
-export function NoteEditor({ note, onSave, onOpenFocus }: NoteEditorProps) {
+export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew }: NoteEditorProps) {
   const [title, setTitle] = useState(note.title)
   const [saved, setSaved] = useState(true)
   const [sourceMode, setSourceMode] = useState(false)
   const [sourceBody, setSourceBody] = useState(note.body)
+  const [incoming, setIncoming] = useState<PersonalNoteRemoteState>()
+  const [showIncomingDiff, setShowIncomingDiff] = useState(false)
   const brain = useBrain()
   const durableSaveState = useSyncExternalStore(
     subscribePersonalKnowledge,
@@ -48,21 +46,36 @@ export function NoteEditor({ note, onSave, onOpenFocus }: NoteEditorProps) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRef = useRef<{ id: string; patch: { title?: string; body?: string } } | null>(null)
   const onSaveRef = useRef(onSave)
+  const baseRevisionRef = useRef(note.revision)
+  const noteIdRef = useRef(note.id)
+  const titleRef = useRef(title)
+  const sourceBodyRef = useRef(sourceBody)
+  const editorBodyRef = useRef(note.body)
+  const sourceModeRef = useRef(sourceMode)
   onSaveRef.current = onSave
+  noteIdRef.current = note.id
+  titleRef.current = title
+  sourceBodyRef.current = sourceBody
+  sourceModeRef.current = sourceMode
 
   function flush() {
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = null
     if (pendingRef.current) {
       onSaveRef.current(pendingRef.current.id, pendingRef.current.patch)
       pendingRef.current = null
     }
   }
 
+  function discardPending() {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = null
+    pendingRef.current = null
+    setSaved(true)
+  }
+
   function scheduleSave(patch: { title?: string; body?: string }) {
-    const id = note.id
+    const id = noteIdRef.current
     const merged = { ...(pendingRef.current?.patch ?? {}), ...patch }
     pendingRef.current = { id, patch: merged }
     setSaved(false)
@@ -75,165 +88,204 @@ export function NoteEditor({ note, onSave, onOpenFocus }: NoteEditorProps) {
     }, AUTOSAVE_MS)
   }
 
-  // Tiptap 编辑器实例
   const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3, 4] },
-        codeBlock: { HTMLAttributes: { class: 'aa-code-block' } },
-      }),
-      Link.configure({ openOnClick: false, autolink: true }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Placeholder.configure({ placeholder: '从这里开始写…' }),
-      Markdown.configure({ html: false, transformPastedText: true }),
-    ],
+    extensions: createMarkdownEditorExtensions('从这里开始写…'),
     content: note.body,
-    editorProps: {
-      attributes: {
-        class: 'aa-editor-prose',
-        spellcheck: 'false',
-      },
-    },
-    onUpdate: ({ editor: ed }) => {
-      const md = (ed.storage as unknown as Record<string, { getMarkdown: () => string }>).markdown.getMarkdown()
-      scheduleSave({ body: md })
+    editorProps: { attributes: { class: 'aa-editor-prose', spellcheck: 'false' } },
+    onUpdate: ({ editor: value }) => {
+      const body = markdownFromEditor(value)
+      editorBodyRef.current = body
+      scheduleSave({ body })
     },
   })
 
-  // 切换到另一篇笔记时：冲刷上一篇，载入新内容。
+  function currentDraft() {
+    return {
+      title: titleRef.current,
+      body: sourceModeRef.current ? sourceBodyRef.current : editorBodyRef.current,
+    }
+  }
+
   useEffect(() => {
     flush()
     setTitle(note.title)
     setSourceBody(note.body)
     setSaved(true)
     setSourceMode(false)
-    if (editor) {
-      editor.commands.setContent(note.body, { emitUpdate: false })
+    setIncoming(undefined)
+    setShowIncomingDiff(false)
+    baseRevisionRef.current = note.revision
+    editorBodyRef.current = note.body
+    if (isEditorUsable(editor)) editor.commands.setContent(note.body, { emitUpdate: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id])
+
+  useEffect(() => {
+    if (!isPersonalKnowledgePersistenceEnabled()) return
+    let disposed = false
+    let checking = false
+    const check = async () => {
+      if (checking) return
+      checking = true
+      try {
+        const remote = await fetchPersonalNoteRemoteState(note.id)
+        if (disposed) return
+        if (remote.status === 'deleted') {
+          if (remote.latestRevision !== undefined && remote.latestRevision.revision > baseRevisionRef.current) {
+            discardPending()
+            setIncoming(remote)
+          }
+          return
+        }
+        if (remote.note.revision <= baseRevisionRef.current) return
+        const draft = currentDraft()
+        if (remote.note.title === draft.title && remote.note.body === draft.body) {
+          baseRevisionRef.current = remote.note.revision
+          return
+        }
+        setIncoming(remote)
+      } catch {
+        // The normal save indicator owns transport errors; polling never replaces visible content.
+      } finally {
+        checking = false
+      }
+    }
+    const onFocus = () => void check()
+    window.addEventListener('focus', onFocus)
+    const interval = window.setInterval(() => void check(), REMOTE_CHECK_MS)
+    void check()
+    return () => {
+      disposed = true
+      window.removeEventListener('focus', onFocus)
+      window.clearInterval(interval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id])
 
-  // 外部标题/正文变更同步（如空间树重命名）。
-  useEffect(() => {
-    if (pendingRef.current?.id === note.id) return
-    setTitle(note.title)
-    setSourceBody(note.body)
-    if (editor && !editor.isFocused) {
-      editor.commands.setContent(note.body, { emitUpdate: false })
-    }
-  }, [note.body, note.id, note.title, editor])
-
-  // 卸载前冲刷。
   useEffect(() => flush, [])
 
-  // 源码模式切换
   const toggleSourceMode = useCallback(() => {
-    if (!editor) return
+    if (!isEditorUsable(editor)) return
     if (!sourceMode) {
-      // 进入源码模式：从编辑器取 Markdown
-      const md = (editor.storage as unknown as Record<string, { getMarkdown: () => string }>).markdown.getMarkdown()
-      setSourceBody(md)
+      setSourceBody(editorBodyRef.current)
       setSourceMode(true)
     } else {
-      // 退出源码模式：把源码写回编辑器
       editor.commands.setContent(sourceBody, { emitUpdate: false })
-      scheduleSave({ body: sourceBody })
+      editorBodyRef.current = sourceBody
       setSourceMode(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, sourceMode, sourceBody])
 
+  const incomingChanges = useMemo(() => {
+    if (!showIncomingDiff || incoming?.status !== 'current') return undefined
+    return diffLines(currentDraft().body, incoming.note.body)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming, showIncomingDiff])
+
+  async function useIncomingVersion() {
+    if (incoming?.status !== 'current') return
+    discardPending()
+    resolvePersonalNoteConflict(note.id)
+    setTitle(incoming.note.title)
+    setSourceBody(incoming.note.body)
+    editorBodyRef.current = incoming.note.body
+    if (isEditorUsable(editor)) editor.commands.setContent(incoming.note.body, { emitUpdate: false })
+    baseRevisionRef.current = incoming.note.revision
+    setIncoming(undefined)
+    setShowIncomingDiff(false)
+    await refreshPersonalKnowledge().catch(() => undefined)
+  }
+
+  async function keepLocalVersion() {
+    if (incoming?.status !== 'current') return
+    const draft = currentDraft()
+    discardPending()
+    resolvePersonalNoteConflict(note.id)
+    await refreshPersonalKnowledge().catch(() => undefined)
+    onSaveRef.current(note.id, { title: draft.title, body: draft.body })
+    baseRevisionRef.current = incoming.note.revision
+    setIncoming(undefined)
+    setShowIncomingDiff(false)
+  }
+
+  async function restoreDeletedDraft() {
+    const draft = currentDraft()
+    discardPending()
+    resolvePersonalNoteConflict(note.id)
+    await refreshPersonalKnowledge().catch(() => undefined)
+    onRestoreAsNew?.(draft)
+  }
+
+  async function closeDeletedDraft() {
+    discardPending()
+    resolvePersonalNoteConflict(note.id)
+    await refreshPersonalKnowledge().catch(() => undefined)
+    onClose?.()
+  }
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-      {/* 编辑器头：保存态 + 源码切换 + 操作 */}
-      <header
-        className="shrink-0 flex items-center gap-3 px-5"
-        style={{ height: 48, borderBottom: '1px solid var(--aa-border, rgba(45,40,34,0.09))' }}
-      >
+      <header className="shrink-0 flex items-center gap-3 px-5" style={{ height: 48, borderBottom: '1px solid var(--aa-border, rgba(45,40,34,0.09))' }}>
         <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: '#6f8778' }} />
-        <span className="text-xs shrink-0" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-          笔记
-        </span>
-
-        <span
-          className="flex items-center gap-1 text-xs shrink-0"
-          style={{ color: 'var(--aa-text-3, #aba39b)' }}
-        >
+        <span className="text-xs shrink-0" style={{ color: 'var(--aa-text-3, #aba39b)' }}>笔记</span>
+        <span className="flex items-center gap-1 text-xs shrink-0" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
           {saved && durableSaveState === 'saved' ? <Check size={12} /> : <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: durableSaveState.startsWith('error:') ? '#b85c52' : 'var(--aa-accent, #6865a7)' }} />}
           {durableSaveState.startsWith('error:') ? '保存失败' : saved && durableSaveState === 'saved' ? '已保存' : '保存中…'}
         </span>
-
         <div className="flex-1" />
-
-        <button
-          onClick={toggleSourceMode}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
-          style={{ color: sourceMode ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}
-          title={sourceMode ? '返回所见即所得' : '查看 Markdown 源码'}
-        >
-          <Code2 size={12} />
-          {sourceMode ? '编辑' : '源码'}
+        <button onClick={toggleSourceMode} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: sourceMode ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }} title={sourceMode ? '返回所见即所得' : '查看 Markdown 源码'}>
+          <Code2 size={12} />{sourceMode ? '编辑' : '源码'}
         </button>
-        {onOpenFocus && (
-          <button
-            onClick={onOpenFocus}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
-            style={{ color: 'var(--aa-text-2, #87827c)' }}
-          >
-            <Maximize2 size={12} />
-            专注
-          </button>
-        )}
-        <button
-          onClick={() => (collected ? brain.uncollect(note.id) : brain.collect(note.id, 'note'))}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
-          style={{ color: collected ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}
-        >
-          <Brain size={12} />
-          {collected ? '已收藏' : '收藏'}
+        {onOpenFocus && <button onClick={onOpenFocus} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: 'var(--aa-text-2, #87827c)' }}><Maximize2 size={12} />专注</button>}
+        <button onClick={() => (collected ? brain.uncollect(note.id) : brain.collect(note.id, 'note'))} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: collected ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}>
+          <Brain size={12} />{collected ? '已收藏' : '收藏'}
         </button>
       </header>
 
-      {/* 标题 */}
+      {incoming !== undefined && (
+        <div className="aa-note-conflict" role="status">
+          <AlertTriangle size={14} />
+          <div>
+            <strong>{incoming.status === 'deleted' ? '这篇笔记已被外部删除' : `${actorLabel(incoming.latestRevision)}更新了这篇笔记`}</strong>
+            <span>{incoming.status === 'deleted' ? '当前草稿仍保留在编辑器中。' : '当前内容没有被覆盖，请选择要保留的版本。'}</span>
+          </div>
+          {incoming.status === 'current' ? (
+            <div className="aa-note-conflict__actions">
+              <button type="button" onClick={() => setShowIncomingDiff((value) => !value)}>{showIncomingDiff ? '返回编辑' : '比较更改'}</button>
+              <button type="button" onClick={() => void keepLocalVersion()}>保留我的版本</button>
+              <button type="button" data-primary onClick={() => void useIncomingVersion()}>采用新版</button>
+            </div>
+          ) : (
+            <div className="aa-note-conflict__actions">
+              <button type="button" onClick={() => void closeDeletedDraft()}>关闭</button>
+              <button type="button" data-primary onClick={() => void restoreDeletedDraft()}>恢复为新笔记</button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="shrink-0 mx-auto w-full px-6 pt-8" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
-        <input
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value)
-            scheduleSave({ title: e.target.value })
-          }}
-          placeholder="无标题"
-          className="w-full outline-none bg-transparent reading-prose"
-          style={{ color: 'var(--aa-text-1, #292722)', fontSize: 22, fontWeight: 600 }}
-        />
+        <input value={title} onChange={(event) => { setTitle(event.target.value); scheduleSave({ title: event.target.value }) }} placeholder="无标题" className="w-full outline-none bg-transparent reading-prose" style={{ color: 'var(--aa-text-1, #292722)', fontSize: 22, fontWeight: 600 }} />
       </div>
 
-      {/* 编辑区 */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto px-6 py-4 pb-24" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
-          {sourceMode ? (
-            <textarea
-              value={sourceBody}
-              onChange={(e) => {
-                setSourceBody(e.target.value)
-                scheduleSave({ body: e.target.value })
-              }}
-              className="w-full outline-none bg-transparent resize-none text-sm leading-relaxed"
-              style={{
-                color: 'var(--aa-text-1, #292722)',
-                minHeight: '60vh',
-                fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
-                fontSize: 13,
-                lineHeight: 1.7,
-              }}
-              spellCheck={false}
-            />
-          ) : (
-            <EditorContent editor={editor} />
-          )}
+          {incomingChanges !== undefined ? <NoteDiff changes={incomingChanges} /> : sourceMode ? (
+            <textarea value={sourceBody} onChange={(event) => { setSourceBody(event.target.value); scheduleSave({ body: event.target.value }) }} className="w-full outline-none bg-transparent resize-none text-sm leading-relaxed" style={{ color: 'var(--aa-text-1, #292722)', minHeight: '60vh', fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace', fontSize: 13, lineHeight: 1.7 }} spellCheck={false} />
+          ) : <EditorContent editor={editor} />}
         </div>
       </div>
     </div>
   )
+}
+
+function actorLabel(revision: PersonalNoteRevision | undefined): string {
+  if (revision?.actor.kind === 'agent') return revision.actor.actorId ? `Agent ${revision.actor.actorId} ` : 'Agent '
+  if (revision?.actor.kind === 'user') return '其他窗口'
+  return '外部来源'
+}
+
+function NoteDiff({ changes }: { changes: readonly Change[] }) {
+  return <pre className="aa-note-conflict__diff" aria-label="笔记内容更改">{changes.map((change, index) => <span key={index} data-change={change.added ? 'incoming' : change.removed ? 'local' : 'same'}>{change.value}</span>)}</pre>
 }

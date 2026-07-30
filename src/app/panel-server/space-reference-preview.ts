@@ -1,33 +1,19 @@
 import { createReadStream, promises as fs } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { analyse } from "chardet";
 import iconv from "iconv-lite";
 
+import type { SpaceReferencePreview } from "../panel-api-contracts.js";
 import type { SpaceReferenceItem } from "../spaces/index.js";
 import { PanelHttpError } from "./http-utils.js";
 
-const MAX_TEXT_PREVIEW_BYTES = 512 * 1024;
+export const MAX_TEXT_PREVIEW_BYTES = 512 * 1024;
 const MAX_DIRECTORY_ENTRIES = 200;
 
-export type PanelSpaceReferencePreview = {
-  readonly itemId: string;
-  readonly title: string;
-  readonly sourceKind: SpaceReferenceItem["reference"]["kind"];
-  readonly source: string;
-  readonly status: "ready" | "missing" | "unsupported";
-  readonly fingerprint?: string;
-  readonly byteLength?: number;
-  readonly modifiedAt?: number;
-  readonly content:
-    | { readonly kind: "text"; readonly text: string; readonly truncated: boolean; readonly editable: boolean; readonly language?: string; readonly encoding?: string }
-    | { readonly kind: "directory"; readonly relativePath: string; readonly entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: "file" | "directory" | "other" }[]; readonly truncated: boolean }
-    | { readonly kind: "media"; readonly mediaKind: "image" | "pdf" | "video" | "audio"; readonly mimeType: string; readonly url: string }
-    | { readonly kind: "web"; readonly url: string }
-    | { readonly kind: "unavailable"; readonly message: string };
-};
+export type PanelSpaceReferencePreview = SpaceReferencePreview;
 
 export async function createPanelSpaceReferencePreview(
   item: SpaceReferenceItem,
@@ -153,120 +139,6 @@ export async function writePanelSpaceReferenceContent(
   await pipeline(createReadStream(source, { start, end }), response);
 }
 
-export async function updatePanelSpaceReferenceText(
-  item: SpaceReferenceItem,
-  input: { readonly relativePath?: string; readonly expectedFingerprint: string; readonly text: string },
-): Promise<PanelSpaceReferencePreview> {
-  const relativePath = input.relativePath ?? "";
-  const source = await resolvePanelSpaceReferencePath(item, relativePath);
-  const stat = await fs.stat(source).catch(() => undefined);
-  if (stat?.isFile() !== true) throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-  const current = await fs.readFile(source);
-  const typePath = source;
-  const decoded = decodeTextPreview(current.subarray(0, MAX_TEXT_PREVIEW_BYTES), isKnownTextPath(typePath, mimeTypeForPath(typePath)));
-  if (decoded?.encoding !== "UTF-8" || Buffer.byteLength(input.text, "utf8") > MAX_TEXT_PREVIEW_BYTES) {
-    throw new PanelHttpError(409, "space_reference_not_editable", "这个文件不能在工作台中编辑。");
-  }
-  const fingerprint = contentFingerprint(current);
-  if (fingerprint !== input.expectedFingerprint) {
-    throw new PanelHttpError(409, "space_reference_revision_conflict", "来源文件已发生变化，请先比较更改。");
-  }
-  const temporaryPath = path.join(path.dirname(source), `.${path.basename(source)}.agentarbor-${randomUUID()}.tmp`);
-  const handle = await fs.open(temporaryPath, "wx", stat.mode);
-  try {
-    await handle.writeFile(input.text, { encoding: "utf8" });
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
-    const latest = await fs.readFile(source).catch(() => undefined);
-    if (latest === undefined || contentFingerprint(latest) !== input.expectedFingerprint) {
-      throw new PanelHttpError(409, "space_reference_revision_conflict", "来源文件已发生变化，请先比较更改。");
-    }
-    await fs.rename(temporaryPath, source);
-    return await createPanelSpaceReferencePreview(item, relativePath);
-  } finally {
-    await fs.unlink(temporaryPath).catch(() => undefined);
-  }
-}
-
-function contentFingerprint(content: Uint8Array): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
-}
-
-export async function renamePanelSpaceReferenceEntry(
-  item: SpaceReferenceItem,
-  input: { readonly relativePath: string; readonly name: string },
-): Promise<{ readonly relativePath: string }> {
-  const relativePath = normalizeMutableEntryPath(item, input.relativePath);
-  const name = normalizeEntryName(input.name);
-  const source = await resolvePanelSpaceReferencePath(item, relativePath);
-  const parentRelativePath = path.posix.dirname(relativePath) === "." ? "" : path.posix.dirname(relativePath);
-  const destinationRelativePath = joinRelativePath(parentRelativePath, name);
-  const destination = await resolveReferenceDestination(item, destinationRelativePath);
-  if (await fs.stat(destination).then(() => true, () => false)) {
-    throw new PanelHttpError(409, "space_reference_entry_exists", "同一文件夹中已存在这个名称。");
-  }
-  await fs.rename(source, destination).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-    throw error;
-  });
-  return { relativePath: destinationRelativePath };
-}
-
-export async function deletePanelSpaceReferenceEntry(
-  item: SpaceReferenceItem,
-  relativePathValue: string,
-): Promise<void> {
-  const relativePath = normalizeMutableEntryPath(item, relativePathValue);
-  const source = await resolvePanelSpaceReferencePath(item, relativePath);
-  await fs.rm(source, { recursive: true, force: false }).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-    throw error;
-  });
-}
-
-/** Deletes the physical object behind a single-file Space reference. */
-export async function deletePanelSpaceReferenceFile(item: SpaceReferenceItem): Promise<void> {
-  if (item.reference.kind !== "local_file") {
-    throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "只有单文件引用可以执行此操作。");
-  }
-  const stat = await fs.lstat(item.reference.path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-    throw error;
-  });
-  if (!stat.isFile() && !stat.isSymbolicLink()) {
-    throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "这个引用不再是可删除的单个文件。");
-  }
-  await fs.unlink(item.reference.path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-    throw error;
-  });
-}
-
-export async function createPanelSpaceReferenceEntry(
-  item: SpaceReferenceItem,
-  input: { readonly parentRelativePath: string; readonly name: string; readonly kind: "file" | "directory" },
-): Promise<{ readonly relativePath: string }> {
-  if (item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
-    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区或软件受管文件夹中可以新建文件。");
-  }
-  const parentRelativePath = normalizeRelativePath(input.parentRelativePath);
-  const relativePath = joinRelativePath(parentRelativePath, normalizeEntryName(input.name));
-  const destination = await resolveReferenceDestination(item, relativePath);
-  try {
-    if (input.kind === "directory") await fs.mkdir(destination);
-    else await fs.writeFile(destination, "", { encoding: "utf8", flag: "wx" });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new PanelHttpError(409, "space_reference_entry_exists", "同一文件夹中已存在这个名称。");
-    }
-    throw error;
-  }
-  return { relativePath };
-}
-
 function base(
   item: SpaceReferenceItem,
   source: string,
@@ -306,7 +178,11 @@ export async function resolvePanelSpaceReferencePath(item: SpaceReferenceItem, r
   throw new PanelHttpError(400, "invalid_space_reference_path", "引用子路径超出了文件夹范围。");
 }
 
-function normalizeRelativePath(value: string): string {
+export function contentFingerprint(content: Uint8Array): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+export function normalizeRelativePath(value: string): string {
   const normalized = value.replaceAll("\\", "/").replace(/^\/+|\/+$/gu, "");
   if (normalized.split("/").some((part) => part === "..")) {
     throw new PanelHttpError(400, "invalid_space_reference_path", "引用子路径无效。");
@@ -314,43 +190,7 @@ function normalizeRelativePath(value: string): string {
   return normalized;
 }
 
-function normalizeMutableEntryPath(item: SpaceReferenceItem, value: string): string {
-  if (item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
-    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区或软件受管文件夹中的条目可以执行此操作。");
-  }
-  const normalized = normalizeRelativePath(value);
-  if (normalized.length === 0) throw new PanelHttpError(400, "invalid_space_reference_path", "不能修改工作区根目录。");
-  return normalized;
-}
-
-function normalizeEntryName(value: string): string {
-  const name = value.trim();
-  if (name.length === 0 || name.length > 255 || name === "." || name === ".." || /[\\/:*?"<>|]/u.test(name)) {
-    throw new PanelHttpError(400, "invalid_space_reference_name", "文件名称无效。");
-  }
-  return name;
-}
-
-async function resolveReferenceDestination(item: SpaceReferenceItem, relativePath: string): Promise<string> {
-  if (item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
-    throw new PanelHttpError(409, "space_reference_entry_mutation_unavailable", "只有工作区或软件受管文件夹中的条目可以执行此操作。");
-  }
-  const root = await fs.realpath(item.reference.path).catch(() => undefined);
-  if (root === undefined) throw new PanelHttpError(404, "space_reference_source_missing", "工作区文件夹已不存在。");
-  const normalized = normalizeRelativePath(relativePath);
-  const parent = await fs.realpath(path.resolve(root, path.dirname(normalized))).catch(() => undefined);
-  if (parent === undefined || !isWithinRoot(root, parent)) {
-    throw new PanelHttpError(400, "invalid_space_reference_path", "引用子路径超出了文件夹范围。");
-  }
-  return path.join(parent, path.basename(normalized));
-}
-
-function isWithinRoot(root: string, candidate: string): boolean {
-  const relation = path.relative(root, candidate);
-  return relation === "" || (!relation.startsWith(`..${path.sep}`) && relation !== ".." && !path.isAbsolute(relation));
-}
-
-function joinRelativePath(parent: string, child: string): string {
+export function joinRelativePath(parent: string, child: string): string {
   const normalizedParent = normalizeRelativePath(parent);
   return normalizedParent.length === 0 ? child : `${normalizedParent}/${child}`;
 }
@@ -359,7 +199,7 @@ function directoryEntryRank(kind: "file" | "directory" | "other"): number {
   return kind === "directory" ? 0 : kind === "file" ? 1 : 2;
 }
 
-function mimeTypeForPath(value: string): string {
+export function mimeTypeForPath(value: string): string {
   switch (path.extname(value).toLowerCase()) {
     case ".md": return "text/markdown; charset=utf-8";
     case ".txt": return "text/plain; charset=utf-8";
@@ -408,7 +248,7 @@ function languageForPath(value: string): { readonly language?: string } {
   return extension.length === 0 ? { language: "plaintext" } : { language: aliases[extension] ?? extension };
 }
 
-function isKnownTextPath(value: string, mimeType: string): boolean {
+export function isKnownTextPath(value: string, mimeType: string): boolean {
   if (mimeType.startsWith("text/") || mimeType.startsWith("application/json")) return true;
   const basename = path.basename(value).toLowerCase();
   if ([".gitignore", ".gitattributes", ".gitmodules", ".editorconfig", ".npmrc", ".nvmrc", ".env", "dockerfile", "makefile", "license"].includes(basename)) return true;
@@ -428,7 +268,7 @@ function isKnownBinaryPath(value: string): boolean {
   ].includes(path.extname(value).toLowerCase());
 }
 
-function decodeTextPreview(body: Buffer, knownText: boolean, truncated = false): { readonly text: string; readonly encoding: string } | undefined {
+export function decodeTextPreview(body: Buffer, knownText: boolean, truncated = false): { readonly text: string; readonly encoding: string } | undefined {
   if (body.length === 0) return { text: "", encoding: "UTF-8" };
   if (body[0] === 0xff && body[1] === 0xfe) return { text: iconv.decode(body, "utf16-le"), encoding: "UTF-16LE" };
   if (body[0] === 0xfe && body[1] === 0xff) return { text: iconv.decode(body, "utf16-be"), encoding: "UTF-16BE" };

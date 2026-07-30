@@ -4,7 +4,8 @@ import type { SpaceFeatureError, SpaceReference, SpaceReferenceItem, SpaceTarget
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
-import { createPanelSpaceReferenceEntry, createPanelSpaceReferencePreview, deletePanelSpaceReferenceEntry, deletePanelSpaceReferenceFile, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { createPanelSpaceReferencePreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { createPanelSpaceReferenceEntry, deletePanelSpaceReferenceEntry, deletePanelSpaceReferenceFile, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
 
 const titleSchema = z.string().trim().min(1).max(160);
 const referenceSchema = z.discriminatedUnion("kind", [

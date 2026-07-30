@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
+import type { PersonalNoteRevision } from "../panel-api-contracts.js";
 import { PersonalKnowledgeError, type PersonalKnowledgeCommand } from "../personal-knowledge/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
@@ -120,7 +121,8 @@ export async function handlePanelPersonalKnowledgeRoute(
   if (revisionsMatch !== null && request.method === "GET") {
     const limitValue = url.searchParams.get("limit");
     const limit = limitValue === null ? undefined : Number(limitValue);
-    writeJson(response, 200, { ok: true, revisions: await feature.queries.noteRevisions(decode(revisionsMatch[1]), limit) });
+    const revisions = await feature.queries.noteRevisions(decode(revisionsMatch[1]), limit) satisfies readonly PersonalNoteRevision[];
+    writeJson(response, 200, { ok: true, revisions });
     return true;
   }
   if (noteMatch !== null && request.method === "GET") {

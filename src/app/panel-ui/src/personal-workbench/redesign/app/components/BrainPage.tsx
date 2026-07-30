@@ -113,7 +113,7 @@ function clean(src: string | undefined): string {
 
 /** 一段如实的文字摘要:笔记 / Markdown / 网页 / PDF 都取各自真实正文。 */
 function previewText(p: ResolvedPage): string {
-  if (p.kind === 'note') return clean(getNote(p.refId)?.body).slice(0, 100)
+  if (p.kind === 'note') return clean(getNote(p.refId)?.bodyMarkdown).slice(0, 100)
   if (p.kind === 'space_reference') return clean(p.previewText).slice(0, 100)
   const m = getMaterial(p.refId)
   if (!m) return ''
@@ -1204,8 +1204,8 @@ function PageContent({
     const note = getNote(page.refId)!
     return (
       <div className="mx-auto px-6 py-10 reading-prose" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
-        {note.body.trim() ? (
-          <MarkdownDocumentSurface markdown={note.body} sourceVersion={`${note.id}:${note.updatedAt}`} />
+        {note.bodyMarkdown.trim() ? (
+          <MarkdownDocumentSurface markdown={note.bodyMarkdown} sourceVersion={`${note.id}:${note.updatedAt}`} />
         ) : (
           <p className="text-sm" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
             这篇笔记还没有内容。

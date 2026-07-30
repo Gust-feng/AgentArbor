@@ -313,11 +313,13 @@ function projectEntry(entry: SpaceTreeEntry): PersonalSpaceItemProjection {
   }
   const { item } = entry;
   const openable = item.reference.kind !== "generated_artifact";
+  const isFileSystemFolder = item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder";
   return {
     itemId: item.id,
     title: item.title,
     kind: itemKind(item.reference.kind),
     openable,
+    ...(isFileSystemFolder ? { referenceId: item.id } : {}),
     ...(item.reference.kind === "conversation" ? { conversationId: item.reference.conversationId } : {}),
     ...(item.reference.kind === "web_page" ? { openUrl: item.reference.url } : {}),
     detail: itemDetail(item.reference),

@@ -107,7 +107,7 @@ test("maps display kinds to Space folder/reference commands for rename and remov
   expect(rename).toHaveBeenCalledWith({ kind: "reference", id: "reference-conversation" }, "阅读讨论");
 
   await user.click(screen.getByRole("button", { name: "关于阅读方法的讨论操作" }));
-  await user.click(screen.getByRole("menuitem", { name: "从空间移除" }));
+  await user.click(screen.getByRole("menuitem", { name: "取消链接" }));
   expect(removeReference).toHaveBeenCalledWith("reference-conversation");
 });
 

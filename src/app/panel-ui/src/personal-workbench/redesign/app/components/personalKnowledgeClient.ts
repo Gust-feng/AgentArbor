@@ -1,8 +1,10 @@
 import { ApiError, requestJson } from '../../../../api'
 import { fetchSpaceReferencePreview } from './referencePreviewClient'
+import type { PersonalNoteRevision } from '../../../../../../panel-api-contracts'
 import type { Assignment, BrainLink, BrainPage, Note, Theme } from './personalKnowledgeTypes'
 
 export type { Assignment, BrainLink, BrainPage, Note, PageKind, Theme } from './personalKnowledgeTypes'
+export type { PersonalNoteRevision } from '../../../../../../panel-api-contracts'
 
 interface Snapshot {
   notes: Note[]
@@ -21,35 +23,13 @@ export type PersonalKnowledgeLoadState =
   | { readonly status: 'error'; readonly message: string }
 
 export interface PersonalKnowledgeSearchHit {
-  readonly note: Omit<Note, 'body'>
+  readonly note: Omit<Note, 'bodyMarkdown'>
   readonly snippet: string
-}
-
-export interface PersonalNoteRevision {
-  readonly noteId: string
-  readonly revision: number
-  readonly baseRevision?: number
-  readonly operation: 'create' | 'update' | 'delete' | 'snapshot'
-  readonly title: string
-  readonly bodyMarkdown: string
-  readonly actor: {
-    readonly kind: 'user' | 'agent' | 'system'
-    readonly actorId?: string
-    readonly traceId?: string
-    readonly goalId?: string
-    readonly toolCallId?: string
-  }
-  readonly changeSummary?: string
-  readonly createdAt: number
 }
 
 export type PersonalNoteRemoteState =
   | { readonly status: 'current'; readonly note: Note; readonly latestRevision?: PersonalNoteRevision }
   | { readonly status: 'deleted'; readonly latestRevision?: PersonalNoteRevision }
-
-type ServerSnapshot = Omit<Snapshot, 'notes'> & {
-  notes: Array<Omit<Note, 'body'> & { bodyMarkdown: string }>
-}
 
 const EMPTY_SNAPSHOT: Snapshot = { notes: [], pages: [], links: [], themes: [], assignments: [], recentlyOpened: {} }
 let snapshot: Snapshot = EMPTY_SNAPSHOT
@@ -107,9 +87,9 @@ export async function searchPersonalKnowledge(
   if (normalized.length === 0) return []
   if (!persistenceEnabled) {
     return snapshot.notes
-      .filter((note) => `${note.title} ${note.body}`.toLowerCase().includes(normalized))
+      .filter((note) => `${note.title} ${note.bodyMarkdown}`.toLowerCase().includes(normalized))
       .slice(0, limit)
-      .map(({ body, ...note }) => ({ note, snippet: noteSnippet(body, normalized) }))
+      .map(({ bodyMarkdown, ...note }) => ({ note, snippet: noteSnippet(bodyMarkdown, normalized) }))
   }
   const response = await requestJson<{ results: readonly PersonalKnowledgeSearchHit[] }>(
     `/api/personal-knowledge/search?q=${encodeURIComponent(query)}&limit=${limit}`,
@@ -129,14 +109,13 @@ export async function fetchPersonalNoteRemoteState(noteId: string, signal?: Abor
   )
   try {
     const [noteResponse, revisionsResponse] = await Promise.all([
-      requestJson<{ note: Omit<Note, 'body'> & { bodyMarkdown: string } }>(
+      requestJson<{ note: Note }>(
         `/api/personal-knowledge/notes/${encodeURIComponent(noteId)}`,
         { signal },
       ),
       revisionsPromise,
     ])
-    const { bodyMarkdown, ...note } = noteResponse.note
-    return { status: 'current', note: { ...note, body: bodyMarkdown }, latestRevision: revisionsResponse.revisions[0] }
+    return { status: 'current', note: noteResponse.note, latestRevision: revisionsResponse.revisions[0] }
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       const revisions = await revisionsPromise.catch(() => ({ revisions: [] as readonly PersonalNoteRevision[] }))
@@ -244,13 +223,13 @@ export function mutatePersonalKnowledge(
   mutationQueue = mutationQueue.then(() => executeMutation(mutation))
 }
 
-export function createPersonalNote(init?: Partial<Pick<Note, 'spaceId' | 'title' | 'body' | 'materialRefs'>>): Note {
+export function createPersonalNote(init?: Partial<Pick<Note, 'spaceId' | 'title' | 'bodyMarkdown' | 'materialRefs'>>): Note {
   const now = Date.now()
   const note: Note = {
     id: crypto.randomUUID(),
     spaceId: activeSpaceId,
     title: '',
-    body: '',
+    bodyMarkdown: '',
     createdAt: now,
     updatedAt: now,
     revision: 1,
@@ -260,14 +239,14 @@ export function createPersonalNote(init?: Partial<Pick<Note, 'spaceId' | 'title'
     (current) => ({ ...current, notes: [note, ...current.notes] }),
     () => requestJson('/api/personal-knowledge/notes', {
       method: 'POST',
-      body: JSON.stringify({ id: note.id, spaceId: note.spaceId, title: note.title, bodyMarkdown: note.body, materialRefs: note.materialRefs }),
+      body: JSON.stringify({ id: note.id, spaceId: note.spaceId, title: note.title, bodyMarkdown: note.bodyMarkdown, materialRefs: note.materialRefs }),
     }),
     note.id,
   )
   return note
 }
 
-export function updatePersonalNote(id: string, patch: Partial<Pick<Note, 'title' | 'body'>>): void {
+export function updatePersonalNote(id: string, patch: Partial<Pick<Note, 'title' | 'bodyMarkdown'>>): void {
   const current = snapshot.notes.find((note) => note.id === id)
   if (current === undefined) return
   const updatedAt = Date.now()
@@ -278,7 +257,7 @@ export function updatePersonalNote(id: string, patch: Partial<Pick<Note, 'title'
       if (note === undefined) return Promise.reject(new Error('笔记已不存在，无法保存更改。'))
       return requestJson(`/api/personal-knowledge/notes/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        body: JSON.stringify({ expectedRevision: note.revision, ...(patch.title === undefined ? {} : { title: patch.title }), ...(patch.body === undefined ? {} : { bodyMarkdown: patch.body }) }),
+        body: JSON.stringify({ expectedRevision: note.revision, ...(patch.title === undefined ? {} : { title: patch.title }), ...(patch.bodyMarkdown === undefined ? {} : { bodyMarkdown: patch.bodyMarkdown }) }),
       })
     },
     id,
@@ -347,9 +326,7 @@ export function collectManagedSpaceReference(referenceId: string, relativePath =
         body: JSON.stringify({ referenceId, relativePath: normalizedRelativePath }),
       })
       managedPage = response.page
-      // The asset is already durable. A cache warm-up must not turn a successful
-      // collection into a false failure when the preview endpoint is unavailable.
-      await fetchSpaceReferencePreview(response.page.refId, '', undefined, '/api/personal-knowledge/assets').catch(() => undefined)
+      warmManagedAssetPreview(response.page)
     },
     undefined,
     sourceKey,
@@ -407,15 +384,18 @@ function upsertKnowledgePage(value: Snapshot, page: BrainPage): Snapshot {
 }
 
 async function fetchPersonalKnowledgeSnapshot(): Promise<Snapshot> {
-  const response = await requestJson<{ snapshot: ServerSnapshot }>('/api/personal-knowledge')
-  const next = {
-    ...response.snapshot,
-    notes: response.snapshot.notes.map(({ bodyMarkdown, ...note }) => ({ ...note, body: bodyMarkdown })),
-  }
-  await Promise.allSettled(next.pages
-    .filter((page) => page.asset?.status === 'managed')
-    .map((page) => fetchSpaceReferencePreview(page.refId, '', undefined, '/api/personal-knowledge/assets')))
-  return next
+  const response = await requestJson<{ snapshot: Snapshot }>('/api/personal-knowledge')
+  const snapshot = response.snapshot ?? EMPTY_SNAPSHOT
+  snapshot.pages.filter((page) => page.asset?.status === 'managed').forEach(warmManagedAssetPreview)
+  return snapshot
+}
+
+function warmManagedAssetPreview(page: BrainPage): void {
+  // Preview data only enriches the card. The persisted asset must remain
+  // immediately visible while a local file read is slow or unavailable.
+  void fetchSpaceReferencePreview(page.refId, '', undefined, '/api/personal-knowledge/assets')
+    .catch(() => undefined)
+    .finally(emit)
 }
 
 function replayPendingMutations(): void {

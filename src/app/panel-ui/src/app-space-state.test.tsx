@@ -108,14 +108,13 @@ test("exposes knowledge initialization failure and retries in place", async () =
   expect(getPersonalKnowledgeLoadState()).toEqual({ status: "error", message: "knowledge unavailable" });
 
   fetchMock
-    .mockResolvedValueOnce(jsonResponse({ ok: true }))
     .mockResolvedValueOnce(jsonResponse({ snapshot: emptyServerSnapshot() }));
   const retry = initializePersonalKnowledge("space-1");
   expect(getPersonalKnowledgeLoadState()).toEqual({ status: "retrying" });
   await retry;
 
   expect(getPersonalKnowledgeLoadState()).toEqual({ status: "ready" });
-  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 
 test("persists a newly created note followed by an immediate edit in order", async () => {
@@ -130,9 +129,9 @@ test("persists a newly created note followed by an immediate edit in order", asy
   setPersonalKnowledgePersistenceEnabled(true);
   await initializePersonalKnowledge("space-1");
 
-  const note = createPersonalNote({ title: "第一篇", body: "初稿" });
-  updatePersonalNote(note.id, { body: "编辑后的正文" });
-  expect(getPersonalKnowledgeSnapshot().notes[0]?.body).toBe("编辑后的正文");
+  const note = createPersonalNote({ title: "第一篇", bodyMarkdown: "初稿" });
+  updatePersonalNote(note.id, { bodyMarkdown: "编辑后的正文" });
+  expect(getPersonalKnowledgeSnapshot().notes[0]?.bodyMarkdown).toBe("编辑后的正文");
   expect(getPersonalNoteSaveState(note.id)).toBe("saving");
 
   await waitFor(() => expect(getPersonalNoteSaveState(note.id)).toBe("saved"));
@@ -165,12 +164,12 @@ test("rebases a queued note edit after the previous write fails", async () => {
   setPersonalKnowledgePersistenceEnabled(true);
   await initializePersonalKnowledge("space-1");
 
-  updatePersonalNote(note.id, { body: "第一次编辑" });
-  updatePersonalNote(note.id, { body: "第二次编辑" });
+  updatePersonalNote(note.id, { bodyMarkdown: "第一次编辑" });
+  updatePersonalNote(note.id, { bodyMarkdown: "第二次编辑" });
 
   await waitFor(() => expect(getPersonalNoteSaveState(note.id)).toBe("saved"));
   expect(getPersonalKnowledgeSnapshot().notes[0]).toMatchObject({
-    body: "第二次编辑",
+    bodyMarkdown: "第二次编辑",
     revision: 2,
   });
   const patchBodies = requests

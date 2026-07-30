@@ -167,6 +167,44 @@ test("keeps a managed asset when its non-blocking preview warm-up fails", async 
   expect(getPersonalKnowledgeError()).toBeUndefined();
 });
 
+test("shows a managed asset before its preview cache has finished warming", async () => {
+  const page = {
+    refId: "asset-preview-pending",
+    kind: "space_reference" as const,
+    collectedAt: 1,
+    asset: {
+      status: "managed" as const,
+      title: "Readme.md",
+      sourceLabel: "E:/workspace/Readme.md",
+      contentKind: "file" as const,
+      sourceReferenceId: "source-readme",
+      sourceRelativePath: "Readme.md",
+    },
+  };
+  let finishPreview: ((response: Response) => void) | undefined;
+  const fetchMock = vi.fn(async (path: string | URL | Request) => {
+    if (String(path) === "/api/personal-knowledge/collect-space-reference") return jsonResponse({ page });
+    if (String(path) === "/api/personal-knowledge/assets/asset-preview-pending/preview") {
+      return await new Promise<Response>((resolve) => { finishPreview = resolve; });
+    }
+    return jsonResponse({ snapshot: emptyKnowledgeSnapshot() });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  setPersonalKnowledgePersistenceEnabled(true);
+
+  collectManagedSpaceReference("source-readme", "Readme.md");
+
+  await waitFor(() => expect(getPersonalKnowledgeSnapshot().pages).toEqual([page]));
+  finishPreview?.(jsonResponse({ preview: {
+    itemId: page.refId,
+    title: page.asset.title,
+    sourceKind: "local_file",
+    source: "managed/asset-preview-pending/content",
+    status: "ready",
+    content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
+  } }));
+});
+
 test("projects a managed Markdown asset as a Markdown card with its real summary", async () => {
   const user = userEvent.setup();
   const assetPath = "/api/personal-knowledge/assets/asset-card-markdown/preview";
@@ -344,7 +382,7 @@ test("prefetches nested local folder entries and keeps folders out of the previe
   });
   vi.stubGlobal("fetch", fetchMock);
   renderWorkbench({
-    spaces: [{ spaceId: "space-folder", title: "本地项目", items: [{ itemId: "folder-reference", title: "项目文件", kind: "workspace_folder" }] }],
+    spaces: [{ spaceId: "space-folder", title: "本地项目", items: [{ itemId: "folder-reference", title: "项目文件", kind: "workspace_folder", referenceId: "folder-reference" }] }],
   });
 
   await user.click(screen.getByRole("button", { name: "本地项目" }));
@@ -437,8 +475,8 @@ test("deletes app-owned folders and creates files from a linked workspace folder
       spaceId: "space-files",
       title: "项目空间",
       items: [
-        { itemId: "managed-folder", title: "软件资料", kind: "managed_folder" },
-        { itemId: "folder-reference", title: "项目文件", kind: "workspace_folder" },
+        { itemId: "managed-folder", title: "软件资料", kind: "managed_folder", referenceId: "managed-folder" },
+        { itemId: "folder-reference", title: "项目文件", kind: "workspace_folder", referenceId: "folder-reference" },
       ],
     }],
     spaceActions: { deleteManagedFolder },
@@ -588,7 +626,7 @@ test("requires later Space notes to name inline and defaults an empty name to un
     id: "note-first",
     spaceId: "space-study",
     title: "第一篇笔记",
-    body: "",
+    bodyMarkdown: "",
     revision: 1,
     createdAt: 1,
     updatedAt: 1,
@@ -614,7 +652,7 @@ test("creates a second Space note from the store order without moving the existi
     id: "note-first",
     spaceId: "space-study",
     title: "第一篇笔记",
-    body: "",
+    bodyMarkdown: "",
     revision: 1,
     createdAt: 1,
     updatedAt: 1,

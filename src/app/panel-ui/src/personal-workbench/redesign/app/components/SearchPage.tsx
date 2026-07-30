@@ -165,8 +165,8 @@ export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spac
           name: n.title || '无标题',
           type: 'note',
           space: spaceTitles.get(n.spaceId) ?? '未归属空间',
-          snippet: makeSnippet(n.body, debouncedQuery, '(空笔记)'),
-          haystack: `${n.title} ${n.body}`,
+          snippet: makeSnippet(n.bodyMarkdown, debouncedQuery, '(空笔记)'),
+          haystack: `${n.title} ${n.bodyMarkdown}`,
           spaceId: n.spaceId,
         }))
       : remoteNotes.map(({ note, snippet }) => ({

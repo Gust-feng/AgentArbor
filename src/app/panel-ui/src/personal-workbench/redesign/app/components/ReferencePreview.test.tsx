@@ -85,6 +85,23 @@ test('does not let a late preview GET replace a newer saved preview', async () =
   expect(getCachedReferencePreview('reference-one')).toEqual(saved)
 })
 
+test('isolates caller cancellation while reusing the same preview request', async () => {
+  const preview = textPreview('1:4', '共享内容')
+  let resolveRequest: ((response: Response) => void) | undefined
+  const fetchMock = vi.fn(async () => await new Promise<Response>((resolve) => { resolveRequest = resolve }))
+  vi.stubGlobal('fetch', fetchMock)
+  const firstController = new AbortController()
+
+  const first = fetchSpaceReferencePreview('reference-one', '', firstController.signal)
+  const second = fetchSpaceReferencePreview('reference-one')
+  firstController.abort()
+
+  await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+  resolveRequest?.(new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  await expect(second).resolves.toEqual(preview)
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
 test('shows a compact relative breadcrumb without exposing the absolute source path', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
     preview: { ...textPreview('1:4', '内容'), title: 'note.txt', sourceKind: 'workspace_folder', source: 'C:/workspace/docs/note.txt' },

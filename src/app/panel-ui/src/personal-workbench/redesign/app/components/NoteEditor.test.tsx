@@ -30,5 +30,5 @@ test('flushes the previous note and saves later input against the newly selected
 })
 
 function note(id: string, title: string): Note {
-  return { id, spaceId: 'space-one', title, body: '', revision: 1, createdAt: 1, updatedAt: 1 }
+  return { id, spaceId: 'space-one', title, bodyMarkdown: '', revision: 1, createdAt: 1, updatedAt: 1 }
 }

@@ -19,10 +19,10 @@ import { createMarkdownEditorExtensions, isEditorUsable, markdownFromEditor } fr
 
 interface NoteEditorProps {
   note: Note
-  onSave: (id: string, patch: { title?: string; body?: string }) => void
+  onSave: (id: string, patch: { title?: string; bodyMarkdown?: string }) => void
   onOpenFocus?: () => void
   onClose?: () => void
-  onRestoreAsNew?: (draft: { title: string; body: string }) => void
+  onRestoreAsNew?: (draft: { title: string; bodyMarkdown: string }) => void
 }
 
 const AUTOSAVE_MS = 500
@@ -32,7 +32,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
   const [title, setTitle] = useState(note.title)
   const [saved, setSaved] = useState(true)
   const [sourceMode, setSourceMode] = useState(false)
-  const [sourceBody, setSourceBody] = useState(note.body)
+  const [sourceBody, setSourceBody] = useState(note.bodyMarkdown)
   const [incoming, setIncoming] = useState<PersonalNoteRemoteState>()
   const [showIncomingDiff, setShowIncomingDiff] = useState(false)
   const brain = useBrain()
@@ -44,13 +44,13 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
   const collected = brain.isCollected(note.id)
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingRef = useRef<{ id: string; patch: { title?: string; body?: string } } | null>(null)
+  const pendingRef = useRef<{ id: string; patch: { title?: string; bodyMarkdown?: string } } | null>(null)
   const onSaveRef = useRef(onSave)
   const baseRevisionRef = useRef(note.revision)
   const noteIdRef = useRef(note.id)
   const titleRef = useRef(title)
   const sourceBodyRef = useRef(sourceBody)
-  const editorBodyRef = useRef(note.body)
+  const editorBodyRef = useRef(note.bodyMarkdown)
   const sourceModeRef = useRef(sourceMode)
   onSaveRef.current = onSave
   noteIdRef.current = note.id
@@ -74,7 +74,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
     setSaved(true)
   }
 
-  function scheduleSave(patch: { title?: string; body?: string }) {
+  function scheduleSave(patch: { title?: string; bodyMarkdown?: string }) {
     const id = noteIdRef.current
     const merged = { ...(pendingRef.current?.patch ?? {}), ...patch }
     pendingRef.current = { id, patch: merged }
@@ -90,33 +90,33 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
 
   const editor = useEditor({
     extensions: createMarkdownEditorExtensions('从这里开始写…'),
-    content: note.body,
+    content: note.bodyMarkdown,
     editorProps: { attributes: { class: 'aa-editor-prose', spellcheck: 'false' } },
     onUpdate: ({ editor: value }) => {
-      const body = markdownFromEditor(value)
-      editorBodyRef.current = body
-      scheduleSave({ body })
+      const bodyMarkdown = markdownFromEditor(value)
+      editorBodyRef.current = bodyMarkdown
+      scheduleSave({ bodyMarkdown })
     },
   })
 
   function currentDraft() {
     return {
       title: titleRef.current,
-      body: sourceModeRef.current ? sourceBodyRef.current : editorBodyRef.current,
+      bodyMarkdown: sourceModeRef.current ? sourceBodyRef.current : editorBodyRef.current,
     }
   }
 
   useEffect(() => {
     flush()
     setTitle(note.title)
-    setSourceBody(note.body)
+    setSourceBody(note.bodyMarkdown)
     setSaved(true)
     setSourceMode(false)
     setIncoming(undefined)
     setShowIncomingDiff(false)
     baseRevisionRef.current = note.revision
-    editorBodyRef.current = note.body
-    if (isEditorUsable(editor)) editor.commands.setContent(note.body, { emitUpdate: false })
+    editorBodyRef.current = note.bodyMarkdown
+    if (isEditorUsable(editor)) editor.commands.setContent(note.bodyMarkdown, { emitUpdate: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id])
 
@@ -139,7 +139,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
         }
         if (remote.note.revision <= baseRevisionRef.current) return
         const draft = currentDraft()
-        if (remote.note.title === draft.title && remote.note.body === draft.body) {
+        if (remote.note.title === draft.title && remote.note.bodyMarkdown === draft.bodyMarkdown) {
           baseRevisionRef.current = remote.note.revision
           return
         }
@@ -179,7 +179,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
 
   const incomingChanges = useMemo(() => {
     if (!showIncomingDiff || incoming?.status !== 'current') return undefined
-    return diffLines(currentDraft().body, incoming.note.body)
+    return diffLines(currentDraft().bodyMarkdown, incoming.note.bodyMarkdown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incoming, showIncomingDiff])
 
@@ -188,9 +188,9 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
     discardPending()
     resolvePersonalNoteConflict(note.id)
     setTitle(incoming.note.title)
-    setSourceBody(incoming.note.body)
-    editorBodyRef.current = incoming.note.body
-    if (isEditorUsable(editor)) editor.commands.setContent(incoming.note.body, { emitUpdate: false })
+    setSourceBody(incoming.note.bodyMarkdown)
+    editorBodyRef.current = incoming.note.bodyMarkdown
+    if (isEditorUsable(editor)) editor.commands.setContent(incoming.note.bodyMarkdown, { emitUpdate: false })
     baseRevisionRef.current = incoming.note.revision
     setIncoming(undefined)
     setShowIncomingDiff(false)
@@ -203,7 +203,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
     discardPending()
     resolvePersonalNoteConflict(note.id)
     await refreshPersonalKnowledge().catch(() => undefined)
-    onSaveRef.current(note.id, { title: draft.title, body: draft.body })
+    onSaveRef.current(note.id, { title: draft.title, bodyMarkdown: draft.bodyMarkdown })
     baseRevisionRef.current = incoming.note.revision
     setIncoming(undefined)
     setShowIncomingDiff(false)
@@ -272,7 +272,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto px-6 py-4 pb-24" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
           {incomingChanges !== undefined ? <NoteDiff changes={incomingChanges} /> : sourceMode ? (
-            <textarea value={sourceBody} onChange={(event) => { setSourceBody(event.target.value); scheduleSave({ body: event.target.value }) }} className="w-full outline-none bg-transparent resize-none text-sm leading-relaxed" style={{ color: 'var(--aa-text-1, #292722)', minHeight: '60vh', fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace', fontSize: 13, lineHeight: 1.7 }} spellCheck={false} />
+            <textarea value={sourceBody} onChange={(event) => { setSourceBody(event.target.value); scheduleSave({ bodyMarkdown: event.target.value }) }} className="w-full outline-none bg-transparent resize-none text-sm leading-relaxed" style={{ color: 'var(--aa-text-1, #292722)', minHeight: '60vh', fontFamily: '"JetBrains Mono", "Fira Code", ui-monospace, monospace', fontSize: 13, lineHeight: 1.7 }} spellCheck={false} />
           ) : <EditorContent editor={editor} />}
         </div>
       </div>

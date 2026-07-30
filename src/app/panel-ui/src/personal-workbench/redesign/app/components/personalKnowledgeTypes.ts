@@ -2,7 +2,7 @@ export interface Note {
   id: string
   spaceId: string
   title: string
-  body: string
+  bodyMarkdown: string
   materialRefs?: string[]
   createdAt: number
   updatedAt: number

@@ -40,6 +40,8 @@ export type PersonalSpaceItemProjection = {
   readonly openable?: boolean;
   readonly conversationId?: string;
   readonly openUrl?: string;
+  /** Stable reference identity for file-system-backed items; undefined for internal folders and non-fs references. */
+  readonly referenceId?: string;
   readonly children?: readonly PersonalSpaceItemProjection[];
 };
 

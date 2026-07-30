@@ -292,7 +292,7 @@ function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
     conversationId: item.conversationId,
     openUrl: item.openUrl,
     openable: item.openable,
-    referenceId: isFileSystemFolderKind(item.kind) ? item.itemId : undefined,
+    referenceId: item.referenceId,
   }
 }
 
@@ -703,7 +703,7 @@ export function SpacePage({
     const note = create({
       spaceId,
       title: firstNote ? '无标题' : undefined,
-      body: `来自《${material.title}》\n\n`,
+      bodyMarkdown: `来自《${material.title}》\n\n`,
       materialRefs: [material.id],
     })
     if (firstNote) {
@@ -888,7 +888,7 @@ export function SpacePage({
               onSave={update}
               onClose={() => setSelectedId(null)}
               onRestoreAsNew={(draft) => {
-                const restored = create({ title: draft.title.trim() || '无标题', body: draft.body })
+                const restored = create({ title: draft.title.trim() || '无标题', bodyMarkdown: draft.bodyMarkdown })
                 setSelectedId(restored.id)
               }}
             />

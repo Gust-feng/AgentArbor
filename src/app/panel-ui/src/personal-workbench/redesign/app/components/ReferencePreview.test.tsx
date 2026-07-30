@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ReferencePreview } from './ReferencePreview'
 import type { SpaceReferencePreview } from './referencePreviewClient'
-import { clearReferencePreviewCacheForTesting, createSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, saveSpaceReferenceText } from './referencePreviewClient'
+import { clearReferencePreviewCacheForTesting, createSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, saveSpaceReferenceText, subscribeReferencePreviewCache } from './referencePreviewClient'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -85,6 +85,26 @@ test('does not let a late preview GET replace a newer saved preview', async () =
   expect(getCachedReferencePreview('reference-one')).toEqual(saved)
 })
 
+test('lets an older preview GET converge on a save that is still in flight', async () => {
+  const stale = textPreview('1:4', '旧内容')
+  const saved = textPreview('2:4', '新内容')
+  let resolveGet: ((response: Response) => void) | undefined
+  let resolvePut: ((response: Response) => void) | undefined
+  vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'PUT') return await new Promise<Response>((resolve) => { resolvePut = resolve })
+    return await new Promise<Response>((resolve) => { resolveGet = resolve })
+  }))
+
+  const staleRequest = fetchSpaceReferencePreview('reference-one')
+  const saveRequest = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
+  resolveGet?.(new Response(JSON.stringify({ preview: stale }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  resolvePut?.(new Response(JSON.stringify({ preview: saved }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+  await expect(saveRequest).resolves.toEqual(saved)
+  await expect(staleRequest).resolves.toEqual(saved)
+  expect(getCachedReferencePreview('reference-one')).toEqual(saved)
+})
+
 test('isolates caller cancellation while reusing the same preview request', async () => {
   const preview = textPreview('1:4', '共享内容')
   let resolveRequest: ((response: Response) => void) | undefined
@@ -125,6 +145,28 @@ test('starts a fresh preview request after a file mutation invalidates an older 
   await expect(refreshedRequest).resolves.toEqual(current)
   await expect(staleRequest).resolves.toEqual(current)
   expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== 'POST')).toHaveLength(2)
+})
+
+test('batches preview notifications and keeps API data domains isolated', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const itemId = decodeURIComponent(String(input).split('/').at(-2) ?? 'unknown')
+    return new Response(JSON.stringify({ preview: { ...textPreview(`1:${itemId.length}`, itemId), itemId } }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+  const managedListener = vi.fn()
+  const spaceListener = vi.fn()
+  const unsubscribeManaged = subscribeReferencePreviewCache(managedListener, '/api/personal-knowledge/assets')
+  const unsubscribeSpace = subscribeReferencePreviewCache(spaceListener)
+
+  await Promise.all([
+    fetchSpaceReferencePreview('managed-one', '', undefined, '/api/personal-knowledge/assets'),
+    fetchSpaceReferencePreview('managed-two', '', undefined, '/api/personal-knowledge/assets'),
+    fetchSpaceReferencePreview('space-one'),
+  ])
+
+  await waitFor(() => expect(managedListener).toHaveBeenCalledTimes(1))
+  expect(spaceListener).toHaveBeenCalledTimes(1)
+  unsubscribeManaged()
+  unsubscribeSpace()
 })
 
 test('shows a compact relative breadcrumb without exposing the absolute source path', async () => {

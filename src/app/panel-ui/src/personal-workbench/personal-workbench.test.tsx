@@ -4,15 +4,15 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { ChatInputProps } from "../components/chat-empty";
 import { PersonalWorkbench, type PersonalWorkbenchProps } from "./personal-workbench";
+import { BrainPage } from "./redesign/app/components/BrainPage";
 import {
   collectManagedSpaceReference,
   getPersonalKnowledgeError,
   getPersonalKnowledgeSnapshot,
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
-  subscribePersonalKnowledge,
 } from "./redesign/app/components/personalKnowledgeClient";
-import { getCachedReferencePreview } from "./redesign/app/components/referencePreviewClient";
+import { fetchSpaceReferencePreview, getCachedReferencePreview } from "./redesign/app/components/referencePreviewClient";
 import { resolvePage } from "./redesign/app/components/brainStore";
 
 beforeEach(() => resetPersonalKnowledgeForTesting());
@@ -139,6 +139,42 @@ test("prewarms managed knowledge assets before the user opens their cards", asyn
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(assetPath, expect.anything()));
 });
 
+test("updates a visible knowledge card when its managed preview finishes", async () => {
+  const page = {
+    refId: "asset-card-live",
+    kind: "space_reference" as const,
+    collectedAt: 1,
+    asset: {
+      status: "managed" as const,
+      title: "托管笔记.md",
+      sourceLabel: "C:/source/托管笔记.md",
+      contentKind: "file" as const,
+      sourceReferenceId: "source-live",
+      sourceRelativePath: "托管笔记.md",
+    },
+  };
+  let finishPreview: ((response: Response) => void) | undefined;
+  vi.stubGlobal("fetch", vi.fn(async () => await new Promise<Response>((resolve) => { finishPreview = resolve; })));
+  resetPersonalKnowledgeForTesting({ pages: [page] });
+  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} spaces={[]} onOpenSpaceReference={() => undefined} />);
+  expect(screen.getByText("托管笔记.md")).toBeTruthy();
+
+  const previewRequest = fetchSpaceReferencePreview("asset-card-live", "", undefined, "/api/personal-knowledge/assets");
+  await waitFor(() => expect(finishPreview).toBeTypeOf("function"));
+  finishPreview?.(jsonResponse({ preview: {
+    itemId: "asset-card-live",
+    title: "托管笔记.md",
+    sourceKind: "local_file",
+    source: "managed/asset-card-live/content",
+    status: "ready",
+    fingerprint: "managed-live",
+    content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
+  } }));
+  await expect(previewRequest).resolves.toBeTruthy();
+  expect(await screen.findByText("已预热")).toBeTruthy();
+  rendered.unmount();
+});
+
 test("keeps a managed asset when its non-blocking preview warm-up fails", async () => {
   const page = {
     refId: "asset-preview-unavailable",
@@ -197,9 +233,6 @@ test("shows a managed asset before its preview cache has finished warming", asyn
   collectManagedSpaceReference("source-readme", "Readme.md");
 
   await waitFor(() => expect(getPersonalKnowledgeSnapshot().pages).toEqual([page]));
-  const snapshotBeforePreview = getPersonalKnowledgeSnapshot();
-  const listener = vi.fn();
-  const unsubscribe = subscribePersonalKnowledge(listener);
   finishPreview?.(jsonResponse({ preview: {
     itemId: page.refId,
     title: page.asset.title,
@@ -209,9 +242,6 @@ test("shows a managed asset before its preview cache has finished warming", asyn
     content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
   } }));
   await waitFor(() => expect(getCachedReferencePreview(page.refId, "", "/api/personal-knowledge/assets")?.content).toMatchObject({ kind: "text", text: "# 已预热" }));
-  expect(getPersonalKnowledgeSnapshot()).not.toBe(snapshotBeforePreview);
-  expect(listener).toHaveBeenCalled();
-  unsubscribe();
 });
 
 test("projects a managed Markdown asset as a Markdown card with its real summary", async () => {

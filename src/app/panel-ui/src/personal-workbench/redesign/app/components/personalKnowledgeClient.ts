@@ -395,12 +395,6 @@ function warmManagedAssetPreview(page: BrainPage): void {
   // immediately visible while a local file read is slow or unavailable.
   void fetchSpaceReferencePreview(page.refId, '', undefined, '/api/personal-knowledge/assets')
     .catch(() => undefined)
-    .finally(() => {
-      // Preview content lives in its own cache. Publish a new snapshot identity
-      // so useSyncExternalStore consumers can observe that cache change.
-      snapshot = { ...snapshot }
-      emit()
-    })
 }
 
 function replayPendingMutations(): void {

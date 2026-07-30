@@ -3,7 +3,7 @@ import { getMaterial } from './materials'
 import { getNote } from './notesStore'
 import type { PersonalSpaceProjection } from '../../../space'
 import { LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS } from './learningDemoDataset'
-import { getCachedReferencePreview } from './referencePreviewClient'
+import { getCachedReferencePreview, getReferencePreviewCacheVersion, subscribeReferencePreviewCache } from './referencePreviewClient'
 import {
   executePersonalKnowledgeCommand,
   collectManagedSpaceReference,
@@ -96,6 +96,8 @@ export interface ResolvedPage {
 }
 
 const MANAGED_ASSET_PREVIEW_BASE = '/api/personal-knowledge/assets'
+const subscribeManagedAssetPreviewCache = (listener: () => void) => subscribeReferencePreviewCache(listener, MANAGED_ASSET_PREVIEW_BASE)
+const getManagedAssetPreviewCacheVersion = () => getReferencePreviewCacheVersion(MANAGED_ASSET_PREVIEW_BASE)
 
 function managedAssetKind(page: BrainPage): NonNullable<ResolvedPage['materialKind']> {
   const asset = page.asset
@@ -168,6 +170,11 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     getPersonalKnowledgeSnapshot,
     getPersonalKnowledgeSnapshot,
   )
+  const previewCacheVersion = useSyncExternalStore(
+    subscribeManagedAssetPreviewCache,
+    getManagedAssetPreviewCacheVersion,
+    getManagedAssetPreviewCacheVersion,
+  )
   const hasLearningDemo = spaces.some((space) => space.demoDataset === 'learning-workspace')
   const demoPages = useMemo<BrainPage[]>(() => hasLearningDemo
     ? LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS.map((refId, index) => ({
@@ -180,7 +187,7 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     const persistedIds = new Set(snapshot.pages.map((page) => page.refId))
     return [...snapshot.pages, ...demoPages.filter((page) => !persistedIds.has(page.refId))]
       .sort((left, right) => right.collectedAt - left.collectedAt)
-  }, [demoPages, snapshot.pages])
+  }, [demoPages, snapshot.pages, previewCacheVersion])
   const demoIds = useMemo(() => new Set(demoPages.map((page) => page.refId)), [demoPages])
   const pageById = useMemo(() => new Map(pages.map((page) => [page.refId, page])), [pages])
   return {

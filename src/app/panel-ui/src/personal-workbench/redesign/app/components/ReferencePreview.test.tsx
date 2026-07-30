@@ -311,7 +311,7 @@ test('highlights known code languages and keeps encoding metadata visible', asyn
   expect(document.querySelector('.aa-code-document__source .hljs-string')?.textContent).toContain('AgentArbor')
 })
 
-test('opens markdown in the shared reading surface and autosaves only source edits', async () => {
+test('opens markdown as WYSIWYG and keeps source edits autosaved', async () => {
   const user = userEvent.setup()
   const markdown = '# 标题\n\n第一段\n\n第二段'
   let currentMarkdown = markdown
@@ -327,7 +327,7 @@ test('opens markdown in the shared reading surface and autosaves only source edi
   expect(rendered.container.querySelectorAll('.aa-reference-markdown-prose p')).toHaveLength(2)
 
   const editor = rendered.container.querySelector('.aa-reference-markdown-prose')
-  expect(editor?.getAttribute('contenteditable')).toBe('false')
+  expect(editor?.getAttribute('contenteditable')).toBe('true')
   expect(rendered.container.querySelector('.aa-reference-preview__editor')).toBeNull()
   expect(screen.queryByRole('button', { name: '阅读' })).toBeNull()
   expect(screen.getByText('第一段')).toBeTruthy()
@@ -338,7 +338,7 @@ test('opens markdown in the shared reading surface and autosaves only source edi
   await user.type(source, '\n\n第三段')
   await waitFor(() => expect(currentMarkdown).toContain('第三段'))
   await user.click(screen.getByRole('button', { name: '阅读' }))
-  expect(rendered.container.querySelector('.aa-reference-markdown-prose')?.getAttribute('contenteditable')).toBe('false')
+  expect(rendered.container.querySelector('.aa-reference-markdown-prose')?.getAttribute('contenteditable')).toBe('true')
 })
 
 test('initializes the editable draft from a cached preview without saving empty content', async () => {

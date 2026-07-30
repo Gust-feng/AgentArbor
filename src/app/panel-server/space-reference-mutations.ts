@@ -26,6 +26,7 @@ import {
 export async function updatePanelSpaceReferenceText(
   item: SpaceReferenceItem,
   input: { readonly relativePath?: string; readonly expectedFingerprint: string; readonly text: string },
+  previewOptions?: { readonly contentBaseUrl?: string; readonly contentTypeHintPath?: string },
 ): Promise<PanelSpaceReferencePreview> {
   const relativePath = input.relativePath ?? "";
   const source = await resolvePanelSpaceReferencePath(item, relativePath);
@@ -54,7 +55,12 @@ export async function updatePanelSpaceReferenceText(
       throw new PanelHttpError(409, "space_reference_revision_conflict", "来源文件已发生变化，请先比较更改。");
     }
     await fs.rename(temporaryPath, source);
-    return await createPanelSpaceReferencePreview(item, relativePath);
+    return await createPanelSpaceReferencePreview(
+      item,
+      relativePath,
+      previewOptions?.contentBaseUrl,
+      previewOptions?.contentTypeHintPath,
+    );
   } finally {
     await fs.unlink(temporaryPath).catch(() => undefined);
   }

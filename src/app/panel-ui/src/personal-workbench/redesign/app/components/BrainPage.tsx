@@ -1212,7 +1212,6 @@ function PageContent({
           canOpen={false}
           onOpen={() => undefined}
           apiBase="/api/personal-knowledge/assets"
-          readOnly
           initialRelativePath={managedPath}
           onNavigatePath={navigateManagedPath}
           embedded

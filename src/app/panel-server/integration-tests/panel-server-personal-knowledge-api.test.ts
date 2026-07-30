@@ -84,6 +84,19 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     assert.equal(generatedOpen.body.error.code, "space_reference_not_openable");
     assert.deepEqual(opened, [{ kind: "path", value: sourcePath }]);
 
+    const managedBeforeRemoval = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview`);
+    assert.equal(managedBeforeRemoval.body.preview.content.text, "# 托管正文");
+    assert.equal(managedBeforeRemoval.body.preview.content.language, "md");
+    assert.equal(managedBeforeRemoval.body.preview.content.editable, true);
+    const editedManaged = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/content`, {
+      method: "PUT",
+      body: { relativePath: "", expectedFingerprint: managedBeforeRemoval.body.preview.fingerprint, text: "# 已编辑托管正文" },
+    });
+    assert.equal(editedManaged.status, 200);
+    assert.equal(editedManaged.body.preview.content.text, "# 已编辑托管正文");
+    assert.equal(editedManaged.body.preview.content.language, "md");
+    assert.equal(await fs.readFile(sourcePath, "utf8"), "# 托管正文");
+
     const missingReference = await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
       method: "POST",
       body: { type: "knowledge.collect", page: { refId: "missing-reference", kind: "space_reference", collectedAt: 2 } },
@@ -103,10 +116,12 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     assert.equal(snapshot.body.snapshot.notes[0].title, "第一篇笔记");
     assert.equal(snapshot.body.snapshot.pages[0].refId, knowledgeRefId);
     const managed = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview`);
-    assert.equal(managed.body.preview.content.text, "# 托管正文");
+    assert.equal(managed.body.preview.content.text, "# 已编辑托管正文");
     assert.equal(managed.body.preview.content.language, "md");
+    assert.equal(managed.body.preview.content.editable, true);
     const managedContent = await fetch(`${server.baseUrl}/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/content`);
     assert.equal(managedContent.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.equal(await managedContent.text(), "# 已编辑托管正文");
 
     const restartedSearch = await requestJson(
       server.baseUrl,

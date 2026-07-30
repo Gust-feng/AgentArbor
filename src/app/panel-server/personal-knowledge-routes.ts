@@ -7,6 +7,7 @@ import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { managedKnowledgeReference } from "./knowledge-asset-store.js";
 import { createPanelSpaceReferencePreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
 import { createWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 
 const id = z.string().trim().min(1).max(512);
@@ -28,6 +29,12 @@ const updateNoteSchema = z.object({
   title: z.string().max(1_000).optional(),
   bodyMarkdown: z.string().max(10_000_000).optional(),
 }).strict().refine((value) => value.title !== undefined || value.bodyMarkdown !== undefined, "No note fields were provided.");
+
+const updateAssetTextSchema = z.object({
+  relativePath: z.string().max(4_096).optional(),
+  expectedFingerprint: z.string().min(1).max(512),
+  text: z.string().max(512 * 1024),
+}).strict();
 
 const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("knowledge.collect"), page: z.object({ refId: id, kind: pageKind, collectedAt: timestamp }).strict() }).strict(),
@@ -111,6 +118,24 @@ export async function handlePanelPersonalKnowledgeRoute(
       url.searchParams.get("path") ?? "",
       page.asset?.sourceLabel,
     );
+    return true;
+  }
+  if (assetContent !== null && request.method === "PUT") {
+    await runtime.knowledgeAssetsReady;
+    const refId = decode(assetContent[1]);
+    const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
+    if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
+    const item = managedKnowledgeReference(requireAssetRoot(runtime), page);
+    const input = parse(updateAssetTextSchema, await readJsonBody(request));
+    const contentBaseUrl = `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`;
+    writeJson(response, 200, {
+      ok: true,
+      preview: await runtime.fileMutationCoordinator.run(item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" ? item.reference.path : item.id, async () =>
+        await updatePanelSpaceReferenceText(item, input, {
+          contentBaseUrl,
+          contentTypeHintPath: page.asset?.sourceLabel,
+        })),
+    });
     return true;
   }
   if (url.pathname === "/api/personal-knowledge/notes" && request.method === "POST") {

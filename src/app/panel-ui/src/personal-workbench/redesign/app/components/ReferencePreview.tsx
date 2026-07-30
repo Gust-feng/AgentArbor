@@ -301,7 +301,7 @@ function ReferenceDocumentSessionView({
       {error !== undefined && <div className="aa-reference-preview__error" role="alert">{error}</div>}
       {changes !== undefined ? <TextDiff changes={changes} /> : sourceMode && markdownDocument ? (
         <textarea className="aa-reference-preview__editor" value={draft} onChange={(event) => scheduleSave(event.target.value)} spellCheck={false} />
-      ) : <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!markdownDocument && !readOnly && !loading && preview.content.kind === 'text' && preview.content.editable} markdownDocument={markdownDocument} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />}
+      ) : <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.content.editable} markdownDocument={markdownDocument} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />}
     </div>
   )
 }

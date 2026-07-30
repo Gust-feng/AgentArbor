@@ -28,7 +28,9 @@ export async function fetchSpaceReferencePreview(itemId: string, relativePath = 
       `${apiBase}/${encodeURIComponent(itemId)}/preview${query}`,
       { headers: { accept: 'application/json' } },
     )
-    if ((previewGeneration.get(key) ?? 0) !== generation) return previewCache.get(key) ?? response.preview
+    if ((previewGeneration.get(key) ?? 0) !== generation) {
+      return previewCache.get(key) ?? await fetchSpaceReferencePreview(itemId, relativePath, undefined, apiBase)
+    }
     previewCache.set(key, response.preview)
     return response.preview
   })().finally(() => {
@@ -105,6 +107,7 @@ function invalidateReferencePreview(itemId: string, apiBase = '/api/spaces/refer
     if (!key.startsWith(prefix)) continue
     previewCache.delete(key)
     previewGeneration.set(key, (previewGeneration.get(key) ?? 0) + 1)
+    previewInFlight.delete(key)
   }
 }
 

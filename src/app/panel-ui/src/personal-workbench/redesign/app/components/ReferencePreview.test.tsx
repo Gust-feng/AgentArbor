@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ReferencePreview } from './ReferencePreview'
 import type { SpaceReferencePreview } from './referencePreviewClient'
-import { clearReferencePreviewCacheForTesting, fetchSpaceReferencePreview, getCachedReferencePreview, saveSpaceReferenceText } from './referencePreviewClient'
+import { clearReferencePreviewCacheForTesting, createSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, saveSpaceReferenceText } from './referencePreviewClient'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -100,6 +100,31 @@ test('isolates caller cancellation while reusing the same preview request', asyn
   resolveRequest?.(new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } }))
   await expect(second).resolves.toEqual(preview)
   expect(fetchMock).toHaveBeenCalledTimes(1)
+})
+
+test('starts a fresh preview request after a file mutation invalidates an older request', async () => {
+  const stale = { ...textPreview('1:4', '旧目录'), content: { kind: 'directory' as const, relativePath: '', entries: [], truncated: false } }
+  const current = { ...stale, fingerprint: '2:8', content: { ...stale.content, entries: [{ name: 'new.txt', relativePath: 'new.txt', kind: 'file' as const }] } }
+  const pendingGets: Array<(response: Response) => void> = []
+  const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      return new Response(JSON.stringify({ entry: { relativePath: 'new.txt' } }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return await new Promise<Response>((resolve) => { pendingGets.push(resolve) })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  const staleRequest = fetchSpaceReferencePreview('reference-one')
+  await waitFor(() => expect(pendingGets).toHaveLength(1))
+  await createSpaceReferenceEntry('reference-one', '', 'new.txt')
+  const refreshedRequest = fetchSpaceReferencePreview('reference-one')
+  await waitFor(() => expect(pendingGets).toHaveLength(2))
+
+  pendingGets[0]?.(new Response(JSON.stringify({ preview: stale }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  pendingGets[1]?.(new Response(JSON.stringify({ preview: current }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  await expect(refreshedRequest).resolves.toEqual(current)
+  await expect(staleRequest).resolves.toEqual(current)
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== 'POST')).toHaveLength(2)
 })
 
 test('shows a compact relative breadcrumb without exposing the absolute source path', async () => {

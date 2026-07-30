@@ -10,7 +10,9 @@ import {
   getPersonalKnowledgeSnapshot,
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
+  subscribePersonalKnowledge,
 } from "./redesign/app/components/personalKnowledgeClient";
+import { getCachedReferencePreview } from "./redesign/app/components/referencePreviewClient";
 import { resolvePage } from "./redesign/app/components/brainStore";
 
 beforeEach(() => resetPersonalKnowledgeForTesting());
@@ -195,6 +197,9 @@ test("shows a managed asset before its preview cache has finished warming", asyn
   collectManagedSpaceReference("source-readme", "Readme.md");
 
   await waitFor(() => expect(getPersonalKnowledgeSnapshot().pages).toEqual([page]));
+  const snapshotBeforePreview = getPersonalKnowledgeSnapshot();
+  const listener = vi.fn();
+  const unsubscribe = subscribePersonalKnowledge(listener);
   finishPreview?.(jsonResponse({ preview: {
     itemId: page.refId,
     title: page.asset.title,
@@ -203,6 +208,10 @@ test("shows a managed asset before its preview cache has finished warming", asyn
     status: "ready",
     content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
   } }));
+  await waitFor(() => expect(getCachedReferencePreview(page.refId, "", "/api/personal-knowledge/assets")?.content).toMatchObject({ kind: "text", text: "# 已预热" }));
+  expect(getPersonalKnowledgeSnapshot()).not.toBe(snapshotBeforePreview);
+  expect(listener).toHaveBeenCalled();
+  unsubscribe();
 });
 
 test("projects a managed Markdown asset as a Markdown card with its real summary", async () => {

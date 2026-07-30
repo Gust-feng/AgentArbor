@@ -7,6 +7,7 @@ import {
   getPersonalNoteSaveState,
   initializePersonalKnowledge,
   createPersonalNote,
+  refreshPersonalKnowledge,
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
   updatePersonalNote,
@@ -115,6 +116,20 @@ test("exposes knowledge initialization failure and retries in place", async () =
 
   expect(getPersonalKnowledgeLoadState()).toEqual({ status: "ready" });
   expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+test("rejects a malformed knowledge snapshot without replacing the last valid state", async () => {
+  const valid = { ...emptyServerSnapshot(), notes: [serverNote({ bodyMarkdown: "保留正文" })] };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ snapshot: valid }))
+    .mockResolvedValueOnce(jsonResponse({ ok: true }));
+  vi.stubGlobal("fetch", fetchMock);
+  setPersonalKnowledgePersistenceEnabled(true);
+  await initializePersonalKnowledge("space-1");
+
+  const before = getPersonalKnowledgeSnapshot();
+  await expect(refreshPersonalKnowledge()).rejects.toThrow("个人知识响应缺少 snapshot");
+  expect(getPersonalKnowledgeSnapshot()).toBe(before);
 });
 
 test("persists a newly created note followed by an immediate edit in order", async () => {

@@ -385,9 +385,9 @@ function upsertKnowledgePage(value: Snapshot, page: BrainPage): Snapshot {
 
 async function fetchPersonalKnowledgeSnapshot(): Promise<Snapshot> {
   const response = await requestJson<{ snapshot: Snapshot }>('/api/personal-knowledge')
-  const snapshot = response.snapshot ?? EMPTY_SNAPSHOT
-  snapshot.pages.filter((page) => page.asset?.status === 'managed').forEach(warmManagedAssetPreview)
-  return snapshot
+  if (response.snapshot === undefined) throw new Error('个人知识响应缺少 snapshot。')
+  response.snapshot.pages.filter((page) => page.asset?.status === 'managed').forEach(warmManagedAssetPreview)
+  return response.snapshot
 }
 
 function warmManagedAssetPreview(page: BrainPage): void {
@@ -395,7 +395,12 @@ function warmManagedAssetPreview(page: BrainPage): void {
   // immediately visible while a local file read is slow or unavailable.
   void fetchSpaceReferencePreview(page.refId, '', undefined, '/api/personal-knowledge/assets')
     .catch(() => undefined)
-    .finally(emit)
+    .finally(() => {
+      // Preview content lives in its own cache. Publish a new snapshot identity
+      // so useSyncExternalStore consumers can observe that cache change.
+      snapshot = { ...snapshot }
+      emit()
+    })
 }
 
 function replayPendingMutations(): void {

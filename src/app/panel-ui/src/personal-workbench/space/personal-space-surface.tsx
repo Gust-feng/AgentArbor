@@ -109,7 +109,7 @@ type RenameTarget = { readonly itemId: string; readonly title: string; readonly 
  * command feedback only; all tree facts continue to come from SpaceFeature.
  */
 export function PersonalSpaceSurface(props: PersonalSpaceSurfaceProps): React.ReactElement {
-  const itemCount = countItems(props.space.items);
+  const itemCount = props.space.itemCount ?? countItems(props.space.items);
   const [openActionsFor, setOpenActionsFor] = useState<string | undefined>();
   const [folderTarget, setFolderTarget] = useState(false);
   const [renameTarget, setRenameTarget] = useState<RenameTarget | undefined>();

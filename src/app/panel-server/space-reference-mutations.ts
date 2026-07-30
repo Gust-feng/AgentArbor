@@ -73,10 +73,15 @@ export async function renamePanelSpaceReferenceEntry(
   const relativePath = normalizeMutableEntryPath(item, input.relativePath);
   const name = normalizeEntryName(input.name);
   const source = await resolvePanelSpaceReferencePath(item, relativePath);
+  if (!await fs.stat(source).then(() => true, () => false)) {
+    throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
+  }
   const parentRelativePath = path.posix.dirname(relativePath) === "." ? "" : path.posix.dirname(relativePath);
   const destinationRelativePath = joinRelativePath(parentRelativePath, name);
+  if (destinationRelativePath === relativePath) return { relativePath };
   const destination = await resolveReferenceDestination(item, destinationRelativePath);
-  if (await fs.stat(destination).then(() => true, () => false)) {
+  const destinationExists = await fs.stat(destination).then(() => true, () => false);
+  if (destinationExists && !sameDirectoryEntryPath(source, destination)) {
     throw new PanelHttpError(409, "space_reference_entry_exists", "同一文件夹中已存在这个名字。");
   }
   await fs.rename(source, destination).catch((error: NodeJS.ErrnoException) => {
@@ -84,6 +89,14 @@ export async function renamePanelSpaceReferenceEntry(
     throw error;
   });
   return { relativePath: destinationRelativePath };
+}
+
+function sameDirectoryEntryPath(source: string, destination: string): boolean {
+  const left = path.normalize(path.resolve(source));
+  const right = path.normalize(path.resolve(destination));
+  return process.platform === "win32"
+    ? left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US")
+    : left === right;
 }
 
 export async function deletePanelSpaceReferenceEntry(

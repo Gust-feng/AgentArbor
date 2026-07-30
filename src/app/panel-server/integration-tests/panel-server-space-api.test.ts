@@ -331,6 +331,13 @@ test("Space API browses and edits text inside a referenced folder without escapi
     assert.equal(file.body.preview.content.text, "# 初稿");
     assert.equal(file.body.preview.content.editable, true);
 
+    const unchangedName = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
+      method: "PATCH",
+      body: { relativePath: "notes/idea.md", name: "idea.md" },
+    });
+    assert.equal(unchangedName.status, 200);
+    assert.equal(unchangedName.body.entry.relativePath, "notes/idea.md");
+
     const saved = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/content`, {
       method: "PUT",
       body: { relativePath: "notes/idea.md", expectedFingerprint: file.body.preview.fingerprint, text: "# 完整想法" },
@@ -361,6 +368,9 @@ test("Space API browses and edits text inside a referenced folder without escapi
     });
     assert.equal(duplicateFile.status, 409);
 
+    await fs.mkdir(path.join(sourceRoot, "other"));
+    await fs.writeFile(path.join(sourceRoot, "other", "renamed.md"), "另一个文件夹允许同名", "utf8");
+
     const renamed = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
       method: "PATCH",
       body: { relativePath: "notes/idea.md", name: "renamed.md" },
@@ -368,6 +378,13 @@ test("Space API browses and edits text inside a referenced folder without escapi
     assert.equal(renamed.status, 200);
     assert.equal(renamed.body.entry.relativePath, "notes/renamed.md");
     assert.equal(await fs.readFile(path.join(sourceRoot, "notes", "renamed.md"), "utf8"), "外部更新且长度不同");
+
+    const trueConflict = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
+      method: "PATCH",
+      body: { relativePath: "notes/renamed.md", name: "new.md" },
+    });
+    assert.equal(trueConflict.status, 409);
+    assert.equal(trueConflict.body.error.code, "space_reference_entry_exists");
 
     const removed = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
       method: "DELETE",

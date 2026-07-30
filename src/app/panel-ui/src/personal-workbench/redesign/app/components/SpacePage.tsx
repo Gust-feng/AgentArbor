@@ -420,6 +420,7 @@ export function SpacePage({
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
   const explorerRef = useRef<HTMLDivElement>(null)
   const referencePreviewRef = useRef<ReferencePreviewHandle>(null)
+  const directoryLoadsRef = useRef(new Map<string, Promise<void>>())
   const selectedStillExists = selectedId !== null
     && (notes.some((note) => note.id === selectedId) || getItem(tree, selectedId) !== undefined)
 
@@ -429,7 +430,10 @@ export function SpacePage({
   }
 
   function prefetchTreeItem(item: SpaceItem) {
-    if (item.type === 'folder') return
+    if (item.type === 'folder') {
+      void loadReferenceDirectory(item)
+      return
+    }
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
     if (getCachedReferencePreview(referenceId, relativePath) !== undefined) return
@@ -452,25 +456,14 @@ export function SpacePage({
 
   function toggleExpanded(id: string) {
     const item = getItem(tree, id)
-    if (!expandedIds.has(id) && item?.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) {
-      const referenceId = item.referenceId
-      const sourceKind = item.domainKind
-      void refreshSpaceReferencePreview(referenceId, item.relativePath ?? '').then((preview) => {
-        if (preview.content.kind !== 'directory') return
-        const entries = preview.content.entries
-        setReferenceChildren((current) => {
-          const next = new Map(current)
-          next.set(id, projectReferenceChildren(referenceId, sourceKind, entries))
-          return next
-        })
-      }, (error: unknown) => setActionError(actionErrorMessage(error)))
-    }
+    const opening = !expandedIds.has(id)
     setExpandedIds((current) => {
       const next = new Set(current)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
+    if (opening && item !== undefined) void loadReferenceDirectory(item, true)
   }
 
   useEffect(() => {
@@ -500,7 +493,7 @@ export function SpacePage({
   const selectedNote = notes.find((n) => n.id === selectedId)
   const selectedItem = selectedId ? getItem(tree, selectedId) : null
   const selectedReferenceRoot = selectedItem?.referenceId === undefined ? undefined : getItem(tree, selectedItem.referenceId)
-  const itemCount = notes.length + countItems(tree)
+  const itemCount = notes.length + (space?.itemCount ?? countItems(projectedTree))
 
   function handleCreateNote() {
     if (notes.length === 0) {
@@ -619,6 +612,54 @@ export function SpacePage({
       return next
     })
   }
+
+  function loadReferenceDirectory(item: SpaceItem, force = false): Promise<void> {
+    if (item.type !== 'folder' || item.referenceId === undefined || !isFileSystemFolderKind(item.domainKind)) {
+      return Promise.resolve()
+    }
+    if (!force && referenceChildren.has(item.id)) return Promise.resolve()
+    const active = directoryLoadsRef.current.get(item.id)
+    if (active !== undefined) return active
+    const request = refreshReferenceDirectory(item.referenceId, item.relativePath ?? '', item.id)
+      .catch((error: unknown) => setActionError(actionErrorMessage(error)))
+      .finally(() => directoryLoadsRef.current.delete(item.id))
+    directoryLoadsRef.current.set(item.id, request)
+    return request
+  }
+
+  useEffect(() => {
+    for (const item of projectedTree) {
+      if (item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) void loadReferenceDirectory(item)
+    }
+  }, [memoryKey, projectedTree])
+
+  useEffect(() => {
+    const visit = (items: readonly SpaceItem[]) => {
+      for (const item of items) {
+        if (expandedIds.has(item.id) && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) {
+          void loadReferenceDirectory(item)
+        }
+        if (item.children !== undefined) visit(item.children)
+      }
+    }
+    visit(tree)
+  }, [expandedIds, tree])
+
+  useEffect(() => {
+    const refreshExpandedDirectories = () => {
+      const visit = (items: readonly SpaceItem[]) => {
+        for (const item of items) {
+          if (expandedIds.has(item.id) && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) {
+            void loadReferenceDirectory(item, true)
+          }
+          if (item.children !== undefined) visit(item.children)
+        }
+      }
+      visit(tree)
+    }
+    window.addEventListener('focus', refreshExpandedDirectories)
+    return () => window.removeEventListener('focus', refreshExpandedDirectories)
+  }, [expandedIds, tree])
 
   async function handleOpenReference(item: SpaceItem) {
     if (item.conversationId !== undefined && onOpenConversation !== undefined) {

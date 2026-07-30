@@ -531,17 +531,25 @@ test("prefetches nested local folder entries and keeps folders out of the previe
   });
   vi.stubGlobal("fetch", fetchMock);
   renderWorkbench({
-    spaces: [{ spaceId: "space-folder", title: "本地项目", items: [{ itemId: "folder-reference", title: "项目文件", kind: "workspace_folder", referenceId: "folder-reference" }] }],
+    spaces: [{ spaceId: "space-folder", title: "本地项目", itemCount: 1, items: [{ itemId: "folder-reference", title: "项目文件", kind: "workspace_folder", referenceId: "folder-reference" }] }],
   });
 
   await user.click(screen.getByRole("button", { name: "本地项目" }));
   const tree = await screen.findByRole("tree", { name: "本地项目资料" });
+  expect(screen.getByText("1 个对象")).toBeTruthy();
   await user.click(within(tree).getByText("项目文件"));
   await user.click(await within(tree).findByText("docs"));
 
   expect(await within(tree).findByText("note.md")).toBeTruthy();
+  expect(screen.getByText("1 个对象")).toBeTruthy();
   expect(screen.queryByText("返回上一级")).toBeNull();
   expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("path=docs"), expect.anything());
+
+  await user.click(screen.getByRole("button", { name: "首页" }));
+  await user.click(screen.getByRole("button", { name: "本地项目" }));
+  const restoredTree = await screen.findByRole("tree", { name: "本地项目资料" });
+  expect(await within(restoredTree).findByText("note.md")).toBeTruthy();
+  expect(screen.getByText("1 个对象")).toBeTruthy();
 });
 
 test("routes real Space reference rename and removal through backend actions", async () => {

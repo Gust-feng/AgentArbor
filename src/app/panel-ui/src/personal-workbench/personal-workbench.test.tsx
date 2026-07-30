@@ -52,14 +52,16 @@ test("projects real Space references without substituting built-in initial asset
   expect(screen.queryByText("PyTorch 入门笔记.pdf")).toBeNull();
 });
 
-test("renders the original built-in tree alongside real items in the fixed learning Space", async () => {
+test("renders initialized assets as ordinary persisted Space items", async () => {
   const user = userEvent.setup();
   renderWorkbench({
     spaces: [{
       spaceId: "space-learning",
       title: "学习空间",
-      demoDataset: "learning-workspace",
-      items: [{ itemId: "created-folder", title: "新建文件夹", kind: "managed_folder" }],
+      items: [
+        { itemId: "f1", title: "2026年学习资料", kind: "folder", children: [{ itemId: "f1-1", title: "PyTorch 入门笔记.pdf", kind: "workbench_asset", assetId: "f1-1", referenceId: "f1-1" }] },
+        { itemId: "created-folder", title: "新建文件夹", kind: "managed_folder" },
+      ],
     }],
   });
 
@@ -71,6 +73,48 @@ test("renders the original built-in tree alongside real items in the fixed learn
   expect(within(tree).getByText("PyTorch 入门笔记.pdf")).toBeTruthy();
 });
 
+test("collects a Workbench asset by asset identity without copying its Space reference", async () => {
+  const user = userEvent.setup();
+  const commands: unknown[] = [];
+  const fetchMock = vi.fn(async (path: string | URL | Request, init?: RequestInit) => {
+    const url = String(path);
+    if (url === "/api/personal-knowledge") return jsonResponse({ snapshot: emptyKnowledgeSnapshot() });
+    if (url === "/api/spaces/references/space-asset/preview") {
+      return jsonResponse({ preview: {
+        itemId: "space-asset",
+        title: "训练脚本.py",
+        sourceKind: "workbench_asset",
+        source: "workbench-asset:asset-code",
+        status: "ready",
+        fingerprint: "asset:asset-code",
+        content: { kind: "text", text: "print('train')", truncated: false, editable: false, language: "python" },
+      } });
+    }
+    if (url === "/api/personal-knowledge/commands") {
+      commands.push(JSON.parse(String(init?.body)) as unknown);
+      return jsonResponse({ ok: true });
+    }
+    return jsonResponse({ ok: true });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderWorkbench({
+    personalKnowledgePersistenceEnabled: true,
+    spaces: [{
+      spaceId: "space-learning",
+      title: "学习空间",
+      items: [{ itemId: "space-asset", title: "训练脚本.py", kind: "workbench_asset", assetId: "asset-code", referenceId: "space-asset", openable: true }],
+    }],
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click((await screen.findAllByText("训练脚本.py"))[0]);
+  await user.click(await screen.findByRole("button", { name: "收藏" }));
+
+  await waitFor(() => expect(commands).toHaveLength(1));
+  expect(commands[0]).toMatchObject({ type: "knowledge.collect", page: { refId: "asset-code", kind: "material" } });
+  expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/personal-knowledge/collect-space-reference")).toBe(false);
+});
+
 test("renders persisted original knowledge materials without rewriting their presentation", async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn(async (path: string | URL | Request) => {
@@ -78,7 +122,7 @@ test("renders persisted original knowledge materials without rewriting their pre
       return jsonResponse({ snapshot: {
         ...emptyKnowledgeSnapshot(),
         pages: [{ refId: "m-attn-pdf", kind: "material", collectedAt: Date.UTC(2026, 6, 29, 10, 0) }],
-      } });
+      }, materialPreviews: [{ itemId: "m-attn-pdf", title: "Attention Is All You Need.pdf", sourceKind: "workbench_asset", source: "workbench-asset:m-attn-pdf", status: "ready", fingerprint: "asset:m-attn-pdf", content: { kind: "pages", pages: ["Attention Is All You Need"] } }] });
     }
     return jsonResponse({ ok: true });
   });
@@ -90,6 +134,7 @@ test("renders persisted original knowledge materials without rewriting their pre
   expect(await screen.findByText("Attention Is All You Need.pdf")).toBeTruthy();
   expect(screen.queryByText("知识库还空着。")).toBeNull();
   expect(fetchMock.mock.calls.filter(([path]) => String(path) === "/api/personal-knowledge")).not.toHaveLength(0);
+  expect(fetchMock.mock.calls.some(([path]) => String(path) === "/api/workbench-assets/m-attn-pdf/preview")).toBe(false);
 });
 
 test("refreshes Personal Knowledge when entering a knowledge surface", async () => {
@@ -195,6 +240,48 @@ test("updates a visible knowledge card when its managed preview finishes", async
   } }));
   await expect(previewRequest).resolves.toBeTruthy();
   expect(await screen.findByText("已预热")).toBeTruthy();
+  rendered.unmount();
+});
+
+test("updates a visible Workbench asset card when its preview finishes", async () => {
+  const page = { refId: "workbench-card-live", kind: "material" as const, collectedAt: 1 };
+  let finishPreview: ((response: Response) => void) | undefined;
+  vi.stubGlobal("fetch", vi.fn(async () => await new Promise<Response>((resolve) => { finishPreview = resolve; })));
+  resetPersonalKnowledgeForTesting({ pages: [page] });
+  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} spaces={[]} onOpenSpaceReference={() => undefined} />);
+  expect(screen.getByText("(材料加载中)")).toBeTruthy();
+
+  const previewRequest = fetchSpaceReferencePreview("workbench-card-live", "", undefined, "/api/workbench-assets");
+  await waitFor(() => expect(finishPreview).toBeTypeOf("function"));
+  finishPreview?.(jsonResponse({ preview: {
+    itemId: "workbench-card-live",
+    title: "训练脚本.py",
+    sourceKind: "workbench_asset",
+    source: "workbench-asset:workbench-card-live",
+    status: "ready",
+    fingerprint: "asset:workbench-card-live",
+    content: { kind: "text", text: "print('train')", truncated: false, editable: false, language: "python" },
+  } }));
+  await expect(previewRequest).resolves.toBeTruthy();
+  expect(await screen.findByText("训练脚本.py")).toBeTruthy();
+  expect(screen.queryByText("(材料加载中)")).toBeNull();
+  rendered.unmount();
+});
+
+test("shows a Workbench asset preview failure instead of an endless loading label", async () => {
+  const page = { refId: "workbench-card-failed", kind: "material" as const, collectedAt: 1 };
+  vi.stubGlobal("fetch", vi.fn(async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({ message: "预览暂不可用" }),
+    text: async () => "预览暂不可用",
+  }) as Response));
+  resetPersonalKnowledgeForTesting({ pages: [page] });
+  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} spaces={[]} onOpenSpaceReference={() => undefined} />);
+  const request = fetchSpaceReferencePreview(page.refId, '', undefined, '/api/workbench-assets');
+  await expect(request).rejects.toThrow();
+  expect(await screen.findByText("材料暂不可用")).toBeTruthy();
+  expect(screen.queryByText("(材料加载中)")).toBeNull();
   rendered.unmount();
 });
 
@@ -677,6 +764,39 @@ test("resolves a managed Brain asset without consulting the current Space projec
     materialKind: "pdf",
     detail: "C:/资料/研究资料.pdf",
     exists: true,
+  });
+});
+
+test("projects managed code content for the same knowledge card cover as initialized code", async () => {
+  const page = {
+    refId: "managed-python",
+    kind: "space_reference" as const,
+    collectedAt: 1,
+    asset: {
+      status: "managed" as const,
+      title: "获取网页源码.py",
+      sourceLabel: "C:/资料/获取网页源码.py",
+      contentKind: "file" as const,
+      sourceReferenceId: "source-python",
+      sourceRelativePath: "获取网页源码.py",
+    },
+  };
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ preview: {
+    itemId: page.refId,
+    title: page.asset.title,
+    sourceKind: "local_file",
+    source: "managed/managed-python/content",
+    status: "ready",
+    fingerprint: "python-one",
+    content: { kind: "text", text: "import requests\nrequests.get('https://example.com')", truncated: false, editable: false, language: "python", encoding: "UTF-8" },
+  } })));
+
+  await fetchSpaceReferencePreview(page.refId, "", undefined, "/api/personal-knowledge/assets");
+
+  expect(resolvePage(page)).toMatchObject({
+    materialKind: "code",
+    language: "python",
+    previewText: "import requests\nrequests.get('https://example.com')",
   });
 });
 

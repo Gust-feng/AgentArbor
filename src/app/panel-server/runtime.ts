@@ -106,7 +106,8 @@ import { resolveTriggeredSkillContexts } from "./skill-service.js";
 import type { PanelRunInput } from "./request-parsers.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
-import { initializeInitialWorkbenchData } from "./initial-workbench-data.js";
+import { createInitialWorkbenchDataInitializer, initializeInitialWorkbenchData } from "./initial-workbench-data.js";
+import { createSqliteWorkbenchAssetRepository, type WorkbenchAssetRepository } from "../workbench-assets/index.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -142,12 +143,13 @@ export type PanelRuntime = {
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
   readonly workbenchDatabase: SqliteRuntimeDatabase;
+  readonly workbenchAssets: WorkbenchAssetRepository;
   readonly fileMutationCoordinator: LocalWorkspaceMutationCoordinator;
   readonly knowledgeAssetRoot?: string;
   /** Host-owned root for physical directories created from Space. */
   readonly managedSpaceFolderRoot: string;
   readonly knowledgeAssetsReady: Promise<void>;
-  readonly initialWorkbenchDataReady: Promise<void>;
+  readonly ensureInitialWorkbenchData: () => Promise<void>;
   readonly flushSpaceKnowledgeSync: () => Promise<void>;
   readonly releaseAgentSessionStorage: () => Promise<void>;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
@@ -261,6 +263,7 @@ function assemblePanelRuntime(input: {
   const runtimeHome = resolveRuntimeHome(input);
   applyPendingWorkbenchRestore(runtimeHome);
   const workbenchDatabase = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
+  const workbenchAssets = createSqliteWorkbenchAssetRepository(workbenchDatabase);
   const workbenchDataMaintenance = createWorkbenchDataMaintenance({
     database: workbenchDatabase,
     runtimeHome,
@@ -296,13 +299,18 @@ function assemblePanelRuntime(input: {
   });
   const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
   const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
-  const initialWorkbenchDataReady = input.testOnlySkipInitialWorkbenchData
-    ? Promise.resolve()
-    : initializeInitialWorkbenchData({
-        database: workbenchDatabase,
-        spaceFeature,
-        personalKnowledgeFeature,
-      });
+  const initialWorkbenchData = createInitialWorkbenchDataInitializer(
+    input.testOnlySkipInitialWorkbenchData
+      ? async () => undefined
+      : async () => await initializeInitialWorkbenchData({
+          database: workbenchDatabase,
+          spaceFeature,
+          personalKnowledgeFeature,
+          workbenchAssets,
+      }),
+  );
+  // Warm the formal initial dataset without making a transient failure fatal to the Panel process.
+  void initialWorkbenchData.ensure().catch(() => undefined);
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
     await reconcileKnowledgeAssets(knowledgeAssetRoot, new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)));
   });
@@ -435,11 +443,12 @@ function assemblePanelRuntime(input: {
     prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
     workbenchDatabase,
+    workbenchAssets,
     fileMutationCoordinator,
     knowledgeAssetRoot,
     managedSpaceFolderRoot,
     knowledgeAssetsReady,
-    initialWorkbenchDataReady,
+    ensureInitialWorkbenchData: () => initialWorkbenchData.ensure(),
     flushSpaceKnowledgeSync: () => spaceKnowledgeSync,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };

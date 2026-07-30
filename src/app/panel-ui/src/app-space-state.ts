@@ -13,7 +13,7 @@ type SpaceTreeResponse = {
 };
 
 type SpaceTreeResponseTree = {
-  readonly space: { readonly id: string; readonly title: string; readonly demoDataset?: "learning-workspace" };
+  readonly space: { readonly id: string; readonly title: string };
   readonly entries: readonly SpaceTreeEntry[];
 };
 
@@ -22,19 +22,21 @@ type SpaceTreeEntry = {
   readonly item: {
         readonly id: string;
         readonly title: string;
+        readonly parentId?: string;
         readonly updatedAt: string;
         readonly reference: {
-          readonly kind: "local_file" | "workspace_folder" | "managed_folder" | "web_page" | "generated_artifact" | "conversation";
+          readonly kind: "local_file" | "workspace_folder" | "managed_folder" | "asset_folder" | "workbench_asset" | "web_page" | "generated_artifact" | "conversation";
           readonly path?: string;
           readonly url?: string;
           readonly artifactRef?: string;
           readonly conversationId?: string;
           readonly conversationTitle?: string;
+          readonly assetId?: string;
         };
   };
 };
 
-type SpaceReferenceKind = "local_file" | "workspace_folder" | "managed_folder" | "web_page" | "generated_artifact" | "conversation";
+type SpaceReferenceKind = "local_file" | "workspace_folder" | "managed_folder" | "asset_folder" | "workbench_asset" | "web_page" | "generated_artifact" | "conversation";
 
 /** Panel query state for SpaceFeature's one-way tree projection. */
 export function useSpaceProjection(enabled = true): {
@@ -270,8 +272,7 @@ function projectTree(tree: SpaceTreeResponseTree): PersonalSpaceProjection {
     title: tree.space.title,
     itemCount: countEntries(tree.entries),
     color: colorFor(tree.space.id),
-    ...(tree.space.demoDataset === undefined ? {} : { demoDataset: tree.space.demoDataset }),
-    items: tree.entries.map(projectEntry),
+    items: projectEntries(tree.entries),
   };
 }
 
@@ -279,9 +280,23 @@ function countEntries(entries: readonly SpaceTreeEntry[]): number {
   return entries.length;
 }
 
+function projectEntries(entries: readonly SpaceTreeEntry[]): PersonalSpaceItemProjection[] {
+  const childrenByParent = new Map<string | undefined, SpaceTreeEntry[]>();
+  for (const entry of entries) {
+    const group = childrenByParent.get(entry.item.parentId) ?? [];
+    group.push(entry);
+    childrenByParent.set(entry.item.parentId, group);
+  }
+  const project = (entry: SpaceTreeEntry): PersonalSpaceItemProjection => ({
+    ...projectEntry(entry),
+    ...((childrenByParent.get(entry.item.id)?.length ?? 0) > 0 ? { children: childrenByParent.get(entry.item.id)!.map(project) } : {}),
+  });
+  return (childrenByParent.get(undefined) ?? []).map(project);
+}
+
 function projectEntry(entry: SpaceTreeEntry): PersonalSpaceItemProjection {
   const { item } = entry;
-  const openable = item.reference.kind !== "generated_artifact";
+  const openable = item.reference.kind !== "generated_artifact" && item.reference.kind !== "asset_folder";
   const isFileSystemFolder = item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder";
   return {
     itemId: item.id,
@@ -289,6 +304,7 @@ function projectEntry(entry: SpaceTreeEntry): PersonalSpaceItemProjection {
     kind: itemKind(item.reference.kind),
     openable,
     ...(isFileSystemFolder ? { referenceId: item.id } : {}),
+    ...(item.reference.kind === "workbench_asset" ? { referenceId: item.id, assetId: item.reference.assetId } : {}),
     ...(item.reference.kind === "conversation" ? { conversationId: item.reference.conversationId } : {}),
     ...(item.reference.kind === "web_page" ? { openUrl: item.reference.url } : {}),
     detail: itemDetail(item.reference),
@@ -301,6 +317,8 @@ function itemKind(kind: SpaceReferenceKind): PersonalSpaceItemProjection["kind"]
     case "local_file": return "local_file";
     case "workspace_folder": return "workspace_folder";
     case "managed_folder": return "managed_folder";
+    case "asset_folder": return "folder";
+    case "workbench_asset": return "workbench_asset";
     case "web_page": return "web_reference";
     case "generated_artifact": return "generated_artifact";
     case "conversation": return "conversation_reference";
@@ -313,6 +331,8 @@ function itemDetail(reference: Extract<SpaceTreeEntry, { readonly kind: "referen
     case "local_file":
     case "workspace_folder":
     case "managed_folder": return reference.path;
+    case "asset_folder": return undefined;
+    case "workbench_asset": return undefined;
     case "web_page": return reference.url;
     case "generated_artifact": return reference.artifactRef;
     case "conversation": return reference.conversationTitle ?? reference.conversationId;

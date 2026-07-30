@@ -61,6 +61,7 @@ function spaceReferenceKindLabel(kind: PersonalSpaceItemProjection['kind']): str
     case 'local_file': return '本地文件引用'
     case 'workspace_folder': return '工作区文件夹引用'
     case 'managed_folder': return '软件文件夹'
+    case 'workbench_asset': return '工作台资产'
     case 'web_reference': return '网页引用'
     case 'generated_artifact': return '生成内容引用'
     case 'conversation_reference': return '对话引用'

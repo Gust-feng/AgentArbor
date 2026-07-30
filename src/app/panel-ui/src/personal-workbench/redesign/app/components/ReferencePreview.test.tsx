@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ReferencePreview } from './ReferencePreview'
 import type { SpaceReferencePreview } from './referencePreviewClient'
-import { clearReferencePreviewCacheForTesting, createSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, saveSpaceReferenceText, subscribeReferencePreviewCache } from './referencePreviewClient'
+import { clearReferencePreviewCacheForTesting, createSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, getReferencePreviewError, saveSpaceReferenceText, subscribeReferencePreviewCache } from './referencePreviewClient'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -182,6 +182,7 @@ test('cancels one preview read without affecting another caller', async () => {
   resolvers.forEach((resolve) => resolve(new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } })))
   await expect(second).resolves.toEqual(preview)
   expect(fetchMock).toHaveBeenCalledTimes(2)
+  expect(getReferencePreviewError('reference-one')).toBeUndefined()
 })
 
 test('starts a fresh preview request after a file mutation invalidates an older request', async () => {
@@ -293,7 +294,7 @@ test('renders a managed Markdown asset from its language hint when the copied pa
 
   expect(await screen.findByRole('heading', { name: '托管 Markdown' })).toBeTruthy()
   expect(screen.getByText('这一段必须按 Markdown 阅读。')).toBeTruthy()
-  expect(document.querySelector('.aa-reference-preview__code')).toBeNull()
+  expect(document.querySelector('.aa-code-document')).toBeNull()
 })
 
 test('highlights known code languages and keeps encoding metadata visible', async () => {
@@ -306,8 +307,8 @@ test('highlights known code languages and keeps encoding metadata visible', asyn
 
   expect(await screen.findByText('UTF-8')).toBeTruthy()
   expect(screen.getByText('json')).toBeTruthy()
-  expect(document.querySelector('.aa-reference-preview__code .hljs-attr')?.textContent).toContain('name')
-  expect(document.querySelector('.aa-reference-preview__code .hljs-string')?.textContent).toContain('AgentArbor')
+  expect(document.querySelector('.aa-code-document__source .hljs-attr')?.textContent).toContain('name')
+  expect(document.querySelector('.aa-code-document__source .hljs-string')?.textContent).toContain('AgentArbor')
 })
 
 test('opens markdown in the shared reading surface and autosaves only source edits', async () => {

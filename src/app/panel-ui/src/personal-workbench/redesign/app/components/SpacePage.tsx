@@ -21,7 +21,6 @@ import {
   Pencil,
   Trash2,
   GripVertical,
-  Maximize2,
 } from 'lucide-react'
 import { type View } from './Sidebar'
 import type {
@@ -29,13 +28,10 @@ import type {
   PersonalSpaceItemProjection,
   PersonalSpaceProjection,
 } from '../../../space'
-import { getMaterial, KIND_META } from './materials'
-import { MaterialView, MaterialBody } from './MaterialView'
 import { ReferencePreview, type ReferencePreviewHandle } from './ReferencePreview'
 import { NoteEditor } from './NoteEditor'
 import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
 import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
-import { LEARNING_DEMO_SPACE_TREE } from './learningDemoDataset'
 import { getAllNotes, useNotes } from './notesStore'
 import { useBrain, type PageKind } from './brainStore'
 
@@ -56,9 +52,9 @@ interface SpaceItem {
   openUrl?: string
   openable?: boolean
   referenceId?: string
+  assetId?: string
   relativePath?: string
   externalChild?: boolean
-  demo?: true
 }
 
 type FileSystemFolderKind = Extract<PersonalSpaceItemProjection['kind'], 'workspace_folder' | 'managed_folder'>
@@ -270,10 +266,7 @@ function getItem(tree: SpaceItem[], id: string): SpaceItem | undefined {
 
 function projectSpaceTree(space: PersonalSpaceProjection | undefined): SpaceItem[] {
   if (space === undefined) return []
-  const realItems = space.items.map(projectSpaceItem)
-  return space.demoDataset === 'learning-workspace'
-    ? [...LEARNING_DEMO_SPACE_TREE, ...realItems]
-    : realItems
+  return space.items.map(projectSpaceItem)
 }
 
 function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
@@ -289,6 +282,7 @@ function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
     openUrl: item.openUrl,
     openable: item.openable,
     referenceId: item.referenceId,
+    assetId: item.assetId,
   }
 }
 
@@ -421,7 +415,6 @@ export function SpacePage({
     () => new Set(rememberedView?.expandedIds ?? collectDefaultExpanded(tree)),
   )
   const [creatingNoteId, setCreatingNoteId] = useState<string | null>(null)
-  const [fullscreenId, setFullscreenId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
@@ -436,7 +429,7 @@ export function SpacePage({
   }
 
   function prefetchTreeItem(item: SpaceItem) {
-    if (item.demo || item.type === 'folder') return
+    if (item.type === 'folder') return
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
     if (getCachedReferencePreview(referenceId, relativePath) !== undefined) return
@@ -446,10 +439,6 @@ export function SpacePage({
   function selectTreeItem(id: string) {
     const item = getItem(tree, id)
     if (item === undefined || item.type === 'folder') {
-      selectItem(id)
-      return
-    }
-    if (item.demo) {
       selectItem(id)
       return
     }
@@ -511,8 +500,6 @@ export function SpacePage({
   const selectedNote = notes.find((n) => n.id === selectedId)
   const selectedItem = selectedId ? getItem(tree, selectedId) : null
   const selectedReferenceRoot = selectedItem?.referenceId === undefined ? undefined : getItem(tree, selectedItem.referenceId)
-  const selectedMaterial = selectedItem?.demo ? getMaterial(selectedItem.id) : undefined
-  const fullscreenMaterial = fullscreenId ? getMaterial(fullscreenId) : undefined
   const itemCount = notes.length + countItems(tree)
 
   function handleCreateNote() {
@@ -552,7 +539,6 @@ export function SpacePage({
 
   // Space feature owns mutations; this page only translates prototype intent.
   async function handleRenameItem(item: SpaceItem, name: string) {
-    if (item.demo) return
     if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
       setActionError(null)
       try {
@@ -575,7 +561,6 @@ export function SpacePage({
     }
   }
   async function handleDeleteItem(item: SpaceItem) {
-    if (item.demo) return
     if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
       if (selectedId === item.id) referencePreviewRef.current?.discard()
       if (!window.confirm(`确定要删除“${item.name}”吗？此操作会删除磁盘上的${item.type === 'folder' ? '文件夹及其内容' : '文件'}。`)) return
@@ -711,10 +696,6 @@ export function SpacePage({
     } catch (error) {
       setActionError(actionErrorMessage(error))
     }
-  }
-
-  if (fullscreenMaterial) {
-    return <MaterialView material={fullscreenMaterial} onClose={() => setFullscreenId(null)} />
   }
 
   return (
@@ -893,49 +874,7 @@ export function SpacePage({
         </DeferredSurfaceBoundary>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {selectedMaterial ? (
-            <>
-              <header
-                className="shrink-0 flex items-center gap-3 px-5"
-                style={{ height: 48, borderBottom: '1px solid var(--aa-border, rgba(45,40,34,0.09))' }}
-              >
-                <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: KIND_META[selectedMaterial.kind].color }} />
-                <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>{selectedMaterial.title}</span>
-                  {selectedMaterial.meta && (
-                    <span className="text-xs shrink-0" style={{ color: 'var(--aa-text-3, #aba39b)' }}>{selectedMaterial.meta}</span>
-                  )}
-                </div>
-                <span
-                  className="text-xs px-2 py-0.5 rounded shrink-0"
-                  style={{ background: 'var(--aa-surface-hover, #eeebe6)', color: 'var(--aa-text-2, #87827c)' }}
-                >
-                  {selectedMaterial.origin === 'library' ? '引用自资料库' : '空间内产出'}
-                </span>
-                <div className="flex-1" />
-                <CollectButton refId={selectedMaterial.id} kind="material" brain={brain} />
-                <button
-                  onClick={() => handleNoteFromMaterial(selectedMaterial)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
-                  style={{ color: '#6f8778' }}
-                >
-                  <NotebookPen size={12} />
-                  记一笔
-                </button>
-                <button
-                  onClick={() => setFullscreenId(selectedMaterial.id)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
-                  style={{ color: 'var(--aa-text-2, #87827c)' }}
-                >
-                  <Maximize2 size={12} />
-                  专注
-                </button>
-              </header>
-              <div className="flex-1 overflow-y-auto">
-                <MaterialBody material={selectedMaterial} />
-              </div>
-            </>
-          ) : selectedItem?.type === 'conversation' ? (
+          {selectedItem?.type === 'conversation' ? (
             <CenteredCard>
               <MessageSquare size={22} style={{ color: 'var(--aa-accent, #6865a7)' }} />
               <p className="text-sm mt-3 mb-1 font-medium" style={{ color: 'var(--aa-text-1, #292722)' }}>
@@ -944,8 +883,8 @@ export function SpacePage({
               <p className="text-xs mb-5" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
                 对话引用{selectedItem.meta ? ` · ${selectedItem.meta}` : ''}
               </p>
-              {(selectedItem.demo || selectedItem.conversationId !== undefined || onOpenItem !== undefined) && <button
-                onClick={() => selectedItem.demo ? onNavigate('conv-done') : void handleOpenReference(selectedItem)}
+              {(selectedItem.conversationId !== undefined || onOpenItem !== undefined) && <button
+                onClick={() => void handleOpenReference(selectedItem)}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-white transition-opacity hover:opacity-90"
                 style={{ background: 'var(--aa-accent, #6865a7)' }}
               >
@@ -962,9 +901,9 @@ export function SpacePage({
               canOpen={selectedItem.openable === true || selectedItem.openUrl !== undefined}
               onOpen={() => void handleOpenReference(selectedItem)}
               actions={<CollectButton
-                refId={selectedItem.id}
-                kind="space_reference"
-                sourceReferenceId={selectedItem.referenceId ?? selectedItem.id}
+                refId={selectedItem.assetId ?? selectedItem.id}
+                kind={selectedItem.domainKind === 'workbench_asset' ? 'material' : 'space_reference'}
+                sourceReferenceId={selectedItem.domainKind === 'workbench_asset' ? undefined : selectedItem.referenceId ?? selectedItem.id}
                 sourceRelativePath={selectedItem.relativePath ?? ''}
                 brain={brain}
               />}

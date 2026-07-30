@@ -7,6 +7,8 @@ export const spaceReferenceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local_file"), path: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("workspace_folder"), path: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("managed_folder"), path: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("asset_folder") }).strict(),
+  z.object({ kind: z.literal("workbench_asset"), assetId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("web_page"), url: z.string().url() }).strict(),
   z.object({ kind: z.literal("generated_artifact"), artifactRef: z.string().min(1) }).strict(),
   z.object({

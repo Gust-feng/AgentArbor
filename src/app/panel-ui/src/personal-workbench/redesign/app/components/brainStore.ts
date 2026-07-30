@@ -1,9 +1,7 @@
 import { useMemo, useSyncExternalStore } from 'react'
-import { getMaterial } from './materials'
 import { getNote } from './notesStore'
 import type { PersonalSpaceProjection } from '../../../space'
-import { LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS } from './learningDemoDataset'
-import { getCachedReferencePreview, getReferencePreviewCacheVersion, subscribeReferencePreviewCache } from './referencePreviewClient'
+import { getCachedReferencePreview, getReferencePreviewCacheVersion, getReferencePreviewError, subscribeReferencePreviewCache } from './referencePreviewClient'
 import {
   executePersonalKnowledgeCommand,
   collectManagedSpaceReference,
@@ -90,12 +88,13 @@ export interface ResolvedPage {
   spaceId?: string
   detail?: string
   previewText?: string
+  language?: string
   managedAsset?: BrainPage['asset']
-  demo?: boolean
   exists: boolean
 }
 
 const MANAGED_ASSET_PREVIEW_BASE = '/api/personal-knowledge/assets'
+const WORKBENCH_ASSET_PREVIEW_BASE = '/api/workbench-assets'
 const subscribeManagedAssetPreviewCache = (listener: () => void) => subscribeReferencePreviewCache(listener, MANAGED_ASSET_PREVIEW_BASE)
 const getManagedAssetPreviewCacheVersion = () => getReferencePreviewCacheVersion(MANAGED_ASSET_PREVIEW_BASE)
 
@@ -128,6 +127,11 @@ function managedAssetPreviewText(page: BrainPage): string | undefined {
   return preview?.content.kind === 'text' ? preview.content.text : undefined
 }
 
+function managedAssetLanguage(page: BrainPage): string | undefined {
+  const preview = getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)
+  return preview?.content.kind === 'text' ? preview.content.language : undefined
+}
+
 export function resolvePage(page: BrainPage, _spaces: readonly PersonalSpaceProjection[] = []): ResolvedPage {
   if (page.kind === 'note') {
     const note = getNote(page.refId)
@@ -142,21 +146,42 @@ export function resolvePage(page: BrainPage, _spaces: readonly PersonalSpaceProj
       materialKind: managedAssetKind(page),
       detail: page.asset?.sourceLabel,
       previewText: managedAssetPreviewText(page),
+      language: managedAssetLanguage(page),
       exists: page.asset?.status === 'managed',
       managedAsset: page.asset,
     }
   }
-  const material = getMaterial(page.refId)
+  const preview = getCachedReferencePreview(page.refId, '', WORKBENCH_ASSET_PREVIEW_BASE)
+  const previewError = getReferencePreviewError(page.refId, '', WORKBENCH_ASSET_PREVIEW_BASE)
   return {
     refId: page.refId,
     kind: 'material',
-    title: material?.title ?? '(材料已不存在)',
+    title: preview?.title ?? (previewError === undefined ? '(材料加载中)' : '材料暂不可用'),
     collectedAt: page.collectedAt,
-    materialKind: material?.kind,
-    thumbnail: material?.thumbnail,
-    demo: LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS.includes(page.refId as (typeof LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS)[number]),
-    exists: material !== undefined,
+    materialKind: previewKind(preview),
+    previewText: previewTextOf(preview),
+    detail: previewError,
+    thumbnail: preview?.content.kind === 'media' && preview.content.mediaKind === 'image' ? preview.content.url : undefined,
+    language: preview?.content.kind === 'text' ? preview.content.language : undefined,
+    exists: true,
   }
+}
+
+function previewKind(preview: ReturnType<typeof getCachedReferencePreview>): ResolvedPage['materialKind'] {
+  if (preview === undefined) return 'file'
+  if (preview.content.kind === 'media') return preview.content.mediaKind
+  if (preview.content.kind === 'web') return 'web'
+  if (preview.content.kind === 'pages') return 'pdf'
+  if (preview.content.kind === 'text') return preview.content.language === 'md' ? 'markdown' : 'code'
+  return 'file'
+}
+
+function previewTextOf(preview: ReturnType<typeof getCachedReferencePreview>): string | undefined {
+  if (preview?.content.kind === 'text') return preview.content.text
+  if (preview?.content.kind === 'web') return preview.content.body
+  if (preview?.content.kind === 'pages') return preview.content.pages[0]
+  if (preview?.content.kind === 'media') return preview.content.caption ?? preview.content.transcript
+  return undefined
 }
 export function resolveById(refId: string, spaces: readonly PersonalSpaceProjection[] = []): ResolvedPage | undefined {
   const page = getPages().find((candidate) => candidate.refId === refId)
@@ -174,9 +199,16 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     getManagedAssetPreviewCacheVersion,
     getManagedAssetPreviewCacheVersion,
   )
-  const pages = useMemo(() => [...snapshot.pages].sort((left, right) => right.collectedAt - left.collectedAt), [snapshot.pages, previewCacheVersion])
+  const workbenchAssetPreviewCacheVersion = useSyncExternalStore(
+    (listener) => subscribeReferencePreviewCache(listener, WORKBENCH_ASSET_PREVIEW_BASE),
+    () => getReferencePreviewCacheVersion(WORKBENCH_ASSET_PREVIEW_BASE),
+    () => getReferencePreviewCacheVersion(WORKBENCH_ASSET_PREVIEW_BASE),
+  )
+  const pages = useMemo(
+    () => [...snapshot.pages].sort((left, right) => right.collectedAt - left.collectedAt),
+    [snapshot.pages, snapshot.notes, previewCacheVersion, workbenchAssetPreviewCacheVersion],
+  )
   const pageById = useMemo(() => new Map(pages.map((page) => [page.refId, page])), [pages])
-  const isBuiltInMaterial = (refId: string) => LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS.includes(refId as (typeof LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS)[number])
   return {
     pages,
     isCollected: (refId: string) => pageById.has(refId),
@@ -184,11 +216,11 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     findCollectedSpaceReference,
     collectSpaceReference,
     spaceReferenceSourceKey,
-    collect: (refId: string, kind: PageKind) => { if (!isBuiltInMaterial(refId)) collect(refId, kind) },
-    uncollect: (refId: string, operationKey = refId) => { if (!isBuiltInMaterial(refId)) uncollect(refId, operationKey) },
+    collect,
+    uncollect,
     addLink,
     removeLink,
-    markOpened: (refId: string) => { if (!isBuiltInMaterial(refId)) markOpened(refId) },
+    markOpened,
     getLinks,
     recentlyOpened: (limit = 6) => recentlyOpened(limit).filter((refId) => pageById.has(refId)),
     recentlyCollected: (limit = 6) => pages.slice(0, limit).map((page) => page.refId),

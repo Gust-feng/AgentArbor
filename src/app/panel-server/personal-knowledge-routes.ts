@@ -7,6 +7,7 @@ import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { managedKnowledgeReference } from "./knowledge-asset-store.js";
 import { createPanelSpaceReferencePreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { createWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 
 const id = z.string().trim().min(1).max(512);
 const timestamp = z.number().int().nonnegative();
@@ -51,6 +52,7 @@ export async function handlePanelPersonalKnowledgeRoute(
 ): Promise<boolean> {
   const feature = runtime.personalKnowledgeFeature;
   if (url.pathname === "/api/personal-knowledge/search" && request.method === "GET") {
+    await runtime.ensureInitialWorkbenchData();
     const query = url.searchParams.get("q")?.trim();
     const spaceId = url.searchParams.get("spaceId")?.trim() || undefined;
     const limitValue = url.searchParams.get("limit");
@@ -66,7 +68,13 @@ export async function handlePanelPersonalKnowledgeRoute(
     return true;
   }
   if (url.pathname === "/api/personal-knowledge" && request.method === "GET") {
-    writeJson(response, 200, { ok: true, snapshot: await feature.queries.snapshot() });
+    await runtime.ensureInitialWorkbenchData();
+    const snapshot = await feature.queries.snapshot();
+    const materialIds = new Set(snapshot.pages.filter((page) => page.kind === "material").map((page) => page.refId));
+    const materialPreviews = (await runtime.workbenchAssets.list())
+      .filter((asset) => materialIds.has(asset.id))
+      .map((asset) => createWorkbenchAssetTextPreview(asset));
+    writeJson(response, 200, { ok: true, snapshot, materialPreviews });
     return true;
   }
   if (url.pathname === "/api/personal-knowledge/collect-space-reference" && request.method === "POST") {

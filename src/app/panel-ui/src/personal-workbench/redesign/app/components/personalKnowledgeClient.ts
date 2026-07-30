@@ -1,6 +1,6 @@
 import { ApiError, requestJson } from '../../../../api'
-import { fetchSpaceReferencePreview } from './referencePreviewClient'
-import type { PersonalNoteRevision } from '../../../../../../panel-api-contracts'
+import { fetchSpaceReferencePreview, getCachedReferencePreview, primeReferencePreviewCache } from './referencePreviewClient'
+import type { PersonalNoteRevision, SpaceReferencePreview } from '../../../../../../panel-api-contracts'
 import type { Assignment, BrainLink, BrainPage, Note, Theme } from './personalKnowledgeTypes'
 
 export type { Assignment, BrainLink, BrainPage, Note, PageKind, Theme } from './personalKnowledgeTypes'
@@ -13,6 +13,11 @@ interface Snapshot {
   themes: Theme[]
   assignments: Assignment[]
   recentlyOpened: Record<string, number>
+}
+
+type PersonalKnowledgeResponse = {
+  readonly snapshot: Snapshot
+  readonly materialPreviews?: readonly SpaceReferencePreview[]
 }
 
 export type PersonalKnowledgeLoadState =
@@ -384,10 +389,21 @@ function upsertKnowledgePage(value: Snapshot, page: BrainPage): Snapshot {
 }
 
 async function fetchPersonalKnowledgeSnapshot(): Promise<Snapshot> {
-  const response = await requestJson<{ snapshot: Snapshot }>('/api/personal-knowledge')
+  const response = await requestJson<PersonalKnowledgeResponse>('/api/personal-knowledge')
   if (response.snapshot === undefined) throw new Error('个人知识响应缺少 snapshot。')
+  if (response.materialPreviews !== undefined) {
+    primeReferencePreviewCache(response.materialPreviews, '/api/workbench-assets')
+  }
   response.snapshot.pages.filter((page) => page.asset?.status === 'managed').forEach(warmManagedAssetPreview)
+  response.snapshot.pages
+    .filter((page) => page.kind === 'material' && getCachedReferencePreview(page.refId, '', '/api/workbench-assets') === undefined)
+    .forEach(warmWorkbenchAssetPreview)
   return response.snapshot
+}
+
+function warmWorkbenchAssetPreview(page: BrainPage): void {
+  void fetchSpaceReferencePreview(page.refId, '', undefined, '/api/workbench-assets')
+    .catch(() => undefined)
 }
 
 function warmManagedAssetPreview(page: BrainPage): void {

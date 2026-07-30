@@ -31,6 +31,7 @@ export type PersonalSpaceItemProjection = {
     | "local_file"
     | "workspace_folder"
     | "managed_folder"
+    | "workbench_asset"
     | "web_reference"
     | "generated_artifact"
     | "conversation_reference";
@@ -42,6 +43,7 @@ export type PersonalSpaceItemProjection = {
   readonly openUrl?: string;
   /** Stable reference identity for file-system-backed items; undefined for internal folders and non-fs references. */
   readonly referenceId?: string;
+  readonly assetId?: string;
   readonly children?: readonly PersonalSpaceItemProjection[];
 };
 
@@ -52,8 +54,6 @@ export type PersonalSpaceProjection = {
   readonly itemCount?: number;
   readonly description?: string;
   readonly color?: string;
-  /** Marks the fixed built-in dataset without changing its original contents. */
-  readonly demoDataset?: "learning-workspace";
   readonly items: readonly PersonalSpaceItemProjection[];
 };
 
@@ -468,6 +468,7 @@ function itemIcon(kind: PersonalSpaceItemProjection["kind"], expanded: boolean):
     case "managed_folder":
       return <Folder size={16} fill={expanded ? "currentColor" : undefined} />;
     case "local_file":
+    case "workbench_asset":
       return <File size={16} />;
     case "web_reference":
       return <Globe2 size={16} />;
@@ -486,6 +487,7 @@ function itemKindLabel(kind: PersonalSpaceItemProjection["kind"]): string {
     case "workspace_folder": return "工作区文件夹";
     case "managed_folder": return "软件文件夹";
     case "local_file": return "本地文件";
+    case "workbench_asset": return "工作台资产";
     case "web_reference": return "网页引用";
     case "generated_artifact": return "生成内容";
     case "conversation_reference": return "对话引用";

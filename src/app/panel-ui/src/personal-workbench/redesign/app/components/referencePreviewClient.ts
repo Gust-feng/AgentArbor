@@ -8,6 +8,7 @@ const previewCache = new Map<string, SpaceReferencePreview>()
 const previewGeneration = new Map<string, number>()
 const previewMutationInFlight = new Map<string, Promise<SpaceReferencePreview>>()
 const previewReadInFlight = new Map<string, Promise<SpaceReferencePreview>>()
+const previewErrors = new Map<string, string>()
 const previewListeners = new Map<string, Set<() => void>>()
 const previewCacheVersions = new Map<string, number>()
 const pendingPreviewNotifications = new Set<string>()
@@ -27,6 +28,10 @@ export function getReferencePreviewCacheVersion(apiBase = '/api/spaces/reference
   return previewCacheVersions.get(apiBase) ?? 0
 }
 
+export function getReferencePreviewError(itemId: string, relativePath = '', apiBase = '/api/spaces/references'): string | undefined {
+  return previewErrors.get(previewCacheKey(apiBase, itemId, relativePath))
+}
+
 export function getCachedReferencePreview(itemId: string, relativePath = '', apiBase = '/api/spaces/references'): SpaceReferencePreview | undefined {
   const key = previewCacheKey(apiBase, itemId, relativePath)
   const value = previewCache.get(key)
@@ -42,6 +47,7 @@ export function clearReferencePreviewCacheForTesting(): void {
   previewGeneration.clear()
   previewMutationInFlight.clear()
   previewReadInFlight.clear()
+  previewErrors.clear()
   previewCacheVersions.clear()
   pendingPreviewNotifications.clear()
   if (previewNotificationTimer !== undefined) clearTimeout(previewNotificationTimer)
@@ -80,7 +86,16 @@ export async function fetchSpaceReferencePreview(
     }
     setCachedPreview(apiBase, key, response.preview)
     return response.preview
-  })().finally(() => {
+  })().catch((error: unknown) => {
+    if (!isAbortError(error)) {
+      const message = error instanceof Error ? error.message : '预览读取失败。'
+      if (previewErrors.get(key) !== message) {
+        previewErrors.set(key, message)
+        schedulePreviewNotification(apiBase)
+      }
+    }
+    throw error
+  }).finally(() => {
     if (previewReadInFlight.get(key) === request) previewReadInFlight.delete(key)
   })
   previewReadInFlight.set(key, request)
@@ -90,6 +105,12 @@ export async function fetchSpaceReferencePreview(
 export async function refreshSpaceReferencePreview(itemId: string, relativePath = '', signal?: AbortSignal, apiBase = '/api/spaces/references'): Promise<SpaceReferencePreview> {
   invalidatePreviewKey(apiBase, itemId, relativePath)
   return await fetchSpaceReferencePreview(itemId, relativePath, signal, apiBase)
+}
+
+export function primeReferencePreviewCache(previews: readonly SpaceReferencePreview[], apiBase = '/api/spaces/references'): void {
+  for (const preview of previews) {
+    setCachedPreview(apiBase, previewCacheKey(apiBase, preview.itemId, ''), preview)
+  }
 }
 
 export async function saveSpaceReferenceText(input: {
@@ -172,8 +193,12 @@ function previewCacheKey(apiBase: string, itemId: string, relativePath: string):
 }
 
 function setCachedPreview(apiBase: string, key: string, preview: SpaceReferencePreview): void {
+  const hadError = previewErrors.delete(key)
   const previous = previewCache.get(key)
-  if (previous !== undefined && previewsEqual(previous, preview)) return
+  if (previous !== undefined && previewsEqual(previous, preview)) {
+    if (hadError) schedulePreviewNotification(apiBase)
+    return
+  }
   previewCache.delete(key)
   previewCache.set(key, preview)
   while (previewCache.size > MAX_CACHED_PREVIEWS) previewCache.delete(previewCache.keys().next().value!)
@@ -215,4 +240,8 @@ function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
     signal.addEventListener('abort', abort, { once: true })
     void promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
   })
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }

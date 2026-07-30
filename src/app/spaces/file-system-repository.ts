@@ -10,7 +10,6 @@ import { spaceReferenceSchema } from "./space-validation.js";
 const spaceSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
-  demoDataset: z.literal("learning-workspace").optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 }).strict();
@@ -19,6 +18,7 @@ const referenceItemSchema = z.object({
   id: z.string().min(1),
   spaceId: z.string().min(1),
   title: z.string().min(1),
+  parentId: z.string().min(1).optional(),
   reference: spaceReferenceSchema,
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
@@ -42,6 +42,12 @@ const snapshotSchema = z.object({
   for (const [index, item] of snapshot.referenceItems.entries()) {
     if (!spaceIds.has(item.spaceId)) {
       context.addIssue({ code: "custom", path: ["referenceItems", index, "spaceId"], message: "reference item space must exist" });
+    }
+    if (item.parentId !== undefined) {
+      const parent = snapshot.referenceItems.find((candidate) => candidate.id === item.parentId);
+      if (parent === undefined || parent.spaceId !== item.spaceId) {
+        context.addIssue({ code: "custom", path: ["referenceItems", index, "parentId"], message: "reference parent must exist in the same Space" });
+      }
     }
   }
 });

@@ -44,7 +44,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
 
   return {
     commands: {
-      createSpace({ id, title, demoDataset }) {
+      createSpace({ id, title }) {
         assertUsable("create a Space");
         return serialize(async () => {
           const snapshot = await input.repository.read();
@@ -52,7 +52,6 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           const space: Space = {
             id: id === undefined ? newId(snapshot) : idFor(id, snapshot),
             title: titleFor(title),
-            ...(demoDataset === undefined ? {} : { demoDataset }),
             createdAt: at,
             updatedAt: at,
           };
@@ -61,15 +60,16 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           return space;
         });
       },
-      addReference({ id, spaceId, title, reference }) {
+      addReference({ id, spaceId, title, parentId, reference }) {
         assertUsable("add a reference");
         return serialize(async () => {
           const snapshot = await input.repository.read();
           requireSpace(snapshot, spaceId);
+          if (parentId !== undefined) requireParent(snapshot, spaceId, parentId);
           await assertWorkspaceMountUnique(snapshot, reference, input.workspaceMountIdentity);
           const at = now();
           const item: SpaceReferenceItem = {
-            id: id === undefined ? newId(snapshot) : idFor(id, snapshot), spaceId, title: titleFor(title), reference: validateSpaceReference(reference), createdAt: at, updatedAt: at,
+            id: id === undefined ? newId(snapshot) : idFor(id, snapshot), spaceId, title: titleFor(title), ...(parentId === undefined ? {} : { parentId }), reference: validateSpaceReference(reference), createdAt: at, updatedAt: at,
           };
           await input.repository.write({
             ...snapshot,
@@ -98,10 +98,16 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           requireSpace(snapshot, destinationSpaceId);
           const item = requireReference(snapshot, target.id);
           const at = now();
-          const moved = { ...item, spaceId: destinationSpaceId, updatedAt: at };
+          const subtree = referenceSubtreeIds(snapshot, item.id);
+          const moved = snapshot.referenceItems.filter((entry) => subtree.has(entry.id)).map((entry) => ({
+            ...entry,
+            spaceId: destinationSpaceId,
+            ...(entry.id === item.id ? { parentId: undefined } : {}),
+            updatedAt: at,
+          }));
           await input.repository.write({
             ...snapshot,
-            referenceItems: [moved, ...snapshot.referenceItems.filter((entry) => entry.id !== item.id)],
+            referenceItems: [...moved, ...snapshot.referenceItems.filter((entry) => !subtree.has(entry.id))],
             spaces: touchSpaces(snapshot.spaces, [item.spaceId, destinationSpaceId], at),
           });
           publish({ type: "space.moved", target, destinationSpaceId });
@@ -114,9 +120,10 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           const snapshot = await input.repository.read();
           const item = requireReference(snapshot, itemId);
           const at = now();
+          const subtree = referenceSubtreeIds(snapshot, itemId);
           await input.repository.write({
             ...snapshot,
-            referenceItems: snapshot.referenceItems.filter((entry) => entry.id !== itemId),
+            referenceItems: snapshot.referenceItems.filter((entry) => !subtree.has(entry.id)),
             spaces: touchSpaces(snapshot.spaces, [item.spaceId], at),
           });
           publish({ type: "space.reference_removed", itemId });
@@ -129,7 +136,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         const snapshot = await input.repository.read();
         return snapshot.spaces.map((space) => ({
           ...space,
-          folderCount: snapshot.referenceItems.filter((item) => item.spaceId === space.id && (item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder")).length,
+          folderCount: snapshot.referenceItems.filter((item) => item.spaceId === space.id && (item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder" || item.reference.kind === "asset_folder")).length,
           referenceItemCount: snapshot.referenceItems.filter((item) => item.spaceId === space.id).length,
         }));
       },
@@ -187,6 +194,28 @@ function requireReference(snapshot: SpaceTreeSnapshot, id: string): SpaceReferen
   const item = snapshot.referenceItems.find((entry) => entry.id === id);
   if (item === undefined) throw new SpaceFeatureError("space_reference_not_found", `Space reference ${id} was not found`);
   return item;
+}
+function requireParent(snapshot: SpaceTreeSnapshot, spaceId: string, id: string): SpaceReferenceItem {
+  const parent = requireReference(snapshot, id);
+  if (parent.spaceId !== spaceId) throw new SpaceFeatureError("space_invalid_input", "Space reference parent must belong to the same Space");
+  if (parent.reference.kind !== "asset_folder") {
+    throw new SpaceFeatureError("space_invalid_input", "Only an internal asset folder can contain Space entries");
+  }
+  return parent;
+}
+function referenceSubtreeIds(snapshot: SpaceTreeSnapshot, rootId: string): Set<string> {
+  const ids = new Set([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const item of snapshot.referenceItems) {
+      if (item.parentId !== undefined && ids.has(item.parentId) && !ids.has(item.id)) {
+        ids.add(item.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
 }
 function renameSnapshot(snapshot: SpaceTreeSnapshot, target: SpaceTarget, title: string, at: string): SpaceTreeSnapshot {
   if (target.kind === "space") {

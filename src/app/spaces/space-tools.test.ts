@@ -7,7 +7,7 @@ import { createSpaceToolRegistryContribution, createSpaceTools } from "./space-t
 import type { SpaceRepository, SpaceTreeSnapshot } from "./contracts.js";
 
 function toolsFixture() {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v2", spaces: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v3", spaces: [], referenceItems: [] };
   const repository: SpaceRepository = {
     async read() { return structuredClone(snapshot); },
     async write(next) { snapshot = structuredClone(next); },

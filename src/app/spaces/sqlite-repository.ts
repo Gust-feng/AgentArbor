@@ -34,6 +34,9 @@ const MIGRATIONS = [{
   sql: `
     ALTER TABLE spaces ADD COLUMN demo_dataset TEXT CHECK(demo_dataset IN ('learning-workspace'));
   `,
+}, {
+  version: 3,
+  sql: `ALTER TABLE space_references ADD COLUMN parent_id TEXT REFERENCES space_references(id) ON DELETE CASCADE;`,
 }] as const;
 
 export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): SpaceRepository {
@@ -42,10 +45,10 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
     async read(): Promise<SpaceTreeSnapshot> {
       try {
         const spaces = database.connection.prepare(
-          "SELECT id, title, demo_dataset AS demoDataset, created_at AS createdAt, updated_at AS updatedAt FROM spaces ORDER BY created_at, id",
-        ).all().map(optionalDemoDataset);
+          "SELECT id, title, created_at AS createdAt, updated_at AS updatedAt FROM spaces ORDER BY created_at, id",
+        ).all();
         const referenceItems = database.connection.prepare(`
-          SELECT id, space_id AS spaceId, title, reference_json AS referenceJson,
+          SELECT id, space_id AS spaceId, title, parent_id AS parentId, reference_json AS referenceJson,
                  created_at AS createdAt, updated_at AS updatedAt
            FROM space_references ORDER BY rowid
         `).all().map((row) => {
@@ -54,6 +57,7 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
             id: item.id,
             spaceId: item.spaceId,
             title: item.title,
+            ...(item.parentId === null ? {} : { parentId: item.parentId }),
             reference: JSON.parse(String(item.referenceJson)) as unknown,
             createdAt: item.createdAt,
             updatedAt: item.updatedAt,
@@ -78,23 +82,17 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
 
 function writeSnapshot(database: SqliteRuntimeDatabase, value: SpaceTreeSnapshot): void {
   database.transaction(() => {
-    database.connection.exec("DELETE FROM space_references; DELETE FROM spaces");
+    database.connection.exec("PRAGMA defer_foreign_keys = ON; DELETE FROM space_references; DELETE FROM spaces");
     const insertSpace = database.connection.prepare(
-      "INSERT INTO spaces(id, title, demo_dataset, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO spaces(id, title, demo_dataset, created_at, updated_at) VALUES (?, ?, NULL, ?, ?)",
     );
-    for (const space of value.spaces) insertSpace.run(space.id, space.title, space.demoDataset ?? null, space.createdAt, space.updatedAt);
+    for (const space of value.spaces) insertSpace.run(space.id, space.title, space.createdAt, space.updatedAt);
     const insertReference = database.connection.prepare(`
-      INSERT INTO space_references(id, space_id, title, reference_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO space_references(id, space_id, title, parent_id, reference_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     for (const item of value.referenceItems) {
-      insertReference.run(item.id, item.spaceId, item.title, JSON.stringify(item.reference), item.createdAt, item.updatedAt);
+      insertReference.run(item.id, item.spaceId, item.title, item.parentId ?? null, JSON.stringify(item.reference), item.createdAt, item.updatedAt);
     }
   });
-}
-
-function optionalDemoDataset(row: Record<string, SQLInputValue>): Record<string, SQLInputValue> {
-  if (row.demoDataset !== null) return row;
-  const { demoDataset: _demoDataset, ...space } = row;
-  return space;
 }

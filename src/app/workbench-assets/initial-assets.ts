@@ -1,9 +1,7 @@
 /**
- * 材料假数据 —— 支撑"空间里点开文件"的只读查看。
+ * 正式初始资产。内容来自原型基线，只负责首次初始化，不参与前端特殊分支。
  *
- * 每个材料声明 kind 与对应的内容载荷；材料视图按 kind 选择渲染器。
- * KIND_META 是全局唯一的「类型 → 颜色 + 标签」映射，列表徽标与材料视图头部共用，
- * 以后接真实数据时替换 MATERIALS 即可，UI 不动。
+ * 每项资产声明 kind 与对应内容载荷；初始化后由 SQLite 和统一资产契约维护。
  */
 
 export type MaterialKind = 'markdown' | 'pdf' | 'web' | 'image' | 'video' | 'audio' | 'code'
@@ -12,7 +10,7 @@ export interface Material {
   id: string
   kind: MaterialKind
   title: string
-  /** 引用自资料库(只读来源) 还是 空间内产出。 */
+  /** 原始内容来源分类，不决定初始化后的编辑权限。 */
   origin: 'library' | 'space'
   meta?: string
   /** 画廊卡片的缩略图(可选)。网页可用 favicon,图片用自身,视频用封面。 */

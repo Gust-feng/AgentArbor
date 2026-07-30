@@ -1,10 +1,12 @@
 /** Durable metadata for the roots visible in one Space. File descendants stay in their owning filesystem. */
-export const SPACE_TREE_SCHEMA_VERSION = "space-tree/v2" as const;
+export const SPACE_TREE_SCHEMA_VERSION = "space-tree/v3" as const;
 
 export type SpaceReference =
   | { readonly kind: "local_file"; readonly path: string }
   | { readonly kind: "workspace_folder"; readonly path: string }
   | { readonly kind: "managed_folder"; readonly path: string }
+  | { readonly kind: "asset_folder" }
+  | { readonly kind: "workbench_asset"; readonly assetId: string }
   | { readonly kind: "web_page"; readonly url: string }
   | { readonly kind: "generated_artifact"; readonly artifactRef: string }
   | { readonly kind: "conversation"; readonly conversationId: string; readonly conversationTitle?: string };
@@ -12,7 +14,6 @@ export type SpaceReference =
 export type Space = {
   readonly id: string;
   readonly title: string;
-  readonly demoDataset?: "learning-workspace";
   readonly createdAt: string;
   readonly updatedAt: string;
 };
@@ -21,6 +22,7 @@ export type SpaceReferenceItem = {
   readonly id: string;
   readonly spaceId: string;
   readonly title: string;
+  readonly parentId?: string;
   readonly reference: SpaceReference;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -36,7 +38,7 @@ export type SpaceTreeSnapshot = {
 
 export type SpaceTreeEntry = { readonly kind: "reference"; readonly item: SpaceReferenceItem };
 export type SpaceTree = { readonly space: Space; readonly entries: readonly SpaceTreeEntry[] };
-export type SpaceSummary = Pick<Space, "id" | "title" | "demoDataset" | "createdAt" | "updatedAt"> & {
+export type SpaceSummary = Pick<Space, "id" | "title" | "createdAt" | "updatedAt"> & {
   readonly folderCount: number;
   readonly referenceItemCount: number;
 };
@@ -76,8 +78,8 @@ export type SpaceEvent =
 
 export type SpaceFeature = {
   readonly commands: {
-    createSpace(input: { readonly id?: string; readonly title: string; readonly demoDataset?: "learning-workspace" }): Promise<Space>;
-    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly reference: SpaceReference }): Promise<SpaceReferenceItem>;
+    createSpace(input: { readonly id?: string; readonly title: string }): Promise<Space>;
+    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceReference }): Promise<SpaceReferenceItem>;
     rename(input: { readonly target: SpaceTarget; readonly title: string }): Promise<SpaceTarget>;
     move(input: { readonly target: SpaceMovableTarget; readonly destinationSpaceId: string }): Promise<SpaceMovableTarget>;
     /** Metadata-only command. Host application services own physical deletion policy. */

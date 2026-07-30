@@ -7,6 +7,7 @@ import type { PanelRuntime } from "./runtime.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
 import { stageOwnedSpaceReferenceDeletion } from "./space-reference-deletion.js";
 import { createPanelSpaceReferencePreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { getWorkbenchAssetPreview, updateWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 import { createPanelSpaceReferenceEntry, deletePanelSpaceReferenceEntry, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
 
 const titleSchema = z.string().trim().min(1).max(160);
@@ -49,6 +50,7 @@ export async function handlePanelSpaceRoute(
 
   if (url.pathname === "/api/spaces") {
     if (request.method === "GET") {
+      await runtime.ensureInitialWorkbenchData();
       writeJson(response, 200, { ok: true, spaces: await feature.queries.list() });
       return true;
     }
@@ -62,6 +64,7 @@ export async function handlePanelSpaceRoute(
 
   const treeMatch = /^\/api\/spaces\/([^/]+)$/u.exec(url.pathname);
   if (treeMatch !== null && request.method === "GET") {
+    await runtime.ensureInitialWorkbenchData();
     const spaceId = decode(treeMatch[1]);
     const tree = await feature.queries.getTree(spaceId);
     if (tree === undefined) throw new PanelHttpError(404, "space_not_found", "未找到空间。");
@@ -172,7 +175,10 @@ export async function handlePanelSpaceRoute(
   if (previewReference !== null && request.method === "GET") {
     const item = await feature.queries.getReference(decode(previewReference[1]));
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
-    writeJson(response, 200, { ok: true, preview: await createPanelSpaceReferencePreview(item, url.searchParams.get("path") ?? "") });
+    const preview = item.reference.kind === "workbench_asset"
+      ? await getWorkbenchAssetPreview(runtime.workbenchAssets, item.reference.assetId, item.id)
+      : await createPanelSpaceReferencePreview(item, url.searchParams.get("path") ?? "");
+    writeJson(response, 200, { ok: true, preview });
     return true;
   }
 
@@ -186,8 +192,16 @@ export async function handlePanelSpaceRoute(
   if (referenceContent !== null && request.method === "PUT") {
     const item = await feature.queries.getReference(decode(referenceContent[1]));
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
-    await assertWorkspaceMountWritable(feature, item.id);
     const input = parse(updateTextSchema, await readJsonBody(request), "引用文件内容无效。");
+    if (item.reference.kind === "workbench_asset") {
+      writeJson(response, 200, { ok: true, preview: await updateWorkbenchAssetTextPreview(
+        runtime.workbenchAssets,
+        { assetId: item.reference.assetId, expectedFingerprint: input.expectedFingerprint, text: input.text },
+        item.id,
+      ) });
+      return true;
+    }
+    await assertWorkspaceMountWritable(feature, item.id);
     writeJson(response, 200, { ok: true, preview: await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => updatePanelSpaceReferenceText(item, input)) });
     return true;
   }

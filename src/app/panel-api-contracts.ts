@@ -32,7 +32,7 @@ export type PersonalNoteRevision = {
 export type SpaceReferencePreview = {
   readonly itemId: string;
   readonly title: string;
-  readonly sourceKind: "local_file" | "workspace_folder" | "managed_folder" | "web_page" | "generated_artifact" | "conversation";
+  readonly sourceKind: "local_file" | "workspace_folder" | "managed_folder" | "asset_folder" | "workbench_asset" | "web_page" | "generated_artifact" | "conversation";
   readonly source: string;
   readonly status: "ready" | "missing" | "unsupported";
   readonly fingerprint?: string;
@@ -41,7 +41,8 @@ export type SpaceReferencePreview = {
   readonly content:
     | { readonly kind: "text"; readonly text: string; readonly truncated: boolean; readonly editable: boolean; readonly language?: string; readonly encoding?: string }
     | { readonly kind: "directory"; readonly relativePath: string; readonly entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: "file" | "directory" | "other" }[]; readonly truncated: boolean }
-    | { readonly kind: "media"; readonly mediaKind: "image" | "pdf" | "video" | "audio"; readonly mimeType: string; readonly url: string }
-    | { readonly kind: "web"; readonly url: string }
+    | { readonly kind: "media"; readonly mediaKind: "image" | "pdf" | "video" | "audio"; readonly mimeType: string; readonly url: string; readonly alt?: string; readonly caption?: string; readonly poster?: string; readonly duration?: string; readonly transcript?: string }
+    | { readonly kind: "pages"; readonly pages: readonly string[] }
+    | { readonly kind: "web"; readonly url: string; readonly site?: string; readonly body?: string }
     | { readonly kind: "unavailable"; readonly message: string };
 };

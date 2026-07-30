@@ -44,6 +44,7 @@ import { handlePanelPersonalKnowledgeRoute, personalKnowledgeHttpError } from ".
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 import { handlePanelWorkbenchDataRoute, workbenchDataHttpError } from "./workbench-data-routes.js";
 import { WorkbenchDataMaintenanceError } from "./workbench-data-maintenance.js";
+import { handlePanelWorkbenchAssetRoute } from "./workbench-asset-routes.js";
 import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
 import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
 import { acquirePanelRuntimeDirectoryLease } from "./runtime-directory-lease.js";
@@ -75,7 +76,6 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
   try {
     const createdRuntime = createPanelRuntime(options);
     runtime = createdRuntime;
-    await createdRuntime.initialWorkbenchDataReady;
     const server = createServer(createPanelRequestHandler(createdRuntime));
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 9090;
@@ -281,6 +281,10 @@ async function handlePanelRequest(
     return;
   }
 
+  if (await handlePanelWorkbenchAssetRoute(runtime, request, response, url)) {
+    return;
+  }
+
   if (await handlePanelPersonalKnowledgeRoute(runtime, request, response, url)) {
     return;
   }
@@ -428,7 +432,6 @@ export async function releasePanelRuntimeResources(
 ): Promise<void> {
   runtime.isQuiescing = true;
   const errors: unknown[] = [];
-  await captureCleanupError(errors, () => runtime.initialWorkbenchDataReady);
   await captureCleanupError(errors, () => ordinaryDisposal);
   // Keep the connector subscribed until Ordinary has produced its final stable facts.
   await captureCleanupError(errors, () => runtime.ordinaryPathMemoryConnector.release());

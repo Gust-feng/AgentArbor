@@ -1,17 +1,13 @@
 import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type ReactNode } from 'react'
 import { diffLines, type Change } from 'diff'
 import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Folder, RefreshCw } from 'lucide-react'
-import { common, createLowlight } from 'lowlight'
 import { fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, saveSpaceReferenceText, type SpaceReferencePreview } from './referencePreviewClient'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
+import { CodeDocumentSurface } from './CodeDocumentSurface'
 import './reference-preview.css'
 
 const REVALIDATE_MS = 15_000
 const AUTOSAVE_MS = 500
-const syntaxHighlighter = createLowlight(common)
-type HighlightNode =
-  | { readonly type: 'text'; readonly value: string }
-  | { readonly type: 'element'; readonly properties: { readonly className?: unknown }; readonly children: readonly HighlightNode[] }
 type PendingReferenceSave = {
   readonly epoch: number
   readonly itemId: string
@@ -338,14 +334,10 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
           </article>
         </div>
       ) : (
-        <div className="aa-reference-preview__text">
-          <div className="aa-reference-preview__code-meta">
-            <span>{content.language ?? 'plaintext'}</span>
-            {content.encoding !== undefined && <span>{content.encoding}</span>}
-          </div>
-          {content.editable ? (
+        <div className="aa-reference-preview__text" data-editable={editable || undefined}>
+          {editable ? (
             <textarea className="aa-reference-preview__editor aa-reference-preview__editor--inline" value={draft} readOnly={!editable} onChange={(event) => onChange(event.target.value)} spellCheck={false} />
-          ) : <CodePreview text={content.text} language={content.language} />}
+          ) : <CodeDocumentSurface source={draft} filename={preview.title} language={content.language ?? 'plaintext'} encoding={content.encoding} />}
           {content.truncated && <p className="aa-reference-preview__truncated">仅显示前 512 KiB 内容。</p>}
         </div>
       )
@@ -371,6 +363,19 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
     return <PreviewState title={preview.title} message="从左侧资源树选择文件。" error={false} onRetry={onReload} />
   }
   if (content.kind === 'web') {
+    if (content.body !== undefined) {
+      return (
+        <div className="aa-reference-preview__reader">
+          <article className="aa-reference-preview__markdown reading-prose">
+            <div className="aa-reference-preview__web-source">
+              <span>{content.site ?? preview.title}</span>
+              <a href={content.url} target="_blank" rel="noreferrer">访问原网页<ExternalLink size={12} /></a>
+            </div>
+            <MarkdownDocumentSurface markdown={content.body} sourceVersion={`${targetKey}:${preview.fingerprint ?? ''}`} />
+          </article>
+        </div>
+      )
+    }
     return (
       <div className="aa-reference-preview__web">
         <FileText size={28} />
@@ -379,27 +384,15 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
       </div>
     )
   }
-  switch (content.mediaKind) {
-    case 'image': return <div className="aa-reference-preview__media"><img src={content.url} alt={preview.title} /></div>
-    case 'pdf': return <object className="aa-reference-preview__pdf" data={content.url} type={content.mimeType}><a href={content.url}>打开 PDF</a></object>
-    case 'video': return <div className="aa-reference-preview__media"><video controls src={content.url} /></div>
-    case 'audio': return <div className="aa-reference-preview__audio"><audio controls src={content.url} /></div>
+  if (content.kind === 'pages') {
+    return <div className="aa-reference-preview__reader"><div className="aa-reference-preview__pages">{content.pages.map((page, index) => <article key={index}><pre>{page}</pre><span>{index + 1} / {content.pages.length}</span></article>)}</div></div>
   }
-}
-
-function CodePreview({ text, language }: { text: string; language?: string }) {
-  const highlighted = language !== undefined && syntaxHighlighter.registered(language)
-    ? syntaxHighlighter.highlight(language, text)
-    : undefined
-  return (
-    <pre className="aa-reference-preview__code"><code>{highlighted === undefined ? text : (highlighted.children as HighlightNode[]).map((node, index) => renderHighlightNode(node, index))}</code></pre>
-  )
-}
-
-function renderHighlightNode(node: HighlightNode, key: number): ReactNode {
-  if (node.type === 'text') return node.value
-  const className = Array.isArray(node.properties.className) ? node.properties.className.join(' ') : undefined
-  return <span key={key} className={className}>{node.children.map((child, index) => renderHighlightNode(child, index))}</span>
+  switch (content.mediaKind) {
+    case 'image': return <div className="aa-reference-preview__media aa-reference-preview__media--described"><img src={content.url} alt={content.alt ?? preview.title} />{content.caption && <p>{content.caption}</p>}</div>
+    case 'pdf': return <object className="aa-reference-preview__pdf" data={content.url} type={content.mimeType}><a href={content.url}>打开 PDF</a></object>
+    case 'video': return <div className="aa-reference-preview__media aa-reference-preview__media--described"><video controls src={content.url} poster={content.poster} />{content.duration && <p>{content.duration}</p>}</div>
+    case 'audio': return <div className="aa-reference-preview__audio"><audio controls src={content.url} />{content.duration && <span>{content.duration}</span>}{content.transcript && <p>{content.transcript}</p>}</div>
+  }
 }
 
 function referenceMarkdownUrlTransform(apiBase: string, itemId: string, relativePath: string): (value: string) => string {

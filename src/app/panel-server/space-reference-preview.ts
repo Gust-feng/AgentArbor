@@ -153,6 +153,8 @@ function referenceSource(item: SpaceReferenceItem): string {
     case "local_file":
     case "workspace_folder":
     case "managed_folder": return item.reference.path;
+    case "asset_folder": return item.title;
+    case "workbench_asset": return item.reference.assetId;
     case "web_page": return item.reference.url;
     case "generated_artifact": return item.reference.artifactRef;
     case "conversation": return item.reference.conversationId;

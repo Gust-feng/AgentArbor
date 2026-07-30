@@ -20,16 +20,44 @@ test("Space stores only top-level roots and counts filesystem folder roots", asy
   assert.equal("folders" in snapshot, false);
 });
 
-test("Space moves one top-level reference between spaces without moving its source", async () => {
+test("Space moves an asset folder with its complete subtree between spaces", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
   let id = 0;
   const feature = createSpaceFeature({ repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } }, idFactory: () => `id-${++id}` });
   const source = await feature.commands.createSpace({ title: "来源" });
   const destination = await feature.commands.createSpace({ title: "目标" });
-  const item = await feature.commands.addReference({ spaceId: source.id, title: "文档", reference: { kind: "local_file", path: "C:/doc.md" } });
-  await feature.commands.move({ target: { kind: "reference", id: item.id }, destinationSpaceId: destination.id });
+  const folder = await feature.commands.addReference({ spaceId: source.id, title: "资料", reference: { kind: "asset_folder" } });
+  const child = await feature.commands.addReference({ spaceId: source.id, parentId: folder.id, title: "子目录", reference: { kind: "asset_folder" } });
+  const grandchild = await feature.commands.addReference({ spaceId: source.id, parentId: child.id, title: "文档", reference: { kind: "workbench_asset", assetId: "asset-1" } });
+
+  await feature.commands.move({ target: { kind: "reference", id: folder.id }, destinationSpaceId: destination.id });
+
   assert.equal((await feature.queries.getTree(source.id))?.entries.length, 0);
-  assert.equal((await feature.queries.getTree(destination.id))?.entries[0]?.item.reference.kind, "local_file");
+  const moved = (await feature.queries.getTree(destination.id))?.entries.map((entry) => entry.item) ?? [];
+  assert.deepEqual(moved.map((item) => item.id), [grandchild.id, child.id, folder.id]);
+  assert.deepEqual(moved.find((item) => item.id === folder.id), {
+    ...folder,
+    spaceId: destination.id,
+    parentId: undefined,
+    updatedAt: moved.find((item) => item.id === folder.id)?.updatedAt,
+  });
+  assert.equal(moved.find((item) => item.id === child.id)?.parentId, folder.id);
+  assert.equal(moved.find((item) => item.id === grandchild.id)?.parentId, child.id);
+});
+
+test("Space removes an asset folder with its complete subtree", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({ repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } }, idFactory: () => `id-${++id}` });
+  const space = await feature.commands.createSpace({ title: "项目" });
+  const folder = await feature.commands.addReference({ spaceId: space.id, title: "资料", reference: { kind: "asset_folder" } });
+  const child = await feature.commands.addReference({ spaceId: space.id, parentId: folder.id, title: "子目录", reference: { kind: "asset_folder" } });
+  await feature.commands.addReference({ spaceId: space.id, parentId: child.id, title: "文档", reference: { kind: "workbench_asset", assetId: "asset-1" } });
+  const retained = await feature.commands.addReference({ spaceId: space.id, title: "保留", reference: { kind: "local_file", path: "C:/keep.md" } });
+
+  await feature.commands.removeReference(folder.id);
+
+  assert.deepEqual((await feature.queries.getTree(space.id))?.entries.map((entry) => entry.item.id), [retained.id]);
 });
 
 test("Space content changes do not reorder Spaces", async () => {
@@ -64,4 +92,45 @@ test("Space rejects duplicate workspace mounts by canonical identity", async () 
   const second = await feature.commands.createSpace({ title: "二" });
   await feature.commands.addReference({ spaceId: first.id, title: "工作区", reference: { kind: "workspace_folder", path: "C:\\Work" } });
   await assert.rejects(feature.commands.addReference({ spaceId: second.id, title: "重复", reference: { kind: "workspace_folder", path: "c:/work" } }), { code: "space_workspace_mount_conflict" });
+});
+
+test("Space accepts only internal asset folders as metadata parents", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+  });
+  const first = await feature.commands.createSpace({ title: "一" });
+  const second = await feature.commands.createSpace({ title: "二" });
+  const asset = await feature.commands.addReference({
+    spaceId: first.id,
+    title: "文档",
+    reference: { kind: "workbench_asset", assetId: "asset-1" },
+  });
+  const conversation = await feature.commands.addReference({
+    spaceId: first.id,
+    title: "讨论",
+    reference: { kind: "conversation", conversationId: "conversation-1" },
+  });
+  const otherFolder = await feature.commands.addReference({
+    spaceId: second.id,
+    title: "其他空间目录",
+    reference: { kind: "asset_folder" },
+  });
+
+  for (const parentId of [asset.id, conversation.id]) {
+    await assert.rejects(feature.commands.addReference({
+      spaceId: first.id,
+      parentId,
+      title: "不可见子项",
+      reference: { kind: "workbench_asset", assetId: `child-${parentId}` },
+    }), { code: "space_invalid_input" });
+  }
+  await assert.rejects(feature.commands.addReference({
+    spaceId: first.id,
+    parentId: otherFolder.id,
+    title: "跨空间子项",
+    reference: { kind: "workbench_asset", assetId: "cross-space" },
+  }), { code: "space_invalid_input" });
 });

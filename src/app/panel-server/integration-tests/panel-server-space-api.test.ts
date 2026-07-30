@@ -228,6 +228,51 @@ test("Space API previews referenced files without copying them", async () => {
   }
 });
 
+test("Space API edits Workbench text assets through the shared revision contract", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-workbench-asset-"));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    await runtime.workbenchAssets.upsertMany([{
+      id: "asset-note",
+      kind: "markdown",
+      title: "共享笔记.md",
+      markdown: "# 初稿",
+    }]);
+    const space = await runtime.spaceFeature.commands.createSpace({ title: "资产编辑" });
+    const folder = await runtime.spaceFeature.commands.addReference({
+      spaceId: space.id,
+      title: "资料",
+      reference: { kind: "asset_folder" },
+    });
+    const item = await runtime.spaceFeature.commands.addReference({
+      spaceId: space.id,
+      parentId: folder.id,
+      title: "共享笔记.md",
+      reference: { kind: "workbench_asset", assetId: "asset-note" },
+    });
+
+    const preview = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(item.id)}/preview`);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.preview.itemId, item.id);
+    assert.equal(preview.body.preview.content.editable, true);
+
+    const saved = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(item.id)}/content`, {
+      method: "PUT",
+      body: { relativePath: "", expectedFingerprint: preview.body.preview.fingerprint, text: "# 定稿" },
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.preview.itemId, item.id);
+    assert.equal((await runtime.workbenchAssets.get("asset-note"))?.markdown, "# 定稿");
+
+    const direct = await requestJson(baseUrl, "/api/workbench-assets/asset-note/preview");
+    assert.equal(direct.body.preview.content.text, "# 定稿");
+    assert.equal(direct.body.preview.fingerprint, saved.body.preview.fingerprint);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Space API browses and edits text inside a referenced folder without escaping its root", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-folder-preview-"));
   const sourceRoot = path.join(directory, "source");

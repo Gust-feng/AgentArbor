@@ -124,6 +124,37 @@
   overflow-wrap: anywhere;
 }
 
+.about-product-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.about-product-version,
+.about-product-runtime {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.about-product-version {
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, var(--border));
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: color-mix(in oklch, var(--accent) 60%, var(--fg));
+  font-variant-numeric: tabular-nums;
+}
+
+.about-product-runtime {
+  border: 1px solid var(--border);
+  background: var(--row-bg);
+  color: var(--muted);
+}
+
 .about-product-github-link {
   display: inline-flex;
   width: 40px;

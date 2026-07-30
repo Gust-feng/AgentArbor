@@ -1,7 +1,10 @@
 import React from "react";
-import { Link2, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
+import { Cpu, Globe, Link2, MessageSquareText, Plus, RotateCcw, Save, SlidersHorizontal, Trash2, X } from "lucide-react";
 import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
+import { modelOptionsFromConfig } from "../model-options";
+import type { ChatModelOption } from "./chat-empty";
+import { ModelOptionPicker } from "./model-option-picker";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import "./capability-settings.css";
 
@@ -13,10 +16,10 @@ type SettingsSelectOption = {
 };
 type ModelCapabilityTarget = {
   readonly key: string;
+  readonly option: ChatModelOption;
   readonly profileId: string;
   readonly providerKind?: string;
   readonly model: string;
-  readonly label: string;
   readonly effectiveCapabilities?: ModelCapabilities;
   readonly overrideCapabilities?: ModelCapabilities;
 };
@@ -71,8 +74,10 @@ export function BasicCapabilitiesSettings(props: {
         onSave={props.onSaveDesktopAgentSystemPrompt}
         onReset={props.onResetDesktopAgentSystemPrompt}
       />
-      <section className="capability-settings-section capability-runtime-preferences" aria-label="运行偏好">
-        <h3>运行偏好</h3>
+      <CapabilityGroup
+        icon={<SlidersHorizontal size={16} />}
+        title="运行偏好"
+      >
         <div className="capability-preference-list">
           <ModelUsageDisplaySettings
             enabled={props.modelUsageDisplayEnabled}
@@ -84,7 +89,7 @@ export function BasicCapabilitiesSettings(props: {
             onSave={props.onSaveSkillTriggerMode}
           />
         </div>
-      </section>
+      </CapabilityGroup>
       <ModelInformationSettings
         config={props.config}
         modelCatalogs={props.modelCatalogs}
@@ -92,6 +97,31 @@ export function BasicCapabilitiesSettings(props: {
         onSave={props.onSaveModelCapabilities}
       />
     </div>
+  );
+}
+
+function CapabilityGroup(props: {
+  readonly icon: React.ReactNode;
+  readonly title: string;
+  readonly actions?: React.ReactNode;
+  readonly busy?: boolean;
+  readonly children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <section className="cap-node" aria-label={props.title} aria-busy={props.busy === true}>
+      <div className="cap-node-rail" aria-hidden="true">
+        <span className="cap-node-dot">{props.icon}</span>
+      </div>
+      <div className="cap-node-card">
+        <header className="cap-group-head">
+          <div className="cap-group-heading">
+            <h3>{props.title}</h3>
+          </div>
+          {props.actions !== undefined && <div className="cap-group-actions">{props.actions}</div>}
+        </header>
+        <div className="cap-group-body">{props.children}</div>
+      </div>
+    </section>
   );
 }
 
@@ -179,10 +209,12 @@ function DesktopAgentPromptSettings(props: {
         : "自定义"
     : "加载中";
   return (
-    <section className="capability-settings-section desktop-agent-prompt-card" aria-busy={props.saving === true}>
-      <div className="capability-section-title-row">
-        <h3>系统提示词</h3>
-        <div className="desktop-agent-prompt-actions">
+    <CapabilityGroup
+      icon={<MessageSquareText size={16} />}
+      title="系统提示词"
+      busy={props.saving === true}
+      actions={
+        <>
           <button
             type="button"
             className="model-info-save-button"
@@ -201,8 +233,9 @@ function DesktopAgentPromptSettings(props: {
             <Save size={14} />
             <span>{props.saving ? "保存中" : "保存"}</span>
           </button>
-        </div>
-      </div>
+        </>
+      }
+    >
       <label className="desktop-agent-prompt-field">
         Desktop Agent
         <textarea
@@ -220,7 +253,7 @@ function DesktopAgentPromptSettings(props: {
         <span>{normalized.length}/{maxChars}</span>
         <span>{stateLabel}</span>
       </div>
-    </section>
+    </CapabilityGroup>
   );
 }
 
@@ -284,9 +317,11 @@ function ModelInformationSettings(props: {
   };
 
   return (
-    <section className="capability-settings-section model-info-card" aria-busy={props.saving === true}>
-      <div className="capability-section-title-row">
-        <h3>模型信息</h3>
+    <CapabilityGroup
+      icon={<Cpu size={16} />}
+      title="模型信息"
+      busy={props.saving === true}
+      actions={
         <button
           type="button"
           className="model-info-save-button"
@@ -296,20 +331,25 @@ function ModelInformationSettings(props: {
           <Save size={14} />
           <span>{props.saving ? "保存中" : "保存"}</span>
         </button>
-      </div>
+      }
+    >
       {selectedTarget === undefined ? (
         <div className="capability-empty">暂无可配置模型。请先在模型服务中添加模型。</div>
       ) : (
         <>
           <div className="model-info-grid">
-            <label className="model-info-field model-info-field-wide">
-              模型
-              <select value={selectedTarget.key} onChange={(event) => setSelectedKey(event.target.value)}>
-                {targets.map((target) => (
-                  <option key={target.key} value={target.key}>{target.label}</option>
-                ))}
-              </select>
-            </label>
+            <div className="model-info-field model-info-field-wide">
+              <span>模型</span>
+              <ModelOptionPicker
+                options={targets.map((target) => target.option)}
+                selectedId={selectedTarget.key}
+                onSelect={setSelectedKey}
+                emptyLabel="暂无可配置模型"
+                ariaLabel="选择模型"
+                variant="settings"
+                placement="top"
+              />
+            </div>
             <label className="model-info-field">
               上下文窗口
               <input
@@ -360,7 +400,7 @@ function ModelInformationSettings(props: {
           </div>
         </>
       )}
-    </section>
+    </CapabilityGroup>
   );
 }
 
@@ -376,54 +416,26 @@ function modelCapabilityTargets(
   config: ConfigResponse | undefined,
   modelCatalogs: Readonly<Record<string, ModelProviderModelCatalog>> | undefined
 ): readonly ModelCapabilityTarget[] {
-  const targets: ModelCapabilityTarget[] = [];
+  type ProviderProfile = NonNullable<ConfigResponse["profiles"]>[number];
+  const providers = new Map<string, ProviderProfile>();
   for (const profile of config?.profiles ?? []) {
-    const profileId = profile.profileId?.trim();
-    if (profileId === undefined || profileId.length === 0) {
-      continue;
-    }
-    const modelIds = new Set<string>();
-    const configuredModel = profile.model?.trim();
-    if (configuredModel !== undefined && configuredModel.length > 0) {
-      modelIds.add(configuredModel);
-    }
-    for (const model of modelCatalogs?.[profileId]?.models ?? []) {
-      const id = model.id.trim();
-      if (id.length > 0) {
-        modelIds.add(id);
-      }
-    }
-    for (const item of config?.modelCapabilityProfiles ?? []) {
-      if (item.profileId === profileId && item.model.trim().length > 0) {
-        modelIds.add(item.model);
-      }
-    }
-    for (const model of modelIds) {
-      targets.push({
-        key: modelCapabilityTargetKey(profileId, model),
-        profileId,
-        providerKind: profile.providerKind,
-        model,
-        label: `${profile.label ?? profileId} / ${model}`,
-        effectiveCapabilities: modelCapabilitiesForTarget(config, profileId, model),
-        overrideCapabilities: modelCapabilityOverrideForTarget(config, profileId, model),
-      });
+    if (typeof profile.profileId === "string" && profile.profileId.trim().length > 0) {
+      providers.set(profile.profileId, profile);
     }
   }
-  return targets.sort((left, right) => left.label.localeCompare(right.label));
-}
-
-function modelCapabilitiesForTarget(
-  config: ConfigResponse | undefined,
-  profileId: string,
-  model: string
-): ModelCapabilities | undefined {
-  const projected = modelCapabilityOverrideForTarget(config, profileId, model);
-  if (projected !== undefined) return projected;
-  if (config?.config?.profileId === profileId && config.config.model === model) {
-    return config.capabilities?.modelCapabilities;
-  }
-  return undefined;
+  return modelOptionsFromConfig(config, modelCatalogs ?? {}, { includeCapabilityProfileModels: true }).map((option) => {
+    const providerKind = providers.get(option.profileId)?.providerKind;
+    const overrideCapabilities = modelCapabilityOverrideForTarget(config, option.profileId, option.modelId);
+    return {
+      key: option.id,
+      option,
+      profileId: option.profileId,
+      model: option.modelId,
+      ...(providerKind === undefined ? {} : { providerKind }),
+      ...(option.capabilities === undefined ? {} : { effectiveCapabilities: option.capabilities }),
+      ...(overrideCapabilities === undefined ? {} : { overrideCapabilities }),
+    };
+  });
 }
 
 function modelCapabilityOverrideForTarget(
@@ -432,10 +444,6 @@ function modelCapabilityOverrideForTarget(
   model: string
 ): ModelCapabilities | undefined {
   return config?.modelCapabilityProfiles?.find((item) => item.profileId === profileId && item.model === model)?.capabilities;
-}
-
-function modelCapabilityTargetKey(profileId: string, model: string): string {
-  return JSON.stringify([profileId, model]);
 }
 
 function modelCapabilityDraftFrom(capabilities: ModelCapabilities | undefined): ModelCapabilityDraft {
@@ -540,8 +548,11 @@ function WebSearchSettings(props: {
     props.onSaveTools({ ...props.toolForm, apiKey });
   };
   return (
-    <section className="capability-settings-section web-search-settings" aria-busy={props.saving === true}>
-      <h3>网络搜索</h3>
+    <CapabilityGroup
+      icon={<Globe size={16} />}
+      title="网络搜索"
+      busy={props.saving === true}
+    >
       <div className="service-config-grid web-search-config-grid">
         <label>
           搜索服务
@@ -598,7 +609,7 @@ function WebSearchSettings(props: {
           </label>
         )}
         {externalProvider && (
-          <label>
+          <label className="web-search-max-results">
             结果数
             <input
               type="number"
@@ -614,7 +625,7 @@ function WebSearchSettings(props: {
           </label>
         )}
       </div>
-    </section>
+    </CapabilityGroup>
   );
 }
 

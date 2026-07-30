@@ -5,6 +5,7 @@ import {
   ChartColumn,
   CloudCog,
   Code2,
+  Cpu,
   Database,
   Download,
   ExternalLink,
@@ -28,7 +29,6 @@ import type {
   SkillTriggerMode,
 } from "../contracts/config";
 import type { AppUpdateInfo, AppUpdateStatus } from "../contracts/app-update";
-import { DevelopmentDataNotice } from "./development-data-notice";
 import { MULTI_AGENT_ENTRY_AVAILABLE } from "../app-multi-agent-availability";
 import type { SkillDefinition } from "../contracts/skills";
 import type { SubAgentDefinition } from "../contracts/sub-agents";
@@ -302,6 +302,7 @@ function AboutSettings(props: {
   const productName = product?.name ?? "AgentArbor";
   const version = product?.version ?? "未提供";
   const defaultEntry = product?.defaultEntry ?? "Desktop Shell / Panel";
+  const runtimeModeLabel = product?.runtimeModeLabel?.trim();
   const configDirectory = product?.configDirectory ?? "未提供";
   const runtimeDirectory = product?.runtimeDirectory ?? "未提供";
   const updateStatus = checkingUpdate ? "checking" : props.appUpdate?.status ?? "idle";
@@ -339,6 +340,12 @@ function AboutSettings(props: {
           </span>
           <div>
             <h3>{productName}</h3>
+            <div className="about-product-tags">
+              <span className="about-product-version">v{version}</span>
+              {runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 && (
+                <span className="about-product-runtime">{runtimeModeLabel}</span>
+              )}
+            </div>
           </div>
         </div>
         <a
@@ -353,8 +360,12 @@ function AboutSettings(props: {
       </section>
 
       <section className="about-fact-grid" aria-label="产品运行信息">
-        <AboutFact icon={<CheckCircle2 size={16} />} label="版本" value={version} />
         <AboutFact icon={<Monitor size={16} />} label="默认入口" value={defaultEntry} />
+        {runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 ? (
+          <AboutFact icon={<Cpu size={16} />} label="运行模式" value={runtimeModeLabel} />
+        ) : (
+          <AboutFact icon={<CheckCircle2 size={16} />} label="版本" value={version} />
+        )}
       </section>
 
       {MULTI_AGENT_ENTRY_AVAILABLE && (
@@ -381,8 +392,6 @@ function AboutSettings(props: {
           </div>
         </section>
       )}
-
-      <DevelopmentDataNotice />
 
       <section className="settings-card about-update-card">
         <div className="settings-card-title-row">

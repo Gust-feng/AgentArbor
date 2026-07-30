@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import {
   X,
   Sun,
@@ -22,6 +22,7 @@ import {
   type ReadingFont,
   type ReadingWidth,
 } from './readingPrefs'
+import { useModalA11y } from './useModalA11y'
 
 interface SettingsModalProps {
   onClose: () => void
@@ -591,15 +592,7 @@ function ActionRow({
 /* ─── modal shell ─── */
 export function SettingsModal({ onClose }: SettingsModalProps) {
   const [section, setSection] = useState<Section>('appearance')
-  const overlayRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const modalRef = useModalA11y(onClose)
 
   const sectionContent: Record<Section, React.ReactNode> = {
     appearance: <AppearanceSection />,
@@ -612,13 +605,17 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   return (
     <div
-      ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.22)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="偏好设置"
     >
       <div
-        className="flex overflow-hidden"
+        ref={modalRef}
+        tabIndex={-1}
+        className="flex overflow-hidden outline-none"
         style={{
           width: 620,
           height: 500,

@@ -115,21 +115,15 @@ function clean(src: string | undefined): string {
 function previewText(p: ResolvedPage): string {
   if (p.kind === 'note') return clean(getNote(p.refId)?.bodyMarkdown).slice(0, 100)
   if (p.kind === 'space_reference') return clean(p.previewText).slice(0, 100)
-  const m = getMaterial(p.refId)
-  if (!m) return ''
-  switch (m.kind) {
-    case 'markdown':
-      return clean(m.markdown).slice(0, 100)
-    case 'web':
-      return clean(m.web?.body).slice(0, 100)
-    case 'pdf':
-      return clean(m.pdf?.pages?.[0]).slice(0, 100)
-    case 'image':
-      return m.image?.caption ?? ''
-    case 'audio':
-      return m.audio?.transcript ? clean(m.audio.transcript).slice(0, 100) : ''
-    default:
-      return ''
+  const material = getMaterial(p.refId)
+  if (!material) return ''
+  switch (material.kind) {
+    case 'markdown': return clean(material.markdown).slice(0, 100)
+    case 'web': return clean(material.web?.body).slice(0, 100)
+    case 'pdf': return clean(material.pdf?.pages?.[0]).slice(0, 100)
+    case 'image': return material.image?.caption ?? ''
+    case 'audio': return material.audio?.transcript ? clean(material.audio.transcript).slice(0, 100) : ''
+    default: return ''
   }
 }
 
@@ -696,7 +690,7 @@ function ReadingView({
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
   const outIds = brain.outgoing(page.refId)
   const backIds = brain.backlinks(page.refId)
-  const linkableTargets = resolved.filter((p) => !p.demo && p.refId !== page.refId && !outIds.includes(p.refId))
+  const linkableTargets = resolved.filter((p) => p.refId !== page.refId && !outIds.includes(p.refId))
 
   return (
     <section className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
@@ -1179,7 +1173,9 @@ function PageContent({
   onOpenSpaceReference?: (spaceId: string, itemId: string) => void
 }) {
   const [managedPath, setManagedPath] = useState('')
+  const managedNavigationVersionRef = useRef(0)
   useEffect(() => {
+    managedNavigationVersionRef.current += 1
     setManagedPath('')
   }, [page.refId])
   const navigateManagedPath = (relativePath: string) => {
@@ -1188,7 +1184,11 @@ function PageContent({
       setManagedPath(relativePath)
       return
     }
-    void fetchSpaceReferencePreview(page.refId, relativePath, undefined, apiBase).then(() => setManagedPath(relativePath))
+    const pageId = page.refId
+    const version = ++managedNavigationVersionRef.current
+    void fetchSpaceReferencePreview(pageId, relativePath, undefined, apiBase).then(() => {
+      if (managedNavigationVersionRef.current === version && page.refId === pageId) setManagedPath(relativePath)
+    })
   }
   if (!page.exists) {
     return (
@@ -1232,8 +1232,8 @@ function PageContent({
     }
     return null
   }
-  const material = getMaterial(page.refId)!
-  return <MaterialBody material={material} />
+  const material = getMaterial(page.refId)
+  return material === undefined ? null : <MaterialBody material={material} />
 }
 
 /* ------------------------------ 卡片 & 小部件 ------------------------------ */
@@ -1241,13 +1241,11 @@ function PageContent({
 /** 哪些格式有封面(图/视频/音频/PDF/代码);文字类(笔记/Markdown/网页)无封面。 */
 function pageHasCover(p: ResolvedPage): boolean {
   if (p.kind !== 'material') return false
-  return (
-    p.materialKind === 'image' ||
-    p.materialKind === 'video' ||
-    p.materialKind === 'audio' ||
-    p.materialKind === 'pdf' ||
-    p.materialKind === 'code'
-  )
+  return p.materialKind === 'image'
+    || p.materialKind === 'video'
+    || p.materialKind === 'audio'
+    || p.materialKind === 'pdf'
+    || p.materialKind === 'code'
 }
 
 function Card({
@@ -1265,7 +1263,6 @@ function Card({
   const [tagOpen, setTagOpen] = useState(false)
   const cover = pageHasCover(page)
   const isWeb = page.kind !== 'note' && page.materialKind === 'web'
-  // 有封面的格式不再重复正文;文字类才配摘要。
   const preview = cover ? '' : previewText(page)
 
   const myThemeIds = themeApi.themesOf(page.refId)
@@ -1315,15 +1312,8 @@ function Card({
       <div className="flex flex-col flex-1" style={{ padding: 18 }}>
         <div className="flex items-center gap-2 mb-3">
           {isWeb && page.thumbnail ? (
-            <ImageWithFallback
-              src={page.thumbnail}
-              alt=""
-              className="rounded-sm"
-              style={{ width: 14, height: 14, objectFit: 'contain' }}
-            />
-          ) : (
-            pageIcon(page)
-          )}
+            <ImageWithFallback src={page.thumbnail} alt="" className="rounded-sm" style={{ width: 14, height: 14, objectFit: 'contain' }} />
+          ) : pageIcon(page)}
           <span className="text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
             {kindLabel(page)}
           </span>
@@ -1375,6 +1365,49 @@ function Card({
       </div>
     </div>
   )
+}
+
+function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) {
+  const material = page.kind === 'material' ? getMaterial(page.refId) : undefined
+  const kind = page.materialKind
+  if (kind === 'image' && material?.image) {
+    return <div className="w-full overflow-hidden" style={{ height: 132 }}>
+      <ImageWithFallback src={material.image.src} alt={material.image.alt} className="w-full h-full object-cover" style={{ transform: hovered ? 'scale(1.04)' : 'none', transition: 'transform 240ms ease' }} />
+    </div>
+  }
+  if (kind === 'video') {
+    return <div className="relative w-full flex items-center justify-center" style={{ height: 132, background: 'linear-gradient(135deg, #2d2822 0%, #4a4038 100%)' }}>
+      <span className="flex items-center justify-center rounded-full transition-transform" style={{ width: 44, height: 44, background: 'rgba(255,255,255,0.16)', transform: hovered ? 'scale(1.1)' : 'none' }}>
+        <Film size={18} style={{ color: '#fff' }} />
+      </span>
+      {material?.video?.duration && <CoverBadge>{material.video.duration}</CoverBadge>}
+    </div>
+  }
+  if (kind === 'audio') {
+    return <div className="relative w-full flex items-end justify-center gap-1 px-6" style={{ height: 132, background: 'linear-gradient(135deg, #b0885a22 0%, #b0885a3d 100%)', paddingBottom: 28 }}>
+      {WAVE.map((height, index) => <span key={index} style={{ width: 4, height: `${height}%`, borderRadius: 2, background: '#b0885a', opacity: 0.75 }} />)}
+      {material?.audio?.duration && <CoverBadge>{material.audio.duration}</CoverBadge>}
+    </div>
+  }
+  if (kind === 'pdf' && material?.pdf) {
+    return <div className="w-full overflow-hidden px-4 pt-4" style={{ height: 132, background: 'var(--aa-surface-hover, #eeebe6)' }}>
+      <div className="w-full h-full rounded-t-md overflow-hidden" style={{ background: '#fff', border: '1px solid rgba(45,40,34,0.08)', padding: '14px 16px' }}>
+        <p className="m-0 whitespace-pre-wrap" style={{ color: 'var(--aa-text-2, #6b655e)', fontSize: 8.5, lineHeight: 1.5, fontFamily: 'var(--reading-font)' }}>{clean(material.pdf.pages[0]).slice(0, 240)}</p>
+      </div>
+    </div>
+  }
+  if (kind === 'code' && material?.code) {
+    return <div className="w-full overflow-hidden px-4 py-3" style={{ height: 132, background: '#1e1c1a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+      {material.code.source.split('\n').slice(0, 7).map((line, index) => <div key={index} className="whitespace-pre truncate" style={{ color: '#c9c2b6', fontSize: 9, lineHeight: 1.7 }}>{line || ' '}</div>)}
+    </div>
+  }
+  return null
+}
+
+const WAVE = [30, 55, 40, 80, 60, 95, 50, 70, 45, 85, 35, 65, 50, 90, 40, 60, 30]
+
+function CoverBadge({ children }: { children: React.ReactNode }) {
+  return <span className="absolute text-xs px-1.5 py-0.5 rounded" style={{ right: 10, bottom: 10, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 11 }}>{children}</span>
 }
 
 /** 卡片上的「归入主题」浮层:勾选归属 + 锁定(锁定 = agent 别再动)。 */
@@ -1482,129 +1515,6 @@ function TagPopover({
         )}
       </div>
     </div>
-  )
-}
-
-/**
- * 卡片封面 —— 如实反映内容,不套库存图。
- *  图片→真图;视频→播放封面+时长;音频→声波+时长;
- *  PDF→真实首页文字预览;代码→真实源码预览;
- *  笔记/Markdown/网页→无封面(用文字摘要)。
- */
-function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) {
-  const m = page.kind === 'material' ? getMaterial(page.refId) : undefined
-  const kind = page.materialKind
-
-  if (kind === 'image' && m?.image) {
-    return (
-      <div className="w-full overflow-hidden" style={{ height: 132 }}>
-        <ImageWithFallback
-          src={m.image.src}
-          alt={m.image.alt}
-          className="w-full h-full object-cover"
-          style={{ transform: hovered ? 'scale(1.04)' : 'none', transition: 'transform 240ms ease' }}
-        />
-      </div>
-    )
-  }
-
-  if (kind === 'video') {
-    return (
-      <div
-        className="relative w-full flex items-center justify-center"
-        style={{ height: 132, background: 'linear-gradient(135deg, #2d2822 0%, #4a4038 100%)' }}
-      >
-        <span
-          className="flex items-center justify-center rounded-full transition-transform"
-          style={{
-            width: 44,
-            height: 44,
-            background: 'rgba(255,255,255,0.16)',
-            transform: hovered ? 'scale(1.1)' : 'none',
-          }}
-        >
-          <Film size={18} style={{ color: '#fff' }} />
-        </span>
-        {m?.video?.duration && <CoverBadge>{m.video.duration}</CoverBadge>}
-      </div>
-    )
-  }
-
-  if (kind === 'audio') {
-    return (
-      <div
-        className="relative w-full flex items-end justify-center gap-1 px-6"
-        style={{ height: 132, background: 'linear-gradient(135deg, #b0885a22 0%, #b0885a3d 100%)', paddingBottom: 28 }}
-      >
-        {WAVE.map((h, i) => (
-          <span
-            key={i}
-            style={{
-              width: 4,
-              height: `${h}%`,
-              borderRadius: 2,
-              background: '#b0885a',
-              opacity: 0.75,
-            }}
-          />
-        ))}
-        {m?.audio?.duration && <CoverBadge>{m.audio.duration}</CoverBadge>}
-      </div>
-    )
-  }
-
-  if (kind === 'pdf' && m?.pdf) {
-    return (
-      <div className="w-full overflow-hidden px-4 pt-4" style={{ height: 132, background: 'var(--aa-surface-hover, #eeebe6)' }}>
-        <div
-          className="w-full h-full rounded-t-md overflow-hidden"
-          style={{ background: '#fff', border: '1px solid rgba(45,40,34,0.08)', padding: '14px 16px' }}
-        >
-          <p
-            className="m-0 whitespace-pre-wrap"
-            style={{ color: 'var(--aa-text-2, #6b655e)', fontSize: 8.5, lineHeight: 1.5, fontFamily: 'var(--reading-font)' }}
-          >
-            {clean(m.pdf.pages[0]).slice(0, 240)}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  if (kind === 'code' && m?.code) {
-    const lines = m.code.source.split('\n').slice(0, 7)
-    return (
-      <div
-        className="w-full overflow-hidden px-4 py-3"
-        style={{ height: 132, background: '#1e1c1a', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
-      >
-        {lines.map((ln, i) => (
-          <div
-            key={i}
-            className="whitespace-pre truncate"
-            style={{ color: '#c9c2b6', fontSize: 9, lineHeight: 1.7 }}
-          >
-            {ln || ' '}
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  // 笔记 / Markdown / 网页 → 无封面(Card 已判断不会渲染到这里)
-  return null
-}
-
-const WAVE = [30, 55, 40, 80, 60, 95, 50, 70, 45, 85, 35, 65, 50, 90, 40, 60, 30]
-
-function CoverBadge({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      className="absolute text-xs px-1.5 py-0.5 rounded"
-      style={{ right: 10, bottom: 10, background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 11 }}
-    >
-      {children}
-    </span>
   )
 }
 

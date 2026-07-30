@@ -273,7 +273,7 @@ export function App(): React.ReactElement {
       onOpenSpaceItem={spaceProjection.openReference}
       onCreateSpace={spaceProjection.createSpace}
       spaceActions={{
-        createFolder: spaceProjection.createFolder,
+        createManagedFolder: spaceProjection.createManagedFolder,
         addLocalFile: spaceProjection.addLocalFile,
         addWorkspaceFolder: spaceProjection.addWorkspaceFolder,
         addWebReference: spaceProjection.addWebReference,
@@ -282,7 +282,6 @@ export function App(): React.ReactElement {
         rename: spaceProjection.rename,
         removeReference: spaceProjection.removeReference,
         deleteManagedFolder: spaceProjection.deleteManagedFolder,
-        removeFolder: spaceProjection.removeFolder,
       }}
       onOpenSettings={() => openSettings("models")}
       appUpdate={app.appUpdate}

@@ -5,7 +5,6 @@ import { type View } from './Sidebar'
 import { RADII, composerSurface } from './tokens'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
-import { LEARNING_DEMO_TIMELINE } from './learningDemoDataset'
 
 interface HomePageProps {
   onNavigate: (v: View) => void
@@ -138,8 +137,8 @@ export function HomePage({ onNavigate, onStartConversation, onOpenConversation, 
   const [focused, setFocused] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const timelineEntries = useMemo(
-    () => homeTimelineEntries(conversations, spaces.some((space) => space.demoDataset === 'learning-workspace')),
-    [conversations, spaces],
+    () => homeTimelineEntries(conversations),
+    [conversations],
   )
 
   const now = new Date()
@@ -472,8 +471,8 @@ function ActivityTrail({ entries, onSelect }: { entries: readonly TimelineEntry[
   )
 }
 
-function homeTimelineEntries(conversations: readonly ConversationSummary[], hasLearningDemo: boolean): TimelineEntry[] {
-  if (conversations.length === 0) return hasLearningDemo ? [...LEARNING_DEMO_TIMELINE] : []
+function homeTimelineEntries(conversations: readonly ConversationSummary[]): TimelineEntry[] {
+  if (conversations.length === 0) return []
   return [...conversations]
     .sort((left, right) => timestamp(right.updatedAt) - timestamp(left.updatedAt))
     .slice(0, 6)

@@ -5,15 +5,13 @@ import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceItemProjection, PersonalSpaceProjection } from '../../../space'
 import { GUTTER, READING_WIDTH, composerSurface } from './tokens'
 import { useNotes } from './notesStore'
-import { getAllMaterials, materialSearchText } from './materials'
-import { LEARNING_DEMO_CONVERSATION_RESULTS, LEARNING_DEMO_MATERIAL_IDS } from './learningDemoDataset'
 import { searchPersonalKnowledge, type PersonalKnowledgeSearchHit } from './personalKnowledgeClient'
 
 /**
  * 全局检索 —— 覆盖「我写的笔记」与「读进来的材料」,以及对话引用。
  *
- * 索引在渲染时即时构建(数据量小,原型足够)。接后端后应替换为服务端
- * 检索接口(全文索引 / 向量检索),本组件只保留结果的呈现与筛选。
+ * 当前索引由 SQLite 投影的真实笔记、空间引用和会话组成；后续若引入服务端
+ * 检索，本组件只保留结果的呈现与筛选。
  */
 
 type ResultType = 'note' | 'file' | 'web' | 'conversation'
@@ -29,7 +27,6 @@ interface SearchResult {
   haystack: string
   spaceId?: string
   conversationId?: string
-  demo?: boolean
 }
 
 /** 从一段正文里,围绕命中词截取一小段摘要。 */
@@ -48,10 +45,6 @@ function makeSnippet(text: string, query: string, fallback = ''): string {
 }
 
 /** 材料 kind → 搜索结果类型(供筛选与图标)。 */
-function materialResultType(kind: string): ResultType {
-  return kind === 'web' ? 'web' : 'file'
-}
-
 function flattenSpaceItems(items: readonly PersonalSpaceItemProjection[]): PersonalSpaceItemProjection[] {
   return items.flatMap((item) => [item, ...flattenSpaceItems(item.children ?? [])])
 }
@@ -188,22 +181,6 @@ export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spac
       spaceId: space.spaceId,
       conversationId: item.conversationId,
     } satisfies SearchResult)))
-    const demoSpace = spaces.find((space) => space.demoDataset === 'learning-workspace')
-    const demoMaterials: SearchResult[] = demoSpace === undefined ? [] : getAllMaterials()
-      .filter((material) => LEARNING_DEMO_MATERIAL_IDS.has(material.id))
-      .map((m) => {
-        const text = materialSearchText(m)
-        return {
-          id: m.id,
-          name: m.title,
-          type: materialResultType(m.kind),
-          space: demoSpace.title,
-          snippet: makeSnippet(text, debouncedQuery, m.meta ?? ''),
-          haystack: `${m.title} ${text}`,
-          spaceId: demoSpace.spaceId,
-          demo: true,
-        }
-      })
     const referencedConversationIds = new Set(spaceReferences.flatMap((result) => result.conversationId ?? []))
     const conversationResults: SearchResult[] = conversations
       .filter((conversation) => !referencedConversationIds.has(conversation.conversationId))
@@ -216,14 +193,7 @@ export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spac
         haystack: `${conversation.title} ${conversation.preview ?? ''}`,
         conversationId: conversation.conversationId,
       }))
-    const demoConversations: SearchResult[] = demoSpace === undefined ? [] : LEARNING_DEMO_CONVERSATION_RESULTS.map((result) => ({
-      ...result,
-      type: 'conversation',
-      space: demoSpace.title,
-      spaceId: demoSpace.spaceId,
-      demo: true,
-    }))
-    return [...noteResults, ...spaceReferences, ...demoMaterials, ...conversationResults, ...demoConversations]
+    return [...noteResults, ...spaceReferences, ...conversationResults]
   }, [conversations, debouncedQuery, notes, remoteNotes, spaces])
 
   const filtered = useMemo(
@@ -253,8 +223,6 @@ export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spac
     if (result.conversationId !== undefined) {
       const opened = await onOpenConversation(result.conversationId)
       if (opened !== false) onNavigate('conv-done')
-    } else if (result.demo && result.type === 'conversation') {
-      onNavigate('conv-done')
     } else if (result.spaceId !== undefined) {
       onOpenInSpace(result.spaceId, result.id)
     }

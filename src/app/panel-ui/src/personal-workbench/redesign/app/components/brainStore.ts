@@ -38,8 +38,8 @@ export function collectSpaceReference(referenceId: string, relativePath = ''): v
   if (findCollectedSpaceReference(referenceId, relativePath) !== undefined || isPersonalKnowledgeMutationPending(sourceKey)) return
   collectManagedSpaceReference(referenceId, relativePath)
 }
-export function uncollect(refId: string): void {
-  if (isPersonalKnowledgeMutationPending(refId)) return
+export function uncollect(refId: string, operationKey = refId): void {
+  if (isPersonalKnowledgeMutationPending(operationKey)) return
   executePersonalKnowledgeCommand(
     (value) => ({
       ...value,
@@ -48,7 +48,7 @@ export function uncollect(refId: string): void {
       assignments: value.assignments.filter((assignment) => assignment.refId !== refId),
     }),
     { type: 'knowledge.uncollect', refId },
-    refId,
+    operationKey,
   )
 }
 export function getLinks(): BrainLink[] { return getPersonalKnowledgeSnapshot().links }
@@ -128,7 +128,7 @@ function managedAssetPreviewText(page: BrainPage): string | undefined {
   return preview?.content.kind === 'text' ? preview.content.text : undefined
 }
 
-export function resolvePage(page: BrainPage, spaces: readonly PersonalSpaceProjection[] = []): ResolvedPage {
+export function resolvePage(page: BrainPage, _spaces: readonly PersonalSpaceProjection[] = []): ResolvedPage {
   if (page.kind === 'note') {
     const note = getNote(page.refId)
     return { refId: page.refId, kind: 'note', title: note?.title || '无标题笔记', collectedAt: page.collectedAt, exists: note !== undefined }
@@ -146,9 +146,7 @@ export function resolvePage(page: BrainPage, spaces: readonly PersonalSpaceProje
       managedAsset: page.asset,
     }
   }
-  const material = spaces.some((space) => space.demoDataset === 'learning-workspace')
-    ? getMaterial(page.refId)
-    : undefined
+  const material = getMaterial(page.refId)
   return {
     refId: page.refId,
     kind: 'material',
@@ -156,6 +154,7 @@ export function resolvePage(page: BrainPage, spaces: readonly PersonalSpaceProje
     collectedAt: page.collectedAt,
     materialKind: material?.kind,
     thumbnail: material?.thumbnail,
+    demo: LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS.includes(page.refId as (typeof LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS)[number]),
     exists: material !== undefined,
   }
 }
@@ -175,21 +174,9 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     getManagedAssetPreviewCacheVersion,
     getManagedAssetPreviewCacheVersion,
   )
-  const hasLearningDemo = spaces.some((space) => space.demoDataset === 'learning-workspace')
-  const demoPages = useMemo<BrainPage[]>(() => hasLearningDemo
-    ? LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS.map((refId, index) => ({
-        refId,
-        kind: 'material',
-        collectedAt: Date.UTC(2026, 6, 29, 12, 0) - index * 60 * 60 * 1000,
-      }))
-    : [], [hasLearningDemo])
-  const pages = useMemo(() => {
-    const persistedIds = new Set(snapshot.pages.map((page) => page.refId))
-    return [...snapshot.pages, ...demoPages.filter((page) => !persistedIds.has(page.refId))]
-      .sort((left, right) => right.collectedAt - left.collectedAt)
-  }, [demoPages, snapshot.pages, previewCacheVersion])
-  const demoIds = useMemo(() => new Set(demoPages.map((page) => page.refId)), [demoPages])
+  const pages = useMemo(() => [...snapshot.pages].sort((left, right) => right.collectedAt - left.collectedAt), [snapshot.pages, previewCacheVersion])
   const pageById = useMemo(() => new Map(pages.map((page) => [page.refId, page])), [pages])
+  const isBuiltInMaterial = (refId: string) => LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS.includes(refId as (typeof LEARNING_DEMO_KNOWLEDGE_MATERIAL_IDS)[number])
   return {
     pages,
     isCollected: (refId: string) => pageById.has(refId),
@@ -197,20 +184,20 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     findCollectedSpaceReference,
     collectSpaceReference,
     spaceReferenceSourceKey,
-    collect: (refId: string, kind: PageKind) => { if (!demoIds.has(refId)) collect(refId, kind) },
-    uncollect: (refId: string) => { if (!demoIds.has(refId)) uncollect(refId) },
+    collect: (refId: string, kind: PageKind) => { if (!isBuiltInMaterial(refId)) collect(refId, kind) },
+    uncollect: (refId: string, operationKey = refId) => { if (!isBuiltInMaterial(refId)) uncollect(refId, operationKey) },
     addLink,
     removeLink,
-    markOpened: (refId: string) => { if (!demoIds.has(refId)) markOpened(refId) },
+    markOpened: (refId: string) => { if (!isBuiltInMaterial(refId)) markOpened(refId) },
     getLinks,
     recentlyOpened: (limit = 6) => recentlyOpened(limit).filter((refId) => pageById.has(refId)),
     recentlyCollected: (limit = 6) => pages.slice(0, limit).map((page) => page.refId),
     outgoing,
     backlinks,
-    resolvePage: (page: BrainPage) => ({ ...resolvePage(page, spaces), ...(demoIds.has(page.refId) ? { demo: true } : {}) }),
+    resolvePage: (page: BrainPage) => resolvePage(page, spaces),
     resolveById: (refId: string) => {
       const page = pageById.get(refId)
-      return page === undefined ? undefined : { ...resolvePage(page, spaces), ...(demoIds.has(page.refId) ? { demo: true } : {}) }
+      return page === undefined ? undefined : resolvePage(page, spaces)
     },
   }
 }

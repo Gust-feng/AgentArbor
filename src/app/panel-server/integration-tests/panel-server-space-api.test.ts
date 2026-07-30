@@ -13,7 +13,7 @@ async function startSpaceTestServer(directory: string): Promise<{
   readonly runtime: PanelRuntime;
   readonly httpServer: Server;
 }> {
-  const runtime = createPanelRuntime({ configDirectory: directory });
+  const runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
   const httpServer = createServer(createPanelRequestHandler(runtime));
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
@@ -35,16 +35,9 @@ test("Space API organizes reference metadata without altering the referenced con
     assert.equal(created.status, 201);
     const spaceId = created.body.space.id as string;
 
-    const folder = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/folders`, {
-      method: "POST",
-      body: { title: "材料" },
-    });
-    assert.equal(folder.status, 201);
-
     const reference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       method: "POST",
       body: {
-        parentFolderId: folder.body.folder.id,
         title: "架构讨论",
         reference: { kind: "conversation", conversationId: "ordinary-conversation-1", conversationTitle: "架构讨论" },
       },
@@ -53,13 +46,13 @@ test("Space API organizes reference metadata without altering the referenced con
 
     const tree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
     assert.equal(tree.status, 200);
-    assert.equal(tree.body.tree.entries[0].kind, "folder");
-    assert.equal(tree.body.tree.entries[0].children[0].item.reference.conversationId, "ordinary-conversation-1");
+    assert.equal(tree.body.tree.entries[0].kind, "reference");
+    assert.equal(tree.body.tree.entries[0].item.reference.conversationId, "ordinary-conversation-1");
 
     const removed = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(reference.body.item.id)}`, { method: "DELETE" });
     assert.equal(removed.status, 200);
     const afterRemoval = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
-    assert.equal(afterRemoval.body.tree.entries[0].children.length, 0);
+    assert.equal(afterRemoval.body.tree.entries.length, 0);
     // Space removal is strictly metadata-only: the feature never consults or deletes Ordinary state.
     assert.equal((await runtime.ordinaryAgentFeature.queries.listConversations()).length, 0);
   } finally {
@@ -89,42 +82,24 @@ test("Space API rejects malformed references and reports missing entries", async
   }
 });
 
-test("Space API deletes internal folders without deleting referenced disk content", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-folder-delete-"));
-  const externalFile = path.join(directory, "external.txt");
-  await fs.writeFile(externalFile, "keep", "utf8");
-  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
-  try {
-    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "整理" } });
-    const spaceId = created.body.space.id as string;
-    const folder = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/folders`, { method: "POST", body: { title: "内部文件夹" } });
-    await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
-      method: "POST",
-      body: { parentFolderId: folder.body.folder.id, title: "外部文件", reference: { kind: "local_file", path: externalFile } },
-    });
-
-    const removed = await requestJson(baseUrl, `/api/spaces/folders/${encodeURIComponent(folder.body.folder.id as string)}`, { method: "DELETE" });
-    assert.equal(removed.status, 200);
-    assert.deepEqual((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`)).body.tree.entries, []);
-    assert.equal(await fs.readFile(externalFile, "utf8"), "keep");
-  } finally {
-    await closePanelServer(httpServer, runtime);
-    await removeTemporaryTree(directory);
-  }
-});
-
 test("Space API creates and physically deletes app-owned folders and files", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-managed-folder-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
   try {
     const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "本地资料" } });
     const spaceId = created.body.space.id as string;
+    const existing = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "已有资料", reference: { kind: "conversation", conversationId: "existing-reference" } },
+    });
     const folder = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
       method: "POST",
       body: { title: "我的文件" },
     });
     assert.equal(folder.status, 201);
     assert.equal(folder.body.item.reference.kind, "managed_folder");
+    const orderedTree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    assert.deepEqual(orderedTree.body.tree.entries.map((entry: { readonly item: { readonly title: string } }) => entry.item.title), ["我的文件", "已有资料"]);
     const itemId = folder.body.item.id as string;
     const folderPath = folder.body.item.reference.path as string;
     assert.equal(await fs.stat(folderPath).then((stat) => stat.isDirectory()), true);
@@ -143,13 +118,11 @@ test("Space API creates and physically deletes app-owned folders and files", asy
     assert.equal(deletedFile.status, 200);
     assert.equal(await fs.stat(path.join(folderPath, "draft.md")).then(() => true, () => false), false);
 
-    const unlink = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}`, { method: "DELETE" });
-    assert.equal(unlink.status, 409);
-    assert.equal(await fs.stat(folderPath).then((stat) => stat.isDirectory()), true);
-
-    const deletedFolder = await requestJson(baseUrl, `/api/spaces/managed-folders/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+    const deletedFolder = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}`, { method: "DELETE" });
     assert.equal(deletedFolder.status, 200);
     assert.equal(await fs.stat(folderPath).then(() => true, () => false), false);
+    const removedExisting = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(existing.body.item.id as string)}`, { method: "DELETE" });
+    assert.equal(removedExisting.status, 200);
     assert.deepEqual((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`)).body.tree.entries, []);
   } finally {
     await closePanelServer(httpServer, runtime);
@@ -197,11 +170,11 @@ test("Space API validates the source Space when moving an entry", async () => {
     const destination = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "目标" } });
     const sourceId = source.body.space.id as string;
     const destinationId = destination.body.space.id as string;
-    const folder = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(sourceId)}/folders`, {
+    const reference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(sourceId)}/references`, {
       method: "POST",
-      body: { title: "待移动" },
+      body: { title: "待移动", reference: { kind: "conversation", conversationId: "move-me" } },
     });
-    const target = { kind: "folder", id: folder.body.folder.id as string };
+    const target = { kind: "reference", id: reference.body.item.id as string };
 
     const wrongSource = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(destinationId)}/move`, {
       method: "POST",
@@ -411,8 +384,8 @@ test("Space API blocks every disk mutation when historical Spaces share one work
     });
     const secondReferenceId = "historical-duplicate-reference";
     runtime.workbenchDatabase.connection.prepare(`
-      INSERT INTO space_references(id, space_id, parent_folder_id, title, reference_json, created_at, updated_at)
-      VALUES (?, ?, NULL, ?, ?, ?, ?)
+      INSERT INTO space_references(id, space_id, title, reference_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       secondReferenceId,
       secondSpace.body.space.id,

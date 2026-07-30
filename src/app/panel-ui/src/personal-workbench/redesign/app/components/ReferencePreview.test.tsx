@@ -105,10 +105,72 @@ test('lets an older preview GET converge on a save that is still in flight', asy
   expect(getCachedReferencePreview('reference-one')).toEqual(saved)
 })
 
-test('isolates caller cancellation while reusing the same preview request', async () => {
+test('waits for an in-flight save before starting a preview GET', async () => {
+  const saved = textPreview('2:4', '新内容')
+  let resolvePut: ((response: Response) => void) | undefined
+  const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'PUT') return await new Promise<Response>((resolve) => { resolvePut = resolve })
+    throw new Error('读取不应在保存完成前发起')
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  const saveRequest = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
+  const previewRequest = fetchSpaceReferencePreview('reference-one')
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  resolvePut?.(new Response(JSON.stringify({ preview: saved }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+  await expect(saveRequest).resolves.toEqual(saved)
+  await expect(previewRequest).resolves.toEqual(saved)
+  expect(getCachedReferencePreview('reference-one')).toEqual(saved)
+})
+
+test('refreshes a read after a failed save instead of propagating the write error', async () => {
+  const old = textPreview('1:4', '旧缓存')
+  const current = textPreview('3:4', '当前内容')
+  let resolvePut: ((response: Response) => void) | undefined
+  let previewReads = 0
+  const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'PUT') return await new Promise<Response>((resolve) => { resolvePut = resolve })
+    previewReads += 1
+    return new Response(JSON.stringify({ preview: previewReads === 1 ? old : current }), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  await fetchSpaceReferencePreview('reference-one')
+  const saveRequest = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '冲突内容' })
+  const previewRequest = fetchSpaceReferencePreview('reference-one')
+  resolvePut?.(new Response(JSON.stringify({ error: { message: '文件已被外部修改' } }), { status: 409, headers: { 'content-type': 'application/json' } }))
+
+  await expect(saveRequest).rejects.toMatchObject({ status: 409 })
+  await expect(previewRequest).resolves.toEqual(current)
+  expect(previewReads).toBe(2)
+  expect(getCachedReferencePreview('reference-one')).toEqual(current)
+})
+
+test('keeps each save promise bound to its own HTTP result', async () => {
+  const saved = textPreview('2:4', '第一次')
+  const putResolvers: Array<(response: Response) => void> = []
+  const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'PUT') return await new Promise<Response>((resolve) => { putResolvers.push(resolve) })
+    throw new Error('不应读取')
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  const firstSave = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '第一次' })
+  const secondSave = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '第二次' })
+  expect(putResolvers).toHaveLength(2)
+
+  putResolvers[0]?.(new Response(JSON.stringify({ preview: saved }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  putResolvers[1]?.(new Response(JSON.stringify({ error: { message: '第二次保存冲突' } }), { status: 409, headers: { 'content-type': 'application/json' } }))
+
+  await expect(firstSave).resolves.toEqual(saved)
+  await expect(secondSave).rejects.toMatchObject({ status: 409 })
+})
+
+test('cancels one preview read without affecting another caller', async () => {
   const preview = textPreview('1:4', '共享内容')
-  let resolveRequest: ((response: Response) => void) | undefined
-  const fetchMock = vi.fn(async () => await new Promise<Response>((resolve) => { resolveRequest = resolve }))
+  const resolvers: Array<(response: Response) => void> = []
+  const fetchMock = vi.fn(async () => await new Promise<Response>((resolve) => { resolvers.push(resolve) }))
   vi.stubGlobal('fetch', fetchMock)
   const firstController = new AbortController()
 
@@ -117,9 +179,9 @@ test('isolates caller cancellation while reusing the same preview request', asyn
   firstController.abort()
 
   await expect(first).rejects.toMatchObject({ name: 'AbortError' })
-  resolveRequest?.(new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  resolvers.forEach((resolve) => resolve(new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } })))
   await expect(second).resolves.toEqual(preview)
-  expect(fetchMock).toHaveBeenCalledTimes(1)
+  expect(fetchMock).toHaveBeenCalledTimes(2)
 })
 
 test('starts a fresh preview request after a file mutation invalidates an older request', async () => {
@@ -165,6 +227,9 @@ test('batches preview notifications and keeps API data domains isolated', async 
 
   await waitFor(() => expect(managedListener).toHaveBeenCalledTimes(1))
   expect(spaceListener).toHaveBeenCalledTimes(1)
+  await fetchSpaceReferencePreview('managed-one', '', undefined, '/api/personal-knowledge/assets')
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  expect(managedListener).toHaveBeenCalledTimes(1)
   unsubscribeManaged()
   unsubscribeSpace()
 })
@@ -294,6 +359,32 @@ test('initializes the editable draft from a cached preview without saving empty 
   await user.click(screen.getByRole('button', { name: '源码' }))
   await user.type(screen.getByRole('textbox'), '新增内容')
   await waitFor(() => expect(writes.some((text) => text.includes('新增内容'))).toBe(true))
+})
+
+test('uses the latest successful fingerprint when edits queue behind an in-flight save', async () => {
+  const putBodies: Array<{ expectedFingerprint: string; text: string }> = []
+  const putResolvers: Array<(response: Response) => void> = []
+  vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'PUT') {
+      putBodies.push(JSON.parse(String(init.body)) as { expectedFingerprint: string; text: string })
+      return await new Promise<Response>((resolve) => { putResolvers.push(resolve) })
+    }
+    return new Response(JSON.stringify({ preview: textPreview('f0', '开始') }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  render(<ReferencePreview itemId="reference-one" fallbackTitle="note.txt" canOpen={false} onOpen={() => undefined} />)
+  const editor = await screen.findByRole('textbox')
+  fireEvent.change(editor, { target: { value: '第一次' } })
+  await waitFor(() => expect(putBodies).toHaveLength(1), { timeout: 1_500 })
+  fireEvent.change(editor, { target: { value: '第二次' } })
+  await new Promise((resolve) => setTimeout(resolve, 550))
+  expect(putBodies).toHaveLength(1)
+
+  putResolvers[0]?.(new Response(JSON.stringify({ preview: textPreview('f1', '第一次') }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  await waitFor(() => expect(putBodies).toHaveLength(2))
+  expect(putBodies[1]).toEqual(expect.objectContaining({ expectedFingerprint: 'f1', text: '第二次' }))
+  putResolvers[1]?.(new Response(JSON.stringify({ preview: textPreview('f2', '第二次') }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
 })
 
 test('keeps the preview shell mounted but isolates document state while switching files', async () => {

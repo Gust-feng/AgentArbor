@@ -75,6 +75,7 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
   try {
     const createdRuntime = createPanelRuntime(options);
     runtime = createdRuntime;
+    await createdRuntime.initialWorkbenchDataReady;
     const server = createServer(createPanelRequestHandler(createdRuntime));
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 9090;
@@ -427,6 +428,7 @@ export async function releasePanelRuntimeResources(
 ): Promise<void> {
   runtime.isQuiescing = true;
   const errors: unknown[] = [];
+  await captureCleanupError(errors, () => runtime.initialWorkbenchDataReady);
   await captureCleanupError(errors, () => ordinaryDisposal);
   // Keep the connector subscribed until Ordinary has produced its final stable facts.
   await captureCleanupError(errors, () => runtime.ordinaryPathMemoryConnector.release());

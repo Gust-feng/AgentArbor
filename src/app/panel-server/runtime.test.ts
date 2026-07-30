@@ -16,6 +16,7 @@ test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary c
     await writeSubAgentPackage(subAgentRoot);
     runtime = createPanelRuntime({
       configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
       subAgentRoots: [{
         rootPath: subAgentRoot,
         sourceKind: "project",
@@ -37,7 +38,7 @@ test("Panel capability snapshots freeze NoteWrite so the model can actually use 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-agent-notes-catalog-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
   try {
-    runtime = createPanelRuntime({ configDirectory: directory });
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const snapshot = await runtime.capabilityCenter.snapshot();
     const noteWrite = snapshot.toolCatalog.tools.find((tool) => tool.name === "NoteWrite");
 
@@ -53,7 +54,7 @@ test("Panel capability snapshots freeze Space tools so an Ordinary Agent can org
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-catalog-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
   try {
-    runtime = createPanelRuntime({ configDirectory: directory });
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const snapshot = await runtime.capabilityCenter.snapshot();
     for (const name of ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]) {
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
@@ -67,7 +68,7 @@ test("Panel capability snapshots freeze Personal Knowledge tools for Ordinary ru
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-personal-knowledge-catalog-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
   try {
-    runtime = createPanelRuntime({ configDirectory: directory });
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const snapshot = await runtime.capabilityCenter.snapshot();
     for (const name of ["KnowledgeSearch", "KnowledgeRead", "KnowledgeCreateNote", "KnowledgeUpdateNote", "KnowledgeCollect"]) {
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
@@ -83,6 +84,7 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
   try {
     runtime = createPanelRuntime({
       configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
       ordinaryAgentExecution: completedExecution("memory answer"),
     });
     const sessionRef = ordinaryAgentSessionRef();
@@ -123,7 +125,7 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-agent-notes-runtime-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
   try {
-    runtime = createPanelRuntime({ configDirectory: directory });
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const workspace = path.join(directory, "project");
     await runtime.agentNotesFeature.commands.write({ kind: "global" }, "- Reply in Chinese.");
     await runtime.agentNotesFeature.commands.write(

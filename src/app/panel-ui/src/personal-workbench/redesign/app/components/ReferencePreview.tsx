@@ -1,8 +1,8 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ForwardedRef, type ReactNode } from 'react'
 import { diffLines, type Change } from 'diff'
 import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Folder, RefreshCw } from 'lucide-react'
 import { common, createLowlight } from 'lowlight'
-import { fetchSpaceReferencePreview, getCachedReferencePreview, saveSpaceReferenceText, type SpaceReferencePreview } from './referencePreviewClient'
+import { fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, saveSpaceReferenceText, type SpaceReferencePreview } from './referencePreviewClient'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import './reference-preview.css'
 
@@ -16,22 +16,22 @@ type PendingReferenceSave = {
   readonly epoch: number
   readonly itemId: string
   readonly relativePath: string
-  readonly expectedFingerprint: string
   readonly text: string
 }
+export type ReferencePreviewHandle = { readonly flush: () => Promise<void>; readonly discard: () => void }
+type ReferenceDocumentSessionProps = {
+  itemId: string
+  initialRelativePath?: string
+  fallbackTitle: string
+  canOpen: boolean
+  onOpen: () => void
+  actions?: ReactNode
+  apiBase?: string
+  readOnly?: boolean
+  onNavigatePath?: (relativePath: string) => void
+}
 
-export function ReferencePreview({
-  itemId,
-  initialRelativePath = '',
-  fallbackTitle,
-  canOpen,
-  onOpen,
-  actions,
-  apiBase,
-  readOnly = false,
-  onNavigatePath,
-  embedded = false,
-}: {
+export const ReferencePreview = forwardRef<ReferencePreviewHandle, {
   itemId: string
   initialRelativePath?: string
   fallbackTitle: string
@@ -42,11 +42,24 @@ export function ReferencePreview({
   readOnly?: boolean
   onNavigatePath?: (relativePath: string) => void
   embedded?: boolean
-}) {
-  const targetKey = `${itemId}:${initialRelativePath}`
+}>(function ReferencePreview({
+  itemId,
+  initialRelativePath = '',
+  fallbackTitle,
+  canOpen,
+  onOpen,
+  actions,
+  apiBase,
+  readOnly = false,
+  onNavigatePath,
+  embedded = false,
+}, ref) {
+  const resolvedApiBase = apiBase ?? '/api/spaces/references'
+  const targetKey = `${resolvedApiBase}:${itemId}:${initialRelativePath}`
   return (
     <div className={`aa-reference-preview${embedded ? ' aa-reference-preview--embedded' : ''}`}>
       <ReferenceDocumentSession
+        ref={ref}
         key={targetKey}
         itemId={itemId}
         initialRelativePath={initialRelativePath}
@@ -54,15 +67,19 @@ export function ReferencePreview({
         canOpen={canOpen}
         onOpen={onOpen}
         actions={actions}
-        apiBase={apiBase}
+        apiBase={resolvedApiBase}
         readOnly={readOnly}
         onNavigatePath={onNavigatePath}
       />
     </div>
   )
-}
+})
 
-function ReferenceDocumentSession({
+const ReferenceDocumentSession = forwardRef<ReferencePreviewHandle, ReferenceDocumentSessionProps>(function ReferenceDocumentSession(props, ref) {
+  return <ReferenceDocumentSessionView {...props} sessionRef={ref} />
+})
+
+function ReferenceDocumentSessionView({
   itemId,
   initialRelativePath = '',
   fallbackTitle,
@@ -72,17 +89,8 @@ function ReferenceDocumentSession({
   apiBase = '/api/spaces/references',
   readOnly = false,
   onNavigatePath,
-}: {
-  itemId: string
-  initialRelativePath?: string
-  fallbackTitle: string
-  canOpen: boolean
-  onOpen: () => void
-  actions?: ReactNode
-  apiBase?: string
-  readOnly?: boolean
-  onNavigatePath?: (relativePath: string) => void
-}) {
+  sessionRef,
+}: ReferenceDocumentSessionProps & { sessionRef: ForwardedRef<ReferencePreviewHandle> }) {
   const cachedPreview = getCachedReferencePreview(itemId, initialRelativePath, apiBase)
   const [preview, setPreview] = useState<SpaceReferencePreview | undefined>(cachedPreview)
   const [incoming, setIncoming] = useState<SpaceReferencePreview>()
@@ -94,7 +102,7 @@ function ReferenceDocumentSession({
   const [sourceMode, setSourceMode] = useState(false)
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
   const loadVersionRef = useRef(0)
-  const targetKey = `${itemId}:${initialRelativePath}`
+  const targetKey = `${apiBase}:${itemId}:${initialRelativePath}`
   const draftRef = useRef(draft)
   const pendingSaveRef = useRef<PendingReferenceSave | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -108,13 +116,16 @@ function ReferenceDocumentSession({
     if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = null
     const pending = pendingSaveRef.current
-    if (pending === null) return
+    if (pending === null) return saveChainRef.current
     pendingSaveRef.current = null
-    saveChainRef.current = saveChainRef.current.catch(() => undefined).then(async () => {
+    saveChainRef.current = saveChainRef.current.then(async () => {
+      if (pending.epoch !== saveEpochRef.current) return
+      const expectedFingerprint = fingerprintsRef.current.get(targetKey)
+      if (expectedFingerprint === undefined) return
       const saved = await saveSpaceReferenceText({
         itemId: pending.itemId,
         relativePath: pending.relativePath,
-        expectedFingerprint: pending.expectedFingerprint,
+        expectedFingerprint,
         text: pending.text,
       }, apiBase)
       if (pending.epoch !== saveEpochRef.current) return
@@ -122,32 +133,43 @@ function ReferenceDocumentSession({
       setPreview(saved)
       setIncoming(undefined)
       setShowDiff(false)
+      setError(undefined)
       if (pendingSaveRef.current === null && draftRef.current === pending.text) setSaveState('saved')
-    }).catch(async (reason: unknown) => {
+    }, async () => undefined).catch(async (reason: unknown) => {
       if (pending.epoch !== saveEpochRef.current) return
       const status = typeof reason === 'object' && reason !== null && 'status' in reason ? Number(reason.status) : undefined
       if (status === 409) {
-        const next = await fetchSpaceReferencePreview(pending.itemId, pending.relativePath, undefined, apiBase).catch(() => undefined)
+        const next = await refreshSpaceReferencePreview(pending.itemId, pending.relativePath, undefined, apiBase).catch(() => undefined)
         if (next !== undefined) setIncoming(next)
       }
       setSaveState('error')
       setError(reason instanceof Error ? reason.message : '引用文件保存失败。')
     })
+    return saveChainRef.current
   }
 
   function scheduleSave(text: string, immediate = false) {
     if (readOnly || preview?.content.kind !== 'text' || !preview.content.editable || loading) return
-    const expectedFingerprint = fingerprintsRef.current.get(targetKey)
-    if (expectedFingerprint === undefined) return
+    if (fingerprintsRef.current.get(targetKey) === undefined) return
     setDraft(text)
     setSaveState('saving')
-    pendingSaveRef.current = { epoch: saveEpochRef.current, itemId, relativePath: initialRelativePath, expectedFingerprint, text }
+    pendingSaveRef.current = { epoch: saveEpochRef.current, itemId, relativePath: initialRelativePath, text }
     if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
     if (immediate) persistPendingSave()
     else saveTimerRef.current = setTimeout(persistPendingSave, AUTOSAVE_MS)
   }
 
-  useEffect(() => () => persistPendingSave(), [targetKey])
+  useEffect(() => () => { void persistPendingSave() }, [targetKey])
+
+  useImperativeHandle(sessionRef, () => ({
+    flush: async () => { await persistPendingSave(); await saveChainRef.current },
+    discard: () => {
+      saveEpochRef.current += 1
+      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+      pendingSaveRef.current = null
+    },
+  }), [targetKey])
 
   useEffect(() => {
     if (!dirty) return
@@ -210,7 +232,7 @@ function ReferenceDocumentSession({
       window.removeEventListener('focus', onFocus)
       window.clearInterval(interval)
     }
-  }, [itemId, preview, relativePath])
+  }, [apiBase, itemId, preview, relativePath])
 
   const changes = useMemo(() => {
     if (!showDiff || preview?.content.kind !== 'text' || incoming?.content.kind !== 'text') return undefined

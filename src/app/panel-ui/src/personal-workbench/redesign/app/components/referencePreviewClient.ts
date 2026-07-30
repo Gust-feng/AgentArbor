@@ -3,10 +3,11 @@ import type { SpaceReferencePreview } from '../../../../../../panel-api-contract
 
 export type { SpaceReferencePreview } from '../../../../../../panel-api-contracts'
 
+const MAX_CACHED_PREVIEWS = 64
 const previewCache = new Map<string, SpaceReferencePreview>()
 const previewGeneration = new Map<string, number>()
-const previewInFlight = new Map<string, Promise<SpaceReferencePreview>>()
 const previewMutationInFlight = new Map<string, Promise<SpaceReferencePreview>>()
+const previewReadInFlight = new Map<string, Promise<SpaceReferencePreview>>()
 const previewListeners = new Map<string, Set<() => void>>()
 const previewCacheVersions = new Map<string, number>()
 const pendingPreviewNotifications = new Set<string>()
@@ -27,48 +28,68 @@ export function getReferencePreviewCacheVersion(apiBase = '/api/spaces/reference
 }
 
 export function getCachedReferencePreview(itemId: string, relativePath = '', apiBase = '/api/spaces/references'): SpaceReferencePreview | undefined {
-  return previewCache.get(previewCacheKey(apiBase, itemId, relativePath))
+  const key = previewCacheKey(apiBase, itemId, relativePath)
+  const value = previewCache.get(key)
+  if (value !== undefined) {
+    previewCache.delete(key)
+    previewCache.set(key, value)
+  }
+  return value
 }
 
 export function clearReferencePreviewCacheForTesting(): void {
   previewCache.clear()
   previewGeneration.clear()
-  previewInFlight.clear()
   previewMutationInFlight.clear()
+  previewReadInFlight.clear()
   previewCacheVersions.clear()
   pendingPreviewNotifications.clear()
-  if (previewNotificationTimer !== undefined) {
-    clearTimeout(previewNotificationTimer)
-    previewNotificationTimer = undefined
-  }
+  if (previewNotificationTimer !== undefined) clearTimeout(previewNotificationTimer)
+  previewNotificationTimer = undefined
 }
 
-export async function fetchSpaceReferencePreview(itemId: string, relativePath = '', signal?: AbortSignal, apiBase = '/api/spaces/references'): Promise<SpaceReferencePreview> {
+export async function fetchSpaceReferencePreview(
+  itemId: string,
+  relativePath = '',
+  signal?: AbortSignal,
+  apiBase = '/api/spaces/references',
+): Promise<SpaceReferencePreview> {
   const key = previewCacheKey(apiBase, itemId, relativePath)
-  const existing = previewInFlight.get(key)
-  if (existing !== undefined) return await withAbort(existing, signal)
-  const generation = previewGeneration.get(key) ?? 0
+  const mutation = previewMutationInFlight.get(key)
+  if (mutation !== undefined) {
+    try { return await mutation } catch { /* read the authoritative source after a failed write */ }
+  }
+  if (!previewGeneration.has(key)) previewGeneration.set(key, 0)
+  const generation = previewGeneration.get(key)!
   const query = relativePath.length === 0 ? '' : `?path=${encodeURIComponent(relativePath)}`
   let request!: Promise<SpaceReferencePreview>
   request = (async () => {
     const response = await requestJson<{ preview: SpaceReferencePreview }>(
       `${apiBase}/${encodeURIComponent(itemId)}/preview${query}`,
-      { headers: { accept: 'application/json' } },
+      { headers: { accept: 'application/json' }, signal },
     )
     if ((previewGeneration.get(key) ?? 0) !== generation) {
-      const mutation = previewMutationInFlight.get(key)
-      if (mutation !== undefined) return await mutation
-      const replacement = previewInFlight.get(key)
-      if (replacement !== undefined && replacement !== request) return await replacement
-      return previewCache.get(key) ?? await fetchSpaceReferencePreview(itemId, relativePath, undefined, apiBase)
+      const currentMutation = previewMutationInFlight.get(key)
+      if (currentMutation !== undefined) {
+        try { return await currentMutation } catch { /* fall through */ }
+      }
+      const newerRead = previewReadInFlight.get(key)
+      if (newerRead !== undefined && newerRead !== request) return await newerRead
+      return getCachedReferencePreview(itemId, relativePath, apiBase)
+        ?? await fetchSpaceReferencePreview(itemId, relativePath, signal, apiBase)
     }
     setCachedPreview(apiBase, key, response.preview)
     return response.preview
   })().finally(() => {
-    if (previewInFlight.get(key) === request) previewInFlight.delete(key)
+    if (previewReadInFlight.get(key) === request) previewReadInFlight.delete(key)
   })
-  previewInFlight.set(key, request)
+  previewReadInFlight.set(key, request)
   return await withAbort(request, signal)
+}
+
+export async function refreshSpaceReferencePreview(itemId: string, relativePath = '', signal?: AbortSignal, apiBase = '/api/spaces/references'): Promise<SpaceReferencePreview> {
+  invalidatePreviewKey(apiBase, itemId, relativePath)
+  return await fetchSpaceReferencePreview(itemId, relativePath, signal, apiBase)
 }
 
 export async function saveSpaceReferenceText(input: {
@@ -78,40 +99,23 @@ export async function saveSpaceReferenceText(input: {
   readonly text: string
 }, apiBase = '/api/spaces/references'): Promise<SpaceReferencePreview> {
   const key = previewCacheKey(apiBase, input.itemId, input.relativePath)
-  const generation = (previewGeneration.get(key) ?? 0) + 1
-  previewGeneration.set(key, generation)
+  const generation = advanceGeneration(key)
   let request!: Promise<SpaceReferencePreview>
-  request = (async () => {
-    const response = await requestJson<{ preview: SpaceReferencePreview }>(
-      `${apiBase}/${encodeURIComponent(input.itemId)}/content`,
-      {
-        method: 'PUT',
-        headers: { accept: 'application/json' },
-        body: JSON.stringify({
-          relativePath: input.relativePath,
-          expectedFingerprint: input.expectedFingerprint,
-          text: input.text,
-        }),
-      },
-    )
-    if ((previewGeneration.get(key) ?? 0) !== generation) {
-      const newer = previewMutationInFlight.get(key)
-      if (newer !== undefined && newer !== request) return await newer
-      const cached = previewCache.get(key)
-      if (cached !== undefined) return cached
-      return response.preview
-    }
-    setCachedPreview(apiBase, key, response.preview)
+  request = requestJson<{ preview: SpaceReferencePreview }>(
+    `${apiBase}/${encodeURIComponent(input.itemId)}/content`,
+    {
+      method: 'PUT',
+      headers: { accept: 'application/json' },
+      body: JSON.stringify(input),
+    },
+  ).then((response) => {
+    if ((previewGeneration.get(key) ?? 0) === generation) setCachedPreview(apiBase, key, response.preview)
     return response.preview
-  })().finally(() => {
+  }).finally(() => {
     if (previewMutationInFlight.get(key) === request) previewMutationInFlight.delete(key)
   })
   previewMutationInFlight.set(key, request)
   return await request
-}
-
-function previewCacheKey(apiBase: string, itemId: string, relativePath: string): string {
-  return `${apiBase}:${itemId}:${relativePath}`
 }
 
 export async function renameSpaceReferenceEntry(itemId: string, relativePath: string, name: string): Promise<string> {
@@ -126,12 +130,7 @@ export async function deleteSpaceReferenceEntry(itemId: string, relativePath: st
   invalidateReferencePreview(itemId)
 }
 
-export async function createSpaceReferenceEntry(
-  itemId: string,
-  parentRelativePath: string,
-  name: string,
-  kind: 'file' | 'directory' = 'file',
-): Promise<string> {
+export async function createSpaceReferenceEntry(itemId: string, parentRelativePath: string, name: string, kind: 'file' | 'directory' = 'file'): Promise<string> {
   const body = await mutateReferenceEntry(itemId, 'POST', { parentRelativePath, name, kind }) as { entry?: { relativePath?: string } }
   if (body.entry?.relativePath === undefined) throw new Error('新建文件响应无效。')
   invalidateReferencePreview(itemId)
@@ -148,19 +147,52 @@ async function mutateReferenceEntry(itemId: string, method: 'POST' | 'PATCH' | '
 
 function invalidateReferencePreview(itemId: string, apiBase = '/api/spaces/references'): void {
   const prefix = `${apiBase}:${itemId}:`
-  const keys = new Set([...previewCache.keys(), ...previewGeneration.keys(), ...previewInFlight.keys()])
+  const keys = new Set([...previewCache.keys(), ...previewGeneration.keys()])
   for (const key of keys) {
     if (!key.startsWith(prefix)) continue
     if (previewCache.delete(key)) schedulePreviewNotification(apiBase)
-    previewGeneration.set(key, (previewGeneration.get(key) ?? 0) + 1)
-    previewInFlight.delete(key)
-    previewMutationInFlight.delete(key)
+    advanceGeneration(key)
   }
 }
 
+function invalidatePreviewKey(apiBase: string, itemId: string, relativePath: string): void {
+  const key = previewCacheKey(apiBase, itemId, relativePath)
+  if (previewCache.delete(key)) schedulePreviewNotification(apiBase)
+  advanceGeneration(key)
+}
+
+function advanceGeneration(key: string): number {
+  const generation = (previewGeneration.get(key) ?? 0) + 1
+  previewGeneration.set(key, generation)
+  return generation
+}
+
+function previewCacheKey(apiBase: string, itemId: string, relativePath: string): string {
+  return `${apiBase}:${itemId}:${relativePath}`
+}
+
 function setCachedPreview(apiBase: string, key: string, preview: SpaceReferencePreview): void {
+  const previous = previewCache.get(key)
+  if (previous !== undefined && previewsEqual(previous, preview)) return
+  previewCache.delete(key)
   previewCache.set(key, preview)
+  while (previewCache.size > MAX_CACHED_PREVIEWS) previewCache.delete(previewCache.keys().next().value!)
   schedulePreviewNotification(apiBase)
+}
+
+function previewsEqual(left: SpaceReferencePreview, right: SpaceReferencePreview): boolean {
+  if (left.fingerprint !== right.fingerprint || left.modifiedAt !== right.modifiedAt || left.content.kind !== right.content.kind) return false
+  if (left.content.kind === 'text' && right.content.kind === 'text') return left.content.text === right.content.text
+  if (left.content.kind === 'directory' && right.content.kind === 'directory') {
+    const rightEntries = right.content.entries
+    return left.content.relativePath === right.content.relativePath
+      && left.content.entries.length === right.content.entries.length
+      && left.content.entries.every((entry, index) => {
+        const candidate = rightEntries[index]
+        return candidate?.name === entry.name && candidate.relativePath === entry.relativePath && candidate.kind === entry.kind
+      })
+  }
+  return JSON.stringify(left.content) === JSON.stringify(right.content)
 }
 
 function schedulePreviewNotification(apiBase: string): void {

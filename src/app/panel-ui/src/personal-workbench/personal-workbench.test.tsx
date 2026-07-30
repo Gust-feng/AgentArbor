@@ -30,7 +30,7 @@ test("submits a real Ordinary task from the redesign home", async () => {
   expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
 }, 10_000);
 
-test("projects real Space references instead of substituting the demo library", async () => {
+test("projects real Space references without substituting built-in initial assets", async () => {
   const user = userEvent.setup();
   renderWorkbench({
     spaces: [{
@@ -52,11 +52,33 @@ test("projects real Space references instead of substituting the demo library", 
   expect(screen.queryByText("PyTorch 入门笔记.pdf")).toBeNull();
 });
 
-test("projects knowledge demo cards without importing them into persisted Personal Knowledge", async () => {
+test("renders the original built-in tree alongside real items in the fixed learning Space", async () => {
+  const user = userEvent.setup();
+  renderWorkbench({
+    spaces: [{
+      spaceId: "space-learning",
+      title: "学习空间",
+      demoDataset: "learning-workspace",
+      items: [{ itemId: "created-folder", title: "新建文件夹", kind: "managed_folder" }],
+    }],
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  const tree = await screen.findByRole("tree", { name: "学习空间资料" });
+  const realItem = within(tree).getByText("新建文件夹");
+  expect(realItem).toBeTruthy();
+  expect(within(tree).getByText("2026年学习资料")).toBeTruthy();
+  expect(within(tree).getByText("PyTorch 入门笔记.pdf")).toBeTruthy();
+});
+
+test("renders persisted original knowledge materials without rewriting their presentation", async () => {
   const user = userEvent.setup();
   const fetchMock = vi.fn(async (path: string | URL | Request) => {
     if (String(path) === "/api/personal-knowledge") {
-      return jsonResponse({ snapshot: emptyKnowledgeSnapshot() });
+      return jsonResponse({ snapshot: {
+        ...emptyKnowledgeSnapshot(),
+        pages: [{ refId: "m-attn-pdf", kind: "material", collectedAt: Date.UTC(2026, 6, 29, 10, 0) }],
+      } });
     }
     return jsonResponse({ ok: true });
   });
@@ -66,6 +88,7 @@ test("projects knowledge demo cards without importing them into persisted Person
   await user.click(screen.getByRole("button", { name: "知识库" }));
 
   expect(await screen.findByText("Attention Is All You Need.pdf")).toBeTruthy();
+  expect(screen.queryByText("知识库还空着。")).toBeNull();
   expect(fetchMock.mock.calls.filter(([path]) => String(path) === "/api/personal-knowledge")).not.toHaveLength(0);
 });
 
@@ -545,21 +568,22 @@ test("deletes app-owned folders and creates files from a linked workspace folder
 
 test("routes the Redesign material add menu through Space actions", async () => {
   const user = userEvent.setup();
-  const createFolder = vi.fn().mockResolvedValue(undefined);
+  const createManagedFolder = vi.fn().mockResolvedValue(undefined);
   const addLocalFile = vi.fn().mockResolvedValue(undefined);
   const addWorkspaceFolder = vi.fn().mockResolvedValue(undefined);
   const addConversation = vi.fn().mockResolvedValue(undefined);
   renderWorkbench({
     conversation: { conversationId: "conversation-current", title: "当前对话", turns: [] },
     spaces: [{ spaceId: "space-reading", title: "阅读资料", items: [] }],
-    spaceActions: { createFolder, addLocalFile, addWorkspaceFolder, addConversation },
+    spaceActions: { createManagedFolder, addLocalFile, addWorkspaceFolder, addConversation },
   });
 
   await user.click(screen.getByRole("button", { name: "阅读资料" }));
   await user.click(await screen.findByRole("button", { name: "添加资料" }));
   await user.click(screen.getByRole("button", { name: "新建文件夹" }));
   await user.type(screen.getByRole("textbox", { name: "文件夹名称" }), "研究资料{Enter}");
-  expect(createFolder).toHaveBeenCalledWith("space-reading", "研究资料");
+  expect(createManagedFolder).toHaveBeenCalledWith("space-reading", "研究资料");
+  expect(createManagedFolder).toHaveBeenCalledTimes(1);
 
   await user.click(screen.getByRole("button", { name: "添加资料" }));
   await user.click(screen.getByRole("button", { name: "添加本地文件" }));
@@ -589,6 +613,31 @@ test("opens a Search result in the Space that owns the reference", async () => {
   const tree = await screen.findByRole("tree", { name: "空间乙资料" });
   expect(within(tree).getByText("乙资料.pdf")).toBeTruthy();
   expect(screen.queryByRole("tree", { name: "空间甲资料" })).toBeNull();
+});
+
+test("clears a Search target when the user switches to another Space", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ preview: {
+    itemId: "ref-a",
+    title: "甲资料.md",
+    sourceKind: "local_file",
+    source: "C:/甲资料.md",
+    status: "ready",
+    content: { kind: "text", text: "甲正文", truncated: false, editable: false, language: "md" },
+  } })));
+  renderWorkbench({
+    spaces: [
+      { spaceId: "space-a", title: "空间甲", items: [{ itemId: "ref-a", title: "甲资料.md", kind: "local_file" }] },
+      { spaceId: "space-b", title: "空间乙", items: [{ itemId: "ref-b", title: "乙资料.pdf", kind: "local_file" }] },
+    ],
+  });
+
+  await user.keyboard("{Control>}k{/Control}");
+  await user.click(await screen.findByRole("button", { name: /乙资料\.pdf/u }));
+  await user.click(screen.getByRole("button", { name: "空间甲" }));
+
+  expect(await screen.findByText("甲正文")).toBeTruthy();
+  expect(screen.queryByText("从左侧选择一篇笔记或材料")).toBeNull();
 });
 
 test("opens a real conversation directly from Search", async () => {
@@ -631,19 +680,34 @@ test("resolves a managed Brain asset without consulting the current Space projec
   });
 });
 
-test("uses file-specific SVG icons for Space materials", async () => {
+test("renders the files supplied by the real Space projection", async () => {
   const user = userEvent.setup();
-  renderWorkbench();
+  renderWorkbench({
+    spaces: [{
+      spaceId: "space-learning",
+      title: "学习空间",
+      items: [{
+        itemId: "initial-materials",
+        title: "学习资料",
+        kind: "managed_folder",
+        children: [
+          { itemId: "readme", title: "README.md", kind: "local_file" },
+          { itemId: "project", title: "project.json", kind: "local_file" },
+          { itemId: "ignore", title: ".gitignore", kind: "local_file" },
+          { itemId: "python", title: "gradient-descent.py", kind: "local_file" },
+        ],
+      }],
+    }],
+  });
 
   await user.click(screen.getByRole("button", { name: "学习空间" }));
-
   const tree = await screen.findByRole("tree", { name: "学习空间资料" });
-  const imageRow = within(tree).getByText("神经网络结构图.png").parentElement;
-  const videoRow = within(tree).getByText("梯度下降讲解.mp4").parentElement;
-  const pdfRow = within(tree).getByText("PyTorch 入门笔记.pdf").parentElement;
-  expect(imageRow?.querySelector(".lucide-file-image")).not.toBeNull();
-  expect(videoRow?.querySelector(".lucide-file-video")).not.toBeNull();
-  expect(pdfRow?.querySelector(".lucide-file-text")).not.toBeNull();
+  await user.click(within(tree).getByText("学习资料"));
+
+  expect(within(tree).getByText("README.md")).toBeTruthy();
+  expect(within(tree).getByText("project.json")).toBeTruthy();
+  expect(within(tree).getByText(".gitignore")).toBeTruthy();
+  expect(within(tree).getByText("gradient-descent.py")).toBeTruthy();
 });
 
 test("creates the first Space note directly without entering inline naming", async () => {
@@ -854,7 +918,7 @@ function baseProps(overrides: Partial<PersonalWorkbenchProps> = {}): PersonalWor
     sidebarCollapsed: false,
     onToggleSidebar: vi.fn(),
     conversations: [],
-    spaces: [{ spaceId: "space-study", title: "学习空间", color: "#a8c4b4", demoDataset: "learning-workspace", items: [] }],
+    spaces: [{ spaceId: "space-study", title: "学习空间", color: "#a8c4b4", items: [] }],
     currentRun: { events: [], transcriptNodes: [] },
     inputProps: inputProps(),
     showModelUsage: false,

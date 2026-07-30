@@ -159,7 +159,11 @@ async function start(
   directory: string,
   externalResourceOpener?: (target: { readonly kind: "path" | "url"; readonly value: string }) => Promise<void>,
 ): Promise<{ readonly baseUrl: string; readonly runtime: PanelRuntime; readonly httpServer: Server }> {
-  const runtime = createPanelRuntime({ configDirectory: directory, externalResourceOpener });
+  const runtime = createPanelRuntime({
+    configDirectory: directory,
+    externalResourceOpener,
+    testOnlySkipInitialWorkbenchData: true,
+  });
   const httpServer = createServer(createPanelRequestHandler(runtime));
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);

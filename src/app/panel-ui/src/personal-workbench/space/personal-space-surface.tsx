@@ -52,31 +52,28 @@ export type PersonalSpaceProjection = {
   readonly itemCount?: number;
   readonly description?: string;
   readonly color?: string;
-  /** Explicit prototype content retained for a designated demo Space only. */
+  /** Marks the fixed built-in dataset without changing its original contents. */
   readonly demoDataset?: "learning-workspace";
   readonly items: readonly PersonalSpaceItemProjection[];
 };
 
 export type PersonalSpaceActions = {
   /** Creates an app-owned folder backed by a real directory. */
-  readonly createFolder?: (spaceId: string, title: string, parentFolderId?: string) => void | Promise<void>;
+  readonly createManagedFolder?: (spaceId: string, title: string) => void | Promise<void>;
   /** Opens a host-owned local-file picker, then adds the selected file as a reference. */
-  readonly addLocalFile?: (spaceId: string, parentFolderId?: string) => void | Promise<void>;
+  readonly addLocalFile?: (spaceId: string) => void | Promise<void>;
   /** Opens a host-owned directory picker, then adds the selection as a reference. */
-  readonly addWorkspaceFolder?: (spaceId: string, parentFolderId?: string) => void | Promise<void>;
+  readonly addWorkspaceFolder?: (spaceId: string) => void | Promise<void>;
   /** Adds a validated web-page reference without fetching or copying its content. */
-  readonly addWebReference?: (spaceId: string, title: string, url: string, parentFolderId?: string) => void | Promise<void>;
+  readonly addWebReference?: (spaceId: string, title: string, url: string) => void | Promise<void>;
   /** Adds an explicit reference to the current Ordinary conversation, if one exists. */
-  readonly addConversation?: (spaceId: string, conversationId: string, title: string, parentFolderId?: string) => void | Promise<void>;
+  readonly addConversation?: (spaceId: string, conversationId: string, title: string) => void | Promise<void>;
   readonly move?: (
     sourceSpaceId: string,
-    target: { readonly kind: "folder" | "reference"; readonly id: string },
+    target: { readonly kind: "reference"; readonly id: string },
     destinationSpaceId: string,
-    destinationFolderId?: string,
   ) => void | Promise<void>;
   readonly rename?: (target: PersonalSpaceRenameTarget, title: string) => void | Promise<void>;
-  /** Removes an internal organization folder subtree without deleting referenced external objects. */
-  readonly removeFolder?: (folderId: string) => void | Promise<void>;
   /** Removes non-file references, or physically deletes a linked local file. */
   readonly removeReference?: (itemId: string) => void | Promise<void>;
   /** Deletes an app-owned directory and its contents, then removes its Space reference. */
@@ -85,7 +82,7 @@ export type PersonalSpaceActions = {
 
 /** Space mutations use its domain distinction, not a display-specific item icon kind. */
 export type PersonalSpaceRenameTarget = {
-  readonly kind: "space" | "folder" | "reference";
+  readonly kind: "space" | "reference";
   readonly id: string;
 };
 
@@ -115,7 +112,6 @@ export function PersonalSpaceSurface(props: PersonalSpaceSurfaceProps): React.Re
   const itemCount = countItems(props.space.items);
   const [openActionsFor, setOpenActionsFor] = useState<string | undefined>();
   const [folderTarget, setFolderTarget] = useState(false);
-  const [folderParentId, setFolderParentId] = useState<string | undefined>();
   const [renameTarget, setRenameTarget] = useState<RenameTarget | undefined>();
   const [busyLabel, setBusyLabel] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -156,7 +152,7 @@ export function PersonalSpaceSurface(props: PersonalSpaceSurfaceProps): React.Re
             open={openActionsFor === "space-root-actions"}
             busy={busyLabel !== undefined}
             onToggle={() => setOpenActionsFor((current) => current === "space-root-actions" ? undefined : "space-root-actions")}
-            onCreateFolder={() => { setFolderParentId(undefined); setFolderTarget(true); setOpenActionsFor(undefined); }}
+            onCreateFolder={() => { setFolderTarget(true); setOpenActionsFor(undefined); }}
             onRenameSpace={() => { setRenameTarget({ itemId: props.space.spaceId, title: props.space.title, kind: "space" }); setOpenActionsFor(undefined); }}
             onRun={(label, action) => void runAction(label, action)}
           />
@@ -183,7 +179,6 @@ export function PersonalSpaceSurface(props: PersonalSpaceSurfaceProps): React.Re
               busy={busyLabel !== undefined}
               onToggleActions={setOpenActionsFor}
               onRename={(target) => { setRenameTarget(target); setOpenActionsFor(undefined); }}
-              onCreateFolder={(folderId) => { setFolderTarget(true); setOpenActionsFor(undefined); setFolderParentId(folderId); }}
               onRun={(label, action) => void runAction(label, action)}
             />
           ))}
@@ -198,15 +193,10 @@ export function PersonalSpaceSurface(props: PersonalSpaceSurfaceProps): React.Re
         placeholder="例如：调研材料"
         busy={busyLabel !== undefined}
         error={error}
-        onClose={() => { setFolderTarget(false); setFolderParentId(undefined); }}
+        onClose={() => setFolderTarget(false)}
         onSubmit={(title) => runAction("正在新建文件夹…", async () => {
-          if (folderParentId === undefined) {
-            await props.actions?.createFolder?.(props.space.spaceId, title);
-          } else {
-            await props.actions?.createFolder?.(props.space.spaceId, title, folderParentId);
-          }
+          await props.actions?.createManagedFolder?.(props.space.spaceId, title);
           setFolderTarget(false);
-          setFolderParentId(undefined);
         })}
       />
       <PersonalSpaceNameDialog
@@ -237,21 +227,17 @@ function SpaceTreeItem(props: {
   readonly busy: boolean;
   readonly onToggleActions: (itemId: string | undefined) => void;
   readonly onRename: (target: RenameTarget) => void;
-  readonly onCreateFolder: (folderId: string) => void;
   readonly onRun: (label: string, action: () => void | Promise<void>) => void;
 }): React.ReactElement {
   const hasChildren = props.item.children !== undefined && props.item.children.length > 0;
   const [expanded, setExpanded] = useState(true);
-  const isFolder = props.item.kind === "folder" || props.item.kind === "workspace_folder" || props.item.kind === "managed_folder";
-  const isInternalFolder = props.item.kind === "folder";
+  const isFolder = props.item.kind === "workspace_folder" || props.item.kind === "managed_folder";
   const isManagedFolder = props.item.kind === "managed_folder";
   const isLocalFile = props.item.kind === "local_file";
   const canOpen = props.onOpenItem !== undefined && props.item.openable !== false;
   const canOperate = props.actions?.rename !== undefined
-    || (isInternalFolder && props.actions?.createFolder !== undefined)
-    || (isInternalFolder && props.actions?.removeFolder !== undefined)
     || (isManagedFolder && props.actions?.deleteManagedFolder !== undefined)
-    || (!isInternalFolder && props.actions?.removeReference !== undefined);
+    || (!isManagedFolder && props.actions?.removeReference !== undefined);
   const icon = itemIcon(props.item.kind, expanded);
   const itemDetail = props.item.detail ?? itemKindLabel(props.item.kind);
   const menuId = `space-item-actions-${props.item.itemId}`;
@@ -294,18 +280,8 @@ function SpaceTreeItem(props: {
             {props.openActionsFor === menuId && (
               <div className="personal-space-action-menu personal-space-action-menu--row" role="menu" aria-label={`${props.item.title}操作`}>
                 {props.actions?.rename !== undefined && (
-                  <button type="button" role="menuitem" onClick={() => props.onRename({ itemId: props.item.itemId, title: props.item.title, kind: isInternalFolder ? "folder" : "reference" })}>
+                  <button type="button" role="menuitem" onClick={() => props.onRename({ itemId: props.item.itemId, title: props.item.title, kind: "reference" })}>
                     <Pencil size={15} aria-hidden="true" />重命名
-                  </button>
-                )}
-                {isInternalFolder && props.actions?.createFolder !== undefined && (
-                  <button type="button" role="menuitem" onClick={() => props.onCreateFolder(props.item.itemId)}>
-                    <FolderPlus size={15} aria-hidden="true" />新建子文件夹
-                  </button>
-                )}
-                {isInternalFolder && props.actions?.removeFolder !== undefined && (
-                  <button type="button" role="menuitem" className="personal-space-action-menu__danger" onClick={() => props.onRun("正在删除文件夹…", () => props.actions?.removeFolder?.(props.item.itemId))}>
-                    <Trash2 size={15} aria-hidden="true" />删除文件夹
                   </button>
                 )}
                 {isManagedFolder && props.actions?.deleteManagedFolder !== undefined && (
@@ -313,7 +289,7 @@ function SpaceTreeItem(props: {
                     <Trash2 size={15} aria-hidden="true" />删除文件夹
                   </button>
                 )}
-                {!isInternalFolder && !isManagedFolder && props.actions?.removeReference !== undefined && (
+                {!isManagedFolder && props.actions?.removeReference !== undefined && (
                   <button type="button" role="menuitem" className="personal-space-action-menu__danger" onClick={() => props.onRun(isLocalFile ? "正在删除文件…" : "正在移除引用…", () => props.actions?.removeReference?.(props.item.itemId))}>
                     <Trash2 size={15} aria-hidden="true" />{isLocalFile ? "删除" : "取消链接"}
                   </button>
@@ -378,7 +354,7 @@ function SpaceActionMenuItems(props: {
 }): React.ReactElement {
   return (
     <>
-      {props.actions?.createFolder !== undefined && (
+      {props.actions?.createManagedFolder !== undefined && (
         <button type="button" role="menuitem" onClick={props.onCreateFolder}>
           <FolderPlus size={15} aria-hidden="true" />新建文件夹
         </button>
@@ -475,7 +451,7 @@ function hasAvailableCreateAction(
   currentConversation: PersonalSpaceConversationContext | undefined,
 ): boolean {
   return actions?.rename !== undefined
-    || actions?.createFolder !== undefined
+    || actions?.createManagedFolder !== undefined
     || actions?.addLocalFile !== undefined
     || actions?.addWorkspaceFolder !== undefined
     || (actions?.addConversation !== undefined && currentConversation !== undefined);

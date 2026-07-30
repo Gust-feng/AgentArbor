@@ -7,7 +7,7 @@ import { createSpaceToolRegistryContribution, createSpaceTools } from "./space-t
 import type { SpaceRepository, SpaceTreeSnapshot } from "./contracts.js";
 
 function toolsFixture() {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v1", spaces: [], folders: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v2", spaces: [], referenceItems: [] };
   const repository: SpaceRepository = {
     async read() { return structuredClone(snapshot); },
     async write(next) { snapshot = structuredClone(next); },
@@ -59,7 +59,7 @@ test("Space tools organize references and preserve Ordinary conversation ownersh
 test("Space tools return malformed and missing user inputs as factual outputs", async () => {
   const { spaces, tools } = toolsFixture();
   assert.deepEqual(await execute(tools.get("SpaceAddReference")!, { spaceId: "x", title: "bad", reference: { kind: "conversation" } }), {
-    status: "invalid_input", message: "spaceId, title and a valid reference are required; parentFolderId must be omitted or a string.",
+    status: "invalid_input", message: "spaceId, title and a valid reference are required.",
   });
   assert.deepEqual(await execute(tools.get("SpaceAddReference")!, { spaceId: "missing", title: "file", reference: { kind: "local_file", path: "C:/missing.txt" } }), {
     status: "space_not_found", message: "Space missing was not found",

@@ -49,6 +49,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
   const baseRevisionRef = useRef(note.revision)
   const noteIdRef = useRef(note.id)
   const titleRef = useRef(title)
+  const observedTitleRef = useRef(note.title)
   const sourceBodyRef = useRef(sourceBody)
   const editorBodyRef = useRef(note.bodyMarkdown)
   const sourceModeRef = useRef(sourceMode)
@@ -109,6 +110,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
   useEffect(() => {
     flush()
     setTitle(note.title)
+    observedTitleRef.current = note.title
     setSourceBody(note.bodyMarkdown)
     setSaved(true)
     setSourceMode(false)
@@ -119,6 +121,11 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
     if (isEditorUsable(editor)) editor.commands.setContent(note.bodyMarkdown, { emitUpdate: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id])
+
+  useEffect(() => {
+    if (titleRef.current === observedTitleRef.current) setTitle(note.title)
+    observedTitleRef.current = note.title
+  }, [note.revision, note.title])
 
   useEffect(() => {
     if (!isPersonalKnowledgePersistenceEnabled()) return

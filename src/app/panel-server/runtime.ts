@@ -106,6 +106,7 @@ import { resolveTriggeredSkillContexts } from "./skill-service.js";
 import type { PanelRunInput } from "./request-parsers.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
+import { initializeInitialWorkbenchData } from "./initial-workbench-data.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -146,6 +147,7 @@ export type PanelRuntime = {
   /** Host-owned root for physical directories created from Space. */
   readonly managedSpaceFolderRoot: string;
   readonly knowledgeAssetsReady: Promise<void>;
+  readonly initialWorkbenchDataReady: Promise<void>;
   readonly flushSpaceKnowledgeSync: () => Promise<void>;
   readonly releaseAgentSessionStorage: () => Promise<void>;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
@@ -186,6 +188,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       appUpdateService: resolveAppUpdateService(options),
       ordinaryAgentExecution: options.ordinaryAgentExecution,
       testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
+      testOnlySkipInitialWorkbenchData: options.testOnlySkipInitialWorkbenchData,
       runtimePaths,
     });
   }
@@ -211,6 +214,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     appUpdateService: resolveAppUpdateService(options),
     ordinaryAgentExecution: options.ordinaryAgentExecution,
     testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
+    testOnlySkipInitialWorkbenchData: options.testOnlySkipInitialWorkbenchData,
     runtimePaths,
   });
 }
@@ -245,6 +249,7 @@ function assemblePanelRuntime(input: {
   readonly appUpdateService: AppUpdateServiceLike;
   readonly ordinaryAgentExecution?: import("../ordinary-agent/contracts.js").OrdinaryExecutionPort;
   readonly testOnlyAllowFakeModel?: boolean;
+  readonly testOnlySkipInitialWorkbenchData?: boolean;
 }): PanelRuntime {
   const activeRequestJobs = new Set<Promise<void>>();
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
@@ -291,6 +296,13 @@ function assemblePanelRuntime(input: {
   });
   const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
   const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
+  const initialWorkbenchDataReady = input.testOnlySkipInitialWorkbenchData
+    ? Promise.resolve()
+    : initializeInitialWorkbenchData({
+        database: workbenchDatabase,
+        spaceFeature,
+        personalKnowledgeFeature,
+      });
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
     await reconcileKnowledgeAssets(knowledgeAssetRoot, new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)));
   });
@@ -427,6 +439,7 @@ function assemblePanelRuntime(input: {
     knowledgeAssetRoot,
     managedSpaceFolderRoot,
     knowledgeAssetsReady,
+    initialWorkbenchDataReady,
     flushSpaceKnowledgeSync: () => spaceKnowledgeSync,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
@@ -746,7 +759,5 @@ function resolvePanelRuntimePaths(configDirectory: string | undefined): AgentArb
 }
 
 function spaceTreeEntryContainsReference(entry: SpaceTreeEntry, itemId: string): boolean {
-  return entry.kind === "reference"
-    ? entry.item.id === itemId
-    : entry.children.some((child) => spaceTreeEntryContainsReference(child, itemId));
+  return entry.item.id === itemId;
 }

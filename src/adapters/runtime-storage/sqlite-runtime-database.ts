@@ -33,6 +33,12 @@ export class SqliteRuntimeDatabase {
         imported_at TEXT NOT NULL
       ) STRICT
     `);
+    this.connection.exec(`
+      CREATE TABLE IF NOT EXISTS runtime_initializations (
+        initialization_key TEXT PRIMARY KEY,
+        initialized_at TEXT NOT NULL
+      ) STRICT
+    `);
   }
 
   migrate(owner: string, migrations: readonly SqliteMigration[]): void {
@@ -76,6 +82,18 @@ export class SqliteRuntimeDatabase {
     this.connection.prepare(
       "INSERT OR IGNORE INTO compatibility_imports(import_key, imported_at) VALUES (?, ?)",
     ).run(importKey, new Date().toISOString());
+  }
+
+  hasInitialization(initializationKey: string): boolean {
+    return this.connection.prepare(
+      "SELECT 1 AS found FROM runtime_initializations WHERE initialization_key = ?",
+    ).get(initializationKey) !== undefined;
+  }
+
+  recordInitialization(initializationKey: string): void {
+    this.connection.prepare(
+      "INSERT OR IGNORE INTO runtime_initializations(initialization_key, initialized_at) VALUES (?, ?)",
+    ).run(initializationKey, new Date().toISOString());
   }
 
   health(): {

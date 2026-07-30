@@ -297,7 +297,7 @@ test("shell reports an external occupied port as notStarted without spawning a d
 
 test("panel server close cleans owned background processes and leaves unowned external processes running", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-runtime-guard-e2e-"));
-  const runtime = createPanelRuntime({});
+  const runtime = createPanelRuntime({ testOnlySkipInitialWorkbenchData: true });
   const panelServer = createHttpServer((_request, response) => {
     response.end("ok");
   });

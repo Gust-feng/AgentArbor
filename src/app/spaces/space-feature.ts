@@ -1,17 +1,13 @@
-import { nowIso } from "../../kernel/id.js";
 import {
+  SPACE_TREE_SCHEMA_VERSION,
   SpaceFeatureError,
   type Space,
   type SpaceEvent,
   type SpaceFeature,
-  type SpaceFolder,
   type SpaceMovableTarget,
   type SpaceReferenceItem,
   type SpaceRepository,
-  type SpaceSummary,
   type SpaceTarget,
-  type SpaceTree,
-  type SpaceTreeEntry,
   type SpaceTreeSnapshot,
 } from "./contracts.js";
 import { validateSpaceReference } from "./space-validation.js";
@@ -23,145 +19,101 @@ export type CreateSpaceFeatureInput = {
   readonly workspaceMountIdentity?: (workspacePath: string) => Promise<string>;
 };
 
-/** Owns SpaceTree commands, durable snapshots and read-model projection. */
 export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature {
-  const now = input.now ?? nowIso;
-  const idFactory = input.idFactory ?? (() => crypto.randomUUID());
+  const now = input.now ?? (() => new Date().toISOString());
+  const createId = input.idFactory ?? (() => crypto.randomUUID());
   const listeners = new Set<(event: SpaceEvent) => void>();
-  const pending = new Set<Promise<unknown>>();
-  let commandTail: Promise<void> = Promise.resolve();
   let released = false;
-
-  function assertUsable(operation: string): void {
-    if (released) {
-      throw new SpaceFeatureError("space_feature_released", `Space feature is released and cannot ${operation}`);
-    }
-  }
-
-  function track<T>(operation: Promise<T>): Promise<T> {
-    pending.add(operation);
-    void operation.then(() => undefined, () => undefined).finally(() => pending.delete(operation));
-    return operation;
-  }
-
-  function serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const result = commandTail.then(operation, operation);
-    commandTail = result.then(() => undefined, () => undefined);
-    return track(result);
-  }
-
-  function publish(event: SpaceEvent): void {
-    for (const listener of listeners) {
-      try {
-        listener(event);
-      } catch {
-        // A projection subscriber may fail, but it cannot undo a committed SpaceTree fact.
-      }
-    }
-  }
-
-  function newId(snapshot: SpaceTreeSnapshot): string {
-    const id = idFactory().trim();
+  let tail = Promise.resolve();
+  const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = tail.then(operation, operation);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  const assertUsable = (action: string) => {
+    if (released) throw new SpaceFeatureError("space_feature_released", `Space feature is released and cannot ${action}`);
+  };
+  const publish = (event: SpaceEvent) => listeners.forEach((listener) => listener(event));
+  const newId = (snapshot: SpaceTreeSnapshot): string => {
+    const id = createId().trim();
     if (id.length === 0) throw new SpaceFeatureError("space_invalid_input", "Space ids must not be empty");
-    const taken = new Set([...snapshot.spaces, ...snapshot.folders, ...snapshot.referenceItems].map((entry) => entry.id));
+    const taken = new Set([...snapshot.spaces.map((entry) => entry.id), ...snapshot.referenceItems.map((entry) => entry.id)]);
     if (taken.has(id)) throw new SpaceFeatureError("space_id_collision", `Space id ${id} already exists`);
     return id;
-  }
+  };
 
   return {
     commands: {
-      createSpace({ title }) {
-        assertUsable("create a space");
+      createSpace({ id, title, demoDataset }) {
+        assertUsable("create a Space");
         return serialize(async () => {
           const snapshot = await input.repository.read();
           const at = now();
-          const space: Space = { id: newId(snapshot), title: titleFor(title), createdAt: at, updatedAt: at };
+          const space: Space = {
+            id: id === undefined ? newId(snapshot) : idFor(id, snapshot),
+            title: titleFor(title),
+            ...(demoDataset === undefined ? {} : { demoDataset }),
+            createdAt: at,
+            updatedAt: at,
+          };
           await input.repository.write({ ...snapshot, spaces: [...snapshot.spaces, space] });
           publish({ type: "space.created", space });
           return space;
         });
       },
-      createFolder({ spaceId, parentFolderId, title }) {
-        assertUsable("create a folder");
-        return serialize(async () => {
-          const snapshot = await input.repository.read();
-          requireSpace(snapshot, spaceId);
-          requireParent(snapshot, spaceId, parentFolderId);
-          const at = now();
-          const folder: SpaceFolder = {
-            id: newId(snapshot), spaceId, ...parentFolder(parentFolderId), title: titleFor(title), createdAt: at, updatedAt: at,
-          };
-          await input.repository.write({ ...snapshot, folders: [...snapshot.folders, folder], spaces: touchSpaces(snapshot.spaces, [spaceId], at) });
-          publish({ type: "space.folder_created", folder });
-          return folder;
-        });
-      },
-      addReference({ spaceId, parentFolderId, title, reference }) {
+      addReference({ id, spaceId, title, reference }) {
         assertUsable("add a reference");
         return serialize(async () => {
           const snapshot = await input.repository.read();
           requireSpace(snapshot, spaceId);
-          requireParent(snapshot, spaceId, parentFolderId);
-          await assertWorkspaceMountAvailable(snapshot, reference, input.workspaceMountIdentity);
+          await assertWorkspaceMountUnique(snapshot, reference, input.workspaceMountIdentity);
           const at = now();
           const item: SpaceReferenceItem = {
-            id: newId(snapshot), spaceId, ...parentFolder(parentFolderId), title: titleFor(title), reference: validateSpaceReference(reference), createdAt: at, updatedAt: at,
+            id: id === undefined ? newId(snapshot) : idFor(id, snapshot), spaceId, title: titleFor(title), reference: validateSpaceReference(reference), createdAt: at, updatedAt: at,
           };
-          await input.repository.write({ ...snapshot, referenceItems: [...snapshot.referenceItems, item], spaces: touchSpaces(snapshot.spaces, [spaceId], at) });
+          await input.repository.write({
+            ...snapshot,
+            referenceItems: [item, ...snapshot.referenceItems],
+            spaces: touchSpaces(snapshot.spaces, [spaceId], at),
+          });
           publish({ type: "space.reference_added", item });
           return item;
         });
       },
       rename({ target, title }) {
-        assertUsable("rename a SpaceTree entry");
+        assertUsable("rename a Space entry");
         return serialize(async () => {
           const snapshot = await input.repository.read();
           const at = now();
-          const normalizedTitle = titleFor(title);
-          const updated = renameSnapshot(snapshot, target, normalizedTitle, at);
+          const updated = renameSnapshot(snapshot, target, titleFor(title), at);
           await input.repository.write(updated);
           publish({ type: "space.renamed", target });
           return target;
         });
       },
-      move({ target, destinationSpaceId, destinationFolderId }) {
-        assertUsable("move a SpaceTree entry");
+      move({ target, destinationSpaceId }) {
+        assertUsable("move a Space reference");
         return serialize(async () => {
           const snapshot = await input.repository.read();
           requireSpace(snapshot, destinationSpaceId);
-          requireParent(snapshot, destinationSpaceId, destinationFolderId);
+          const item = requireReference(snapshot, target.id);
           const at = now();
-          const updated = moveSnapshot(snapshot, target, destinationSpaceId, destinationFolderId, at);
-          await input.repository.write(updated);
-          publish({ type: "space.moved", target, destinationSpaceId, destinationFolderId });
-          return target;
-        });
-      },
-      removeFolder(folderId) {
-        assertUsable("remove a folder");
-        return serialize(async () => {
-          const snapshot = await input.repository.read();
-          const folder = snapshot.folders.find((entry) => entry.id === folderId);
-          if (folder === undefined) throw new SpaceFeatureError("space_folder_not_found", `Space folder ${folderId} was not found`);
-          const removedFolderIds = collectFolderSubtreeIds(snapshot.folders, folderId);
-          const at = now();
+          const moved = { ...item, spaceId: destinationSpaceId, updatedAt: at };
           await input.repository.write({
             ...snapshot,
-            folders: snapshot.folders.filter((entry) => !removedFolderIds.has(entry.id)),
-            referenceItems: snapshot.referenceItems.filter((entry) => entry.parentFolderId === undefined || !removedFolderIds.has(entry.parentFolderId)),
-            spaces: touchSpaces(snapshot.spaces, [folder.spaceId], at),
+            referenceItems: [moved, ...snapshot.referenceItems.filter((entry) => entry.id !== item.id)],
+            spaces: touchSpaces(snapshot.spaces, [item.spaceId, destinationSpaceId], at),
           });
-          publish({ type: "space.folder_removed", folderId });
+          publish({ type: "space.moved", target, destinationSpaceId });
+          return target;
         });
       },
       removeReference(itemId) {
         assertUsable("remove a reference");
         return serialize(async () => {
           const snapshot = await input.repository.read();
-          const item = snapshot.referenceItems.find((entry) => entry.id === itemId);
-          if (item === undefined) throw new SpaceFeatureError("space_reference_not_found", `Space reference ${itemId} was not found`);
+          const item = requireReference(snapshot, itemId);
           const at = now();
-          // Do not call a workspace/artifact/conversation API here. This command only deletes this metadata edge.
           await input.repository.write({
             ...snapshot,
             referenceItems: snapshot.referenceItems.filter((entry) => entry.id !== itemId),
@@ -172,229 +124,100 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       },
     },
     queries: {
-      list() {
-        assertUsable("list spaces");
-        return track(input.repository.read().then((snapshot) => summaries(snapshot)));
-      },
-      getTree(spaceId) {
-        assertUsable("read a space");
-        return track(input.repository.read().then((snapshot) => treeFor(snapshot, spaceId)));
-      },
-      getReference(itemId) {
-        assertUsable("read a space reference");
-        return track(input.repository.read().then((snapshot) => snapshot.referenceItems.find((item) => item.id === itemId)));
-      },
-      hasWorkspaceMountConflict(itemId) {
-        assertUsable("check a workspace mount");
-        return track(input.repository.read().then(async (snapshot) => {
-          const item = snapshot.referenceItems.find((entry) => entry.id === itemId);
-          if (item === undefined) throw new SpaceFeatureError("space_reference_not_found", `Space reference ${itemId} was not found`);
-          if (item.reference.kind !== "workspace_folder") return false;
-          const identity = await workspaceMountIdentity(item.reference.path, input.workspaceMountIdentity);
-          for (const candidate of snapshot.referenceItems) {
-            if (candidate.id === item.id || candidate.reference.kind !== "workspace_folder") continue;
-            if (await workspaceMountIdentity(candidate.reference.path, input.workspaceMountIdentity) === identity) return true;
-          }
-          return false;
+      async list() {
+        assertUsable("list Spaces");
+        const snapshot = await input.repository.read();
+        return snapshot.spaces.map((space) => ({
+          ...space,
+          folderCount: snapshot.referenceItems.filter((item) => item.spaceId === space.id && (item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder")).length,
+          referenceItemCount: snapshot.referenceItems.filter((item) => item.spaceId === space.id).length,
         }));
+      },
+      async getTree(spaceId) {
+        assertUsable("read a Space");
+        const snapshot = await input.repository.read();
+        const space = snapshot.spaces.find((entry) => entry.id === spaceId);
+        if (space === undefined) return undefined;
+        const entries = snapshot.referenceItems.filter((item) => item.spaceId === spaceId)
+          .map((item) => ({ kind: "reference" as const, item }));
+        return { space, entries };
+      },
+      async getReference(itemId) {
+        assertUsable("read a reference");
+        return (await input.repository.read()).referenceItems.find((entry) => entry.id === itemId);
+      },
+      async hasWorkspaceMountConflict(itemId) {
+        assertUsable("check a workspace mount");
+        const snapshot = await input.repository.read();
+        const item = requireReference(snapshot, itemId);
+        if (item.reference.kind !== "workspace_folder") return false;
+        const identity = await workspaceMountIdentity(item.reference.path, input.workspaceMountIdentity);
+        for (const candidate of snapshot.referenceItems) {
+          if (candidate.id === item.id || candidate.reference.kind !== "workspace_folder") continue;
+          if (await workspaceMountIdentity(candidate.reference.path, input.workspaceMountIdentity) === identity) return true;
+        }
+        return false;
       },
     },
     events: {
-      subscribe(listener) {
-        assertUsable("subscribe to SpaceTree events");
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     },
-    async release() {
-      if (released) return;
-      released = true;
-      listeners.clear();
-      while (pending.size > 0) await Promise.allSettled([...pending]);
-    },
+    async release() { released = true; await tail; listeners.clear(); },
   };
-}
-
-function collectFolderSubtreeIds(folders: readonly SpaceFolder[], rootId: string): Set<string> {
-  const result = new Set([rootId]);
-  const queue = [rootId];
-  while (queue.length > 0) {
-    const parentId = queue.shift()!;
-    for (const folder of folders) {
-      if (folder.parentFolderId !== parentId || result.has(folder.id)) continue;
-      result.add(folder.id);
-      queue.push(folder.id);
-    }
-  }
-  return result;
-}
-
-async function assertWorkspaceMountAvailable(
-  snapshot: SpaceTreeSnapshot,
-  reference: import("./contracts.js").SpaceReference,
-  identify: CreateSpaceFeatureInput["workspaceMountIdentity"],
-): Promise<void> {
-  if (reference.kind !== "workspace_folder") return;
-  const identity = await workspaceMountIdentity(reference.path, identify);
-  for (const item of snapshot.referenceItems) {
-    if (item.reference.kind !== "workspace_folder") continue;
-    if (await workspaceMountIdentity(item.reference.path, identify) === identity) {
-      throw new SpaceFeatureError("space_workspace_mount_conflict", "This workspace folder is already linked to another Space");
-    }
-  }
-}
-
-async function workspaceMountIdentity(
-  value: string,
-  identify: CreateSpaceFeatureInput["workspaceMountIdentity"],
-): Promise<string> {
-  if (identify !== undefined) return await identify(value);
-  return value.trim().replaceAll("\\", "/").replace(/\/+$/u, "").toLocaleLowerCase("en-US");
 }
 
 function titleFor(value: string): string {
   const title = value.trim();
-  if (title.length === 0) throw new SpaceFeatureError("space_invalid_input", "SpaceTree titles must not be empty");
-  if (title.length > 160) throw new SpaceFeatureError("space_invalid_input", "SpaceTree titles must be at most 160 characters");
+  if (title.length === 0 || title.length > 160) throw new SpaceFeatureError("space_invalid_input", "Space titles must contain 1 to 160 characters");
   return title;
 }
-
-function requireSpace(snapshot: SpaceTreeSnapshot, spaceId: string): Space {
-  const space = snapshot.spaces.find((entry) => entry.id === spaceId);
-  if (space === undefined) throw new SpaceFeatureError("space_not_found", `Space ${spaceId} was not found`);
+function idFor(value: string, snapshot: SpaceTreeSnapshot): string {
+  const id = value.trim();
+  if (id.length === 0) throw new SpaceFeatureError("space_invalid_input", "Space ids must not be empty");
+  const taken = new Set([...snapshot.spaces.map((entry) => entry.id), ...snapshot.referenceItems.map((entry) => entry.id)]);
+  if (taken.has(id)) throw new SpaceFeatureError("space_id_collision", `Space id ${id} already exists`);
+  return id;
+}
+function requireSpace(snapshot: SpaceTreeSnapshot, id: string): Space {
+  const space = snapshot.spaces.find((entry) => entry.id === id);
+  if (space === undefined) throw new SpaceFeatureError("space_not_found", `Space ${id} was not found`);
   return space;
 }
-
-function requireParent(snapshot: SpaceTreeSnapshot, spaceId: string, parentFolderId: string | undefined): void {
-  if (parentFolderId === undefined) return;
-  const parent = snapshot.folders.find((entry) => entry.id === parentFolderId);
-  if (parent === undefined || parent.spaceId !== spaceId) {
-    throw new SpaceFeatureError("space_parent_not_found", `Folder ${parentFolderId} is not in Space ${spaceId}`);
-  }
+function requireReference(snapshot: SpaceTreeSnapshot, id: string): SpaceReferenceItem {
+  const item = snapshot.referenceItems.find((entry) => entry.id === id);
+  if (item === undefined) throw new SpaceFeatureError("space_reference_not_found", `Space reference ${id} was not found`);
+  return item;
 }
-
-function touchSpaces(spaces: readonly Space[], ids: readonly string[], at: string): readonly Space[] {
-  const affected = new Set(ids);
-  return spaces.map((space) => affected.has(space.id) ? { ...space, updatedAt: at } : space);
-}
-
-function parentFolder(parentFolderId: string | undefined): Pick<SpaceFolder, "parentFolderId"> | Record<never, never> {
-  return parentFolderId === undefined ? {} : { parentFolderId };
-}
-
 function renameSnapshot(snapshot: SpaceTreeSnapshot, target: SpaceTarget, title: string, at: string): SpaceTreeSnapshot {
   if (target.kind === "space") {
     requireSpace(snapshot, target.id);
     return { ...snapshot, spaces: snapshot.spaces.map((space) => space.id === target.id ? { ...space, title, updatedAt: at } : space) };
   }
-  if (target.kind === "folder") {
-    const folder = snapshot.folders.find((entry) => entry.id === target.id);
-    if (folder === undefined) throw new SpaceFeatureError("space_folder_not_found", `Space folder ${target.id} was not found`);
-    return {
-      ...snapshot,
-      folders: snapshot.folders.map((entry) => entry.id === target.id ? { ...entry, title, updatedAt: at } : entry),
-      spaces: touchSpaces(snapshot.spaces, [folder.spaceId], at),
-    };
-  }
-  const item = snapshot.referenceItems.find((entry) => entry.id === target.id);
-  if (item === undefined) throw new SpaceFeatureError("space_reference_not_found", `Space reference ${target.id} was not found`);
+  const item = requireReference(snapshot, target.id);
   return {
     ...snapshot,
-    referenceItems: snapshot.referenceItems.map((entry) => entry.id === target.id ? { ...entry, title, updatedAt: at } : entry),
+    referenceItems: snapshot.referenceItems.map((entry) => entry.id === item.id ? { ...entry, title, updatedAt: at } : entry),
     spaces: touchSpaces(snapshot.spaces, [item.spaceId], at),
   };
 }
-
-function moveSnapshot(
-  snapshot: SpaceTreeSnapshot,
-  target: SpaceMovableTarget,
-  destinationSpaceId: string,
-  destinationFolderId: string | undefined,
-  at: string,
-): SpaceTreeSnapshot {
-  if (target.kind === "reference") {
-    const item = snapshot.referenceItems.find((entry) => entry.id === target.id);
-    if (item === undefined) throw new SpaceFeatureError("space_reference_not_found", `Space reference ${target.id} was not found`);
-    return {
-      ...snapshot,
-      referenceItems: snapshot.referenceItems.map((entry) => entry.id === target.id
-        ? { ...entry, spaceId: destinationSpaceId, ...parentFolder(destinationFolderId), updatedAt: at }
-        : entry),
-      spaces: touchSpaces(snapshot.spaces, [item.spaceId, destinationSpaceId], at),
-    };
-  }
-
-  const folder = snapshot.folders.find((entry) => entry.id === target.id);
-  if (folder === undefined) throw new SpaceFeatureError("space_folder_not_found", `Space folder ${target.id} was not found`);
-  const subtreeIds = folderSubtreeIds(snapshot.folders, folder.id);
-  if (destinationFolderId !== undefined && subtreeIds.has(destinationFolderId)) {
-    throw new SpaceFeatureError("space_invalid_move", "A folder cannot be moved into itself or one of its descendants");
-  }
-  return {
-    ...snapshot,
-    folders: snapshot.folders.map((entry) => {
-      if (!subtreeIds.has(entry.id)) return entry;
-      return {
-        ...entry,
-        spaceId: destinationSpaceId,
-        ...(entry.id === folder.id ? { ...parentFolder(destinationFolderId), updatedAt: at } : {}),
-      };
-    }),
-    referenceItems: snapshot.referenceItems.map((item) => subtreeIds.has(item.parentFolderId ?? "")
-      ? { ...item, spaceId: destinationSpaceId }
-      : item),
-    spaces: touchSpaces(snapshot.spaces, [folder.spaceId, destinationSpaceId], at),
-  };
+function touchSpaces(spaces: readonly Space[], ids: readonly string[], at: string): readonly Space[] {
+  const targets = new Set(ids);
+  return spaces.map((space) => targets.has(space.id) ? { ...space, updatedAt: at } : space);
 }
-
-function folderSubtreeIds(folders: readonly SpaceFolder[], rootId: string): ReadonlySet<string> {
-  const result = new Set([rootId]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const folder of folders) {
-      if (folder.parentFolderId !== undefined && result.has(folder.parentFolderId) && !result.has(folder.id)) {
-        result.add(folder.id);
-        changed = true;
-      }
+async function assertWorkspaceMountUnique(snapshot: SpaceTreeSnapshot, reference: SpaceReferenceItem["reference"], identify: CreateSpaceFeatureInput["workspaceMountIdentity"]): Promise<void> {
+  if (reference.kind !== "workspace_folder") return;
+  const identity = await workspaceMountIdentity(reference.path, identify);
+  for (const item of snapshot.referenceItems) {
+    if (item.reference.kind === "workspace_folder" && await workspaceMountIdentity(item.reference.path, identify) === identity) {
+      throw new SpaceFeatureError("space_workspace_mount_conflict", "This workspace folder is already linked to another Space");
     }
   }
-  return result;
+}
+async function workspaceMountIdentity(value: string, identify: CreateSpaceFeatureInput["workspaceMountIdentity"]): Promise<string> {
+  if (identify !== undefined) return await identify(value);
+  return value.trim().replaceAll("\\", "/").replace(/\/+$/u, "").toLocaleLowerCase("en-US");
 }
 
-function summaries(snapshot: SpaceTreeSnapshot): readonly SpaceSummary[] {
-  return snapshot.spaces.map((space) => ({
-    ...space,
-    folderCount: snapshot.folders.filter((folder) => folder.spaceId === space.id).length,
-    referenceItemCount: snapshot.referenceItems.filter((item) => item.spaceId === space.id).length,
-  })).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
-}
-
-function treeFor(snapshot: SpaceTreeSnapshot, spaceId: string): SpaceTree | undefined {
-  const space = snapshot.spaces.find((entry) => entry.id === spaceId);
-  if (space === undefined) return undefined;
-  const foldersByParent = new Map<string | undefined, SpaceFolder[]>();
-  for (const folder of snapshot.folders.filter((entry) => entry.spaceId === spaceId)) {
-    const list = foldersByParent.get(folder.parentFolderId) ?? [];
-    list.push(folder);
-    foldersByParent.set(folder.parentFolderId, list);
-  }
-  const itemsByParent = new Map<string | undefined, SpaceReferenceItem[]>();
-  for (const item of snapshot.referenceItems.filter((entry) => entry.spaceId === spaceId)) {
-    const list = itemsByParent.get(item.parentFolderId) ?? [];
-    list.push(item);
-    itemsByParent.set(item.parentFolderId, list);
-  }
-  const build = (parentFolderId: string | undefined): readonly SpaceTreeEntry[] => {
-    const folders = (foldersByParent.get(parentFolderId) ?? []).sort(compareTitle).map((folder): SpaceTreeEntry => ({
-      kind: "folder", folder, children: build(folder.id),
-    }));
-    const items = (itemsByParent.get(parentFolderId) ?? []).sort(compareTitle).map((item): SpaceTreeEntry => ({ kind: "reference", item }));
-    return [...folders, ...items];
-  };
-  return { space, entries: build(undefined) };
-}
-
-function compareTitle<T extends { readonly title: string; readonly id: string }>(left: T, right: T): number {
-  return left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+export function emptySpaceTreeSnapshot(): SpaceTreeSnapshot {
+  return { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
 }

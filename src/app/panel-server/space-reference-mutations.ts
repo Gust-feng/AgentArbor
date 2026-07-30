@@ -92,24 +92,6 @@ export async function deletePanelSpaceReferenceEntry(
   });
 }
 
-/** Deletes the physical object behind a single-file Space reference. */
-export async function deletePanelSpaceReferenceFile(item: SpaceReferenceItem): Promise<void> {
-  if (item.reference.kind !== "local_file") {
-    throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "只有单文件引用可以执行此操作。");
-  }
-  const stat = await fs.lstat(item.reference.path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-    throw error;
-  });
-  if (!stat.isFile() && !stat.isSymbolicLink()) {
-    throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "这个引用不再是可删除的单个文件。");
-  }
-  await fs.unlink(item.reference.path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-    throw error;
-  });
-}
-
 export async function createPanelSpaceReferenceEntry(
   item: SpaceReferenceItem,
   input: { readonly parentRelativePath: string; readonly name: string; readonly kind: "file" | "directory" },

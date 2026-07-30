@@ -31,6 +31,8 @@ export type PanelServerOptions = {
   readonly ordinaryAgentExecution?: OrdinaryExecutionPort;
   /** Explicit test seam for deterministic provider-backed runtime tests. */
   readonly testOnlyAllowFakeModel?: boolean;
+  /** Test-only opt-out for the product's first-install initial assets. */
+  readonly testOnlySkipInitialWorkbenchData?: boolean;
 };
 
 export type PanelExternalResourceTarget =

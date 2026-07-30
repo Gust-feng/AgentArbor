@@ -64,7 +64,7 @@ async function startPathMemoryTestServer(directory: string): Promise<{
   readonly runtime: PanelRuntime;
   readonly httpServer: Server;
 }> {
-  const runtime = createPanelRuntime({ configDirectory: directory });
+  const runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
   const httpServer = createServer(createPanelRequestHandler(runtime));
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);

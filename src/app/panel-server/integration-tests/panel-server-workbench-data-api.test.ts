@@ -11,7 +11,7 @@ import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
 test("Workbench data API reports health and creates a verified backup", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-data-api-"));
-  const runtime = createPanelRuntime({ configDirectory: directory });
+  const runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
   const server = createServer(createPanelRequestHandler(runtime));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();

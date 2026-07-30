@@ -15,19 +15,9 @@ const spaceSchema = z.object({
   updatedAt: z.string().min(1),
 }).strict();
 
-const folderSchema = z.object({
-  id: z.string().min(1),
-  spaceId: z.string().min(1),
-  parentFolderId: z.string().min(1).optional(),
-  title: z.string().min(1),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-}).strict();
-
 const referenceItemSchema = z.object({
   id: z.string().min(1),
   spaceId: z.string().min(1),
-  parentFolderId: z.string().min(1).optional(),
   title: z.string().min(1),
   reference: spaceReferenceSchema,
   createdAt: z.string().min(1),
@@ -37,11 +27,10 @@ const referenceItemSchema = z.object({
 const snapshotSchema = z.object({
   schemaVersion: z.literal(SPACE_TREE_SCHEMA_VERSION),
   spaces: z.array(spaceSchema),
-  folders: z.array(folderSchema),
   referenceItems: z.array(referenceItemSchema),
 }).strict().superRefine((snapshot, context) => {
   const ids = new Set<string>();
-  for (const [collection, entries] of [["spaces", snapshot.spaces], ["folders", snapshot.folders], ["referenceItems", snapshot.referenceItems]] as const) {
+  for (const [collection, entries] of [["spaces", snapshot.spaces], ["referenceItems", snapshot.referenceItems]] as const) {
     for (const [index, entry] of entries.entries()) {
       if (ids.has(entry.id)) {
         context.addIssue({ code: "custom", path: [collection, index, "id"], message: "ids must be unique across a SpaceTree snapshot" });
@@ -50,41 +39,9 @@ const snapshotSchema = z.object({
     }
   }
   const spaceIds = new Set(snapshot.spaces.map((space) => space.id));
-  const folders = new Map(snapshot.folders.map((folder) => [folder.id, folder]));
-  for (const [index, folder] of snapshot.folders.entries()) {
-    if (!spaceIds.has(folder.spaceId)) {
-      context.addIssue({ code: "custom", path: ["folders", index, "spaceId"], message: "folder space must exist" });
-    }
-    if (folder.parentFolderId !== undefined) {
-      const parent = folders.get(folder.parentFolderId);
-      if (parent === undefined || parent.spaceId !== folder.spaceId) {
-        context.addIssue({ code: "custom", path: ["folders", index, "parentFolderId"], message: "folder parent must exist in the same space" });
-      }
-    }
-  }
-  for (const folder of snapshot.folders) {
-    const visited = new Set<string>();
-    let current = folder;
-    while (current.parentFolderId !== undefined) {
-      if (visited.has(current.id)) {
-        context.addIssue({ code: "custom", path: ["folders"], message: "folder hierarchy cannot contain a cycle" });
-        break;
-      }
-      visited.add(current.id);
-      const parent = folders.get(current.parentFolderId);
-      if (parent === undefined) break;
-      current = parent;
-    }
-  }
   for (const [index, item] of snapshot.referenceItems.entries()) {
     if (!spaceIds.has(item.spaceId)) {
       context.addIssue({ code: "custom", path: ["referenceItems", index, "spaceId"], message: "reference item space must exist" });
-    }
-    if (item.parentFolderId !== undefined) {
-      const parent = folders.get(item.parentFolderId);
-      if (parent === undefined || parent.spaceId !== item.spaceId) {
-        context.addIssue({ code: "custom", path: ["referenceItems", index, "parentFolderId"], message: "reference item parent must exist in the same space" });
-      }
     }
   }
 });
@@ -143,5 +100,5 @@ export function createFileSystemSpaceRepository(rootDir: string): SpaceRepositor
 }
 
 function emptySnapshot(): SpaceTreeSnapshot {
-  return { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], folders: [], referenceItems: [] };
+  return { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
 }

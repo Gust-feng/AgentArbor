@@ -17,15 +17,9 @@ type SpaceTreeResponseTree = {
   readonly entries: readonly SpaceTreeEntry[];
 };
 
-type SpaceTreeEntry =
-  | {
-      readonly kind: "folder";
-      readonly folder: { readonly id: string; readonly title: string; readonly updatedAt: string };
-      readonly children: readonly SpaceTreeEntry[];
-    }
-  | {
-      readonly kind: "reference";
-      readonly item: {
+type SpaceTreeEntry = {
+  readonly kind: "reference";
+  readonly item: {
         readonly id: string;
         readonly title: string;
         readonly updatedAt: string;
@@ -37,8 +31,8 @@ type SpaceTreeEntry =
           readonly conversationId?: string;
           readonly conversationTitle?: string;
         };
-      };
-    };
+  };
+};
 
 type SpaceReferenceKind = "local_file" | "workspace_folder" | "managed_folder" | "web_page" | "generated_artifact" | "conversation";
 
@@ -46,21 +40,19 @@ type SpaceReferenceKind = "local_file" | "workspace_folder" | "managed_folder" |
 export function useSpaceProjection(enabled = true): {
   readonly spaces: readonly PersonalSpaceProjection[];
   readonly createSpace: (title: string) => Promise<void>;
-  readonly createFolder: (spaceId: string, title: string, parentFolderId?: string) => Promise<void>;
-  readonly addLocalFile: (spaceId: string, parentFolderId?: string) => Promise<void>;
-  readonly addWorkspaceFolder: (spaceId: string, parentFolderId?: string) => Promise<void>;
-  readonly addWebReference: (spaceId: string, title: string, url: string, parentFolderId?: string) => Promise<void>;
-  readonly addConversation: (spaceId: string, conversationId: string, conversationTitle: string, parentFolderId?: string) => Promise<void>;
+  readonly createManagedFolder: (spaceId: string, title: string) => Promise<void>;
+  readonly addLocalFile: (spaceId: string) => Promise<void>;
+  readonly addWorkspaceFolder: (spaceId: string) => Promise<void>;
+  readonly addWebReference: (spaceId: string, title: string, url: string) => Promise<void>;
+  readonly addConversation: (spaceId: string, conversationId: string, conversationTitle: string) => Promise<void>;
   readonly move: (
     sourceSpaceId: string,
-    target: { readonly kind: "folder" | "reference"; readonly id: string },
+    target: { readonly kind: "reference"; readonly id: string },
     destinationSpaceId: string,
-    destinationFolderId?: string,
   ) => Promise<void>;
-  readonly rename: (target: { readonly kind: "space" | "folder" | "reference"; readonly id: string }, title: string) => Promise<void>;
+  readonly rename: (target: { readonly kind: "space" | "reference"; readonly id: string }, title: string) => Promise<void>;
   readonly removeReference: (itemId: string) => Promise<void>;
   readonly deleteManagedFolder: (itemId: string) => Promise<void>;
-  readonly removeFolder: (folderId: string) => Promise<void>;
   readonly openReference: (spaceId: string, itemId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
   readonly loading: boolean;
@@ -146,32 +138,29 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`create-space:${title.trim()}`, () => postJson("/api/spaces", { title }));
   }, [runMutation]);
 
-  const createFolder = useCallback(async (spaceId: string, title: string, parentFolderId?: string): Promise<void> => {
-    await runMutation(`create-folder:${spaceId}:${parentFolderId ?? "root"}:${title.trim()}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
+  const createManagedFolder = useCallback(async (spaceId: string, title: string): Promise<void> => {
+    await runMutation(`create-managed-folder:${spaceId}:${title.trim()}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
       title,
-      ...(parentFolderId === undefined ? {} : { parentFolderId }),
     }));
   }, [runMutation]);
 
-  const addLocalFile = useCallback(async (spaceId: string, parentFolderId?: string): Promise<void> => {
+  const addLocalFile = useCallback(async (spaceId: string): Promise<void> => {
     const attachment = await selectLocalContextAttachment();
     if (attachment === undefined) return;
     const reference = localReferenceFromAttachment(attachment);
     if (reference === undefined) throw new Error("所选内容不能作为空间引用。");
-    await runMutation(`add-local-file:${spaceId}:${parentFolderId ?? "root"}:${attachment.ref}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+    await runMutation(`add-local-file:${spaceId}:${attachment.ref}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title: attachment.title,
       reference,
-      ...(parentFolderId === undefined ? {} : { parentFolderId }),
     }));
   }, [runMutation]);
 
-  const addWorkspaceFolder = useCallback(async (spaceId: string, parentFolderId?: string): Promise<void> => {
+  const addWorkspaceFolder = useCallback(async (spaceId: string): Promise<void> => {
     const directory = await selectTaskWorkspaceDirectory();
     if (directory === undefined) return;
-    await runMutation(`add-workspace:${spaceId}:${parentFolderId ?? "root"}:${directory}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+    await runMutation(`add-workspace:${spaceId}:${directory}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title: basename(directory),
       reference: { kind: "workspace_folder", path: directory },
-      ...(parentFolderId === undefined ? {} : { parentFolderId }),
     }));
   }, [runMutation]);
 
@@ -179,12 +168,10 @@ export function useSpaceProjection(enabled = true): {
     spaceId: string,
     title: string,
     url: string,
-    parentFolderId?: string,
   ): Promise<void> => {
-    await runMutation(`add-web:${spaceId}:${parentFolderId ?? "root"}:${url}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+    await runMutation(`add-web:${spaceId}:${url}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title,
       reference: { kind: "web_page", url },
-      ...(parentFolderId === undefined ? {} : { parentFolderId }),
     }));
   }, [runMutation]);
 
@@ -192,35 +179,31 @@ export function useSpaceProjection(enabled = true): {
     spaceId: string,
     conversationId: string,
     conversationTitle: string,
-    parentFolderId?: string,
   ): Promise<void> => {
-    await runMutation(`add-conversation:${spaceId}:${parentFolderId ?? "root"}:${conversationId}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+    await runMutation(`add-conversation:${spaceId}:${conversationId}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title: conversationTitle,
       reference: { kind: "conversation", conversationId, conversationTitle },
-      ...(parentFolderId === undefined ? {} : { parentFolderId }),
     }));
   }, [runMutation]);
 
   const move = useCallback(async (
     sourceSpaceId: string,
-    target: { readonly kind: "folder" | "reference"; readonly id: string },
+    target: { readonly kind: "reference"; readonly id: string },
     destinationSpaceId: string,
-    destinationFolderId?: string,
   ): Promise<void> => {
     await runMutation(`move:${target.kind}:${target.id}`, () => postJson(`/api/spaces/${encodeURIComponent(sourceSpaceId)}/move`, {
       target,
       destinationSpaceId,
-      ...(destinationFolderId === undefined ? {} : { destinationFolderId }),
     }));
   }, [runMutation]);
 
   const rename = useCallback(async (
-    target: { readonly kind: "space" | "folder" | "reference"; readonly id: string },
+    target: { readonly kind: "space" | "reference"; readonly id: string },
     title: string,
   ): Promise<void> => {
     const path = target.kind === "space"
       ? `/api/spaces/${encodeURIComponent(target.id)}/rename`
-      : `/api/spaces/${target.kind === "folder" ? "folders" : "references"}/${encodeURIComponent(target.id)}/rename`;
+      : `/api/spaces/references/${encodeURIComponent(target.id)}/rename`;
     await runMutation(`rename:${target.kind}:${target.id}`, () => postJson(path, { title }));
   }, [runMutation]);
 
@@ -229,11 +212,7 @@ export function useSpaceProjection(enabled = true): {
   }, [runMutation]);
 
   const deleteManagedFolder = useCallback(async (itemId: string): Promise<void> => {
-    await runMutation(`delete-managed-folder:${itemId}`, () => deleteJson(`/api/spaces/managed-folders/${encodeURIComponent(itemId)}`));
-  }, [runMutation]);
-
-  const removeFolder = useCallback(async (folderId: string): Promise<void> => {
-    await runMutation(`remove-folder:${folderId}`, () => deleteJson(`/api/spaces/folders/${encodeURIComponent(folderId)}`));
+    await runMutation(`delete-managed-folder:${itemId}`, () => deleteJson(`/api/spaces/references/${encodeURIComponent(itemId)}`));
   }, [runMutation]);
 
   const openReference = useCallback(async (_spaceId: string, itemId: string): Promise<void> => {
@@ -243,7 +222,7 @@ export function useSpaceProjection(enabled = true): {
   return {
     spaces,
     createSpace,
-    createFolder,
+    createManagedFolder,
     addLocalFile,
     addWorkspaceFolder,
     addWebReference,
@@ -252,7 +231,6 @@ export function useSpaceProjection(enabled = true): {
     rename,
     removeReference,
     deleteManagedFolder,
-    removeFolder,
     openReference,
     refresh,
     loading,
@@ -298,19 +276,10 @@ function projectTree(tree: SpaceTreeResponseTree): PersonalSpaceProjection {
 }
 
 function countEntries(entries: readonly SpaceTreeEntry[]): number {
-  return entries.reduce((count, entry) => count + 1 + (entry.kind === "folder" ? countEntries(entry.children) : 0), 0);
+  return entries.length;
 }
 
 function projectEntry(entry: SpaceTreeEntry): PersonalSpaceItemProjection {
-  if (entry.kind === "folder") {
-    return {
-      itemId: entry.folder.id,
-      title: entry.folder.title,
-      kind: "folder",
-      updatedAtLabel: relativeTimeLabel(entry.folder.updatedAt),
-      children: entry.children.map(projectEntry),
-    };
-  }
   const { item } = entry;
   const openable = item.reference.kind !== "generated_artifact";
   const isFileSystemFolder = item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder";

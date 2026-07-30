@@ -16,7 +16,7 @@ export async function captureKnowledgeAsset(
   item: SpaceReferenceItem,
   relativePath = "",
 ): Promise<NonNullable<KnowledgePage["asset"]>> {
-  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder") {
+  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
     throw new PanelHttpError(409, "knowledge_asset_capture_unavailable", "当前来源暂不支持复制到知识库。");
   }
   const source = await resolvePanelSpaceReferencePath(item, relativePath);

@@ -5,7 +5,6 @@ export {
   type SpaceEvent,
   type SpaceFeature,
   type SpaceFeatureErrorCode,
-  type SpaceFolder,
   type SpaceMovableTarget,
   type SpaceReference,
   type SpaceReferenceItem,

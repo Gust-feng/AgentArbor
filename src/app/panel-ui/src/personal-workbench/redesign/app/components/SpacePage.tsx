@@ -14,7 +14,6 @@ import {
   MessageSquare,
   Plus,
   Search,
-  Maximize2,
   ArrowRight,
   NotebookPen,
   Brain,
@@ -22,6 +21,7 @@ import {
   Pencil,
   Trash2,
   GripVertical,
+  Maximize2,
 } from 'lucide-react'
 import { type View } from './Sidebar'
 import type {
@@ -31,9 +31,9 @@ import type {
 } from '../../../space'
 import { getMaterial, KIND_META } from './materials'
 import { MaterialView, MaterialBody } from './MaterialView'
-import { ReferencePreview } from './ReferencePreview'
+import { ReferencePreview, type ReferencePreviewHandle } from './ReferencePreview'
 import { NoteEditor } from './NoteEditor'
-import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
+import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
 import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
 import { LEARNING_DEMO_SPACE_TREE } from './learningDemoDataset'
 import { getAllNotes, useNotes } from './notesStore'
@@ -52,13 +52,13 @@ interface SpaceItem {
   meta?: string
   defaultExpanded?: boolean
   children?: SpaceItem[]
-  demo?: boolean
   conversationId?: string
   openUrl?: string
   openable?: boolean
   referenceId?: string
   relativePath?: string
   externalChild?: boolean
+  demo?: true
 }
 
 type FileSystemFolderKind = Extract<PersonalSpaceItemProjection['kind'], 'workspace_folder' | 'managed_folder'>
@@ -70,7 +70,7 @@ function isFileSystemFolderKind(kind: PersonalSpaceItemProjection['kind']): kind
 /**
  * 空间里的材料 / 对话引用。引用保留外部来源身份，文本来源可在冲突保护下编辑。
  * (「我写的笔记」是另一类可写对象,来自 notesStore,不在这棵树里。)
- * 这份数据只在明确标记为 learning-workspace 的演示空间中展示。
+ * 所有条目都来自 SpaceFeature 的真实投影；初始内容由后端首次启动初始化。
  */
 function fileIcon(name: string, size: number) {
   const extension = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
@@ -112,7 +112,6 @@ function TreeNode({
   onCreateEntry,
   renameEnabled,
   removeEnabled,
-  removeFolderEnabled,
   removeManagedFolderEnabled,
   isExpanded,
   onToggleExpand,
@@ -130,7 +129,6 @@ function TreeNode({
   onCreateEntry: (item: SpaceItem) => void
   renameEnabled: boolean
   removeEnabled: boolean
-  removeFolderEnabled: boolean
   removeManagedFolderEnabled: boolean
   isExpanded: (id: string) => boolean
   onToggleExpand: (id: string) => void
@@ -145,12 +143,11 @@ function TreeNode({
   const selected = selectedId === item.id
   const canMutateExternalEntry = item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined
   const isManagedFolder = !item.externalChild && item.domainKind === 'managed_folder'
-  const canCreateExternalEntry = !item.demo && item.type === 'folder' && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)
-  const canRename = !item.demo && (canMutateExternalEntry || (!item.externalChild && renameEnabled))
-  const canRemove = !item.demo && (canMutateExternalEntry
-    || (!item.externalChild && item.domainKind === 'folder' && removeFolderEnabled)
+  const canCreateExternalEntry = item.type === 'folder' && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)
+  const canRename = canMutateExternalEntry || (!item.externalChild && renameEnabled)
+  const canRemove = canMutateExternalEntry
     || (isManagedFolder && removeManagedFolderEnabled)
-    || (!item.externalChild && item.domainKind !== 'folder' && item.domainKind !== 'managed_folder' && removeEnabled))
+    || (!item.externalChild && item.domainKind !== 'managed_folder' && removeEnabled)
   const pl = 10 + depth * 14
 
   return (
@@ -241,7 +238,6 @@ function TreeNode({
               onCreateEntry={onCreateEntry}
               renameEnabled={renameEnabled}
               removeEnabled={removeEnabled}
-              removeFolderEnabled={removeFolderEnabled}
               removeManagedFolderEnabled={removeManagedFolderEnabled}
               isExpanded={isExpanded}
               onToggleExpand={onToggleExpand}
@@ -430,6 +426,9 @@ export function SpacePage({
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
   const explorerRef = useRef<HTMLDivElement>(null)
+  const referencePreviewRef = useRef<ReferencePreviewHandle>(null)
+  const selectedStillExists = selectedId !== null
+    && (notes.some((note) => note.id === selectedId) || getItem(tree, selectedId) !== undefined)
 
   function selectItem(id: string) {
     setActionError(null)
@@ -446,7 +445,11 @@ export function SpacePage({
 
   function selectTreeItem(id: string) {
     const item = getItem(tree, id)
-    if (item === undefined || item.demo || item.type === 'folder') {
+    if (item === undefined || item.type === 'folder') {
+      selectItem(id)
+      return
+    }
+    if (item.demo) {
       selectItem(id)
       return
     }
@@ -460,10 +463,10 @@ export function SpacePage({
 
   function toggleExpanded(id: string) {
     const item = getItem(tree, id)
-    if (!expandedIds.has(id) && item?.referenceId !== undefined && isFileSystemFolderKind(item.domainKind) && !referenceChildren.has(id)) {
+    if (!expandedIds.has(id) && item?.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) {
       const referenceId = item.referenceId
       const sourceKind = item.domainKind
-      void fetchSpaceReferencePreview(referenceId, item.relativePath ?? '').then((preview) => {
+      void refreshSpaceReferencePreview(referenceId, item.relativePath ?? '').then((preview) => {
         if (preview.content.kind !== 'directory') return
         const entries = preview.content.entries
         setReferenceChildren((current) => {
@@ -489,6 +492,12 @@ export function SpacePage({
       scrollTop: current?.scrollTop ?? 0,
     })
   }, [expandedIds, memoryKey, selectedId])
+  useEffect(() => {
+    if (targetId !== null && targetId !== undefined) return
+    if (selectedStillExists) return
+    const nextId = notes[0]?.id ?? tree[0]?.id ?? null
+    setSelectedId(nextId)
+  }, [selectedStillExists, targetId, notes, tree])
   useLayoutEffect(() => {
     const explorer = explorerRef.current
     if (explorer !== null) explorer.scrollTop = spaceViewMemory.get(memoryKey)?.scrollTop ?? 0
@@ -543,9 +552,11 @@ export function SpacePage({
 
   // Space feature owns mutations; this page only translates prototype intent.
   async function handleRenameItem(item: SpaceItem, name: string) {
+    if (item.demo) return
     if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
       setActionError(null)
       try {
+        if (selectedId === item.id) await referencePreviewRef.current?.flush()
         const nextRelativePath = await renameSpaceReferenceEntry(item.referenceId, item.relativePath, name)
         await refreshReferenceParent(item.referenceId, item.relativePath)
         await fetchSpaceReferencePreview(item.referenceId, nextRelativePath)
@@ -558,31 +569,21 @@ export function SpacePage({
     if (actions?.rename === undefined) return
     setActionError(null)
     try {
-      await actions.rename({ kind: item.domainKind === 'folder' ? 'folder' : 'reference', id: item.id }, name)
+      await actions.rename({ kind: 'reference', id: item.id }, name)
     } catch (error) {
       setActionError(actionErrorMessage(error))
     }
   }
   async function handleDeleteItem(item: SpaceItem) {
+    if (item.demo) return
     if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
+      if (selectedId === item.id) referencePreviewRef.current?.discard()
       if (!window.confirm(`确定要删除“${item.name}”吗？此操作会删除磁盘上的${item.type === 'folder' ? '文件夹及其内容' : '文件'}。`)) return
       setActionError(null)
       try {
         await deleteSpaceReferenceEntry(item.referenceId, item.relativePath)
         await refreshReferenceParent(item.referenceId, item.relativePath)
         setSelectedId((current) => current === item.id ? null : current)
-      } catch (error) {
-        setActionError(actionErrorMessage(error))
-      }
-      return
-    }
-    if (item.domainKind === 'folder') {
-      if (actions?.removeFolder === undefined) return
-      if (!window.confirm(`确定删除“${item.name}”吗？其中的空间组织和引用会一并移除，但不会删除磁盘上的文件。`)) return
-      setActionError(null)
-      try {
-        await actions.removeFolder(item.id)
-        setSelectedId((prev) => prev === item.id ? null : prev)
       } catch (error) {
         setActionError(actionErrorMessage(error))
       }
@@ -622,7 +623,7 @@ export function SpacePage({
   }
 
   async function refreshReferenceDirectory(referenceId: string, relativePath: string, directoryId: string) {
-    const preview = await fetchSpaceReferencePreview(referenceId, relativePath)
+    const preview = await refreshSpaceReferencePreview(referenceId, relativePath)
     if (preview.content.kind !== 'directory') return
     const entries = preview.content.entries
     const root = getItem(tree, referenceId)
@@ -658,8 +659,23 @@ export function SpacePage({
 
   function handleCreateFolder(title: string) {
     setCreatingFolder(false)
-    if (space === undefined || actions?.createFolder === undefined) return
-    void runSpaceAction(() => actions.createFolder!(space.spaceId, title))
+    if (space === undefined || actions?.createManagedFolder === undefined) return
+    void runSpaceAction(() => actions.createManagedFolder!(space.spaceId, title))
+  }
+
+  function handleNoteFromMaterial(material: { id: string; title: string }) {
+    const firstNote = notes.length === 0
+    const note = create({
+      spaceId,
+      title: firstNote ? '无标题' : undefined,
+      bodyMarkdown: `来自《${material.title}》\n\n`,
+      materialRefs: [material.id],
+    })
+    if (firstNote) {
+      setSelectedId(note.id)
+      return
+    }
+    openNameDraft(note.id)
   }
 
   function beginCreateReferenceFile(targetItem?: SpaceItem) {
@@ -697,23 +713,6 @@ export function SpacePage({
     }
   }
 
-  // 就着一份材料新建笔记:带上 materialRefs(对象层),并在正文留下出处引子。
-  function handleNoteFromMaterial(material: { id: string; title: string }) {
-    const firstNote = notes.length === 0
-    const note = create({
-      spaceId,
-      title: firstNote ? '无标题' : undefined,
-      bodyMarkdown: `来自《${material.title}》\n\n`,
-      materialRefs: [material.id],
-    })
-    if (firstNote) {
-      setSelectedId(note.id)
-      return
-    }
-    openNameDraft(note.id)
-  }
-
-  // 全屏/专注阅读材料:叠加在整屏之上
   if (fullscreenMaterial) {
     return <MaterialView material={fullscreenMaterial} onClose={() => setFullscreenId(null)} />
   }
@@ -814,7 +813,7 @@ export function SpacePage({
                 visible
                 trigger={<Plus size={13} />}
                 actions={[
-                  ...(actions?.createFolder === undefined ? [] : [{
+                  ...(actions?.createManagedFolder === undefined ? [] : [{
                     label: '新建文件夹',
                     icon: <Folder size={12} />,
                     onClick: () => setCreatingFolder(true),
@@ -866,7 +865,6 @@ export function SpacePage({
                 onCreateEntry={beginCreateReferenceFile}
                 renameEnabled={actions?.rename !== undefined}
                 removeEnabled={actions?.removeReference !== undefined}
-                removeFolderEnabled={actions?.removeFolder !== undefined}
                 removeManagedFolderEnabled={actions?.deleteManagedFolder !== undefined}
                 isExpanded={(id) => expandedIds.has(id)}
                 onToggleExpand={toggleExpanded}
@@ -901,18 +899,11 @@ export function SpacePage({
                 className="shrink-0 flex items-center gap-3 px-5"
                 style={{ height: 48, borderBottom: '1px solid var(--aa-border, rgba(45,40,34,0.09))' }}
               >
-                <span
-                  className="w-2.5 h-2.5 rounded-sm shrink-0"
-                  style={{ background: KIND_META[selectedMaterial.kind].color }}
-                />
+                <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: KIND_META[selectedMaterial.kind].color }} />
                 <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>
-                    {selectedMaterial.title}
-                  </span>
+                  <span className="text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>{selectedMaterial.title}</span>
                   {selectedMaterial.meta && (
-                    <span className="text-xs shrink-0" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                      {selectedMaterial.meta}
-                    </span>
+                    <span className="text-xs shrink-0" style={{ color: 'var(--aa-text-3, #aba39b)' }}>{selectedMaterial.meta}</span>
                   )}
                 </div>
                 <span
@@ -964,6 +955,7 @@ export function SpacePage({
           </CenteredCard>
           ) : selectedItem?.type !== 'folder' && selectedItem ? (
             <ReferencePreview
+              ref={referencePreviewRef}
               itemId={selectedItem.referenceId ?? selectedItem.id}
               initialRelativePath={selectedItem.relativePath ?? ''}
               fallbackTitle={selectedReferenceRoot?.name ?? selectedItem.name}
@@ -1141,6 +1133,8 @@ function InlineName({
 }) {
   const [draft, setDraft] = useState(value)
   const ref = useRef<HTMLInputElement>(null)
+  const settledRef = useRef(false)
+  const blurTimerRef = useRef<number | undefined>(undefined)
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -1150,10 +1144,27 @@ function InlineName({
     const len = el.value.length
     el.setSelectionRange(len, len)
   }, [])
+  useEffect(() => () => {
+    if (blurTimerRef.current !== undefined) window.clearTimeout(blurTimerRef.current)
+  }, [])
+  function cancel() {
+    if (settledRef.current) return
+    settledRef.current = true
+    onCancel()
+  }
   function commit() {
+    if (settledRef.current) return
+    settledRef.current = true
     const t = draft.trim()
     if (t) onCommit(t)
     else onCancel()
+  }
+  function scheduleBlurCommit() {
+    if (blurTimerRef.current !== undefined) window.clearTimeout(blurTimerRef.current)
+    blurTimerRef.current = window.setTimeout(() => {
+      blurTimerRef.current = undefined
+      if (document.activeElement !== ref.current) commit()
+    }, 0)
   }
   return (
     <input
@@ -1161,12 +1172,23 @@ function InlineName({
       aria-label={label}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
+      onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') commit()
-        if (e.key === 'Escape') onCancel()
+      onFocus={() => {
+        if (blurTimerRef.current !== undefined) window.clearTimeout(blurTimerRef.current)
+        blurTimerRef.current = undefined
       }}
-      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          commit()
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          cancel()
+        }
+      }}
+      onBlur={scheduleBlurCommit}
       className="flex-1 min-w-0 text-sm bg-transparent outline-none"
       style={{
         height: 20,
@@ -1262,7 +1284,7 @@ function hasMaterialCreateAction(
   actions: PersonalSpaceActions | undefined,
   currentConversation: SpacePageProps['currentConversation'],
 ): boolean {
-  return actions?.createFolder !== undefined
+  return actions?.createManagedFolder !== undefined
     || actions?.addLocalFile !== undefined
     || actions?.addWorkspaceFolder !== undefined
     || (actions?.addConversation !== undefined && currentConversation !== undefined)
@@ -1295,7 +1317,7 @@ function CollectButton({
       disabled={pending}
       onClick={() => {
         if (sourceReferenceId !== undefined) {
-          if (sourcePage !== undefined) brain.uncollect(sourcePage.refId)
+          if (sourcePage !== undefined) brain.uncollect(sourcePage.refId, pendingKey)
           else brain.collectSpaceReference(sourceReferenceId, sourceRelativePath)
           return
         }

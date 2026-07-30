@@ -167,7 +167,9 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   const navigate = (target: View): void => {
     if (target === "search") setPreviousView(view);
     if (target === "conv-new") props.inputProps.onChange("");
-    if (target !== "space") setSpaceTargetId(null);
+    // Only search navigation sets a target explicitly. Normal navigation must
+    // clear it, otherwise a later Space switch can reuse an id from another Space.
+    setSpaceTargetId(null);
     if (target !== "brain") setBrainSelectedId(null);
     setView(target);
   };

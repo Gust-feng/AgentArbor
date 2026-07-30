@@ -9,7 +9,7 @@ const space: PersonalSpaceProjection = {
   items: [{
     itemId: "folder-notes",
     title: "笔记",
-    kind: "folder",
+    kind: "managed_folder",
   }, {
     itemId: "reference-conversation",
     title: "关于阅读方法的讨论",
@@ -19,9 +19,9 @@ const space: PersonalSpaceProjection = {
 
 test("collects a folder name before returning a Space command to the host", async () => {
   const user = userEvent.setup();
-  const createFolder = vi.fn();
+  const createManagedFolder = vi.fn();
 
-  render(<PersonalSpaceSurface space={space} actions={{ createFolder }} />);
+  render(<PersonalSpaceSurface space={space} actions={{ createManagedFolder }} />);
 
   await user.click(screen.getByRole("button", { name: "空间操作" }));
   await user.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
@@ -30,21 +30,16 @@ test("collects a folder name before returning a Space command to the host", asyn
   await user.type(screen.getByRole("textbox", { name: "名称" }), " 调研材料 ");
   await user.click(screen.getByRole("button", { name: "新建文件夹" }));
 
-  expect(createFolder).toHaveBeenCalledWith("space-reading", "调研材料");
+  expect(createManagedFolder).toHaveBeenCalledWith("space-reading", "调研材料");
 });
 
-test("creates a nested folder under the selected Space folder", async () => {
+test("does not expose a virtual nested-folder command for a managed folder", async () => {
   const user = userEvent.setup();
-  const createFolder = vi.fn();
 
-  render(<PersonalSpaceSurface space={space} actions={{ createFolder }} />);
+  render(<PersonalSpaceSurface space={space} actions={{ createManagedFolder: vi.fn(), rename: vi.fn() }} />);
 
   await user.click(screen.getByRole("button", { name: "笔记操作" }));
-  await user.click(screen.getByRole("menuitem", { name: "新建子文件夹" }));
-  await user.type(screen.getByRole("textbox", { name: "名称" }), "章节一");
-  await user.click(screen.getByRole("button", { name: "新建文件夹" }));
-
-  expect(createFolder).toHaveBeenCalledWith("space-reading", "章节一", "folder-notes");
+  expect(screen.queryByRole("menuitem", { name: "新建子文件夹" })).toBeNull();
 });
 
 test("returns picker and explicit-current-conversation intents without inventing a Space item", async () => {
@@ -96,7 +91,7 @@ test("maps display kinds to Space folder/reference commands for rename and remov
   await user.clear(name);
   await user.type(name, "沉淀");
   await user.click(screen.getByRole("button", { name: "保存" }));
-  expect(rename).toHaveBeenCalledWith({ kind: "folder", id: "folder-notes" }, "沉淀");
+  expect(rename).toHaveBeenCalledWith({ kind: "reference", id: "folder-notes" }, "沉淀");
 
   await user.click(screen.getByRole("button", { name: "关于阅读方法的讨论操作" }));
   await user.click(screen.getByRole("menuitem", { name: "重命名" }));

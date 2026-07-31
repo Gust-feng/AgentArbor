@@ -189,7 +189,7 @@ test("projectToolDisplay keeps sources and HTTP content without webpage excerpts
   assert.equal(search.kind === "search_results" ? search.results.length : undefined, 2);
   assert.equal(browser.kind, "web_fetch");
   assert.equal(JSON.stringify(browser).includes("page text"), false);
-  assert.equal(JSON.stringify(browser).includes("truncated"), false);
+  assert.equal(browser.truncated, true);
   assert.equal(http.kind, "http_response");
   assert.equal(http.kind === "http_response" ? http.statusCode : undefined, 200);
   assert.equal(http.kind === "http_response" ? http.bodyPreview : undefined, "response body");
@@ -222,9 +222,9 @@ test("projectToolDisplay does not interpret legacy action, summary, or result wr
     },
   );
 
-  assert.equal(display.kind, "generic_tool_summary");
-  assert.notEqual(display.kind === "generic_tool_summary" ? display.action : undefined, "legacy action");
-  assert.equal(display.kind === "generic_tool_summary" ? display.summary : undefined, undefined);
+  assert.equal(display.kind, "raw_tool_result");
+  assert.notEqual(display.kind === "raw_tool_result" ? display.action : undefined, "legacy action");
+  assert.equal(display.kind === "raw_tool_result" ? display.summary : undefined, undefined);
   assert.equal(JSON.stringify(display).includes("legacy body"), false);
 });
 
@@ -236,4 +236,44 @@ test("projectToolDisplay keeps complete source titles instead of clipping them",
   );
 
   assert.equal(display.kind === "search_results" ? display.results[0]?.title : undefined, title);
+});
+
+test("projectToolDisplay gives Workbench feature tools non-filesystem displays", () => {
+  const knowledge = projectToolDisplay(
+    { callId: "call-knowledge", toolName: "KnowledgeCreateNote", input: { title: "Daily" } },
+    { status: "created", note: { id: "note-1", title: "Daily", revision: 1 } },
+  );
+  const spaces = projectToolDisplay(
+    { callId: "call-spaces", toolName: "SpaceList", input: {} },
+    { spaces: [{ id: "space-1", title: "Project", folderCount: 1, referenceItemCount: 2 }] },
+  );
+  const note = projectToolDisplay(
+    { callId: "call-note", toolName: "NoteWrite", input: { scope: "workspace" } },
+    { status: "updated", scope: "workspace", characters: 42 },
+  );
+
+  assert.equal(knowledge.kind, "knowledge_operation");
+  assert.equal(knowledge.kind === "knowledge_operation" ? knowledge.operation : undefined, "create_note");
+  assert.equal(spaces.kind, "space_operation");
+  assert.equal(spaces.kind === "space_operation" ? spaces.operation : undefined, "list");
+  assert.equal(note.kind, "note_operation");
+});
+
+test("projectToolDisplay treats Glob matches as file-search results and preserves continuation", () => {
+  const display = projectToolDisplay(
+    { callId: "call-glob", toolName: "Glob", input: { pattern: "*.ts", path: "src" } },
+    {
+      pattern: "*.ts",
+      path: "src",
+      matches: [{ path: "src/app.ts" }],
+      truncated: true,
+      continuation: { nextInput: { pattern: "*.ts", path: "src", offset: 1 } },
+    },
+  );
+
+  assert.equal(display.kind, "file_search_results");
+  assert.equal(display.kind === "file_search_results" ? display.query : undefined, "*.ts");
+  assert.equal(display.kind === "file_search_results" ? display.matches[0]?.path : undefined, "src/app.ts");
+  assert.equal(display.truncated, true);
+  assert.deepEqual(display.continuation?.nextInput, { pattern: "*.ts", path: "src", offset: 1 });
 });

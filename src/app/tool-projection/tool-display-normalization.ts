@@ -1,7 +1,7 @@
 import { stringOrUndefined } from "../../kernel/values/index.js";
 import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { ToolFileDisplayOperation } from "../../domain/tools/index.js";
-import { toolDisplayName } from "../../domain/tools/index.js";
+import { normalizeToolFactValue, toolDisplayName } from "../../domain/tools/index.js";
 
 export type ToolDisplayNormalizationInput = {
   readonly toolName: string;
@@ -10,6 +10,13 @@ export type ToolDisplayNormalizationInput = {
 };
 
 export function normalizeToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
+  return {
+    ...normalizeToolDisplayCore(input),
+    ...projectToolDisplayResultFacts(input.output),
+  };
+}
+
+function normalizeToolDisplayCore(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
   const structuredDisplay = structuredToolDisplayForOperation(input);
   if (structuredDisplay !== undefined) {
     return structuredDisplay;
@@ -98,7 +105,8 @@ function structuredToolDisplayForOperation(input: ToolDisplayNormalizationInput)
       .filter((item): item is NonNullable<ReturnType<typeof fileSearchMatchDisplayItem>> => item !== undefined);
     return {
       kind: "file_search_results",
-      query: stringOrUndefined(output.query) ?? stringOrUndefined(inputRecord.query),
+      query: stringOrUndefined(output.query) ?? stringOrUndefined(output.pattern) ??
+        stringOrUndefined(inputRecord.query) ?? stringOrUndefined(inputRecord.pattern),
       path: stringOrUndefined(output.path) ?? stringOrUndefined(inputRecord.path),
       skippedUnreadableFiles: numberOrUndefined(output.skippedUnreadableFiles),
       matches,
@@ -271,7 +279,7 @@ function uniqueExternalSources(values: readonly ExternalSourceDisplayItem[]): re
 
 function isDirectoryListingTool(toolName: string): boolean {
   const normalized = toolName.toLowerCase();
-  return normalized === "list" || normalized === "glob" ||
+  return normalized === "list" ||
     normalized === "list_files" ||
     normalized === "attachmentlistfiles" ||
     normalized === "attachmentinspectarchive";
@@ -279,7 +287,7 @@ function isDirectoryListingTool(toolName: string): boolean {
 
 function isFileSearchTool(toolName: string): boolean {
   const normalized = toolName.toLowerCase();
-  return normalized === "grep" ||
+  return normalized === "glob" || normalized === "grep" ||
     normalized === "attachmentsearchfiles";
 }
 
@@ -352,13 +360,26 @@ function genericToolDisplayForOperation(input: ToolDisplayNormalizationInput): T
     ...structuredContentItems(output.structuredContent),
   ]
     .map((item) => stringOrUndefined(item))
-    .filter((item): item is string => item !== undefined)
-    .slice(0, 8);
+    .filter((item): item is string => item !== undefined);
   return {
-    kind: "generic_tool_summary",
+    kind: "raw_tool_result",
     action: toolDisplayName(input.toolName),
     summary: stringOrUndefined(request.query) ?? genericFactSummary(output) ?? genericRequestTarget(request),
     items: items.length === 0 ? undefined : items,
+  };
+}
+
+export function projectToolDisplayResultFacts(output: unknown): Pick<ToolDisplayProjection, "truncated" | "continuation"> {
+  const record = asRecord(output);
+  const continuation = asRecord(record.continuation);
+  const ref = stringOrUndefined(continuation.ref);
+  const note = stringOrUndefined(continuation.note);
+  const nextInput = normalizeToolFactValue(continuation.nextInput);
+  return {
+    truncated: booleanOrUndefined(record.truncated),
+    continuation: ref === undefined && note === undefined && nextInput === undefined
+      ? undefined
+      : { ref, note, nextInput },
   };
 }
 

@@ -145,17 +145,17 @@ test("tool activity copy labels write as write when only summary carries the pat
   });
 });
 
-test("display activity items keep generic file write summaries visible", () => {
+test("display activity items keep structured file writes visible", () => {
   const items = displayActivityItemsForNodes(activityVisibleNodes([
     node({
       kind: "tool",
       eventType: "tool.completed",
       phase: "completed",
-      toolName: "filesystem_tool",
+      toolName: "write",
       display: {
-        kind: "generic_tool_summary",
-        action: "写入文件",
-        summary: "路径：src/generated.txt",
+        kind: "file_change_summary",
+        operation: "write",
+        path: "src/generated.txt",
       },
     }),
   ]));
@@ -164,6 +164,36 @@ test("display activity items keep generic file write summaries visible", () => {
   assert.equal(items[0]?.copy.label, "写入");
   assert.equal(items[0]?.copy.detail, "src/generated.txt");
   assert.equal(items[0]?.statusBadge, undefined);
+});
+
+test("Workbench feature operations are not presented as filesystem mutations", () => {
+  const knowledge = activityLineForNode(node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "KnowledgeCreateNote",
+    display: {
+      kind: "knowledge_operation",
+      operation: "create_note",
+      title: "Daily",
+    },
+  }));
+  const spaces = activityLineForNode(node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "SpaceList",
+    display: {
+      kind: "space_operation",
+      operation: "list",
+      count: 2,
+    },
+  }));
+
+  assert.equal(knowledge?.label, "知识");
+  assert.equal(knowledge?.detail, "Daily");
+  assert.equal(spaces?.label, "查看");
+  assert.equal(spaces?.detail, "空间");
 });
 
 test("tool activity copy removes redundant target prefixes", () => {
@@ -445,6 +475,27 @@ test("generic article tool results keep only the source and omit partial excerpt
   );
   assert.equal(items[0]?.expandedSections?.[0]?.meta, undefined);
   assert.equal(JSON.stringify(items[0]?.expandedSections).includes("Less than 24 hours"), false);
+});
+
+test("opaque tool results keep article-like text instead of applying article summary cleanup", () => {
+  const raw = [
+    "Title: Provider result",
+    "URL: https://example.com/result",
+    "This complete provider paragraph must remain visible.",
+  ].join("\n");
+  const items = displayActivityItemsForNodes([node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "vendor__opaque",
+    display: {
+      kind: "raw_tool_result",
+      action: "opaque",
+      items: [raw],
+    },
+  })]);
+
+  assert.equal(JSON.stringify(items[0]?.expandedSections).includes("complete provider paragraph"), true);
 });
 
 test("remote reads and browser snapshots expose links without partial page previews", () => {

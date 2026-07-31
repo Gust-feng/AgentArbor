@@ -1,7 +1,17 @@
 import type { ToolFileDisplayOperation } from "../tools/contracts.js";
+import type { ToolFactValue } from "../tools/fact-value.js";
+
+export type ToolDisplayResultFacts = {
+  readonly truncated?: boolean;
+  readonly continuation?: {
+    readonly ref?: string;
+    readonly nextInput?: ToolFactValue;
+    readonly note?: string;
+  };
+};
 
 /** Panel/Observation read-model derived from tool execution facts. */
-export type ToolDisplayProjection =
+export type ToolDisplayProjection = ToolDisplayResultFacts & (
   | {
       readonly kind: "search_results";
       readonly query?: string;
@@ -89,8 +99,57 @@ export type ToolDisplayProjection =
       readonly result?: string;
     }
   | {
+      readonly kind: "knowledge_operation";
+      readonly operation: "search" | "read" | "create_note" | "update_note" | "collect";
+      readonly status?: string;
+      readonly query?: string;
+      readonly spaceId?: string;
+      readonly noteId?: string;
+      readonly title?: string;
+      readonly revision?: number;
+      readonly count?: number;
+      readonly items?: readonly {
+        readonly noteId: string;
+        readonly title?: string;
+        readonly spaceId?: string;
+        readonly revision?: number;
+        readonly snippet?: string;
+      }[];
+    }
+  | {
+      readonly kind: "space_operation";
+      readonly operation: "list" | "create" | "move" | "add_reference" | "remove_reference" | "rename";
+      readonly status?: string;
+      readonly spaceId?: string;
+      readonly title?: string;
+      readonly targetId?: string;
+      readonly destinationSpaceId?: string;
+      readonly count?: number;
+      readonly items?: readonly {
+        readonly spaceId: string;
+        readonly title?: string;
+        readonly folderCount?: number;
+        readonly referenceItemCount?: number;
+      }[];
+    }
+  | {
+      readonly kind: "note_operation";
+      readonly operation: "write";
+      readonly status?: string;
+      readonly scope?: "workspace" | "global";
+      readonly characters?: number;
+    }
+  | {
       readonly kind: "generic_tool_summary";
       readonly action?: string;
       readonly summary?: string;
       readonly items?: readonly string[];
-    };
+    }
+  | {
+      /** Opaque provider output. Copy may be inspected, but it carries no inferred file semantics. */
+      readonly kind: "raw_tool_result";
+      readonly action?: string;
+      readonly summary?: string;
+      readonly items?: readonly string[];
+    }
+);

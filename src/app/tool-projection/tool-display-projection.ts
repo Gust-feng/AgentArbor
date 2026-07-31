@@ -2,7 +2,10 @@ import type { ToolDisplayProjection } from "../../domain/observation/index.js";
 import type { ToolCallRequest } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
-import { normalizeToolDisplayForOperation } from "./tool-display-normalization.js";
+import {
+  normalizeToolDisplayForOperation,
+  projectToolDisplayResultFacts,
+} from "./tool-display-normalization.js";
 import {
   asRecord,
   isMcpToolName,
@@ -16,6 +19,13 @@ import {
 const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
 
 export function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
+  return {
+    ...projectToolDisplayCore(request, output),
+    ...projectToolDisplayResultFacts(output),
+  };
+}
+
+function projectToolDisplayCore(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
   const record = asRecord(output);
   const input = asRecord(request.input);
   if (request.toolName === "ResearchSearch") {
@@ -49,6 +59,24 @@ export function projectToolDisplay(request: ToolCallRequest, output: unknown): T
       uri,
       contentPreview: url === undefined ? stringOrUndefined(record.contentPreview) : undefined,
       error,
+    };
+  }
+  const knowledgeDisplay = projectKnowledgeDisplay(request.toolName, input, record);
+  if (knowledgeDisplay !== undefined) {
+    return knowledgeDisplay;
+  }
+  const spaceDisplay = projectSpaceDisplay(request.toolName, input, record);
+  if (spaceDisplay !== undefined) {
+    return spaceDisplay;
+  }
+  if (request.toolName === "NoteWrite") {
+    const scope = record.scope ?? input.scope;
+    return {
+      kind: "note_operation",
+      operation: "write",
+      status: stringOrUndefined(record.status),
+      scope: scope === "workspace" || scope === "global" ? scope : undefined,
+      characters: numberOrUndefined(record.characters),
     };
   }
   if (isContentReadTool(request.toolName)) {
@@ -165,4 +193,97 @@ export function projectSearchDisplayItem(value: unknown): Extract<ToolDisplayPro
     url: stringOrUndefined(item.url) ?? stringOrUndefined(item.uri),
     source: stringOrUndefined(item.source),
   };
+}
+
+function projectKnowledgeDisplay(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  output: Readonly<Record<string, unknown>>,
+): Extract<ToolDisplayProjection, { readonly kind: "knowledge_operation" }> | undefined {
+  const operation = knowledgeOperation(toolName);
+  if (operation === undefined) return undefined;
+  const note = asRecord(output.note);
+  const page = asRecord(output.page);
+  const results = Array.isArray(output.results) ? output.results : [];
+  const items = results.map((value) => {
+    const result = asRecord(value);
+    const resultNote = asRecord(result.note);
+    const noteId = stringOrUndefined(resultNote.id);
+    if (noteId === undefined) return undefined;
+    return {
+      noteId,
+      title: stringOrUndefined(resultNote.title),
+      spaceId: stringOrUndefined(resultNote.spaceId),
+      revision: numberOrUndefined(resultNote.revision),
+      snippet: stringOrUndefined(result.snippet),
+    };
+  }).filter((item): item is NonNullable<typeof item> => item !== undefined);
+  return {
+    kind: "knowledge_operation",
+    operation,
+    status: stringOrUndefined(output.status),
+    query: stringOrUndefined(output.query) ?? stringOrUndefined(input.query),
+    spaceId: stringOrUndefined(note.spaceId) ?? stringOrUndefined(input.spaceId),
+    noteId: stringOrUndefined(note.id) ?? stringOrUndefined(output.noteId) ?? stringOrUndefined(input.noteId) ?? stringOrUndefined(page.refId),
+    title: stringOrUndefined(note.title) ?? stringOrUndefined(input.title),
+    revision: numberOrUndefined(note.revision) ?? numberOrUndefined(output.revision),
+    count: numberOrUndefined(output.count) ?? (Array.isArray(output.results) ? output.results.length : undefined),
+    items: items.length === 0 ? undefined : items,
+  };
+}
+
+function knowledgeOperation(toolName: string): Extract<ToolDisplayProjection, { readonly kind: "knowledge_operation" }>["operation"] | undefined {
+  if (toolName === "KnowledgeSearch") return "search";
+  if (toolName === "KnowledgeRead") return "read";
+  if (toolName === "KnowledgeCreateNote") return "create_note";
+  if (toolName === "KnowledgeUpdateNote") return "update_note";
+  if (toolName === "KnowledgeCollect") return "collect";
+  return undefined;
+}
+
+function projectSpaceDisplay(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  output: Readonly<Record<string, unknown>>,
+): Extract<ToolDisplayProjection, { readonly kind: "space_operation" }> | undefined {
+  const operation = spaceOperation(toolName);
+  if (operation === undefined) return undefined;
+  const space = asRecord(output.space);
+  const tree = asRecord(output.tree);
+  const treeSpace = asRecord(tree.space);
+  const item = asRecord(output.item);
+  const target = asRecord(output.target);
+  const spaces = Array.isArray(output.spaces) ? output.spaces : [];
+  const items = spaces.map((value) => {
+    const candidate = asRecord(value);
+    const spaceId = stringOrUndefined(candidate.id);
+    if (spaceId === undefined) return undefined;
+    return {
+      spaceId,
+      title: stringOrUndefined(candidate.title),
+      folderCount: numberOrUndefined(candidate.folderCount),
+      referenceItemCount: numberOrUndefined(candidate.referenceItemCount),
+    };
+  }).filter((value): value is NonNullable<typeof value> => value !== undefined);
+  return {
+    kind: "space_operation",
+    operation,
+    status: stringOrUndefined(output.status),
+    spaceId: stringOrUndefined(space.id) ?? stringOrUndefined(treeSpace.id) ?? stringOrUndefined(item.spaceId) ?? stringOrUndefined(input.spaceId),
+    title: stringOrUndefined(space.title) ?? stringOrUndefined(treeSpace.title) ?? stringOrUndefined(item.title) ?? stringOrUndefined(output.title) ?? stringOrUndefined(input.title),
+    targetId: stringOrUndefined(target.id) ?? stringOrUndefined(output.itemId) ?? stringOrUndefined(input.targetId) ?? stringOrUndefined(input.itemId),
+    destinationSpaceId: stringOrUndefined(output.destinationSpaceId) ?? stringOrUndefined(input.destinationSpaceId),
+    count: items.length > 0 ? items.length : Array.isArray(tree.entries) ? tree.entries.length : undefined,
+    items: items.length === 0 ? undefined : items,
+  };
+}
+
+function spaceOperation(toolName: string): Extract<ToolDisplayProjection, { readonly kind: "space_operation" }>["operation"] | undefined {
+  if (toolName === "SpaceList") return "list";
+  if (toolName === "SpaceCreate") return "create";
+  if (toolName === "SpaceMove") return "move";
+  if (toolName === "SpaceAddReference") return "add_reference";
+  if (toolName === "SpaceRemoveReference") return "remove_reference";
+  if (toolName === "SpaceRename") return "rename";
+  return undefined;
 }

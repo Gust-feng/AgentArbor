@@ -133,7 +133,7 @@ test("normalizeToolDisplayForOperation derives write display without output disp
   assert.equal(display.kind === "file_change_summary" ? display.operation : undefined, "append");
   assert.equal(display.kind === "file_change_summary" ? display.preview : undefined, "+ hello\n+ world");
   assert.equal(JSON.stringify(display).includes("bytes"), false);
-  assert.equal(JSON.stringify(display).includes("truncated"), false);
+  assert.equal(display.truncated, true);
 });
 
 test("normalizeToolDisplayForOperation does not invent a changed line for empty file content", () => {
@@ -253,7 +253,7 @@ test("normalizeToolDisplayForOperation derives structured directory listings fro
   assert.equal(display.kind === "directory_listing" ? display.unreadableSamples?.[0]?.path : undefined, "node_modules/.cache");
   assert.equal(JSON.stringify(display).includes("totalEntries"), false);
   assert.equal(JSON.stringify(display).includes("bytes"), false);
-  assert.equal(JSON.stringify(display).includes("truncated"), false);
+  assert.equal(display.truncated, true);
 });
 
 test("normalizeToolDisplayForOperation preserves directory and search targets while tools are running", () => {
@@ -281,9 +281,9 @@ test("normalizeToolDisplayForOperation uses a concrete unknown tool name and req
     input: { path: "database/schema.sql" },
   });
 
-  assert.equal(display.kind, "generic_tool_summary");
-  assert.equal(display.kind === "generic_tool_summary" ? display.action : undefined, "inspect schema");
-  assert.equal(display.kind === "generic_tool_summary" ? display.summary : undefined, "database/schema.sql");
+  assert.equal(display.kind, "raw_tool_result");
+  assert.equal(display.kind === "raw_tool_result" ? display.action : undefined, "inspect schema");
+  assert.equal(display.kind === "raw_tool_result" ? display.summary : undefined, "database/schema.sql");
 });
 
 test("normalizeToolDisplayForOperation derives structured file search results ahead of generic attachment display", () => {
@@ -380,7 +380,18 @@ test("normalizeToolDisplayForOperation derives compact MCP display from canonica
     },
   });
 
-  assert.equal(display.kind, "generic_tool_summary");
-  assert.equal(display.kind === "generic_tool_summary" ? display.summary : undefined, "AgentArbor tool display");
-  assert.deepEqual(display.kind === "generic_tool_summary" ? display.items : undefined, ["result text"]);
+  assert.equal(display.kind, "raw_tool_result");
+  assert.equal(display.kind === "raw_tool_result" ? display.summary : undefined, "AgentArbor tool display");
+  assert.deepEqual(display.kind === "raw_tool_result" ? display.items : undefined, ["result text"]);
+});
+
+test("normalizeToolDisplayForOperation keeps every bounded opaque result item", () => {
+  const items = Array.from({ length: 12 }, (_, index) => `result ${index + 1}`);
+  const display = normalizeToolDisplayForOperation({
+    toolName: "vendor__opaque",
+    output: { items },
+  });
+
+  assert.equal(display.kind, "raw_tool_result");
+  assert.deepEqual(display.kind === "raw_tool_result" ? display.items : undefined, items);
 });

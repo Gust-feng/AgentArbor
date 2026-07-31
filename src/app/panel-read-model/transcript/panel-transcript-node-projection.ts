@@ -155,8 +155,14 @@ function isMergeableModelActivityNode(node: ProjectableTranscriptNode): boolean 
 
 export function isFileReadNode(node: ProjectableTranscriptNode): boolean {
   if (node.kind !== "tool") return false;
+  if (node.display?.kind === "read_result") return node.display.url === undefined;
+  if (node.display !== undefined && node.display.kind !== "generic_tool_summary") {
+    return false;
+  }
   const toolName = normalizedToolName(node.toolName);
-  const action = node.display?.kind === "generic_tool_summary" ? node.display.action?.toLowerCase() ?? "" : "";
+  const action = node.display?.kind === "generic_tool_summary"
+    ? node.display.action?.toLowerCase() ?? ""
+    : "";
   const genericText = node.display?.kind === "generic_tool_summary"
     ? [node.display.action, ...(node.display.items ?? [])].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
     : "";
@@ -277,6 +283,9 @@ function aggregateFileReadNodes<TNode extends ProjectableTranscriptNode>(previou
 
 function fileReadLabels(node: ProjectableTranscriptNode): readonly string[] {
   const display = node.display;
+  if (display?.kind === "read_result") {
+    return [display.title ?? display.uri ?? node.summary].filter((value): value is string => value !== undefined);
+  }
   if (display?.kind === "generic_tool_summary" && display.items !== undefined && display.items.length > 0) {
     return display.items.map(genericItemLabel);
   }

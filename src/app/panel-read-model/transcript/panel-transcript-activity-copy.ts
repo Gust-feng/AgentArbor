@@ -416,6 +416,27 @@ function activityLeadForNode(
       context: agentName === undefined ? undefined : task,
     });
   }
+  if (display?.kind === "knowledge_operation") {
+    return makeActivityLead({
+      action,
+      subject: cleanToolTargetText(display.query ?? display.title ?? display.noteId ?? display.spaceId) ?? "个人知识",
+      context: display.status,
+    });
+  }
+  if (display?.kind === "space_operation") {
+    return makeActivityLead({
+      action,
+      subject: cleanToolTargetText(display.title ?? display.spaceId ?? display.targetId) ?? "空间",
+      context: display.status,
+    });
+  }
+  if (display?.kind === "note_operation") {
+    return makeActivityLead({
+      action: "记录",
+      subject: display.scope === "global" ? "全局笔记" : display.scope === "workspace" ? "工作区笔记" : "Agent 笔记",
+      context: display.status,
+    });
+  }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
     return makeActivityLead({
       action,
@@ -429,7 +450,7 @@ function activityLeadForNode(
       subject: `${display.files.length} 个文件`,
     });
   }
-  if (display?.kind === "generic_tool_summary") {
+  if (display?.kind === "generic_tool_summary" || display?.kind === "raw_tool_result") {
     const directory = genericDirectoryFacts(display);
     if (directory !== undefined) {
       return makeActivityLead({
@@ -511,16 +532,20 @@ function activityBadgesForNode(node: ProjectableTranscriptNode): readonly Activi
   if (isContextCompactionNode(node)) {
     return undefined;
   }
+  const badges: ActivityBadge[] = [];
   if (display?.kind === "directory_listing" && (display.unreadableDirectories ?? 0) > 0) {
-    return [{ label: "部分目录不可读", tone: "warning" }];
+    badges.push({ label: "部分目录不可读", tone: "warning" });
   }
   if (display?.kind === "file_search_results" && (display.skippedUnreadableFiles ?? 0) > 0) {
-    return [{ label: "部分文件不可读", tone: "warning" }];
+    badges.push({ label: "部分文件不可读", tone: "warning" });
   }
   if (display?.kind === "http_response" && (display.statusCode ?? 0) >= 400) {
-    return [{ label: "请求失败", tone: "danger" }];
+    badges.push({ label: "请求失败", tone: "danger" });
   }
-  return undefined;
+  if (display?.truncated === true) {
+    badges.push({ label: display.continuation === undefined ? "结果已截断" : "可继续读取", tone: "warning" });
+  }
+  return badges.length === 0 ? undefined : badges;
 }
 
 function activityVariantForNode(node: ProjectableTranscriptNode): ActivityItem["variant"] {
@@ -689,7 +714,7 @@ function activityExpandedSectionsForNode(
         });
       }
     }
-  } else if (display?.kind === "generic_tool_summary") {
+  } else if (display?.kind === "generic_tool_summary" || display?.kind === "raw_tool_result") {
     sections.push(...genericToolSections(display, copy));
   }
   if (node.delegatedExecution !== undefined) {
@@ -1158,7 +1183,10 @@ function filePreviewLooksLikeDiff(value: string): boolean {
     .some((line) => line.startsWith("+") || line.startsWith("-") || line.startsWith("@@"));
 }
 
-type GenericToolSummaryDisplay = Extract<NonNullable<ProjectableTranscriptNode["display"]>, { readonly kind: "generic_tool_summary" }>;
+type GenericToolSummaryDisplay = Extract<
+  NonNullable<ProjectableTranscriptNode["display"]>,
+  { readonly kind: "generic_tool_summary" | "raw_tool_result" }
+>;
 
 type GenericArticleFacts = {
   readonly title?: string;
@@ -1245,7 +1273,7 @@ function genericToolSections(
     return sections;
   }
 
-  const article = genericArticleFacts(display);
+  const article = display.kind === "raw_tool_result" ? {} : genericArticleFacts(display);
   const sections: ActivityExpandedSection[] = [];
   if (article.title !== undefined || article.url !== undefined || article.published !== undefined || article.author !== undefined) {
     const source = sourceSection("来源", {
@@ -1310,6 +1338,7 @@ type GenericDirectoryFacts = {
 };
 
 function genericDirectoryFacts(display: GenericToolSummaryDisplay): GenericDirectoryFacts | undefined {
+  if (display.kind === "raw_tool_result") return undefined;
   const action = display.action?.toLowerCase() ?? "";
   const text = genericToolJoinedText(display).toLowerCase();
   const looksLikeDirectory =
@@ -1547,7 +1576,19 @@ function uniqueStrings(values: readonly string[]): readonly string[] {
 function toolVerb(node: ProjectableTranscriptNode): string {
   const display = node.display;
   const toolName = normalizedToolName(node.toolName);
-  const action = display?.kind === "generic_tool_summary" ? display.action?.toLowerCase() ?? "" : "";
+  const action = display?.kind === "generic_tool_summary" || display?.kind === "raw_tool_result"
+    ? display.action?.toLowerCase() ?? ""
+    : "";
+  if (display?.kind === "knowledge_operation") {
+    if (display.operation === "search") return "搜索";
+    if (display.operation === "read") return "读取";
+    return "知识";
+  }
+  if (display?.kind === "space_operation") {
+    if (display.operation === "list") return "查看";
+    return "空间";
+  }
+  if (display?.kind === "note_operation") return "记录";
   const fileMutationVerb = fileMutationVerbForTool(toolName, display);
   if (display?.kind === "agent_task" || toolName === "agent" || toolName === "agentspawn") return "委派";
   if (display?.kind === "command_summary" || toolName === "shell" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
@@ -1601,45 +1642,25 @@ function fileMutationVerbForTool(
     if (operation === "edit") return "编辑";
     if (operation === "append" || operation === "write") return "写入";
   }
-  const genericText = display?.kind === "generic_tool_summary"
-    ? [display.action, display.summary].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
-    : "";
-  if (toolName === "delete" || toolName.includes("delete") || toolName.includes("remove_file") || mentionsDeleteFile(genericText)) {
+  if (display !== undefined) return undefined;
+  if (toolName === "delete" || toolName.includes("delete") || toolName.includes("remove_file")) {
     return "删除";
   }
-  if (toolName === "create" || toolName.includes("create") || mentionsCreateFile(genericText)) {
+  if (toolName === "create" || toolName.includes("create")) {
     return "创建";
   }
   if (
-    display?.kind === "file_diff_preview" ||
     toolName === "edit" ||
     toolName.includes("edit") ||
     toolName.includes("patch") ||
-    toolName.includes("replace") ||
-    mentionsEditFile(genericText)
+    toolName.includes("replace")
   ) {
     return "编辑";
   }
-  if (display?.kind === "file_change_summary" || toolName === "write" || toolName.includes("write") || mentionsWriteFile(genericText)) {
+  if (toolName === "write" || toolName.includes("write")) {
     return "写入";
   }
   return undefined;
-}
-
-function mentionsWriteFile(value: string): boolean {
-  return value.includes("写入文件") || value.includes("write") || value.includes("write file") || value.includes("written");
-}
-
-function mentionsCreateFile(value: string): boolean {
-  return value.includes("创建文件") || value.includes("create") || value.includes("create file") || value.includes("created");
-}
-
-function mentionsDeleteFile(value: string): boolean {
-  return value.includes("删除文件") || value.includes("delete") || value.includes("delete file") || value.includes("deleted");
-}
-
-function mentionsEditFile(value: string): boolean {
-  return value.includes("编辑文件") || value.includes("修改文件") || value.includes("edit") || value.includes("edit file");
 }
 
 function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy, "detail" | "expandedDetail"> | undefined {
@@ -1693,6 +1714,17 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     return {
       detail: cleanToolTargetText(display.agentName) ?? cleanToolTargetText(display.task) ?? "协作任务",
     };
+  }
+  if (display?.kind === "knowledge_operation") {
+    const target = display.query ?? display.title ?? display.noteId ?? display.spaceId;
+    return { detail: cleanToolTargetText(target) ?? "个人知识" };
+  }
+  if (display?.kind === "space_operation") {
+    const target = display.title ?? display.spaceId ?? display.targetId;
+    return { detail: cleanToolTargetText(target) ?? "空间" };
+  }
+  if (display?.kind === "note_operation") {
+    return { detail: display.scope === "global" ? "全局笔记" : display.scope === "workspace" ? "工作区笔记" : "Agent 笔记" };
   }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
     return readableToolTarget(cleanToolTargetText(display.path ?? node.summary)) ?? fallbackToolTargetCopy(node);

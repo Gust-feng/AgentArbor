@@ -38,9 +38,6 @@ import type {
 import { ToolExecutionObservationGateway } from "../ordinary-agent/tool-execution-observation-gateway.js";
 import { OrdinaryToolMetricsCollector } from "../ordinary-agent/tool-runtime-metrics.js";
 import { createSkillToolRegistryContribution } from "../skills/skill-resource-tool.js";
-import type { AgentNotesFeature } from "../agent-notes/index.js";
-import type { SpaceFeature } from "../spaces/index.js";
-import type { PersonalKnowledgeFeature } from "../personal-knowledge/index.js";
 import {
   createSubAgentAgentToolCatalogContribution,
   createSubAgentAgentTools,
@@ -55,7 +52,10 @@ import {
   type AgentRunResourceHost,
   type AgentHostRunResources,
 } from "./agent-run-resources.js";
-import { createHostAgentToolContributions } from "./agent-tool-contributions.js";
+import {
+  createHostAgentToolContributions,
+  type HostFeatureAgentToolContributionResolver,
+} from "./agent-tool-contributions.js";
 
 export type OrdinaryAgentDefinitionResolver = (
   input: {
@@ -84,12 +84,7 @@ export type CreateOrdinaryAgentRunResourceAcquirerInput = {
   readonly soilStore: ReadonlySoilStore;
   readonly resolveAgentDefinition: OrdinaryAgentDefinitionResolver;
   readonly resolveSkillContexts?: OrdinaryAgentSkillContextResolver;
-  /** Host-owned note feature; exposed to the model only through NoteWrite. */
-  readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
-  /** Feature-owned reference tree exposed through ordinary Agent tools. */
-  readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
-  /** Feature-owned personal knowledge exposed only through its Agent tools. */
-  readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
+  readonly resolveFeatureToolContributions?: HostFeatureAgentToolContributionResolver;
   readonly resolveSubAgentRoots: (workspaceRoot: string) => readonly SubAgentRootInput[];
 };
 
@@ -197,9 +192,9 @@ export function createOrdinaryAgentRunResourceAcquirer(
               runtime: toolRuntime,
               resources,
               providerFetch: options.host.providerFetch,
-              agentNotes: options.agentNotes,
-              spaces: options.spaces,
-              personalKnowledge: options.personalKnowledge,
+              featureContributions: options.resolveFeatureToolContributions?.({
+                workspaceRoot: resources.workspaceRoot,
+              }),
             }),
             createSkillToolRegistryContribution(skillContexts),
           ],

@@ -8,6 +8,7 @@ import { CapabilityCenter } from "./capability-center.js";
 import { ConfigCenter } from "../config-center/index.js";
 import type { SkillRootInput } from "../skills/index.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
+import type { AgentToolRegistryContribution } from "../tool-center/factory.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 
 test("CapabilityCenter exposes the shared tool-output reader when the Host provides its store", async () => {
@@ -58,6 +59,49 @@ test("CapabilityCenter freezes transient run workspace without changing the defa
     await removeTestDirectory(directory);
     await removeTestDirectory(defaultWorkspace);
     await removeTestDirectory(runWorkspace);
+  }
+});
+
+test("CapabilityCenter freezes Host-injected feature contributions for the effective workspace", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-contributions-"));
+  const workspace = path.join(directory, "workspace");
+  const resolvedWorkspaces: string[] = [];
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    const contribution: AgentToolRegistryContribution = (register) => register({
+      executor: {
+        definition: {
+          name: "FeatureOwnedTool",
+          description: "A feature-owned test tool.",
+          inputSchema: { type: "object", properties: {} },
+          metadata: {
+            category: "workspace",
+            riskLevel: "low",
+            operationType: "read-only",
+            requiresConfirmation: false,
+          },
+        },
+        execute: async () => ({ status: "ok" }),
+      },
+      scopes: ["desktop-basic"],
+      enabledByDefault: true,
+    });
+    const snapshot = await new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+      resolveToolContributions: ({ workspaceRoot }) => {
+        resolvedWorkspaces.push(workspaceRoot);
+        return [contribution];
+      },
+    }).snapshot({ workspaceDirectory: workspace });
+
+    assert.deepEqual(resolvedWorkspaces, [path.resolve(workspace)]);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("FeatureOwnedTool"), true);
+  } finally {
+    await removeTestDirectory(directory);
   }
 });
 

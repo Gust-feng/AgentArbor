@@ -8,4 +8,8 @@ export {
 } from "./contracts.js";
 export { createAgentNotesFeature, type CreateAgentNotesFeatureInput } from "./agent-notes-feature.js";
 export { createFileSystemAgentNoteRepository } from "./file-system-repository.js";
-export { createNoteWriteTool, type NoteToolOptions } from "./note-tools.js";
+export {
+  createAgentNotesToolRegistryContribution,
+  createNoteWriteTool,
+  type NoteToolOptions,
+} from "./note-tools.js";

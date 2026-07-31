@@ -461,6 +461,29 @@ test("shared Agent run resources do not own feature contributions", async () => 
   );
 });
 
+test("capability freezing and Ordinary run assembly consume Host-selected feature contributions", async () => {
+  const files = [
+    path.join(process.cwd(), "src", "app", "capability", "capability-center.ts"),
+    path.join(process.cwd(), "src", "app", "panel-server", "ordinary-agent-run-resources.ts"),
+  ];
+  const violations: string[] = [];
+
+  for (const file of files) {
+    const source = await fs.readFile(file, "utf8");
+    for (const specifier of importSpecifiersFrom(source)) {
+      if (/\/(?:agent-notes|spaces|personal-knowledge)(?:\/|$)/u.test(specifier)) {
+        violations.push(`${relativePath(file)} -> ${specifier}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    "CapabilityCenter and Ordinary run assembly must receive feature-owned tool contributions from the Host",
+  );
+});
+
 function isPathWithin(file: string, directory: string): boolean {
   const relative = path.relative(directory, file);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));

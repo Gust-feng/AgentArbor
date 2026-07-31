@@ -102,6 +102,7 @@ import type {
 import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-model-settings.js";
 import { PanelHttpError } from "./http-utils.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
+import { createHostFeatureAgentToolContributionResolver } from "./agent-tool-contributions.js";
 import { resolveTriggeredSkillContexts } from "./skill-service.js";
 import type { PanelRunInput } from "./request-parsers.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
@@ -315,6 +316,11 @@ function assemblePanelRuntime(input: {
     await reconcileKnowledgeAssets(knowledgeAssetRoot, new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)));
   });
   const spaceKnowledgeSync = Promise.resolve();
+  const resolveFeatureToolContributions = createHostFeatureAgentToolContributionResolver({
+    agentNotes: agentNotesFeature,
+    spaces: spaceFeature,
+    personalKnowledge: personalKnowledgeFeature,
+  });
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
     skillRoots: input.skillRoots,
@@ -324,9 +330,7 @@ function assemblePanelRuntime(input: {
     resolveSubAgentRoots: input.resolveSubAgentRoots,
     fetch: input.providerFetch,
     toolOutputStore,
-    agentNotes: agentNotesFeature,
-    spaces: spaceFeature,
-    personalKnowledge: personalKnowledgeFeature,
+    resolveToolContributions: resolveFeatureToolContributions,
   });
   const agentSessionEnvironment = new NodeExecutionEnv({ cwd: ordinaryRuntimeRoot });
   const agentSessionRepository = new FileSystemAgentSessionRepository({
@@ -365,9 +369,7 @@ function assemblePanelRuntime(input: {
           }
         : { routingMode: "keyword", abortSignal: context.abortSignal },
     ),
-    agentNotes: agentNotesFeature,
-    spaces: spaceFeature,
-    personalKnowledge: personalKnowledgeFeature,
+    resolveFeatureToolContributions,
     resolveSubAgentRoots: (workspaceRoot) =>
       input.resolveSubAgentRoots?.({ workspaceDirectory: workspaceRoot }) ?? input.subAgentRoots,
   });

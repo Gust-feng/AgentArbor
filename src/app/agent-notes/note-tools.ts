@@ -1,5 +1,6 @@
 import type { ToolExecutionContext, ToolExecutor } from "../../domain/tools/index.js";
 import { asRecord, stringOrUndefined } from "../../kernel/values/index.js";
+import type { AgentToolRegistryContribution } from "../tool-center/factory.js";
 import { AGENT_NOTE_MAX_CHARS, AgentNotesError, type AgentNotesFeature, type AgentNoteScope } from "./contracts.js";
 
 export type NoteToolOptions = {
@@ -7,6 +8,18 @@ export type NoteToolOptions = {
   /** 当前 run 的工作区根目录；工作区笔记以它为作用域。 */
   readonly workspaceRoot: string;
 };
+
+export function createAgentNotesToolRegistryContribution(
+  options: NoteToolOptions,
+): AgentToolRegistryContribution {
+  return (register) => {
+    register({
+      executor: createNoteWriteTool(options),
+      scopes: ["desktop-basic"],
+      enabledByDefault: true,
+    });
+  };
+}
 
 /**
  * NoteWrite：模型主动沉淀记忆的工具（ADR-0033）。

@@ -43,6 +43,18 @@ test('keeps an edited reference stable until the user loads the external version
   await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('外部新版'))
 })
 
+test('keeps the preview header visible while a new document is loading', async () => {
+  let resolvePreview: ((response: Response) => void) | undefined
+  vi.stubGlobal('fetch', vi.fn(async () => await new Promise<Response>((resolve) => { resolvePreview = resolve })))
+
+  render(<ReferencePreview itemId="reference-loading" fallbackTitle="正在打开.md" canOpen={false} onOpen={() => undefined} />)
+  expect(screen.getByRole('navigation', { name: '文件路径' })).toBeTruthy()
+  expect(screen.getByText('正在读取引用内容...')).toBeTruthy()
+
+  resolvePreview?.(new Response(JSON.stringify({ preview: markdownPreview('reference-loading', '1:4', '# 已打开') }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  expect(await screen.findByRole('heading', { name: '已打开' })).toBeTruthy()
+})
+
 test('loading an external version cancels the older scheduled autosave', async () => {
   const original = textPreview('1:4', '原始内容')
   const external = textPreview('2:6', '外部新版')
@@ -469,6 +481,33 @@ test('does not autosave the previous markdown document into a newly selected fil
 
   resolveSecond?.(new Response(JSON.stringify({ preview: previews['reference-two'] }), { status: 200, headers: { 'content-type': 'application/json' } }))
   expect(await screen.findByRole('heading', { name: '文件二' })).toBeTruthy()
+})
+
+test('restores document scroll and source mode by target identity', async () => {
+  const previews: Record<string, SpaceReferencePreview> = {
+    'reference-view-memory-one': markdownPreview('reference-view-memory-one', '1:8', '# 文档一\n\n正文一'),
+    'reference-view-memory-two': markdownPreview('reference-view-memory-two', '2:8', '# 文档二'),
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const id = String(input).includes('reference-view-memory-two') ? 'reference-view-memory-two' : 'reference-view-memory-one'
+    return new Response(JSON.stringify({ preview: previews[id] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  const rendered = render(<ReferencePreview itemId="reference-view-memory-one" fallbackTitle="文档一.md" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByRole('heading', { name: '文档一' })).toBeTruthy()
+  const reader = rendered.container.querySelector<HTMLElement>('[data-document-scroll="content"]')
+  expect(reader).not.toBeNull()
+  reader!.scrollTop = 180
+  fireEvent.scroll(reader!)
+  await userEvent.click(screen.getByRole('button', { name: '源码' }))
+
+  rendered.rerender(<ReferencePreview itemId="reference-view-memory-two" fallbackTitle="文档二.md" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByRole('heading', { name: '文档二' })).toBeTruthy()
+  rendered.rerender(<ReferencePreview itemId="reference-view-memory-one" fallbackTitle="文档一.md" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByRole('button', { name: '阅读' })).toBeTruthy()
+  await userEvent.click(screen.getByRole('button', { name: '阅读' }))
+
+  await waitFor(() => expect(rendered.container.querySelector<HTMLElement>('[data-document-scroll="content"]')?.scrollTop).toBe(180))
 })
 
 function textPreview(fingerprint: string, text: string): SpaceReferencePreview {

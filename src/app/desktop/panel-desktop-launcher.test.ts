@@ -19,8 +19,8 @@ test("panel desktop window options keep secure defaults", () => {
     title: "AgentArbor",
     width: 1440,
     height: 960,
-    minWidth: 1200,
-    minHeight: 800,
+    minWidth: 960,
+    minHeight: 640,
     kind: "main",
     startup: {
       initialWidth: 718,
@@ -39,10 +39,12 @@ test("panel desktop window options keep secure defaults", () => {
       },
     },
     frame: false,
-    transparent: true,
+    transparent: false,
+    resizable: true,
+    maximizable: true,
     hasShadow: false,
     center: true,
-    backgroundColor: "#00000000",
+    backgroundColor: "#f5f7fa",
     show: false,
     autoHideMenuBar: true,
     startupAnimationEnabled: false,
@@ -55,8 +57,17 @@ test("panel desktop window options keep secure defaults", () => {
     },
   } satisfies Omit<PanelDesktopWindowOptions, "icon">);
 
-  assert.equal(createPanelDesktopWindowOptionsWithStartupAnimation(true).startupAnimationEnabled, true);
   assert.equal(createPanelDesktopWindowOptionsWithStartupAnimation(false).startupAnimationEnabled, false);
+});
+
+test("startup animation preserves native window resize, maximize, and restore", () => {
+  const animatedOptions = createPanelDesktopWindowOptionsWithStartupAnimation(true);
+
+  assert.equal(animatedOptions.startupAnimationEnabled, true);
+  assert.equal(animatedOptions.transparent, false);
+  assert.equal(animatedOptions.resizable, true);
+  assert.equal(animatedOptions.maximizable, true);
+  assert.notEqual(animatedOptions.backgroundColor, "#00000000");
 });
 
 test("panel desktop smoke starts and closes the local server without creating a window", async () => {

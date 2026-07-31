@@ -25,7 +25,9 @@ export type PanelDesktopWindowOptions = {
     readonly theme: StartupThemeSnapshot;
   };
   readonly frame: false;
-  readonly transparent: true;
+  readonly transparent: false;
+  readonly resizable: true;
+  readonly maximizable: true;
   readonly hasShadow: false;
   readonly center: boolean;
   readonly backgroundColor: string;
@@ -159,8 +161,8 @@ export function createPanelDesktopWindowOptionsWithStartupAnimation(
     icon: resolvePanelBrandLogoPath(),
     width: STARTUP_MAIN_WINDOW_WIDTH,
     height: STARTUP_MAIN_WINDOW_HEIGHT,
-    minWidth: 1200,
-    minHeight: 800,
+    minWidth: 960,
+    minHeight: 640,
     kind: "main",
     startup: {
       initialWidth: startupWindowSize.width,
@@ -168,10 +170,12 @@ export function createPanelDesktopWindowOptionsWithStartupAnimation(
       theme: startupTheme,
     },
     frame: false,
-    transparent: true,
+    transparent: false,
+    resizable: true,
+    maximizable: true,
     hasShadow: false,
     center: true,
-    backgroundColor: "#00000000",
+    backgroundColor: startupTheme.backgroundColor,
     show: false,
     autoHideMenuBar: true,
     startupAnimationEnabled,

@@ -22,12 +22,12 @@ import {
   type PanelDesktopSession,
 } from "./panel-desktop-launcher.js";
 import {
-  clearDesktopWindowMaximizeState,
-  createDesktopWindowMaximizeState,
+  createDesktopWindowNativeEventState,
   readDesktopWindowPresentationState,
+  recordDesktopWindowMaximized,
   toggleDesktopWindowMaximize,
+  type DesktopWindowNativeEventState,
   type DesktopWindowPresentationState,
-  type DesktopWindowMaximizeState,
 } from "./panel-desktop-window-controls.js";
 import { startLocalPanelServer } from "../panel-server.js";
 import type { AppUpdateServiceLike } from "../app-update/app-update-service.js";
@@ -45,7 +45,7 @@ const mainWindowStates = new WeakMap<BrowserWindow, DesktopMainWindowState>();
 let desktopLocalPreferenceStore: DesktopLocalPreferenceStore | undefined;
 let desktopExitCleanup: Promise<void> | undefined;
 const startupHandoffFallbackTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
-const startupNativeControlRestoreTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
+const startupHandoffFocusTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const STARTUP_WINDOW_EXPAND_CHANNEL = "agentarbor:startup-window-expand";
 const STARTUP_WINDOW_BEGIN_EXPAND_CHANNEL = "agentarbor:startup-window-begin-expand";
 const STARTUP_ANIMATION_CONSUME_CHANNEL = "agentarbor:startup-animation-consume";
@@ -63,14 +63,13 @@ const LOCAL_PREFERENCE_SET_CHANNEL = "agentarbor:local-preference-set";
 const STARTUP_ANIMATION_PREFERENCE_KEY = "agentarbor:startup-animation";
 const AGENTARBOR_APP_ID = "com.agentarbor.desktop";
 const AGENTARBOR_APP_NAME = "AgentArbor";
-const DESKTOP_WINDOW_MAXIMIZE_ANIMATION_MS = 180;
 const STARTUP_WINDOW_EXPAND_MS = 720;
 const STARTUP_WINDOW_REDUCED_MOTION_MS = 80;
 const STARTUP_WINDOW_RENDERER_SETTLE_MS = 80;
 const STARTUP_WINDOW_INITIAL_SHOW_FALLBACK_MS = 1200;
 const STARTUP_WINDOW_BOUNDS_FRAME_MS = 16;
 const STARTUP_MAIN_HANDOFF_VISIBLE_FALLBACK_MS = 900;
-const STARTUP_WINDOW_NATIVE_CONTROL_RESTORE_DELAY_MS = 1000;
+const STARTUP_WINDOW_HANDOFF_FOCUS_DELAY_MS = 1000;
 const STARTUP_WINDOW_SMOKE_TIMEOUT_MS = 18000;
 const STARTUP_WINDOW_SMOKE_MAX_BOUNDS_FRAME_MS = 64;
 const STARTUP_WINDOW_SMOKE_MAX_BOUNDS_STEP_PX = 96;
@@ -153,8 +152,6 @@ type DesktopStartupRendererVisualStats = {
 
 type DesktopStartupWindowState = {
   readonly mainWindow: BrowserWindow;
-  readonly targetMinWidth: number;
-  readonly targetMinHeight: number;
   readonly targetBounds: Rectangle;
   readonly startupBounds: Rectangle;
   handoffRequested: boolean;
@@ -173,7 +170,7 @@ type DesktopStartupWindowState = {
 
 type DesktopMainWindowState = {
   readonly startupWindow: BrowserWindow;
-  readonly maximizeState: DesktopWindowMaximizeState;
+  readonly nativeWindowEvents: DesktopWindowNativeEventState;
 };
 
 // NOTE: 不使用顶层 await，因为 ESM 顶层 await 会阻塞事件循环，
@@ -383,9 +380,12 @@ function createElectronPanelWindow(
     height: targetBounds.height,
     minWidth: targetOptions.minWidth,
     minHeight: targetOptions.minHeight,
-    backgroundColor: startupAnimationEnabled ? "#00000000" : startup.theme.backgroundColor,
-    transparent: startupAnimationEnabled,
-    resizable: !startupAnimationEnabled,
+    backgroundColor: startup.theme.backgroundColor,
+    // Windows cannot restore a transparent frameless BrowserWindow after native maximize.
+    // Startup visuals are renderer-only and must not disable native window capabilities.
+    transparent: targetOptions.transparent,
+    resizable: targetOptions.resizable,
+    maximizable: targetOptions.maximizable,
     show: false,
     webPreferences: {
       ...targetOptions.webPreferences,
@@ -405,8 +405,6 @@ function createElectronPanelWindow(
   if (startupAnimationEnabled) {
     startupWindowStates.set(mainWindow, {
       mainWindow,
-      targetMinWidth: targetOptions.minWidth,
-      targetMinHeight: targetOptions.minHeight,
       targetBounds,
       startupBounds,
       handoffRequested: false,
@@ -425,22 +423,22 @@ function createElectronPanelWindow(
   }
   mainWindowStates.set(mainWindow, {
     startupWindow: mainWindow,
-    maximizeState: createDesktopWindowMaximizeState(),
+    nativeWindowEvents: createDesktopWindowNativeEventState(),
   });
   registerDesktopWindowCleanup(mainWindow);
   mainWindow.on("unmaximize", () => {
     const state = mainWindowStates.get(mainWindow);
     if (state === undefined) return;
-    clearDesktopWindowMaximizeState(state.maximizeState);
+    recordDesktopWindowMaximized(state.nativeWindowEvents, false);
     notifyCurrentDesktopWindowState(mainWindow);
   });
   mainWindow.on("maximize", () => {
+    const state = mainWindowStates.get(mainWindow);
+    if (state === undefined) return;
+    recordDesktopWindowMaximized(state.nativeWindowEvents, true);
     notifyCurrentDesktopWindowState(mainWindow);
   });
   mainWindow.on("leave-full-screen", () => {
-    const state = mainWindowStates.get(mainWindow);
-    if (state === undefined) return;
-    clearDesktopWindowMaximizeState(state.maximizeState);
     notifyCurrentDesktopWindowState(mainWindow);
   });
   mainWindow.on("enter-full-screen", () => {
@@ -495,19 +493,15 @@ function registerDesktopWindowCleanup(window: BrowserWindow): void {
       clearTimeout(fallbackTimer);
       startupHandoffFallbackTimers.delete(window);
     }
-    const nativeControlTimer = startupNativeControlRestoreTimers.get(window);
-    if (nativeControlTimer !== undefined) {
-      clearTimeout(nativeControlTimer);
-      startupNativeControlRestoreTimers.delete(window);
+    const handoffFocusTimer = startupHandoffFocusTimers.get(window);
+    if (handoffFocusTimer !== undefined) {
+      clearTimeout(handoffFocusTimer);
+      startupHandoffFocusTimers.delete(window);
     }
     const startupState = startupWindowStates.get(window);
     if (startupState?.showFallbackTimer !== undefined) {
       clearTimeout(startupState.showFallbackTimer);
       startupState.showFallbackTimer = undefined;
-    }
-    const mainState = mainWindowStates.get(window);
-    if (mainState !== undefined) {
-      clearDesktopWindowMaximizeState(mainState.maximizeState);
     }
     activeWindows.delete(window);
   });
@@ -588,7 +582,7 @@ function installStartupWindowExpansionBridge(): void {
     if (window === undefined) return createDefaultDesktopWindowState();
     const state = mainWindowStates.get(window);
     if (state === undefined) return createDefaultDesktopWindowState();
-    return readDesktopWindowPresentationState(window, state.maximizeState);
+    return readDesktopWindowPresentationState(window, state.nativeWindowEvents);
   });
   ipcMain.on(WINDOW_MINIMIZE_CHANNEL, (event: IpcMainEvent) => {
     const window = panelWindowFromEvent(event);
@@ -600,13 +594,7 @@ function installStartupWindowExpansionBridge(): void {
     if (window === undefined) return;
     const state = mainWindowStates.get(window);
     if (state === undefined) return;
-    toggleDesktopWindowMaximize(window, state.maximizeState, {
-      targetBounds: desktopWindowMaximizeTargetBounds(window),
-      durationMs: DESKTOP_WINDOW_MAXIMIZE_ANIMATION_MS,
-      onStateChange: (nextState) => {
-        notifyDesktopWindowState(window, nextState);
-      },
-    });
+    toggleDesktopWindowMaximize(window, state.nativeWindowEvents);
   });
   ipcMain.on(WINDOW_CLOSE_CHANNEL, (event: IpcMainEvent) => {
     const window = panelWindowFromEvent(event);
@@ -670,11 +658,7 @@ function notifyDesktopWindowState(
 function notifyCurrentDesktopWindowState(window: BrowserWindow): void {
   const state = mainWindowStates.get(window);
   if (state === undefined) return;
-  notifyDesktopWindowState(window, readDesktopWindowPresentationState(window, state.maximizeState));
-}
-
-function desktopWindowMaximizeTargetBounds(window: BrowserWindow): Rectangle {
-  return screen.getDisplayMatching(window.getBounds()).workArea;
+  notifyDesktopWindowState(window, readDesktopWindowPresentationState(window, state.nativeWindowEvents));
 }
 
 function readStartupWindowExpansionRequest(request: unknown): DesktopStartupWindowExpansionRequest {
@@ -889,26 +873,23 @@ function completeStartupMainHandoff(startupWindow: BrowserWindow, state: Desktop
     clearTimeout(fallbackTimer);
     startupHandoffFallbackTimers.delete(state.mainWindow);
   }
-  scheduleStartupWindowNativeControlRestore(startupWindow, state);
+  scheduleStartupWindowFocus(startupWindow);
   completeStartupWindowSmokeIfRequested(state.mainWindow);
 }
 
-function scheduleStartupWindowNativeControlRestore(startupWindow: BrowserWindow, state: DesktopStartupWindowState): void {
-  const existingTimer = startupNativeControlRestoreTimers.get(startupWindow);
+function scheduleStartupWindowFocus(startupWindow: BrowserWindow): void {
+  const existingTimer = startupHandoffFocusTimers.get(startupWindow);
   if (existingTimer !== undefined) {
     clearTimeout(existingTimer);
-    startupNativeControlRestoreTimers.delete(startupWindow);
+    startupHandoffFocusTimers.delete(startupWindow);
   }
   const timer = setTimeout(() => {
-    startupNativeControlRestoreTimers.delete(startupWindow);
+    startupHandoffFocusTimers.delete(startupWindow);
     if (startupWindow.isDestroyed()) return;
-    startupWindow.setMinimumSize(state.targetMinWidth, state.targetMinHeight);
-    startupWindow.setResizable(true);
-    startupWindow.setMaximizable(true);
     startupWindow.focus();
-  }, STARTUP_WINDOW_NATIVE_CONTROL_RESTORE_DELAY_MS);
+  }, STARTUP_WINDOW_HANDOFF_FOCUS_DELAY_MS);
   timer.unref();
-  startupNativeControlRestoreTimers.set(startupWindow, timer);
+  startupHandoffFocusTimers.set(startupWindow, timer);
 }
 
 function scheduleStartupWindowSmokeTimeout(): void {

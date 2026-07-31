@@ -6,8 +6,13 @@ import { PersonalKnowledgeError, type PersonalKnowledgeCommand } from "../person
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { managedKnowledgeReference } from "./knowledge-asset-store.js";
-import { createPanelSpaceReferencePreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
-import { updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
+import type { SpaceReferenceItem } from "../spaces/index.js";
+import {
+  buildLocalReferencePreview,
+  streamLocalReferenceContent,
+  updateLocalReferenceText,
+  type LocalReferenceMeta,
+} from "./local-reference-preview.js";
 import { createWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 
 const id = z.string().trim().min(1).max(512);
@@ -96,12 +101,15 @@ export async function handlePanelPersonalKnowledgeRoute(
     const refId = decode(assetPreview[1]);
     const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
     if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
-    const item = managedKnowledgeReference(requireAssetRoot(runtime), page);
-    writeJson(response, 200, { ok: true, preview: await createPanelSpaceReferencePreview(
-      item,
+    const { rootDir, meta } = localReferenceInfo(managedKnowledgeReference(requireAssetRoot(runtime), page));
+    writeJson(response, 200, { ok: true, preview: await buildLocalReferencePreview(
+      rootDir,
       url.searchParams.get("path") ?? "",
-      `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`,
-      page.asset?.sourceLabel,
+      meta,
+      {
+        contentBaseUrl: `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`,
+        contentTypeHintPath: page.asset?.sourceLabel,
+      },
     ) });
     return true;
   }
@@ -111,11 +119,12 @@ export async function handlePanelPersonalKnowledgeRoute(
     const refId = decode(assetContent[1]);
     const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
     if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
-    await writePanelSpaceReferenceContent(
-      managedKnowledgeReference(requireAssetRoot(runtime), page),
+    const { rootDir } = localReferenceInfo(managedKnowledgeReference(requireAssetRoot(runtime), page));
+    await streamLocalReferenceContent(
+      rootDir,
+      url.searchParams.get("path") ?? "",
       request,
       response,
-      url.searchParams.get("path") ?? "",
       page.asset?.sourceLabel,
     );
     return true;
@@ -125,16 +134,19 @@ export async function handlePanelPersonalKnowledgeRoute(
     const refId = decode(assetContent[1]);
     const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
     if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
-    const item = managedKnowledgeReference(requireAssetRoot(runtime), page);
+    const { rootDir, meta, mutationKey } = localReferenceInfo(managedKnowledgeReference(requireAssetRoot(runtime), page));
     const input = parse(updateAssetTextSchema, await readJsonBody(request));
     const contentBaseUrl = `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`;
     writeJson(response, 200, {
       ok: true,
-      preview: await runtime.fileMutationCoordinator.run(item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" ? item.reference.path : item.id, async () =>
-        await updatePanelSpaceReferenceText(item, input, {
-          contentBaseUrl,
-          contentTypeHintPath: page.asset?.sourceLabel,
-        })),
+      preview: await runtime.fileMutationCoordinator.run(mutationKey, async () =>
+        await updateLocalReferenceText(
+          rootDir,
+          input.relativePath ?? "",
+          { expectedFingerprint: input.expectedFingerprint, text: input.text },
+          meta,
+          { contentBaseUrl, contentTypeHintPath: page.asset?.sourceLabel },
+        )),
     });
     return true;
   }
@@ -190,6 +202,22 @@ export async function handlePanelPersonalKnowledgeRoute(
 function requireAssetRoot(runtime: PanelRuntime): string {
   if (runtime.knowledgeAssetRoot === undefined) throw new PanelHttpError(503, "knowledge_asset_storage_unavailable", "知识资产存储不可用。");
   return runtime.knowledgeAssetRoot;
+}
+
+/** 从托管知识引用中提取 rootDir、元数据和变更协调键。 */
+function localReferenceInfo(item: SpaceReferenceItem): {
+  rootDir: string;
+  meta: LocalReferenceMeta;
+  mutationKey: string;
+} {
+  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder") {
+    throw new PanelHttpError(404, "knowledge_asset_not_found", "知识资产类型不支持预览。");
+  }
+  return {
+    rootDir: item.reference.path,
+    meta: { itemId: item.id, title: item.title, sourceKind: item.reference.kind },
+    mutationKey: item.reference.path,
+  };
 }
 
 const USER_ACTOR = { kind: "user" } as const;

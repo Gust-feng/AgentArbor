@@ -5,7 +5,7 @@ import path from "node:path";
 import type { KnowledgePage } from "../personal-knowledge/index.js";
 import type { SpaceReferenceItem } from "../spaces/index.js";
 import { PanelHttpError } from "./http-utils.js";
-import { resolvePanelSpaceReferencePath } from "./space-reference-preview.js";
+import { resolveWithinRoot } from "../local-filesystem/index.js";
 
 const MAX_CAPTURE_BYTES = 256 * 1024 * 1024;
 const MAX_CAPTURE_ENTRIES = 5_000;
@@ -19,7 +19,12 @@ export async function captureKnowledgeAsset(
   if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
     throw new PanelHttpError(409, "knowledge_asset_capture_unavailable", "当前来源暂不支持复制到知识库。");
   }
-  const source = await resolvePanelSpaceReferencePath(item, relativePath);
+  let source: string;
+  try {
+    source = await resolveWithinRoot(item.reference.path, relativePath);
+  } catch {
+    throw new PanelHttpError(400, "invalid_space_reference_path", "引用子路径超出了文件夹范围。");
+  }
   const stat = await fs.stat(source).catch(() => undefined);
   if (stat === undefined || (!stat.isFile() && !stat.isDirectory())) {
     throw new PanelHttpError(404, "knowledge_asset_source_missing", "来源文件已不存在。");

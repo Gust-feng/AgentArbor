@@ -25,43 +25,27 @@ import {
 import { type View } from './Sidebar'
 import type {
   PersonalSpaceActions,
-  PersonalSpaceItemProjection,
   PersonalSpaceProjection,
 } from '../../../space'
 import { ReferencePreview, type ReferencePreviewHandle } from './ReferencePreview'
 import { NoteEditor } from './NoteEditor'
-import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
+import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
 import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
-import { getAllNotes, useNotes } from './notesStore'
+import {
+  useMountedTree,
+  getItem,
+  referenceChildId,
+  isFileSystemFolderKind,
+  actionErrorMessage,
+  type SpaceItem,
+} from './useMountedTree'
+import { useNotes } from './notesStore'
 import { useBrain, type PageKind } from './brainStore'
 
 /**
  * 学习空间 —— VS Code 式分栏:左侧资源管理器(我的笔记 + 资料),右侧书写/查看。
  * 单击进入,追求心流。笔记与外部引用分区呈现；引用是否可编辑由来源能力决定。
  */
-
-interface SpaceItem {
-  id: string
-  name: string
-  type: 'folder' | 'file' | 'web' | 'conversation'
-  domainKind: PersonalSpaceItemProjection['kind']
-  meta?: string
-  defaultExpanded?: boolean
-  children?: SpaceItem[]
-  conversationId?: string
-  openUrl?: string
-  openable?: boolean
-  referenceId?: string
-  assetId?: string
-  relativePath?: string
-  externalChild?: boolean
-}
-
-type FileSystemFolderKind = Extract<PersonalSpaceItemProjection['kind'], 'workspace_folder' | 'managed_folder'>
-
-function isFileSystemFolderKind(kind: PersonalSpaceItemProjection['kind']): kind is FileSystemFolderKind {
-  return kind === 'workspace_folder' || kind === 'managed_folder'
-}
 
 /**
  * 空间里的材料 / 对话引用。引用保留外部来源身份，文本来源可在冲突保护下编辑。
@@ -253,73 +237,6 @@ function countItems(tree: SpaceItem[]): number {
   return tree.reduce((n, item) => n + 1 + (item.children ? countItems(item.children) : 0), 0)
 }
 
-function getItem(tree: SpaceItem[], id: string): SpaceItem | undefined {
-  for (const item of tree) {
-    if (item.id === id) return item
-    if (item.children) {
-      const found = getItem(item.children, id)
-      if (found) return found
-    }
-  }
-  return undefined
-}
-
-function projectSpaceTree(space: PersonalSpaceProjection | undefined): SpaceItem[] {
-  if (space === undefined) return []
-  return space.items.map(projectSpaceItem)
-}
-
-function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
-  return {
-    id: item.itemId,
-    name: item.title,
-    type: visualItemType(item.kind),
-    domainKind: item.kind,
-    meta: item.detail ?? item.updatedAtLabel,
-    defaultExpanded: item.kind === 'folder',
-    children: item.children?.map(projectSpaceItem),
-    conversationId: item.conversationId,
-    openUrl: item.openUrl,
-    openable: item.openable,
-    referenceId: item.referenceId,
-    assetId: item.assetId,
-  }
-}
-
-function attachReferenceChildren(tree: SpaceItem[], childrenById: ReadonlyMap<string, SpaceItem[]>): SpaceItem[] {
-  return tree.map((item) => {
-    const children = childrenById.get(item.id) ?? item.children
-    return { ...item, children: children === undefined ? undefined : attachReferenceChildren(children, childrenById) }
-  })
-}
-
-function projectReferenceChildren(referenceId: string, sourceKind: FileSystemFolderKind, entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: 'file' | 'directory' | 'other' }[]): SpaceItem[] {
-  return entries.map((entry) => ({
-    id: referenceChildId(referenceId, entry.relativePath),
-    name: entry.name,
-    type: entry.kind === 'directory' ? 'folder' : 'file',
-    domainKind: entry.kind === 'directory' ? sourceKind : 'local_file',
-    referenceId,
-    relativePath: entry.relativePath,
-    externalChild: true,
-  }))
-}
-
-function referenceChildId(referenceId: string, relativePath: string): string {
-  return `${referenceId}::${encodeURIComponent(relativePath)}`
-}
-
-function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['type'] {
-  switch (kind) {
-    case 'folder':
-    case 'workspace_folder': return 'folder'
-    case 'managed_folder': return 'folder'
-    case 'web_reference': return 'web'
-    case 'conversation_reference': return 'conversation'
-    default: return 'file'
-  }
-}
-
 function deleteLabelFor(item: SpaceItem): string {
   if (item.externalChild) return item.type === 'folder' ? '删除文件夹' : '删除'
   if (item.domainKind === 'folder' || item.domainKind === 'managed_folder') return '删除文件夹'
@@ -339,19 +256,11 @@ interface SpacePageProps {
 
 interface SpaceViewMemory {
   selectedId: string | null
-  expandedIds: Set<string>
+  expandedIds: ReadonlySet<string>
   scrollTop: number
 }
 
 const spaceViewMemory = new Map<string, SpaceViewMemory>()
-
-function collectDefaultExpanded(tree: SpaceItem[], result = new Set<string>()): Set<string> {
-  for (const item of tree) {
-    if (item.type === 'folder' && item.defaultExpanded) result.add(item.id)
-    if (item.children !== undefined) collectDefaultExpanded(item.children, result)
-  }
-  return result
-}
 
 export function SpacePage({
   onNavigate,
@@ -399,28 +308,25 @@ export function SpacePage({
   }
 
   // 书写为中心:默认打开最近编辑的笔记(有 targetId 则优先)。
-  const [referenceChildren, setReferenceChildren] = useState<ReadonlyMap<string, SpaceItem[]>>(new Map())
-  const projectedTree = useMemo(() => projectSpaceTree(space), [space])
-  const tree = useMemo(() => attachReferenceChildren(projectedTree, referenceChildren), [projectedTree, referenceChildren])
-  const memoryKey = spaceId ?? 'prototype-space'
-  const rememberedView = spaceViewMemory.get(memoryKey)
-  const [selectedId, setSelectedId] = useState<string | null>(() => (
-    targetId
-      ?? rememberedView?.selectedId
-      ?? getAllNotes().find((note) => spaceId === undefined || note.spaceId === spaceId)?.id
-      ?? tree[0]?.id
-      ?? null
-  ))
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(
-    () => new Set(rememberedView?.expandedIds ?? collectDefaultExpanded(tree)),
-  )
   const [creatingNoteId, setCreatingNoteId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
   const explorerRef = useRef<HTMLDivElement>(null)
   const referencePreviewRef = useRef<ReferencePreviewHandle>(null)
-  const directoryLoadsRef = useRef(new Map<string, Promise<void>>())
+  const memoryKey = spaceId ?? 'prototype-space'
+  const rememberedView = spaceViewMemory.get(memoryKey)
+  const mountedTree = useMountedTree({
+    spaceId: memoryKey,
+    space,
+    initialExpandedIds: rememberedView?.expandedIds,
+    onError: setActionError,
+  })
+  const { tree, projectedTree, expandedIds } = mountedTree
+  // 书写为中心:默认打开最近一篇笔记(有 targetId / 记忆选择则优先)，再回退到首个空间对象。
+  const [selectedId, setSelectedId] = useState<string | null>(() => (
+    targetId ?? rememberedView?.selectedId ?? notes[0]?.id ?? tree[0]?.id ?? null
+  ))
   const selectedStillExists = selectedId !== null
     && (notes.some((note) => note.id === selectedId) || getItem(tree, selectedId) !== undefined)
 
@@ -431,7 +337,7 @@ export function SpacePage({
 
   function prefetchTreeItem(item: SpaceItem) {
     if (item.type === 'folder') {
-      void loadReferenceDirectory(item)
+      void mountedTree.loadDirectory(item)
       return
     }
     const referenceId = item.referenceId ?? item.id
@@ -455,15 +361,9 @@ export function SpacePage({
   }
 
   function toggleExpanded(id: string) {
+    // 展开 / 加载 / 缓存收口到 useMountedTree；这里只把 id 解析成条目后委派。
     const item = getItem(tree, id)
-    const opening = !expandedIds.has(id)
-    setExpandedIds((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-    if (opening && item !== undefined) void loadReferenceDirectory(item, true)
+    if (item !== undefined) mountedTree.toggleExpand(item)
   }
 
   useEffect(() => {
@@ -537,7 +437,7 @@ export function SpacePage({
       try {
         if (selectedId === item.id) await referencePreviewRef.current?.flush()
         const nextRelativePath = await renameSpaceReferenceEntry(item.referenceId, item.relativePath, name)
-        await refreshReferenceParent(item.referenceId, item.relativePath)
+        await mountedTree.refreshParentOf(item.referenceId, item.relativePath)
         await fetchSpaceReferencePreview(item.referenceId, nextRelativePath)
         setSelectedId((current) => current === item.id ? referenceChildId(item.referenceId!, nextRelativePath) : current)
       } catch (error) {
@@ -560,7 +460,7 @@ export function SpacePage({
       setActionError(null)
       try {
         await deleteSpaceReferenceEntry(item.referenceId, item.relativePath)
-        await refreshReferenceParent(item.referenceId, item.relativePath)
+        await mountedTree.refreshParentOf(item.referenceId, item.relativePath)
         setSelectedId((current) => current === item.id ? null : current)
       } catch (error) {
         setActionError(actionErrorMessage(error))
@@ -593,73 +493,7 @@ export function SpacePage({
     }
   }
 
-  async function refreshReferenceParent(referenceId: string, relativePath: string) {
-    const separator = relativePath.lastIndexOf('/')
-    const parentPath = separator < 0 ? '' : relativePath.slice(0, separator)
-    const parentId = parentPath.length === 0 ? referenceId : referenceChildId(referenceId, parentPath)
-    await refreshReferenceDirectory(referenceId, parentPath, parentId)
-  }
-
-  async function refreshReferenceDirectory(referenceId: string, relativePath: string, directoryId: string) {
-    const preview = await refreshSpaceReferencePreview(referenceId, relativePath)
-    if (preview.content.kind !== 'directory') return
-    const entries = preview.content.entries
-    const root = getItem(tree, referenceId)
-    const sourceKind = root !== undefined && isFileSystemFolderKind(root.domainKind) ? root.domainKind : 'workspace_folder'
-    setReferenceChildren((current) => {
-      const next = new Map(current)
-      next.set(directoryId, projectReferenceChildren(referenceId, sourceKind, entries))
-      return next
-    })
-  }
-
-  function loadReferenceDirectory(item: SpaceItem, force = false): Promise<void> {
-    if (item.type !== 'folder' || item.referenceId === undefined || !isFileSystemFolderKind(item.domainKind)) {
-      return Promise.resolve()
-    }
-    if (!force && referenceChildren.has(item.id)) return Promise.resolve()
-    const active = directoryLoadsRef.current.get(item.id)
-    if (active !== undefined) return active
-    const request = refreshReferenceDirectory(item.referenceId, item.relativePath ?? '', item.id)
-      .catch((error: unknown) => setActionError(actionErrorMessage(error)))
-      .finally(() => directoryLoadsRef.current.delete(item.id))
-    directoryLoadsRef.current.set(item.id, request)
-    return request
-  }
-
-  useEffect(() => {
-    for (const item of projectedTree) {
-      if (item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) void loadReferenceDirectory(item)
-    }
-  }, [memoryKey, projectedTree])
-
-  useEffect(() => {
-    const visit = (items: readonly SpaceItem[]) => {
-      for (const item of items) {
-        if (expandedIds.has(item.id) && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) {
-          void loadReferenceDirectory(item)
-        }
-        if (item.children !== undefined) visit(item.children)
-      }
-    }
-    visit(tree)
-  }, [expandedIds, tree])
-
-  useEffect(() => {
-    const refreshExpandedDirectories = () => {
-      const visit = (items: readonly SpaceItem[]) => {
-        for (const item of items) {
-          if (expandedIds.has(item.id) && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)) {
-            void loadReferenceDirectory(item, true)
-          }
-          if (item.children !== undefined) visit(item.children)
-        }
-      }
-      visit(tree)
-    }
-    window.addEventListener('focus', refreshExpandedDirectories)
-    return () => window.removeEventListener('focus', refreshExpandedDirectories)
-  }, [expandedIds, tree])
+  // 目录加载 / 缓存 / 展开已收口到 useMountedTree；这里只剩读写动作与对外导航。
 
   async function handleOpenReference(item: SpaceItem) {
     if (item.conversationId !== undefined && onOpenConversation !== undefined) {
@@ -720,7 +554,7 @@ export function SpacePage({
       }
     }
     const referenceId = parent.referenceId ?? parent.id
-    setExpandedIds((current) => new Set(current).add(parent.id))
+    mountedTree.expandItem(parent)
     setCreatingReferenceFile({ referenceId, parentId: parent.id, parentPath: parent.relativePath ?? '' })
   }
 
@@ -731,7 +565,7 @@ export function SpacePage({
     setActionError(null)
     try {
       const relativePath = await createSpaceReferenceEntry(target.referenceId, target.parentPath, name)
-      await refreshReferenceDirectory(target.referenceId, target.parentPath, target.parentId)
+      await mountedTree.refreshByReference(target.referenceId, target.parentPath)
       await fetchSpaceReferencePreview(target.referenceId, relativePath)
       setSelectedId(referenceChildId(target.referenceId, relativePath))
     } catch (error) {
@@ -1252,12 +1086,6 @@ function CenteredCard({ children }: { children: ReactNode }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">{children}</div>
   )
-}
-
-function actionErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim().length > 0
-    ? error.message
-    : '空间操作没有完成，请重试。'
 }
 
 function hasMaterialCreateAction(

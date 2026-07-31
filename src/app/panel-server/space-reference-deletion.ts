@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { SpaceReferenceItem } from "../spaces/index.js";
 import { PanelHttpError } from "./http-utils.js";
+import { isWithinRoot } from "../local-filesystem/index.js";
 
 export type StagedSpaceReferenceDeletion = {
   readonly commit: () => Promise<void>;
@@ -17,7 +18,12 @@ export async function stageOwnedSpaceReferenceDeletion(
 ): Promise<StagedSpaceReferenceDeletion | undefined> {
   if (item.reference.kind !== "local_file" && item.reference.kind !== "managed_folder") return undefined;
   const source = path.resolve(item.reference.path);
-  if (item.reference.kind === "managed_folder") assertInsideManagedRoot(managedFolderRoot, source);
+  if (item.reference.kind === "managed_folder") {
+    const resolvedRoot = path.resolve(managedFolderRoot);
+    if (path.relative(resolvedRoot, source).length === 0 || !isWithinRoot(resolvedRoot, source)) {
+      throw new PanelHttpError(409, "space_managed_folder_not_found", "软件文件夹不属于当前维护空间。");
+    }
+  }
   const stat = await fs.lstat(source).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
     throw error;
@@ -34,11 +40,4 @@ export async function stageOwnedSpaceReferenceDeletion(
     commit: async () => await fs.rm(staged, { recursive: true, force: false }),
     rollback: async () => await fs.rename(staged, source),
   };
-}
-
-function assertInsideManagedRoot(root: string, candidate: string): void {
-  const relative = path.relative(path.resolve(root), candidate);
-  if (relative.length === 0 || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new PanelHttpError(409, "space_managed_folder_not_found", "软件文件夹不属于当前维护空间。");
-  }
 }

@@ -1,9 +1,8 @@
 /**
  * Redesign 风格对话转录渲染器。
  *
- * 消费与旧 TranscriptChain 完全相同的 ConversationDisplayItem[] 数据，
- * 但用 Redesign 的 --aa-* 设计 token 和 inline style 渲染，
- * 不再依赖旧 styles/ 目录中的 CSS 类。
+ * 消费 ConversationDisplayItem[] 与 canonical tool result 数据，使用
+ * Redesign 的 --aa-* token 渲染，不依赖旧 Transcript 组件和主题。
  *
  * 数据权威不变：projectConversationDisplayList 产出什么，这里就渲染什么。
  * 全量可见性不变：工具活动、确认流、失败归因、Sub-Agent 嵌套全部保留。
@@ -23,8 +22,6 @@ import {
   FolderOpen,
   Bot,
   Wrench,
-  ShieldCheck,
-  X,
 } from "lucide-react";
 import type { ConversationTurn, ConversationTurnAttachment } from "../../../../contracts/conversation";
 import type { AgentDeliverable, BasicAgentRun, DesktopWorkView, TranscriptNode } from "../../../../contracts/run";
@@ -41,11 +38,10 @@ import {
   transcriptToolResultsCacheForConversation,
 } from "../../../../panel-ui-transcript-store";
 import type { ChatModelOption } from "../../../../components/chat-empty";
-import type { ConfirmationProjection } from "../../../../components/transcript-timeline";
 import { RichText, StreamingRichText } from "../../../../components/rich-text";
-import { ConfirmationNode } from "../../../../components/transcript-confirmation";
-import { ActivityEvidencePanel } from "../../../../components/activity-evidence";
+import { ActivityEvidencePanel } from "./ActivityEvidence";
 import { toolResultForActivity } from "../../../../tool-result-association";
+import { ConfirmationCard, type ConfirmationProjection } from "./ConfirmationCard";
 import { RADII, contentCard } from "./tokens";
 import type {
   ConversationDisplayItem,
@@ -418,7 +414,7 @@ function RedesignActivityTimeline(props: {
       {/* 确认卡片 */}
       {confirmation.current !== undefined && (
         <div className="px-3 pb-3" style={{ borderTop: "1px solid var(--aa-border)" }}>
-          <ConfirmationNode
+          <ConfirmationCard
             confirmation={confirmation.current}
             busy={props.confirmationBusy}
             onDecision={props.onDecision}

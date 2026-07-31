@@ -7,7 +7,7 @@ import { WorkbenchSettingsDialog, type WorkbenchSettingsDialogProps } from "../.
 import type { AppUpdateInfo } from "../../contracts/app-update";
 import type { Conversation, ConversationSummary } from "../../contracts/conversation";
 import type { PendingConfirmation, TranscriptNode } from "../../contracts/run";
-import type { ConfirmationProjection } from "../../components/transcript-timeline";
+import type { ConfirmationProjection } from "./app/components/ConfirmationCard";
 import type { PersonalSpaceActions, PersonalSpaceProjection } from "../space";
 import { ConversationPage, type LiveConversationState } from "./app/components/ConversationPage";
 import { BrainPage } from "./app/components/BrainPage";

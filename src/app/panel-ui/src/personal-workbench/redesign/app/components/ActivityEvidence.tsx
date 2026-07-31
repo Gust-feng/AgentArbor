@@ -4,9 +4,9 @@ import type {
   ActivityExpandedItem,
   ActivityExpandedSection,
   ActivityItem,
-} from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
-import type { ToolCallResult, ToolFactValue } from "../../../../domain/tools";
-import { CopyActionButton } from "./copy-action-button";
+} from "../../../../../../panel-read-model/transcript/panel-transcript-activity-copy";
+import type { ToolCallResult, ToolFactValue } from "../../../../../../../domain/tools";
+import { CopyActionButton } from "../../../../components/copy-action-button";
 
 const PRIMARY_LIST_LIMIT = 8;
 

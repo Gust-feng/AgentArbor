@@ -1,11 +1,8 @@
 import type React from "react";
-import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { projectChatWorkline } from "../../panel-read-model/assistant/panel-assistant-workline";
 import { createLiveRunUpdateController } from "./app-live-run-updates";
 import { projectCurrentRun } from "./app-run-projection";
 import { createInitialAppState, type AppState } from "./app-state";
-import { ChatTranscriptDisplay } from "./components/chat-transcript-display";
 import type { BasicAgentRunView, RunEvent } from "./contracts/run";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -231,42 +228,6 @@ describe("live Ordinary run updates", () => {
       "final.result",
     ]);
 
-    const terminalState = terminalSnapshots[0]!;
-    const currentRun = projectCurrentRun(terminalState);
-    const turns = terminalState.conversation?.turns ?? [];
-    const workline = projectChatWorkline({
-      turns,
-      currentRunId: currentRun.run?.runId,
-      currentRunStatus: currentRun.run?.status,
-      transcriptNodes: currentRun.transcriptNodes,
-      hasAnswer: turns.some((turn) => turn.role === "assistant" && turn.content.trim().length > 0),
-      hasLiveAnswer: currentRun.live?.turns.some((turn) => turn.output.text.length > 0) === true,
-      hasPendingConfirmation: false,
-      hasDeliverable: false,
-    });
-    render(
-      <ChatTranscriptDisplay
-        conversationId="conversation-1"
-        projectedTurns={workline.turns}
-        turns={turns}
-        currentRunId={currentRun.run?.runId}
-        currentRunNodes={currentRun.transcriptNodes}
-        run={currentRun.run}
-        live={currentRun.live}
-        workView={currentRun.workView}
-        showModelUsage={false}
-        models={[]}
-        selectedModelId=""
-        onDecision={() => undefined}
-        confirmationBusy={false}
-      />,
-    );
-
-    expect(document.querySelectorAll(".typing-dots > span")).toHaveLength(0);
-    expect(screen.getByText("最终回答")).toBeTruthy();
-    const reasoning = screen.getByText("思考过程").closest("details");
-    expect(reasoning?.open).toBe(false);
-    expect(reasoning?.contains(screen.getByText("先确认用户意图，再组织回答。"))).toBe(true);
   });
 });
 

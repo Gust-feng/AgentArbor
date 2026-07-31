@@ -2,8 +2,8 @@
  * External transcript cache for historical runs.
  *
  * Historical transcript nodes and canonical tool results are stored OUTSIDE React's app state so that
- * loading them does NOT trigger a full App → ChatActive → TranscriptChain
- * re-render cascade. Only transcript renderers subscribe to this
+ * loading them does NOT trigger a full workbench render cascade. Only the
+ * active Redesign transcript subscribes to this
  * cache via useSyncExternalStore, keeping the rest of the UI stable during
  * background conversation loading.
  */

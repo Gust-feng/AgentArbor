@@ -1,9 +1,9 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
-import type { ActivityItem } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
-import type { ToolCallResult } from "../../../../domain/tools";
-import { ActivityEvidencePanel } from "./activity-evidence";
+import type { ActivityItem } from "../../../../../../panel-read-model/transcript/panel-transcript-activity-copy";
+import type { ToolCallResult } from "../../../../../../../domain/tools";
+import { ActivityEvidencePanel } from "./ActivityEvidence";
 
 test("activity evidence renders sources with only title, link, and domain", () => {
   render(<ActivityEvidencePanel item={item({

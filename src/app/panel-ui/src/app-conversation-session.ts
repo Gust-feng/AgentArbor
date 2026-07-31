@@ -152,8 +152,8 @@ export async function loadConversationSession(
   //
   // 2. EXTERNAL cache — historical nodes are written to a module-level
   //    cache (panel-ui-transcript-store) instead of app state.  Only
-  //    TranscriptChain subscribes to that cache via useSyncExternalStore,
-  //    so the rest of the UI (App, ChatActive, status bars, etc.) does
+  //    The Redesign transcript subscribes via useSyncExternalStore, so the
+  //    rest of the workbench does
   //    NOT re-render.  The historical nodes carry no data-entering
   //    attribute, so no CSS animation fires — the user perceives a
   //    silent background fill-in with zero flicker.

@@ -6,9 +6,6 @@ import { PanelHttpError, readJsonBody } from "./http-utils.js";
 import {
   parseContextAttachmentPreviewRequest,
   parseConfigUpdate,
-  parseDeepChildMessageRequest,
-  parseDeepIntakeRequest,
-  parseDeepRunControlRequest,
   parseMcpEnvironmentRequest,
   parseMcpServerImport,
   parseRunInput,
@@ -119,12 +116,6 @@ test("Panel request parsers ignore retired aliases instead of reviving compatibi
   assert.equal(ordinary.reasoningEffort, undefined);
   assert.equal(ordinary.taskSoilInput?.contextRefs, undefined);
 
-  assertPanelError(() => parseDeepChildMessageRequest({ instruction: "legacy" }), "empty_child_instruction");
-  assertPanelError(
-    () => parseDeepRunControlRequest({ context: ["legacy"] }, "correct"),
-    "empty_correction_context",
-  );
-
   assertPanelError(
     () => parseMcpServerImport({ mcp: { servers: { docs: { command: "npx" } } } }),
     "missing_mcp_import_servers",
@@ -142,17 +133,7 @@ test("Panel request parsers ignore retired aliases instead of reviving compatibi
   })[0]?.headerSecretRefs, []);
 });
 
-test("Deep and context request schemas preserve explicit 400 errors for invalid enum and nested input", () => {
-  assert.deepEqual(parseDeepIntakeRequest({ message: "  investigate  ", aiMode: "fake" }), {
-    message: "investigate",
-    aiMode: "fake",
-    taskSoilInput: undefined,
-  });
-  assertPanelError(() => parseDeepIntakeRequest({ message: "investigate", aiMode: "bad" }), "invalid_ai_mode");
-  assertPanelError(
-    () => parseDeepRunControlRequest({ correctionContext: ["valid", { nested: true }] }, "correct"),
-    "invalid_correction_context",
-  );
+test("context request schemas preserve explicit 400 errors for invalid enum input", () => {
   assertPanelError(
     () => parseContextAttachmentPreviewRequest({ kind: "archive", value: "x" }),
     "invalid_context_attachment_kind",

@@ -61,14 +61,16 @@ import {
   parseConfirmationDecision,
   parseConversationPinInput,
   parseConversationRenameInput,
+} from "../app/panel-server/request-parsers.js";
+import {
   parseDeepChildMessageRequest,
   parseDeepConversationCreateRequest,
   parseDeepIntakeRequest,
+  parseDeepRunListLimit,
   parseDeepRunControlRequest,
   parseDeepRunFollowUpRequest,
   parseDeepRunStartRequest,
-} from "../app/panel-server/request-parsers.js";
-import { parseDeepRunListLimit } from "../app/panel-server/deep-route-helpers.js";
+} from "./deep-request-parsers.js";
 import { errorMessage } from "../kernel/values/index.js";
 
 const DEEP_STREAM_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -916,4 +918,3 @@ async function resolveDeepAiMode(
   const config = await runtime.configCenter.getModelProviderConfig();
   return config.defaultAiMode;
 }
-

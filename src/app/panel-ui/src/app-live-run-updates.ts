@@ -24,7 +24,7 @@ import {
   safeBasicRunView,
 } from "./runtime";
 import { transcriptNodesFrom } from "./app-run-projection";
-import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
+import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
 import type { BasicAgentRun, OrdinaryRunCursor, RunEvent } from "./contracts/run";
 
 const FALLBACK_POLL_INTERVAL_MS = 1_200;
@@ -400,11 +400,13 @@ function cacheSettledRunTranscriptNodes(settled: SettledRunProjection): void {
   }
   const nodes = transcriptNodesFrom(settled.workView)
     .filter((node) => node.runId === settled.runId);
-  if (nodes.length === 0) {
+  const toolResults = settled.detail?.toolResults ?? [];
+  if (nodes.length === 0 && toolResults.length === 0) {
     return;
   }
-  updateTranscriptNodesCache(conversationId, {
-    [settled.runId]: nodes,
+  updateTranscriptRunCache(conversationId, {
+    nodesByRunId: { [settled.runId]: nodes },
+    toolResultsByRunId: { [settled.runId]: toolResults },
   });
 }
 

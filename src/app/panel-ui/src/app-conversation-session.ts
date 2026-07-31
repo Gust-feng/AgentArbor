@@ -5,7 +5,8 @@ import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "
 import type { AppState } from "./app-state";
 import { liveRunForObservedReplay } from "./app-task-submit-flow";
 import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
-import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
+import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
+import type { ToolCallResult } from "../../../domain/tools";
 import type { Conversation } from "./contracts/conversation";
 import type { TranscriptNode } from "./contracts/run";
 import { ordinaryWorkViewFromRunView, safeBasicRunView } from "./runtime";
@@ -163,16 +164,18 @@ export async function loadConversationSession(
   const historicalRunIds = runIdsForTurnWindow(response.conversation.turns, initialVisibleWindow.startIndex)
     .filter((id) => id !== latestRunId);
   if (historicalRunIds.length > 0) {
-    const entries = await loadHistoricalTranscriptNodeEntries(historicalRunIds, abortController.signal);
+    const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds, abortController.signal);
     if (options.conversationLoadAbortRef.current === abortController) {
       options.conversationLoadAbortRef.current = undefined;
     }
     if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return false;
-    const patch: Record<string, readonly TranscriptNode[]> = {};
-    for (const [runId, nodes] of entries) {
-      patch[runId] = nodes;
+    const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
+    const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
+    for (const entry of entries) {
+      nodesByRunId[entry.runId] = entry.nodes;
+      toolResultsByRunId[entry.runId] = entry.toolResults;
     }
-    updateTranscriptNodesCache(response.conversation.conversationId, patch);
+    updateTranscriptRunCache(response.conversation.conversationId, { nodesByRunId, toolResultsByRunId });
   } else {
     if (options.conversationLoadAbortRef.current === abortController) {
       options.conversationLoadAbortRef.current = undefined;
@@ -212,11 +215,11 @@ export function resetConversationSession(options: ConversationSessionControllerO
   }));
 }
 
-export async function loadHistoricalTranscriptNodeEntries(
+export async function loadHistoricalTranscriptRunEntries(
   runIds: readonly string[],
   signal?: AbortSignal
-): Promise<readonly (readonly [string, readonly TranscriptNode[]])[]> {
-  const entries: (readonly [string, readonly TranscriptNode[]])[] = [];
+): Promise<readonly HistoricalTranscriptRunEntry[]> {
+  const entries: HistoricalTranscriptRunEntry[] = [];
   let nextIndex = 0;
   const workerCount = Math.min(HISTORICAL_RUN_LOAD_CONCURRENCY, runIds.length);
   await Promise.all(Array.from({ length: workerCount }, async () => {
@@ -227,8 +230,14 @@ export async function loadHistoricalTranscriptNodeEntries(
       const view = await safeBasicRunView(runId, undefined, { signal });
       const nodes = transcriptNodesFrom(ordinaryWorkViewFromRunView(view))
         .filter((node: TranscriptNode) => node.runId === runId);
-      entries.push([runId, nodes] as const);
+      entries.push({ runId, nodes, toolResults: view?.detail.toolResults ?? [] });
     }
   }));
-  return entries.sort((left, right) => runIds.indexOf(left[0]) - runIds.indexOf(right[0]));
+  return entries.sort((left, right) => runIds.indexOf(left.runId) - runIds.indexOf(right.runId));
 }
+
+export type HistoricalTranscriptRunEntry = {
+  readonly runId: string;
+  readonly nodes: readonly TranscriptNode[];
+  readonly toolResults: readonly ToolCallResult[];
+};

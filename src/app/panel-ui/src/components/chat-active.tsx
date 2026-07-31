@@ -9,6 +9,7 @@ import type {
   TranscriptNode,
 } from "../contracts/run";
 import type { LiveRunBuffer } from "../../../panel-read-model/run/panel-run-live-buffer";
+import type { ToolCallResult } from "../../../../domain/tools";
 import { RichText } from "./rich-text";
 import { ChatInputBar, type ChatInputProps } from "./chat-empty";
 import { projectChatActiveView, type ChatStatusNotice } from "../chat-active-view";
@@ -20,9 +21,10 @@ import {
   type TranscriptVisibilityState,
 } from "../transcript-window";
 import {
-  getTranscriptNodesCache,
+  getTranscriptCache,
   transcriptNodesCacheForConversation,
-  updateTranscriptNodesCache,
+  transcriptToolResultsCacheForConversation,
+  updateTranscriptRunCache,
 } from "../panel-ui-transcript-store";
 import { transcriptNodesFrom } from "../app-run-projection";
 import { ordinaryWorkViewFromRunView, safeBasicRunView } from "../runtime";
@@ -329,10 +331,12 @@ async function loadVisibleHistoricalRunNodes(input: {
   readonly currentRunId?: string;
   readonly abortRef: React.MutableRefObject<AbortController | undefined>;
 }): Promise<void> {
-  const cachedNodes = transcriptNodesCacheForConversation(getTranscriptNodesCache(), input.conversationId);
+  const snapshot = getTranscriptCache();
+  const cachedNodes = transcriptNodesCacheForConversation(snapshot, input.conversationId);
+  const cachedToolResults = transcriptToolResultsCacheForConversation(snapshot, input.conversationId);
   const missingRunIds = runIdsForTurnWindow(input.turns, input.startIndex, input.endIndex)
     .filter((runId) => runId !== input.currentRunId)
-    .filter((runId) => cachedNodes[runId] === undefined);
+    .filter((runId) => cachedNodes[runId] === undefined || cachedToolResults[runId] === undefined);
   if (missingRunIds.length === 0) return;
 
   input.abortRef.current?.abort();
@@ -347,14 +351,17 @@ async function loadVisibleHistoricalRunNodes(input: {
         runId,
         nodes: transcriptNodesFrom(ordinaryWorkViewFromRunView(view))
           .filter((node) => node.runId === runId),
+        toolResults: view?.detail.toolResults ?? [],
       };
     }));
     if (abortController.signal.aborted) return;
-    const patch: Record<string, readonly TranscriptNode[]> = {};
+    const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
+    const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
     for (const item of batch) {
-      patch[item.runId] = item.nodes;
+      nodesByRunId[item.runId] = item.nodes;
+      toolResultsByRunId[item.runId] = item.toolResults;
     }
-    updateTranscriptNodesCache(input.conversationId, patch);
+    updateTranscriptRunCache(input.conversationId, { nodesByRunId, toolResultsByRunId });
   }
 }
 

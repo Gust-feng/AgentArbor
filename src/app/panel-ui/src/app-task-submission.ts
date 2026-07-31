@@ -12,7 +12,8 @@ import {
   createRunReadModelPatch,
 } from "./app-run-projection";
 import { runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
-import { updateTranscriptNodesCache } from "./panel-ui-transcript-store";
+import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
+import type { ToolCallResult } from "../../../domain/tools";
 import { shouldKeepRefreshing, stopPolling, stopStream } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
 import type { AppState } from "./app-state";
@@ -32,7 +33,7 @@ import { emptyLiveRun } from "../../panel-read-model/run/panel-run-live-buffer";
 import {
   safeConversation,
 } from "./runtime";
-import { loadHistoricalTranscriptNodeEntries } from "./app-conversation-session";
+import { loadHistoricalTranscriptRunEntries } from "./app-conversation-session";
 import type { LiveRunSubscription } from "./app-live-run-updates";
 
 export type PanelTaskSubmissionOptions = {
@@ -258,13 +259,15 @@ export async function submitPanelTask(
       const historicalRunIds = runIdsForConversation(effectiveConversation.turns)
         .filter((id) => id !== observedRunId);
       if (historicalRunIds.length > 0) {
-        const entries = await loadHistoricalTranscriptNodeEntries(historicalRunIds);
+        const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds);
         if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
-        const patch: Record<string, readonly TranscriptNode[]> = {};
-        for (const [runId, nodes] of entries) {
-          patch[runId] = nodes;
+        const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
+        const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
+        for (const entry of entries) {
+          nodesByRunId[entry.runId] = entry.nodes;
+          toolResultsByRunId[entry.runId] = entry.toolResults;
         }
-        updateTranscriptNodesCache(effectiveConversation.conversationId, patch);
+        updateTranscriptRunCache(effectiveConversation.conversationId, { nodesByRunId, toolResultsByRunId });
       }
     } catch (error) {
       if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;

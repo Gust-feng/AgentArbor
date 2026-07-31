@@ -2,6 +2,7 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
 import type { ActivityItem } from "../../../panel-read-model/transcript/panel-transcript-activity-copy";
+import type { ToolCallResult } from "../../../../domain/tools";
 import { ActivityEvidencePanel } from "./activity-evidence";
 
 test("activity evidence renders sources with only title, link, and domain", () => {
@@ -137,6 +138,45 @@ test("command evidence keeps the command and output without internal execution m
   expect(screen.queryByText("目录：Z:/AgentArbor")).toBeNull();
   expect(screen.queryByText("Shell：PowerShell")).toBeNull();
   expect(screen.queryByText("耗时：1.5s")).toBeNull();
+});
+
+test("activity evidence keeps structured sections and exposes the complete canonical tool result", () => {
+  const toolResult: ToolCallResult = {
+    callId: "provider-call-1",
+    factId: "tool-fact-1",
+    toolName: "Shell",
+    input: { command: "pnpm test" },
+    output: {
+      stdout: "complete stdout\nlast line",
+      stderr: "warning from stderr",
+      truncated: true,
+      continuation: { ref: "tool-output:1", nextInput: { offset: 2048 } },
+    },
+    status: "failed",
+    error: "Command exited with code 1",
+    errorDomain: "process_error",
+    failureAttribution: "execution_failure",
+    errorFacts: { exitCode: "1" },
+    durationMs: 1250,
+  };
+
+  render(<ActivityEvidencePanel item={item({
+    title: "输出",
+    content: "bounded summary",
+    format: "console",
+  })} toolResult={toolResult} />);
+
+  expect(screen.getByText("bounded summary")).toBeTruthy();
+  expect(screen.getByText("完整工具结果")).toBeTruthy();
+  expect(screen.getByText("失败 · 1250 ms")).toBeTruthy();
+  expect(screen.getByText("provider-call-1")).toBeTruthy();
+  expect(screen.getByText("tool-fact-1")).toBeTruthy();
+  expect(screen.getByText("结果已截断 · 保留了继续读取信息")).toBeTruthy();
+  expect(screen.getByText(/complete stdout/)).toBeTruthy();
+  expect(screen.getByText(/warning from stderr/)).toBeTruthy();
+  expect(screen.getByText("Command exited with code 1")).toBeTruthy();
+  expect(screen.getByText("execution_failure")).toBeTruthy();
+  expect(screen.getByText(/tool-output:1/)).toBeTruthy();
 });
 
 function item(section: NonNullable<ActivityItem["expandedSections"]>[number]): ActivityItem {

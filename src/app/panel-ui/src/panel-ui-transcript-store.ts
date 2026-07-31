@@ -1,13 +1,14 @@
 /**
- * External transcript node cache for historical runs.
+ * External transcript cache for historical runs.
  *
- * Historical transcript nodes are stored OUTSIDE React's app state so that
+ * Historical transcript nodes and canonical tool results are stored OUTSIDE React's app state so that
  * loading them does NOT trigger a full App → ChatActive → TranscriptChain
- * re-render cascade.  Only the TranscriptChain component subscribes to this
+ * re-render cascade. Only transcript renderers subscribe to this
  * cache via useSyncExternalStore, keeping the rest of the UI stable during
  * background conversation loading.
  */
 import type { TranscriptNode } from "./contracts/run";
+import type { ToolCallResult } from "../../../domain/tools";
 import {
   resetConversationTranscriptNodes,
   transcriptNodesByRunIdForConversation,
@@ -16,27 +17,42 @@ import {
 } from "../../panel-read-model/transcript/panel-transcript-cache";
 
 export type TranscriptNodesCache = Readonly<Record<string, readonly TranscriptNode[]>>;
-export type TranscriptNodesStoreSnapshot = {
+export type TranscriptToolResultsCache = Readonly<Record<string, readonly ToolCallResult[]>>;
+export type TranscriptStoreSnapshot = {
   readonly nodesByConversationId: TranscriptNodesByConversationId<TranscriptNode>;
+  readonly toolResultsByConversationId: TranscriptNodesByConversationId<ToolCallResult>;
 };
 
-let cache: TranscriptNodesStoreSnapshot = {
+export type TranscriptRunCachePatch = {
+  readonly nodesByRunId?: TranscriptNodesCache;
+  readonly toolResultsByRunId?: TranscriptToolResultsCache;
+};
+
+let cache: TranscriptStoreSnapshot = {
   nodesByConversationId: {},
+  toolResultsByConversationId: {},
 };
 const listenersByConversationId = new Map<string | undefined, Set<() => void>>();
 
-export function getTranscriptNodesCache(): TranscriptNodesStoreSnapshot {
+export function getTranscriptCache(): TranscriptStoreSnapshot {
   return cache;
 }
 
 export function transcriptNodesCacheForConversation(
-  snapshot: TranscriptNodesStoreSnapshot,
+  snapshot: TranscriptStoreSnapshot,
   conversationId: string | undefined
 ): TranscriptNodesCache {
   return transcriptNodesByRunIdForConversation(snapshot.nodesByConversationId, conversationId);
 }
 
-export function subscribeTranscriptNodesCache(
+export function transcriptToolResultsCacheForConversation(
+  snapshot: TranscriptStoreSnapshot,
+  conversationId: string | undefined
+): TranscriptToolResultsCache {
+  return transcriptNodesByRunIdForConversation(snapshot.toolResultsByConversationId, conversationId);
+}
+
+export function subscribeTranscriptCache(
   conversationId: string | undefined,
   listener: () => void
 ): () => void {
@@ -59,45 +75,62 @@ export function subscribeTranscriptNodesCache(
  * If the merge produces no actual changes for this conversation, notification
  * is suppressed to avoid spurious re-renders.
  */
-export function updateTranscriptNodesCache(
+export function updateTranscriptRunCache(
   conversationId: string,
-  patch: Record<string, readonly TranscriptNode[]>
+  patch: TranscriptRunCachePatch
 ): void {
   const nextNodesByConversationId = updateConversationTranscriptNodes(
     cache.nodesByConversationId,
     conversationId,
-    patch,
+    patch.nodesByRunId ?? {},
   );
-  if (nextNodesByConversationId === cache.nodesByConversationId) return;
+  const nextToolResultsByConversationId = updateConversationTranscriptNodes(
+    cache.toolResultsByConversationId,
+    conversationId,
+    patch.toolResultsByRunId ?? {},
+  );
+  if (
+    nextNodesByConversationId === cache.nodesByConversationId &&
+    nextToolResultsByConversationId === cache.toolResultsByConversationId
+  ) return;
   cache = {
     nodesByConversationId: nextNodesByConversationId,
+    toolResultsByConversationId: nextToolResultsByConversationId,
   };
-  notifyTranscriptNodesCache(conversationId);
+  notifyTranscriptCache(conversationId);
 }
 
-export function resetTranscriptNodesCache(conversationId?: string): void {
+export function resetTranscriptCache(conversationId?: string): void {
   const nextNodesByConversationId = resetConversationTranscriptNodes(
     cache.nodesByConversationId,
     conversationId,
   );
-  if (nextNodesByConversationId === cache.nodesByConversationId) return;
+  const nextToolResultsByConversationId = resetConversationTranscriptNodes(
+    cache.toolResultsByConversationId,
+    conversationId,
+  );
+  if (
+    nextNodesByConversationId === cache.nodesByConversationId &&
+    nextToolResultsByConversationId === cache.toolResultsByConversationId
+  ) return;
   cache = {
     nodesByConversationId: nextNodesByConversationId,
+    toolResultsByConversationId: nextToolResultsByConversationId,
   };
   if (conversationId === undefined) {
-    notifyAllTranscriptNodesCache();
+    notifyAllTranscriptCache();
   } else {
-    notifyTranscriptNodesCache(conversationId);
+    notifyTranscriptCache(conversationId);
   }
 }
 
-function notifyTranscriptNodesCache(conversationId: string | undefined): void {
+function notifyTranscriptCache(conversationId: string | undefined): void {
   const listeners = listenersByConversationId.get(conversationId);
   if (listeners === undefined) return;
   for (const listener of listeners) listener();
 }
 
-function notifyAllTranscriptNodesCache(): void {
+function notifyAllTranscriptCache(): void {
   for (const listeners of listenersByConversationId.values()) {
     for (const listener of listeners) listener();
   }

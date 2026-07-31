@@ -28,20 +28,24 @@ import {
 } from "lucide-react";
 import type { ConversationTurn, ConversationTurnAttachment } from "../../../../contracts/conversation";
 import type { AgentDeliverable, BasicAgentRun, DesktopWorkView, TranscriptNode } from "../../../../contracts/run";
+import type { ToolCallResult } from "../../../../../../../domain/tools";
 import type { LiveRunBuffer } from "../../../../../../panel-read-model/run/panel-run-live-buffer";
 import type { WorklineProjectedTurn } from "../../../../../../panel-read-model/assistant/panel-assistant-workline";
 import type { LiveRunTranscriptProjection } from "../../../../../../panel-read-model/transcript/panel-live-transcript";
 import { projectConversationDisplayList } from "../../../../../../panel-conversation/panel-conversation-display-list";
 import { shouldCollapseStandaloneTimeline } from "../../../../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
 import {
-  getTranscriptNodesCache,
-  subscribeTranscriptNodesCache,
+  getTranscriptCache,
+  subscribeTranscriptCache,
   transcriptNodesCacheForConversation,
+  transcriptToolResultsCacheForConversation,
 } from "../../../../panel-ui-transcript-store";
 import type { ChatModelOption } from "../../../../components/chat-empty";
 import type { ConfirmationProjection } from "../../../../components/transcript-timeline";
 import { RichText, StreamingRichText } from "../../../../components/rich-text";
 import { ConfirmationNode } from "../../../../components/transcript-confirmation";
+import { ActivityEvidencePanel } from "../../../../components/activity-evidence";
+import { toolResultForActivity } from "../../../../tool-result-association";
 import { RADII, contentCard } from "./tokens";
 import type {
   ConversationDisplayItem,
@@ -68,6 +72,7 @@ export type RedesignTranscriptProps = {
   readonly turns: readonly ConversationTurn[];
   readonly currentRunId?: string;
   readonly currentRunNodes: readonly TranscriptNode[];
+  readonly currentRunToolResults: readonly ToolCallResult[];
   readonly run?: BasicAgentRun;
   readonly live?: LiveRunBuffer;
   readonly workView?: DesktopWorkView;
@@ -90,13 +95,23 @@ export type RedesignTranscriptProps = {
 export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactElement | null {
   const cachedHistoricalSnapshot = useSyncExternalStore(
     useCallback(
-      (listener: () => void) => subscribeTranscriptNodesCache(props.conversationId, listener),
+      (listener: () => void) => subscribeTranscriptCache(props.conversationId, listener),
       [props.conversationId],
     ),
-    getTranscriptNodesCache,
-    getTranscriptNodesCache,
+    getTranscriptCache,
+    getTranscriptCache,
   );
   const cachedHistoricalNodes = transcriptNodesCacheForConversation(cachedHistoricalSnapshot, props.conversationId);
+  const cachedHistoricalToolResults = transcriptToolResultsCacheForConversation(
+    cachedHistoricalSnapshot,
+    props.conversationId,
+  );
+  const toolResultsByRunId = useMemo(() => props.currentRunId === undefined
+    ? cachedHistoricalToolResults
+    : {
+        ...cachedHistoricalToolResults,
+        [props.currentRunId]: props.currentRunToolResults,
+      }, [cachedHistoricalToolResults, props.currentRunId, props.currentRunToolResults]);
   const conversationDisplay = useMemo(() => {
     const collapseTimeline = shouldCollapseStandaloneTimeline({
       runStatus: props.standaloneRun?.runStatus,
@@ -137,6 +152,7 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
               failure={item.failure}
               terminalStatus={item.terminalStatus}
               workflow={item.workflow}
+              toolResultsByRunId={toolResultsByRunId}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy}
             />
@@ -147,6 +163,7 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
             key={item.key}
             live={item.live}
             workflow={item.workflow}
+            toolResultsByRunId={toolResultsByRunId}
             onDecision={props.onDecision}
             confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
           />
@@ -198,6 +215,7 @@ const RedesignUserMessage = React.memo(function RedesignUserMessage(props: {
 function RedesignAssistantMessage(props: {
   readonly live?: boolean;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+  readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
 }) {
@@ -217,6 +235,7 @@ function RedesignAssistantMessage(props: {
               lifecycle={segment.lifecycle}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy === true}
+              toolResultsByRunId={props.toolResultsByRunId}
             />
           );
         }
@@ -241,6 +260,7 @@ function RedesignFailureMessage(props: {
   readonly failure: AssistantFailureParts;
   readonly terminalStatus?: AssistantTerminalStatus;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
+  readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }) {
@@ -277,6 +297,7 @@ function RedesignFailureMessage(props: {
             lifecycle={segment.lifecycle}
             onDecision={props.onDecision}
             confirmationBusy={props.confirmationBusy}
+            toolResultsByRunId={props.toolResultsByRunId}
           />
         ) : null
       ))}
@@ -341,6 +362,7 @@ function RedesignActivityTimeline(props: {
   readonly lifecycle?: "open" | "settled" | "attention";
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
+  readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
 }) {
   const { confirmation, items, hasContent } = props.timeline;
   if (!hasContent) return null;
@@ -382,7 +404,12 @@ function RedesignActivityTimeline(props: {
         <div className="space-y-1 px-3 pb-2.5" style={{ borderTop: "1px solid var(--aa-border)" }}>
           <div className="space-y-1.5 pt-2">
             {visibleItems.map((item) => (
-              <RedesignActivityItem key={item.key} item={item} />
+              <RedesignActivityItem
+                key={item.key}
+                item={item}
+                toolResult={toolResultForActivity(item, props.timeline.nodes, props.toolResultsByRunId)}
+                resolveChildResult={(child) => toolResultForActivity(child, props.timeline.nodes, props.toolResultsByRunId)}
+              />
             ))}
           </div>
         </div>
@@ -414,16 +441,32 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   sub_agent: <Bot size={11} />,
 };
 
-function RedesignActivityItem({ item }: { readonly item: ActivityItem }) {
+function RedesignActivityItem(props: {
+  readonly item: ActivityItem;
+  readonly toolResult?: ToolCallResult;
+  readonly resolveChildResult: (item: ActivityItem) => ToolCallResult | undefined;
+}) {
+  const { item } = props;
   const toolKind = item.toolKind ?? resolveActivityToolKind(item);
   const icon = TOOL_ICONS[toolKind] ?? <Wrench size={11} />;
   const isActive = item.phase === "executing" || item.phase === "preparing";
   const isFailed = item.phase === "failed";
   const displayText = item.lead !== undefined ? `${item.lead.action} ${item.lead.subject}` : item.copy.detail;
   const badgeLabel = item.badges?.[0]?.label;
+  const hasEvidence = (item.expandedSections?.length ?? 0) > 0 ||
+    item.copy.expandedDetail !== undefined ||
+    props.toolResult !== undefined;
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className="flex items-center gap-2 text-xs" style={{ color: "var(--aa-text-2)" }}>
+    <div className="min-w-0 text-xs" style={{ color: "var(--aa-text-2)" }}>
+      <button
+        type="button"
+        className="flex w-full min-w-0 items-center gap-2 text-left"
+        onClick={hasEvidence ? () => setOpen((value) => !value) : undefined}
+        aria-expanded={hasEvidence ? open : undefined}
+        style={{ cursor: hasEvidence ? "pointer" : "default" }}
+      >
       {/* 状态指示 */}
       {isActive ? (
         <span
@@ -442,6 +485,29 @@ function RedesignActivityItem({ item }: { readonly item: ActivityItem }) {
       {/* 详情 */}
       {badgeLabel !== undefined && (
         <span className="ml-auto shrink-0 text-[10px]" style={{ color: "var(--aa-text-3)" }}>{badgeLabel}</span>
+      )}
+      {hasEvidence && (
+        <span className="ml-auto shrink-0" style={{ color: "var(--aa-text-3)" }}>
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </span>
+      )}
+      </button>
+      {open && hasEvidence && (
+        <div className="min-w-0 pb-1 pl-[34px] pt-2">
+          <ActivityEvidencePanel item={item} toolResult={props.toolResult} />
+        </div>
+      )}
+      {item.children !== undefined && item.children.length > 0 && (
+        <div className="ml-3 mt-1 space-y-1 border-l pl-3" style={{ borderColor: "var(--aa-border)" }}>
+          {item.children.map((child) => (
+            <RedesignActivityItem
+              key={child.key}
+              item={child}
+              toolResult={props.resolveChildResult(child)}
+              resolveChildResult={props.resolveChildResult}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

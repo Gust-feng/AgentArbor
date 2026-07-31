@@ -421,6 +421,7 @@ function ConversationSurface(props: {
       turns={props.conversation?.turns ?? []}
       currentRunId={active.currentRunId}
       currentRunNodes={active.currentRunProjection.nodes}
+      currentRunToolResults={props.props.currentRun.detail?.toolResults ?? []}
       run={props.props.currentRun.run}
       live={props.props.currentRun.live}
       workView={props.props.currentRun.workView}

@@ -12,8 +12,8 @@ import type { LiveRunTranscriptProjection } from "../../../panel-read-model/tran
 import { projectConversationDisplayList } from "../../../panel-conversation/panel-conversation-display-list";
 import { shouldCollapseStandaloneTimeline } from "../../../panel-read-model/assistant/panel-assistant-timeline-collapse";
 import {
-  getTranscriptNodesCache,
-  subscribeTranscriptNodesCache,
+  getTranscriptCache,
+  subscribeTranscriptCache,
   transcriptNodesCacheForConversation,
 } from "../panel-ui-transcript-store";
 import type { ChatModelOption } from "./chat-empty";
@@ -51,11 +51,11 @@ export function ChatTranscriptDisplay(props: {
 }): React.ReactElement | null {
   const cachedHistoricalSnapshot = useSyncExternalStore(
     useCallback(
-      (listener: () => void) => subscribeTranscriptNodesCache(props.conversationId, listener),
+      (listener: () => void) => subscribeTranscriptCache(props.conversationId, listener),
       [props.conversationId],
     ),
-    getTranscriptNodesCache,
-    getTranscriptNodesCache,
+    getTranscriptCache,
+    getTranscriptCache,
   );
   const cachedHistoricalNodes = transcriptNodesCacheForConversation(
     cachedHistoricalSnapshot,

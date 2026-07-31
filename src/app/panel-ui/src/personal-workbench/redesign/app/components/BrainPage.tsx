@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
+import { motion } from 'motion/react'
 import {
   NotebookPen,
   FileText,
@@ -799,7 +799,7 @@ function ReadingView({
  * 灵感来自 Andy Matuschak 的联网笔记:你打开一篇 = 一栏;顺着这一栏底部
  * 的「关系」再点开另一篇,新的一栏滑到右边、原来的不关。于是你顺链走多深,
  * 就横向叠出多少栏——思路轨迹看得见,且从不丢上下文。读过的栏自动收成左侧
- * 一条竖书脊,像书架;点书脊即可回到那一栏(其后的栏收起)。
+ * 一条竖书脊,像书架;点书脊即可回到那一栏,其余路径仍然保留。
  *
  * 与卡片/图谱那套无关:这里就是"边读边顺着关系走"。
  */
@@ -834,11 +834,10 @@ function StartPicker({
     if (!p) return null
     const degree = brain.outgoing(id).length + brain.backlinks(id).length
     return (
-      <motion.button
+      <button
         key={id}
         onClick={() => onPick(id)}
-        whileHover={{ x: 3, backgroundColor: 'rgba(104,101,167,0.08)' }}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors"
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-black/[0.035]"
         style={{ color: '#292722' }}
       >
         <span className="shrink-0">{pageIcon(p, 15)}</span>
@@ -847,7 +846,7 @@ function StartPicker({
           {kindLabel(p)}
           {degree > 0 ? ` · ${degree} 链` : ''}
         </span>
-      </motion.button>
+      </button>
     )
   }
 
@@ -862,7 +861,7 @@ function StartPicker({
           挑一个起点,之后顺着链接一栏栏往下读。
         </p>
       </div>
-      <div className="flex-1 overflow-y-auto px-3 pb-6">
+      <div className="flex-1 overflow-x-hidden overflow-y-auto px-3 pb-6">
         {recent.length > 0 && (
           <>
             <div className="px-3 pt-2 pb-1 text-xs flex items-center gap-1.5" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
@@ -891,7 +890,7 @@ function WikiView({
 }) {
   // 起点由用户选:空 = 显示「从哪里开始」选择列,选了才开第一栏。
   const [trail, setTrail] = useState<string[]>([])
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
 
   const byId = useMemo(() => {
     const m = new Map<string, ResolvedPage>()
@@ -899,31 +898,39 @@ function WikiView({
     return m
   }, [resolved])
 
-  // 把第 i 栏滚到视野里(其左侧只留前面几栏的书脊)。非破坏式:不删任何栏。
-  const scrollToPane = (i: number) => {
-    requestAnimationFrame(() =>
-      scrollRef.current?.scrollTo({ left: Math.max(0, i * (PANE_W - SPINE_W)), behavior: 'smooth' })
-    )
+  // 知识库同步可能移除正在路径中的页面；路径和栏索引必须同时收敛。
+  useEffect(() => {
+    setTrail((current) => {
+      const available = current.filter((id) => byId.has(id))
+      return available.length === current.length ? current : available
+    })
+  }, [byId])
+
+  // 与原始堆叠交互保持一致:索引决定目标栏,前置栏各留下一个书脊。
+  const scrollToPane = (index: number) => {
+    requestAnimationFrame(() => {
+      viewportRef.current?.scrollTo({ left: Math.max(0, index * (PANE_W - SPINE_W)), behavior: 'smooth' })
+    })
   }
 
   // 从第 index 栏顺着链接打开 id。
-  // - 若 id 已在链上:只滚过去,绝不删除它后面的栏。
-  // - 否则:插在 index 之后(其余栏原样保留),再滚到新栏。
+  // 已在路径中的目标只切换焦点；只有新目标才从当前栏生成一条新分支。
   const openFrom = (index: number, id: string) => {
     const existing = trail.indexOf(id)
     if (existing !== -1) {
       scrollToPane(existing)
       return
     }
+    const prefix = trail.slice(0, index + 1)
     brain.markOpened(id)
-    setTrail((t) => [...t.slice(0, index + 1), id, ...t.slice(index + 1)])
-    scrollToPane(index + 1)
+    setTrail([...prefix, id])
+    scrollToPane(prefix.length)
   }
-  // 点书脊 = 回到那一栏(滚过去,不收起后面的)。
+  // 点书脊只切换当前阅读位置,不改写已经形成的路径。
   const revealPane = (index: number) => scrollToPane(index)
   // 关闭 = 显式地把这一栏及其之后全部合上,并滚回上一栏。
   const closeFrom = (index: number) => {
-    setTrail((t) => t.slice(0, index))
+    setTrail((current) => current.slice(0, index))
     scrollToPane(index - 1)
   }
 
@@ -948,7 +955,17 @@ function WikiView({
       </header>
 
       {/* 横向栏容器 */}
-      <div ref={scrollRef} className="flex-1 flex overflow-x-auto overflow-y-hidden" style={{ minHeight: 0 }}>
+      <div
+        ref={viewportRef}
+        data-wiki-scroll-viewport
+        aria-label="堆叠阅读栏"
+        className="flex-1 flex overflow-x-auto overflow-y-hidden"
+        style={{
+          minHeight: 0,
+          overscrollBehaviorX: 'contain',
+          scrollbarWidth: 'thin',
+        }}
+      >
         {trail.length === 0 && (
           <StartPicker
             brain={brain}
@@ -959,25 +976,23 @@ function WikiView({
             }}
           />
         )}
-        <AnimatePresence initial={false}>
-          {trail.map((id, i) => {
-            const page = byId.get(id)
-            if (!page) return null
-            return (
-              <Pane
-                key={id}
-                page={page}
-                index={i}
-                isLast={i === trail.length - 1}
-                brain={brain}
-                byId={byId}
-                onOpen={(target) => openFrom(i, target)}
-                onReveal={() => revealPane(i)}
-                onClose={i === 0 ? undefined : () => closeFrom(i)}
-              />
-            )
-          })}
-        </AnimatePresence>
+        {trail.map((id, i) => {
+          const page = byId.get(id)
+          if (!page) return null
+          return (
+            <Pane
+              key={id}
+              page={page}
+              index={i}
+              isLast={i === trail.length - 1}
+              brain={brain}
+              byId={byId}
+              onOpen={(target) => openFrom(i, target)}
+              onReveal={() => revealPane(i)}
+              onClose={i === 0 ? undefined : () => closeFrom(i)}
+            />
+          )
+        })}
       </div>
     </section>
   )
@@ -1014,17 +1029,20 @@ function Pane({
     .filter((r): r is { id: string; dir: 'out' | 'in'; page: ResolvedPage } => !!r.page)
 
   return (
-    <motion.div
+    <div
+      data-wiki-pane={page.refId}
       className="shrink-0 flex h-full overflow-hidden"
-      style={{ position: 'sticky', left: index * SPINE_W, zIndex: index + 1 }}
-      initial={{ opacity: 0, width: 0 }}
-      animate={{ opacity: 1, width: PANE_W }}
-      exit={{ opacity: 0, width: 0 }}
-      transition={{ type: 'spring', stiffness: 260, damping: 30 }}
+      style={{
+        position: 'sticky',
+        left: index * SPINE_W,
+        zIndex: index + 1,
+        width: PANE_W,
+      }}
     >
       {/* 竖书脊:收起时露出的就是它 */}
       <button
         onClick={onReveal}
+        aria-label={`展开${page.title}`}
         className="shrink-0 flex flex-col items-center gap-3 pt-4 pb-4 transition-colors hover:bg-black/[0.03]"
         style={{
           width: SPINE_W,
@@ -1047,7 +1065,7 @@ function Pane({
         </span>
       </button>
 
-      {/* 内容区:固定宽度,外层动画只裁剪显现,内容始终不回流(避免文字位移)。 */}
+      {/* 内容区保持固定宽度,入场只做位移与透明度变化,避免正文在动画中回流。 */}
       <div
         className="shrink-0 flex flex-col min-w-0"
         style={{
@@ -1082,31 +1100,54 @@ function Pane({
           )}
         </header>
 
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div data-wiki-pane-content className="flex-1 min-h-0 overflow-hidden">
           <PageContent page={page} />
+        </div>
 
-          {/* 关系:顺着走 */}
-          {rels.length > 0 && (
+        {/* 关联导航独立于正文滚动。标签只占左上角,右侧留白自然结束这张附属卡片。 */}
+        {rels.length > 0 && (
+          <nav
+            aria-label={`${page.title}的关联文件`}
+            className="shrink-0 px-3 pb-3"
+            style={{ background: 'var(--aa-surface, #fff)' }}
+          >
             <div
-              className="mx-4 mb-6 mt-2 pt-5"
-              style={{ borderTop: '1px dashed var(--aa-border, rgba(45,40,34,0.14))' }}
+              data-wiki-relations-tab
+              className="relative z-[1] inline-flex h-7 items-center gap-1.5 rounded-t-md border border-b-0 px-3"
+              style={{
+                marginBottom: -1,
+                background: 'var(--aa-canvas, #f7f5f2)',
+                borderColor: 'var(--aa-border, rgba(45,40,34,0.09))',
+                color: 'var(--aa-text-2, #87827c)',
+              }}
             >
-              <div className="flex items-center gap-1.5 mb-3">
-                <Link2 size={13} style={{ color: 'var(--aa-accent, #6865a7)' }} />
-                <span className="text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                  顺着走 · {rels.length} 个链接
-                </span>
-              </div>
-              <div className="flex flex-col gap-1.5">
+              <Link2 size={13} style={{ color: 'var(--aa-accent, #6865a7)' }} />
+              <span className="text-xs">
+                顺着走 · {rels.length} 个链接
+              </span>
+            </div>
+            <div
+              data-wiki-relations-surface
+              className="overflow-hidden rounded-bl-md rounded-br-md rounded-tr-md border"
+              style={{
+                background: 'color-mix(in srgb, var(--aa-canvas, #f7f5f2) 72%, var(--aa-surface, #fff))',
+                borderColor: 'var(--aa-border, rgba(45,40,34,0.09))',
+              }}
+            >
+              <div
+                data-wiki-relations-list
+                className="flex min-h-0 flex-col overflow-x-hidden overflow-y-auto p-1"
+                style={{ maxHeight: 'min(220px, 28vh)', overscrollBehavior: 'contain' }}
+              >
                 {rels.map((r) => (
                   <RelRow key={r.id} page={r.page} dir={r.dir} onClick={() => onOpen(r.id)} />
                 ))}
               </div>
             </div>
-          )}
-        </div>
+          </nav>
+        )}
       </div>
-    </motion.div>
+    </div>
   )
 }
 
@@ -1121,23 +1162,19 @@ function RelRow({
   onClick: () => void
 }) {
   return (
-    <motion.button
+    <button
       onClick={onClick}
-      className="group flex items-center gap-2.5 w-full px-2.5 py-2 rounded-lg text-left"
-      style={{ background: 'var(--aa-surface-hover, #f4f1ec)' }}
-      whileHover={{ x: 3, backgroundColor: 'rgba(104,101,167,0.08)' }}
-      whileTap={{ scale: 0.99 }}
-      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+      className="group flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-black/[0.035] focus-visible:bg-black/[0.035]"
+      style={{ borderColor: 'var(--aa-border, rgba(45,40,34,0.08))' }}
     >
       <span className="shrink-0">{pageIcon(page, 14)}</span>
       <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>
         {page.title}
       </span>
       <span
-        className="shrink-0 text-xs px-1.5 py-0.5 rounded"
+        className="shrink-0 text-xs"
         style={{
           color: dir === 'out' ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-3, #aba39b)',
-          background: dir === 'out' ? 'rgba(104,101,167,0.1)' : 'transparent',
         }}
       >
         {dir === 'out' ? '引用' : '被引用'}
@@ -1147,7 +1184,7 @@ function RelRow({
         className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
         style={{ color: 'var(--aa-accent, #6865a7)', transform: 'scaleX(-1)' }}
       />
-    </motion.button>
+    </button>
   )
 }
 /* ------------------------------ 内容渲染 ------------------------------ */

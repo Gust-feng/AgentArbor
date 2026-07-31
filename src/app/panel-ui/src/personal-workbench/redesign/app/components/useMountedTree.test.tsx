@@ -109,6 +109,7 @@ function directoryPreview(name: string, kind: 'file' | 'directory' = 'file') {
     sourceKind: 'workspace_folder' as const,
     source: 'C:/workspace',
     status: 'ready' as const,
+    presentation: { kind: 'directory' as const, editable: false, sourceMode: false },
     content: {
       kind: 'directory' as const,
       relativePath: '',

@@ -20,6 +20,7 @@ import {
   type LocalReferenceMeta,
 } from "./local-reference-preview.js";
 import { normalizeRelativePath } from "../local-filesystem/index.js";
+import { documentPresentation } from "./document-preview-presentation.js";
 
 export type PanelSpaceReferencePreview = SpaceReferencePreview;
 
@@ -30,23 +31,27 @@ export async function createPanelSpaceReferencePreview(
   contentTypeHintPath?: string,
 ): Promise<PanelSpaceReferencePreview> {
   if (item.reference.kind === "web_page") {
+    const content = { kind: "web" as const, url: item.reference.url };
     return {
       itemId: item.id,
       title: item.title,
       sourceKind: item.reference.kind,
       source: item.reference.url,
       status: "ready",
-      content: { kind: "web", url: item.reference.url },
+      presentation: documentPresentation(content),
+      content,
     };
   }
   if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
+    const content = { kind: "unavailable" as const, message: "这个引用需要由它的来源功能提供预览。" };
     return {
       itemId: item.id,
       title: item.title,
       sourceKind: item.reference.kind,
       source: referenceSource(item),
       status: "unsupported",
-      content: { kind: "unavailable", message: "这个引用需要由它的来源功能提供预览。" },
+      presentation: documentPresentation(content),
+      content,
     };
   }
 

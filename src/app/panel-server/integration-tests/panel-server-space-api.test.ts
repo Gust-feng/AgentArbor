@@ -305,12 +305,14 @@ test("Space API browses and edits text inside a referenced folder without escapi
     const gitignore = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/preview?path=${encodeURIComponent(".gitignore")}`);
     assert.equal(gitignore.body.preview.content.text, "dist/\n.env\n");
     assert.equal(gitignore.body.preview.content.language, "gitignore");
+    assert.deepEqual(gitignore.body.preview.presentation, { kind: "code", editable: true, sourceMode: false });
     assert.equal(gitignore.body.preview.content.encoding, "UTF-8");
     assert.equal(gitignore.body.preview.content.editable, true);
 
     const notice = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/preview?path=${encodeURIComponent("NOTICE")}`);
     assert.equal(notice.body.preview.content.text, "无扩展名 UTF-8 文本");
     assert.equal(notice.body.preview.content.language, "plaintext");
+    assert.deepEqual(notice.body.preview.presentation, { kind: "text", editable: true, sourceMode: false });
 
     const legacy = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/preview?path=${encodeURIComponent("legacy.ini")}`);
     assert.equal(legacy.body.preview.content.text, "标题=配置");
@@ -330,6 +332,7 @@ test("Space API browses and edits text inside a referenced folder without escapi
     const file = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/preview?path=${encodeURIComponent("notes/idea.md")}`);
     assert.equal(file.body.preview.content.text, "# 初稿");
     assert.equal(file.body.preview.content.editable, true);
+    assert.deepEqual(file.body.preview.presentation, { kind: "markdown", editable: true, sourceMode: true });
 
     const unchangedName = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
       method: "PATCH",

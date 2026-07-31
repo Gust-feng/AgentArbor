@@ -18,6 +18,7 @@ type TestResponseBody = {
   readonly preview?: {
     readonly sourceKind?: string;
     readonly fingerprint?: string;
+    readonly presentation?: { readonly kind?: string; readonly editable?: boolean; readonly sourceMode?: boolean };
     readonly content?: { readonly editable?: boolean; readonly text?: string };
   };
   readonly error?: { readonly code?: string };
@@ -49,6 +50,7 @@ test("Workbench asset routes return editable previews and enforce SQLite fingerp
   const initial = await request(baseUrl, "/api/workbench-assets/note-one/preview");
   assert.equal(initial.status, 200);
   assert.equal(initial.body.preview?.sourceKind, "workbench_asset");
+  assert.deepEqual(initial.body.preview?.presentation, { kind: "markdown", editable: true, sourceMode: true });
   assert.equal(initial.body.preview?.content?.editable, true);
   assert.equal(initial.body.preview?.content?.text, "# 初稿");
   assert.equal(initial.body.preview?.fingerprint, workbenchAssetTextFingerprint("# 初稿"));

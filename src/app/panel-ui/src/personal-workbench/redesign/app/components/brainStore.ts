@@ -13,6 +13,7 @@ import {
   type BrainPage,
   type PageKind,
 } from './personalKnowledgeClient'
+import { classifyReferencePreview, type DocumentMaterialKind } from './documentProjection'
 
 export type { BrainLink, BrainPage, PageKind } from './personalKnowledgeClient'
 
@@ -83,7 +84,7 @@ export interface ResolvedPage {
   kind: PageKind
   title: string
   collectedAt: number
-  materialKind?: 'file' | 'markdown' | 'pdf' | 'web' | 'image' | 'video' | 'audio' | 'code'
+  materialKind?: DocumentMaterialKind
   thumbnail?: string
   spaceId?: string
   detail?: string
@@ -97,30 +98,6 @@ const MANAGED_ASSET_PREVIEW_BASE = '/api/personal-knowledge/assets'
 const WORKBENCH_ASSET_PREVIEW_BASE = '/api/workbench-assets'
 const subscribeManagedAssetPreviewCache = (listener: () => void) => subscribeReferencePreviewCache(listener, MANAGED_ASSET_PREVIEW_BASE)
 const getManagedAssetPreviewCacheVersion = () => getReferencePreviewCacheVersion(MANAGED_ASSET_PREVIEW_BASE)
-
-function managedAssetKind(page: BrainPage): NonNullable<ResolvedPage['materialKind']> {
-  const asset = page.asset
-  if (asset?.contentKind !== 'file') return 'file'
-  const preview = getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)
-  if (preview?.content.kind === 'media') return preview.content.mediaKind
-  if (preview?.content.kind === 'web') return 'web'
-  if (preview?.content.kind === 'text') {
-    if (preview.content.language === 'md' || preview.content.language === 'markdown') return 'markdown'
-  }
-  return materialKindFromSourceLabel(asset?.sourceLabel ?? asset?.title ?? '')
-}
-
-function materialKindFromSourceLabel(sourceLabel: string): NonNullable<ResolvedPage['materialKind']> {
-  const source = sourceLabel.toLowerCase()
-  if (/\.(?:md|markdown)$/u.test(source)) return 'markdown'
-  if (/\.pdf$/u.test(source)) return 'pdf'
-  if (/\.(?:png|jpe?g|gif|webp|svg|avif)$/u.test(source)) return 'image'
-  if (/\.(?:mp4|webm|mov|mkv)$/u.test(source)) return 'video'
-  if (/\.(?:mp3|wav|ogg|m4a|flac)$/u.test(source)) return 'audio'
-  if (/\.(?:jsonc?|jsonl|ya?ml|toml|ini|xml|csv|ts|tsx|js|mjs|cjs|jsx|py|java|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|ps1|sql|graphql|vue|svelte|css|html)$/u.test(source)
-    || /(?:^|[\\/])(?:\.gitignore|\.gitattributes|\.gitmodules|\.editorconfig|\.npmrc|\.nvmrc|\.env|dockerfile|makefile|license)$/u.test(source)) return 'code'
-  return 'file'
-}
 
 function managedAssetPreviewText(page: BrainPage): string | undefined {
   const preview = getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)
@@ -143,7 +120,7 @@ export function resolvePage(page: BrainPage, _spaces: readonly PersonalSpaceProj
       kind: 'space_reference',
       title: page.asset?.title ?? '(知识资产不可用)',
       collectedAt: page.collectedAt,
-      materialKind: managedAssetKind(page),
+      materialKind: classifyReferencePreview(getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)),
       detail: page.asset?.sourceLabel,
       previewText: managedAssetPreviewText(page),
       language: managedAssetLanguage(page),
@@ -158,22 +135,13 @@ export function resolvePage(page: BrainPage, _spaces: readonly PersonalSpaceProj
     kind: 'material',
     title: preview?.title ?? (previewError === undefined ? '(材料加载中)' : '材料暂不可用'),
     collectedAt: page.collectedAt,
-    materialKind: previewKind(preview),
+    materialKind: classifyReferencePreview(preview),
     previewText: previewTextOf(preview),
     detail: previewError,
     thumbnail: preview?.content.kind === 'media' && preview.content.mediaKind === 'image' ? preview.content.url : undefined,
     language: preview?.content.kind === 'text' ? preview.content.language : undefined,
     exists: true,
   }
-}
-
-function previewKind(preview: ReturnType<typeof getCachedReferencePreview>): ResolvedPage['materialKind'] {
-  if (preview === undefined) return 'file'
-  if (preview.content.kind === 'media') return preview.content.mediaKind
-  if (preview.content.kind === 'web') return 'web'
-  if (preview.content.kind === 'pages') return 'pdf'
-  if (preview.content.kind === 'text') return preview.content.language === 'md' ? 'markdown' : 'code'
-  return 'file'
 }
 
 function previewTextOf(preview: ReturnType<typeof getCachedReferencePreview>): string | undefined {

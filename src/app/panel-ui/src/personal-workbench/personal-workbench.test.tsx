@@ -87,6 +87,7 @@ test("collects a Workbench asset by asset identity without copying its Space ref
         source: "workbench-asset:asset-code",
         status: "ready",
         fingerprint: "asset:asset-code",
+        presentation: { kind: "code", editable: false, sourceMode: false },
         content: { kind: "text", text: "print('train')", truncated: false, editable: false, language: "python" },
       } });
     }
@@ -122,7 +123,7 @@ test("renders persisted original knowledge materials without rewriting their pre
       return jsonResponse({ snapshot: {
         ...emptyKnowledgeSnapshot(),
         pages: [{ refId: "m-attn-pdf", kind: "material", collectedAt: Date.UTC(2026, 6, 29, 10, 0) }],
-      }, materialPreviews: [{ itemId: "m-attn-pdf", title: "Attention Is All You Need.pdf", sourceKind: "workbench_asset", source: "workbench-asset:m-attn-pdf", status: "ready", fingerprint: "asset:m-attn-pdf", content: { kind: "pages", pages: ["Attention Is All You Need"] } }] });
+      }, materialPreviews: [{ itemId: "m-attn-pdf", title: "Attention Is All You Need.pdf", sourceKind: "workbench_asset", source: "workbench-asset:m-attn-pdf", status: "ready", fingerprint: "asset:m-attn-pdf", presentation: { kind: "pdf", editable: false, sourceMode: false }, content: { kind: "pages", pages: ["Attention Is All You Need"] } }] });
     }
     return jsonResponse({ ok: true });
   });
@@ -195,6 +196,7 @@ test("prewarms managed knowledge assets before the user opens their cards", asyn
         source: "managed/asset-one/content",
         status: "ready",
         fingerprint: "managed-one",
+        presentation: { kind: "markdown", editable: false, sourceMode: false },
         content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
       } });
     }
@@ -236,6 +238,7 @@ test("updates a visible knowledge card when its managed preview finishes", async
     source: "managed/asset-card-live/content",
     status: "ready",
     fingerprint: "managed-live",
+    presentation: { kind: "markdown", editable: false, sourceMode: false },
     content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
   } }));
   await expect(previewRequest).resolves.toBeTruthy();
@@ -260,6 +263,7 @@ test("updates a visible Workbench asset card when its preview finishes", async (
     source: "workbench-asset:workbench-card-live",
     status: "ready",
     fingerprint: "asset:workbench-card-live",
+    presentation: { kind: "code", editable: false, sourceMode: false },
     content: { kind: "text", text: "print('train')", truncated: false, editable: false, language: "python" },
   } }));
   await expect(previewRequest).resolves.toBeTruthy();
@@ -349,6 +353,7 @@ test("shows a managed asset before its preview cache has finished warming", asyn
     sourceKind: "local_file",
     source: "managed/asset-preview-pending/content",
     status: "ready",
+    presentation: { kind: "markdown", editable: false, sourceMode: false },
     content: { kind: "text", text: "# 已预热", truncated: false, editable: false, language: "md" },
   } }));
   await waitFor(() => expect(getCachedReferencePreview(page.refId, "", "/api/personal-knowledge/assets")?.content).toMatchObject({ kind: "text", text: "# 已预热" }));
@@ -386,6 +391,7 @@ test("projects a managed Markdown asset as a Markdown card with its real summary
         source: "managed/asset-card-markdown/content",
         status: "ready",
         fingerprint: "managed-markdown",
+        presentation: { kind: "markdown", editable: false, sourceMode: false },
         content: { kind: "text", text: markdown, truncated: false, editable: false, language: "md" },
       } });
     }
@@ -599,6 +605,7 @@ test("deletes app-owned folders and creates files from a linked workspace folder
         sourceKind: "managed_folder",
         source: "C:/agentarbor/space-files/internal-note.md",
         status: "ready",
+        presentation: { kind: "markdown", editable: true, sourceMode: true },
         content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
       } });
     }
@@ -609,6 +616,7 @@ test("deletes app-owned folders and creates files from a linked workspace folder
         sourceKind: "workspace_folder",
         source: "C:/project/new-note.md",
         status: "ready",
+        presentation: { kind: "markdown", editable: true, sourceMode: true },
         content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
       } });
     }
@@ -718,6 +726,7 @@ test("clears a Search target when the user switches to another Space", async () 
     sourceKind: "local_file",
     source: "C:/甲资料.md",
     status: "ready",
+    presentation: { kind: "markdown", editable: false, sourceMode: false },
     content: { kind: "text", text: "甲正文", truncated: false, editable: false, language: "md" },
   } })));
   renderWorkbench({
@@ -769,7 +778,7 @@ test("resolves a managed Brain asset without consulting the current Space projec
     refId: "reference-brain",
     kind: "space_reference",
     title: "研究资料.pdf",
-    materialKind: "pdf",
+    materialKind: "file",
     detail: "C:/资料/研究资料.pdf",
     exists: true,
   });
@@ -796,6 +805,7 @@ test("projects managed code content for the same knowledge card cover as initial
     source: "managed/managed-python/content",
     status: "ready",
     fingerprint: "python-one",
+    presentation: { kind: "code", editable: false, sourceMode: false },
     content: { kind: "text", text: "import requests\nrequests.get('https://example.com')", truncated: false, editable: false, language: "python", encoding: "UTF-8" },
   } })));
 
@@ -1102,6 +1112,7 @@ function directoryPreview(relativePath: string, entries: readonly { name: string
     status: "ready",
     fingerprint: "1:0",
     modifiedAt: 1,
+    presentation: { kind: "directory", editable: false, sourceMode: false },
     content: { kind: "directory", relativePath, entries, truncated: false },
   };
 }

@@ -235,6 +235,23 @@ test('batches preview notifications and keeps API data domains isolated', async 
   unsubscribeSpace()
 })
 
+test('keeps same-named files in different relative paths isolated', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const url = String(input)
+    const first = url.includes(encodeURIComponent('folder-a/config.json'))
+    const preview = { ...textPreview(first ? 'a:1' : 'b:1', first ? 'A' : 'B'), source: first ? 'C:/root/folder-a/config.json' : 'C:/root/folder-b/config.json' }
+    return new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  await Promise.all([
+    fetchSpaceReferencePreview('reference-one', 'folder-a/config.json'),
+    fetchSpaceReferencePreview('reference-one', 'folder-b/config.json'),
+  ])
+
+  expect(getCachedReferencePreview('reference-one', 'folder-a/config.json')?.content).toMatchObject({ kind: 'text', text: 'A' })
+  expect(getCachedReferencePreview('reference-one', 'folder-b/config.json')?.content).toMatchObject({ kind: 'text', text: 'B' })
+})
+
 test('shows a compact relative breadcrumb without exposing the absolute source path', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
     preview: { ...textPreview('1:4', '内容'), title: 'note.txt', sourceKind: 'workspace_folder', source: 'C:/workspace/docs/note.txt' },
@@ -266,7 +283,7 @@ test('renders complete GFM markdown and resolves relative reference assets', asy
     '![结构图](../images/结构图.png)',
   ].join('\n')
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-    preview: { ...textPreview('1:100', markdown), title: 'guide.md', sourceKind: 'workspace_folder', source: 'C:/workspace/docs/guides/guide.md', content: { kind: 'text', text: markdown, truncated: false, editable: true, language: 'md' } },
+    preview: { ...textPreview('1:100', markdown), title: 'guide.md', sourceKind: 'workspace_folder', source: 'C:/workspace/docs/guides/guide.md', presentation: { kind: 'markdown', editable: true, sourceMode: true }, content: { kind: 'text', text: markdown, truncated: false, editable: true, language: 'md' } },
   }), { status: 200, headers: { 'content-type': 'application/json' } })))
 
   render(<ReferencePreview itemId="reference-one" initialRelativePath="docs/guides/guide.md" fallbackTitle="项目" canOpen={false} onOpen={() => undefined} />)
@@ -286,6 +303,7 @@ test('renders a managed Markdown asset from its language hint when the copied pa
       ...textPreview('managed:1', markdown),
       title: 'Readme.md',
       source: 'runtime/knowledge-assets/asset-one/content',
+      presentation: { kind: 'markdown', editable: false, sourceMode: false },
       content: { kind: 'text', text: markdown, truncated: false, editable: false, language: 'md', encoding: 'UTF-8' },
     },
   }), { status: 200, headers: { 'content-type': 'application/json' } })))
@@ -300,7 +318,7 @@ test('renders a managed Markdown asset from its language hint when the copied pa
 test('highlights known code languages and keeps encoding metadata visible', async () => {
   const json = '{"name":"AgentArbor","enabled":true}'
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-    preview: { ...textPreview('1:40', json), title: 'config.json', source: 'C:/workspace/config.json', content: { kind: 'text', text: json, truncated: false, editable: false, language: 'json', encoding: 'UTF-8' } },
+    preview: { ...textPreview('1:40', json), title: 'config.json', source: 'C:/workspace/config.json', presentation: { kind: 'code', editable: false, sourceMode: false }, content: { kind: 'text', text: json, truncated: false, editable: false, language: 'json', encoding: 'UTF-8' } },
   }), { status: 200, headers: { 'content-type': 'application/json' } })))
 
   render(<ReferencePreview itemId="reference-one" fallbackTitle="config.json" canOpen={false} onOpen={() => undefined} />)
@@ -318,7 +336,7 @@ test('opens markdown as WYSIWYG and keeps source edits autosaved', async () => {
   vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
     if (init?.method === 'PUT') currentMarkdown = (JSON.parse(String(init.body)) as { text: string }).text
     return new Response(JSON.stringify({
-      preview: { ...textPreview('1:30', currentMarkdown), title: 'note.md', source: 'C:/workspace/note.md', content: { kind: 'text', text: currentMarkdown, truncated: false, editable: true, language: 'md', encoding: 'UTF-8' } },
+      preview: { ...textPreview('1:30', currentMarkdown), title: 'note.md', source: 'C:/workspace/note.md', presentation: { kind: 'markdown', editable: true, sourceMode: true }, content: { kind: 'text', text: currentMarkdown, truncated: false, editable: true, language: 'md', encoding: 'UTF-8' } },
     }), { status: 200, headers: { 'content-type': 'application/json' } })
   }))
 
@@ -460,6 +478,7 @@ function textPreview(fingerprint: string, text: string): SpaceReferencePreview {
     sourceKind: 'local_file',
     source: 'C:/notes/note.txt',
     status: 'ready',
+    presentation: { kind: 'text', editable: true, sourceMode: false },
     fingerprint,
     byteLength: text.length,
     modifiedAt: 1,
@@ -473,6 +492,7 @@ function markdownPreview(itemId: string, fingerprint: string, text: string): Spa
     itemId,
     title: `${itemId}.md`,
     source: `C:/notes/${itemId}.md`,
+    presentation: { kind: 'markdown', editable: true, sourceMode: true },
     content: { kind: 'text', text, truncated: false, editable: true, language: 'md' },
   }
 }

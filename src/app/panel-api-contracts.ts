@@ -29,12 +29,19 @@ export type PersonalNoteRevision = {
 
 /* ─── Space Reference Preview ────────────────────────────────────── */
 
+export type DocumentPresentation = {
+  readonly kind: "directory" | "markdown" | "code" | "text" | "image" | "pdf" | "video" | "audio" | "web" | "unavailable";
+  readonly editable: boolean;
+  readonly sourceMode: boolean;
+};
+
 export type SpaceReferencePreview = {
   readonly itemId: string;
   readonly title: string;
   readonly sourceKind: "local_file" | "workspace_folder" | "managed_folder" | "asset_folder" | "workbench_asset" | "web_page" | "generated_artifact" | "conversation";
   readonly source: string;
   readonly status: "ready" | "missing" | "unsupported";
+  readonly presentation: DocumentPresentation;
   readonly fingerprint?: string;
   readonly byteLength?: number;
   readonly modifiedAt?: number;

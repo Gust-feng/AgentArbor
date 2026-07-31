@@ -1,7 +1,9 @@
 import type { SpaceReferencePreview } from "../panel-api-contracts.js";
 import type { WorkbenchAsset } from "../workbench-assets/index.js";
+import { documentPresentation } from "./document-preview-presentation.js";
 
 export function createWorkbenchAssetPreviewFromAsset(asset: WorkbenchAsset, itemId = asset.id): SpaceReferencePreview {
+  const content = contentOf(asset);
   return {
     itemId,
     title: asset.title,
@@ -9,7 +11,8 @@ export function createWorkbenchAssetPreviewFromAsset(asset: WorkbenchAsset, item
     source: `workbench-asset:${asset.id}`,
     status: "ready",
     fingerprint: `asset:${asset.id}`,
-    content: contentOf(asset),
+    presentation: documentPresentation(content),
+    content,
   };
 }
 

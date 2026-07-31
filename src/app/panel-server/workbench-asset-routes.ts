@@ -11,6 +11,7 @@ import {
 } from "../workbench-assets/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import { createWorkbenchAssetPreviewFromAsset } from "./workbench-asset-preview.js";
+import { documentPresentation } from "./document-preview-presentation.js";
 
 type WorkbenchAssetRouteRuntime = {
   readonly ensureInitialWorkbenchData: () => Promise<void>;
@@ -95,18 +96,20 @@ export function createWorkbenchAssetTextPreview(
   const preview = createWorkbenchAssetPreviewFromAsset(asset, itemId);
   const editable = editableWorkbenchAssetText(asset);
   if (editable === undefined || preview.content.kind !== "text") return preview;
+  const content: Extract<SpaceReferencePreview["content"], { readonly kind: "text" }> = {
+    ...preview.content,
+    text: editable.text,
+    truncated: false,
+    editable: true,
+    language: editable.language,
+    encoding: "UTF-8",
+  };
   return {
     ...preview,
     fingerprint: workbenchAssetTextFingerprint(editable.text),
     byteLength: Buffer.byteLength(editable.text, "utf8"),
-    content: {
-      ...preview.content,
-      text: editable.text,
-      truncated: false,
-      editable: true,
-      language: editable.language,
-      encoding: "UTF-8",
-    },
+    presentation: documentPresentation(content),
+    content,
   };
 }
 

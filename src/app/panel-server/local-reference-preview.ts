@@ -15,6 +15,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { SpaceReferencePreview } from "../panel-api-contracts.js";
 import { PanelHttpError } from "./http-utils.js";
+import { documentPresentation } from "./document-preview-presentation.js";
 import {
   MAX_TEXT_PREVIEW_BYTES,
   resolveWithinRoot,
@@ -225,7 +226,15 @@ function basePreview(
   status: SpaceReferencePreview["status"],
   content: SpaceReferencePreview["content"],
 ): SpaceReferencePreview {
-  return { itemId: meta.itemId, title: meta.title, sourceKind: meta.sourceKind, source, status, content };
+  return {
+    itemId: meta.itemId,
+    title: meta.title,
+    sourceKind: meta.sourceKind,
+    source,
+    status,
+    presentation: documentPresentation(content),
+    content,
+  };
 }
 
 async function resolveSource(rootDir: string, relativePath: string): Promise<string> {

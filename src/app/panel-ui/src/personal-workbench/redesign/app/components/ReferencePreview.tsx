@@ -4,6 +4,7 @@ import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Fold
 import { fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, saveSpaceReferenceText, type SpaceReferencePreview } from './referencePreviewClient'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
+import { isMarkdownDocument } from './documentProjection'
 import './reference-preview.css'
 
 const REVALIDATE_MS = 15_000
@@ -106,7 +107,7 @@ function ReferenceDocumentSessionView({
   const saveEpochRef = useRef(0)
   const fingerprintsRef = useRef(new Map<string, string>())
   draftRef.current = draft
-  const dirty = !loading && preview?.content.kind === 'text' && preview.content.editable && draft !== preview.content.text
+  const dirty = !loading && preview?.content.kind === 'text' && preview.presentation.editable && draft !== preview.content.text
 
   function persistPendingSave() {
     if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
@@ -145,7 +146,7 @@ function ReferenceDocumentSessionView({
   }
 
   function scheduleSave(text: string, immediate = false) {
-    if (readOnly || preview?.content.kind !== 'text' || !preview.content.editable || loading) return
+    if (readOnly || preview?.content.kind !== 'text' || !preview.presentation.editable || loading) return
     if (fingerprintsRef.current.get(targetKey) === undefined) return
     setDraft(text)
     setSaveState('saving')
@@ -259,20 +260,20 @@ function ReferenceDocumentSessionView({
   if (preview === undefined) {
     return <PreviewState title={fallbackTitle} message={error ?? '正在读取引用内容...'} error={error !== undefined} onRetry={() => void reload()} />
   }
-  const markdownDocument = isMarkdownPreview(preview)
+  const markdownDocument = isMarkdownDocument(preview)
 
   return (
     <div className="aa-reference-preview__session">
       <header className="aa-reference-preview__header">
         <ReferenceBreadcrumb rootTitle={fallbackTitle} relativePath={relativePath} source={preview.source} />
         <div className="aa-reference-preview__actions">
-          {!readOnly && preview.content.kind === 'text' && preview.content.editable && (
+          {!readOnly && preview.content.kind === 'text' && preview.presentation.editable && (
             <span className="aa-reference-preview__save-state" data-state={saveState}>
               {saveState === 'saved' ? <Check size={12} /> : <span />}
               {saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : '保存失败'}
             </span>
           )}
-          {!readOnly && markdownDocument && preview.content.kind === 'text' && preview.content.editable && (
+          {!readOnly && preview.presentation.sourceMode && preview.content.kind === 'text' && (
             <button type="button" onClick={() => setSourceMode((value) => !value)} title={sourceMode ? '返回阅读视图' : '编辑 Markdown 源码'}>
               <Code2 size={13} />{sourceMode ? '阅读' : '源码'}
             </button>
@@ -301,7 +302,7 @@ function ReferenceDocumentSessionView({
       {error !== undefined && <div className="aa-reference-preview__error" role="alert">{error}</div>}
       {changes !== undefined ? <TextDiff changes={changes} /> : sourceMode && markdownDocument ? (
         <textarea className="aa-reference-preview__editor" value={draft} onChange={(event) => scheduleSave(event.target.value)} spellCheck={false} />
-      ) : <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.content.editable} markdownDocument={markdownDocument} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />}
+      ) : <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} markdownDocument={markdownDocument} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />}
     </div>
   )
 }
@@ -443,8 +444,4 @@ function PreviewState({ title, message, error, onRetry }: { title: string; messa
 
 function hasSourceChanged(current: SpaceReferencePreview, next: SpaceReferencePreview): boolean {
   return current.fingerprint !== next.fingerprint || current.status !== next.status
-}
-
-function isMarkdownPreview(preview: SpaceReferencePreview): boolean {
-  return preview.content.kind === 'text' && (preview.content.language === 'md' || preview.source.toLowerCase().endsWith('.md'))
 }

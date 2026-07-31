@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, watch as watchFileSystem } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,6 +66,12 @@ const childEnv = {
 };
 const shouldStartPanelApi = !args.desktop || args.smoke;
 const children = [];
+let desktopChild;
+let desktopLaunch;
+let desktopRestartTimer;
+let desktopRuntimeWatcher;
+let desktopRestarting = false;
+let desktopRestartRequested = false;
 pushChild(spawnLabeled("tsc-watch", process.execPath, [
     tscBin,
     "-p",
@@ -113,7 +119,7 @@ if (args.smoke || args.desktop) {
       console.log("[dev] smoke check passed.");
       void stopAll(0);
     } else {
-      pushChild(spawnLabeled("electron", process.execPath, [
+      startRestartableDesktop([
         electronBin,
         panelDesktopEntry,
         "--host",
@@ -123,7 +129,7 @@ if (args.smoke || args.desktop) {
         "--dev-url",
         `http://${args.host}:${frontendPort}/`,
         ...configDirectoryArgs(args.configDirectory),
-      ], { env: childEnv }));
+      ], { env: childEnv });
     }
   } catch (error) {
     console.error(`[dev] startup check failed: ${errorMessage(error)}`);
@@ -276,6 +282,78 @@ function pushChild(child) {
   });
 }
 
+function startRestartableDesktop(commandArgs, options) {
+  desktopLaunch = { commandArgs, options };
+  startDesktopChild();
+  desktopRuntimeWatcher = watchFileSystem(path.join(root, "dist"), { recursive: true }, (_event, filename) => {
+    if (typeof filename !== "string" || !/\.(?:c?js|json)$/i.test(filename)) {
+      return;
+    }
+    clearTimeout(desktopRestartTimer);
+    desktopRestartTimer = setTimeout(() => {
+      desktopRestartTimer = undefined;
+      void restartDesktopChild();
+    }, 300);
+    desktopRestartTimer.unref();
+  });
+  desktopRuntimeWatcher.on("error", (error) => {
+    console.error(`[dev] desktop runtime watcher failed: ${errorMessage(error)}`);
+    void stopAll(1);
+  });
+}
+
+function startDesktopChild() {
+  if (stopping || desktopLaunch === undefined) {
+    return;
+  }
+  const child = spawnLabeled("electron", process.execPath, desktopLaunch.commandArgs, desktopLaunch.options);
+  desktopChild = child;
+  children.push(child);
+  child.on("exit", (code, signal) => {
+    if (stopping || child !== desktopChild) {
+      return;
+    }
+    const reason = signal === null ? `code ${code ?? 1}` : `signal ${signal}`;
+    console.error(`[dev] ${child.label} exited with ${reason}.`);
+    void stopAll(code ?? 1);
+  });
+}
+
+async function restartDesktopChild() {
+  if (stopping) {
+    return;
+  }
+  if (desktopRestarting) {
+    desktopRestartRequested = true;
+    return;
+  }
+  desktopRestarting = true;
+  do {
+    desktopRestartRequested = false;
+    const previousChild = desktopChild;
+    desktopChild = undefined;
+    removeChild(previousChild);
+    if (previousChild !== undefined) {
+      await stopDevelopmentProcessTree(previousChild);
+    }
+    if (!stopping) {
+      console.log("[dev] restarting Electron after desktop runtime rebuild.");
+      startDesktopChild();
+    }
+  } while (desktopRestartRequested && !stopping);
+  desktopRestarting = false;
+}
+
+function removeChild(child) {
+  if (child === undefined) {
+    return;
+  }
+  const index = children.indexOf(child);
+  if (index >= 0) {
+    children.splice(index, 1);
+  }
+}
+
 function spawnLabeled(label, command, commandArgs, options = {}) {
   const child = spawn(command, commandArgs, {
     cwd: root,
@@ -361,6 +439,8 @@ async function stopAll(exitCode) {
     return;
   }
   stopping = true;
+  clearTimeout(desktopRestartTimer);
+  desktopRuntimeWatcher?.close();
   await Promise.allSettled(children.map((child) => stopDevelopmentProcessTree(child)));
   // Windows can retain stdio handles for terminated watcher children. End the
   // supervisor explicitly so a dead dev session cannot look healthy.
@@ -374,6 +454,6 @@ Starts:
   - TypeScript compiler in watch mode
   - Panel API with node --watch
   - Vite panel UI with HMR and API proxy
-  - Electron desktop shell when --desktop is provided
+  - Electron desktop shell with backend reload when --desktop is provided
 `);
 }

@@ -284,6 +284,9 @@ function ActivityTrail({ entries, onSelect }: { entries: readonly TimelineEntry[
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hoverId, setHoverId] = useState<string | null>(null)
   const [scrollX, setScrollX] = useState(0)
+  const momentumFrameRef = useRef<number | null>(null)
+  const momentumFrameTimeRef = useRef<number | null>(null)
+  const momentumVelocityRef = useRef(0)
   const lastIndex = entries.length - 1
 
   const { cardW, pitch, padL, padR, ridgeH, amp, baseY } = TRAIL
@@ -305,11 +308,74 @@ function ActivityTrail({ entries, onSelect }: { entries: readonly TimelineEntry[
   // 标题栖在枝干起点左侧，随着向右前进平滑淡出
   const labelOpacity = Math.max(0, 1 - scrollX / 90)
 
-  // 竖直滚轮转成横向浏览
+  const stopMomentum = useCallback(() => {
+    if (momentumFrameRef.current !== null) cancelAnimationFrame(momentumFrameRef.current)
+    momentumFrameRef.current = null
+    momentumFrameTimeRef.current = null
+    momentumVelocityRef.current = 0
+  }, [])
+
+  const animateMomentum = useCallback(function tick(timestamp: number) {
+    const el = scrollRef.current
+    if (!el) {
+      stopMomentum()
+      return
+    }
+
+    const previousTimestamp = momentumFrameTimeRef.current
+    const elapsedFrames = previousTimestamp === null
+      ? 1
+      : Math.min(2, Math.max(0.5, (timestamp - previousTimestamp) / (1000 / 60)))
+    momentumFrameTimeRef.current = timestamp
+
+    const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth)
+    const nextScrollLeft = Math.min(
+      maxScrollLeft,
+      Math.max(0, el.scrollLeft + momentumVelocityRef.current * elapsedFrames),
+    )
+    const reachedBoundary = nextScrollLeft === el.scrollLeft
+      && ((nextScrollLeft === 0 && momentumVelocityRef.current < 0)
+        || (nextScrollLeft === maxScrollLeft && momentumVelocityRef.current > 0))
+
+    el.scrollLeft = nextScrollLeft
+    momentumVelocityRef.current *= Math.pow(0.86, elapsedFrames)
+
+    if (reachedBoundary || Math.abs(momentumVelocityRef.current) < 0.35) {
+      stopMomentum()
+      return
+    }
+    momentumFrameRef.current = requestAnimationFrame(tick)
+  }, [stopMomentum])
+
+  // 将滚轮输入汇入一条可反向的惯性轨迹，避免每个鼠标刻度都成为离散跳动。
   function handleWheel(e: React.WheelEvent<HTMLDivElement>) {
     const el = scrollRef.current
-    if (!el || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
-    el.scrollLeft += e.deltaY
+    if (!el) return
+
+    const dominantDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+    const deltaScale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? Math.max(1, el.clientWidth) : 1
+    const delta = Math.min(180, Math.max(-180, dominantDelta * deltaScale))
+    if (delta === 0) return
+
+    const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth)
+    const canMove = delta < 0 ? el.scrollLeft > 0 : el.scrollLeft < maxScrollLeft
+    if (!canMove) return
+    e.preventDefault()
+
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      stopMomentum()
+      el.scrollLeft = Math.min(maxScrollLeft, Math.max(0, el.scrollLeft + delta))
+      return
+    }
+
+    momentumVelocityRef.current = Math.min(
+      42,
+      Math.max(-42, momentumVelocityRef.current + delta * 0.18),
+    )
+    if (momentumFrameRef.current === null) {
+      momentumFrameTimeRef.current = null
+      momentumFrameRef.current = requestAnimationFrame(animateMomentum)
+    }
   }
 
   const rafRef = useRef<number | null>(null)
@@ -324,7 +390,8 @@ function ActivityTrail({ entries, onSelect }: { entries: readonly TimelineEntry[
   }, [])
   useEffect(() => () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-  }, [])
+    stopMomentum()
+  }, [stopMomentum])
 
   return (
     <div style={{ flexShrink: 0, paddingBottom: 8 }}>
@@ -333,13 +400,14 @@ function ActivityTrail({ entries, onSelect }: { entries: readonly TimelineEntry[
       {/* 可滚动小径，右端柔化淡出 */}
       <div
         ref={scrollRef}
+        data-home-activity-trail
         onWheel={handleWheel}
         onScroll={handleScroll}
         className="overflow-x-auto overflow-y-hidden no-scrollbar"
         style={{
           paddingTop: 4,
           paddingBottom: 20,
-          scrollBehavior: 'smooth',
+          overscrollBehaviorX: 'contain',
           WebkitMaskImage: 'linear-gradient(to right, #000 0, #000 calc(100% - 72px), transparent 100%)',
           maskImage: 'linear-gradient(to right, #000 0, #000 calc(100% - 72px), transparent 100%)',
         }}

@@ -110,8 +110,12 @@ export function createOrdinaryAgentFeature(input: {
       if (document !== undefined) conversationDocuments.set(summary.conversationId, document);
     }
     for (const summary of await input.repository.list(Number.MAX_SAFE_INTEGER)) {
+      if (unavailableConversationIds.has(summary.conversationId)) continue;
       let document = await input.repository.get(summary.runId);
       if (document === undefined) continue;
+      // Cache the durable run before Session recovery so an unavailable transcript
+      // cannot force unrelated conversations to reopen this run during startup.
+      documents.set(summary.runId, document);
       // Settled terminal runs receive no further activities; their streams are
       // pure projections of the persisted timeline and are rebuilt on demand by
       // replay (which passes the rebuild inputs). Materializing them here would
@@ -120,9 +124,13 @@ export function createOrdinaryAgentFeature(input: {
       // rounds, lost approvals) keep an eager stream because those paths append
       // activities through bare streamFor(runId), which must not start empty.
       if (needsLiveActivityStream(document.state)) {
-        await restorePersistedActivityStream(document.state);
+        try {
+          await restorePersistedActivityStream(document.state);
+        } catch (error) {
+          markConversationUnavailable(summary.conversationId, error);
+          continue;
+        }
       }
-      documents.set(summary.runId, document);
       if (document.state.status.kind === "awaiting_approval") {
         await blockLostApproval(summary.runId, {
           code: "confirmation_continuation_lost",
@@ -158,16 +166,12 @@ export function createOrdinaryAgentFeature(input: {
     for (const [conversationId, control] of conversationDocuments) {
       try {
         if (await conversationView(control) === undefined) {
-          conversationDocuments.delete(conversationId);
-          unavailableConversationIds.add(conversationId);
-          emitDiagnostic({ kind: "conversation_unavailable", conversationId });
+          markConversationUnavailable(conversationId);
         }
       } catch (error) {
         // Unsupported or incomplete Session branches remain on disk for diagnosis, but
         // cannot make unrelated conversations or new tasks unavailable.
-        conversationDocuments.delete(conversationId);
-        unavailableConversationIds.add(conversationId);
-        emitDiagnostic({ kind: "conversation_unavailable", conversationId, error });
+        markConversationUnavailable(conversationId, error);
       }
     }
     for (const document of documents.values()) {
@@ -192,6 +196,13 @@ export function createOrdinaryAgentFeature(input: {
         await activateSuccessor(predecessor.state.runId);
       }
     }
+  }
+
+  function markConversationUnavailable(conversationId: string, error?: unknown): void {
+    conversationDocuments.delete(conversationId);
+    if (unavailableConversationIds.has(conversationId)) return;
+    unavailableConversationIds.add(conversationId);
+    emitDiagnostic({ kind: "conversation_unavailable", conversationId, ...(error === undefined ? {} : { error }) });
   }
 
   async function loadConversationControl(conversationId: string): Promise<OrdinaryConversationControlDocument | undefined> {
@@ -1501,19 +1512,24 @@ export function createOrdinaryAgentFeature(input: {
   async function conversationView(control: OrdinaryConversationControlDocument): Promise<OrdinaryConversationReadModel | undefined> {
     if (control.state.deletedAt !== undefined) return undefined;
     const runs = await visibleRuns(control);
-    const assistantEntries = await Promise.all(runs.map(async (run) => {
-      if (run.status.kind !== "completed" || run.session.phase !== "rollbackable") return undefined;
-      return (await input.sessionRepository.readAssistantEntries({
-        sessionRef: run.sessionRef,
-        entryRefs: [run.session.endLeafRef],
-      }))[0];
-    }));
+    const completedAnswers = runs.flatMap((run) =>
+      run.status.kind === "completed" && run.session.phase === "rollbackable"
+        ? [{ runId: run.runId, entryRef: run.session.endLeafRef }]
+        : []);
+    const assistantEntries = completedAnswers.length === 0
+      ? []
+      : await input.sessionRepository.readAssistantEntries({
+          sessionRef: control.state.sessionRef,
+          entryRefs: completedAnswers.map((answer) => answer.entryRef),
+        });
+    const assistantTextByEntryRef = new Map(assistantEntries.map((entry) =>
+      [sessionEntryKey(entry.entryRef), entry.text] as const));
     return projectOrdinaryConversation({
       control,
       runs,
-      completedAssistantTextByRunId: new Map(runs.flatMap((run, index) => {
-        const entry = assistantEntries[index];
-        return entry === undefined ? [] : [[run.runId, entry.text] as const];
+      completedAssistantTextByRunId: new Map(completedAnswers.flatMap((answer) => {
+        const text = assistantTextByEntryRef.get(sessionEntryKey(answer.entryRef));
+        return text === undefined ? [] : [[answer.runId, text] as const];
       })),
     });
   }

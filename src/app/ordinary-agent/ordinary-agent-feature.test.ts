@@ -731,6 +731,88 @@ test("restart does not activate a stale root queue when the Session branch is un
   assert.equal(await restarted.queries.getConversation(completed.turn.conversationId), undefined);
 });
 
+test("startup isolates a damaged Session while healthy conversations and new tasks remain available", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-session-isolation-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const sessions = new SessionHarness();
+  const recordedAt = clock();
+  const birth = ordinaryRunBirth();
+
+  const damagedSession = ordinaryAgentSessionRef("damaged-session");
+  sessions.ensure(damagedSession);
+  const damagedInput = sessions.append(damagedSession, "damaged-input");
+  const damagedAnswer = sessions.append(damagedSession, "damaged-answer", damagedInput, "partial answer");
+  let damaged = createInitialOrdinaryRunState({
+    runId: "damaged-run",
+    sessionRef: damagedSession,
+    turn: { ...ordinaryRunTurn("damaged-run"), conversationId: "damaged-conversation" },
+    runInput: { userMessage: "damaged" },
+    birth,
+    recordedAt: recordedAt(),
+    eventId: "damaged-created",
+  });
+  damaged = transitionOrdinaryRun({ state: damaged, transition: { type: "start" }, recordedAt: recordedAt(), eventId: "damaged-started" });
+  damaged = transitionOrdinaryRun({ state: damaged, transition: { type: "record_session_checkpoint", checkpoint: { kind: "start_leaf_captured", sessionId: damagedSession.sessionId, startLeafRef: null } }, recordedAt: recordedAt(), eventId: "damaged-checkpoint-1" });
+  damaged = transitionOrdinaryRun({ state: damaged, transition: { type: "record_session_checkpoint", checkpoint: { kind: "input_entry_committed", sessionId: damagedSession.sessionId, inputEntryRef: damagedInput } }, recordedAt: recordedAt(), eventId: "damaged-checkpoint-2" });
+  damaged = transitionOrdinaryRun({ state: damaged, transition: { type: "record_session_checkpoint", checkpoint: { kind: "assistant_response_entry_committed", sessionId: damagedSession.sessionId, assistantEntryRef: damagedAnswer }, modelRequestId: "damaged-model-request" }, recordedAt: recordedAt(), eventId: "damaged-checkpoint-3" });
+
+  const healthySession = ordinaryAgentSessionRef("healthy-session");
+  sessions.ensure(healthySession);
+  const healthyInput = sessions.append(healthySession, "healthy-input");
+  const healthyAnswer = sessions.append(healthySession, "healthy-answer", healthyInput, "healthy answer");
+  let healthy = createInitialOrdinaryRunState({
+    runId: "healthy-run",
+    sessionRef: healthySession,
+    turn: { ...ordinaryRunTurn("healthy-run"), conversationId: "healthy-conversation" },
+    runInput: { userMessage: "healthy" },
+    birth,
+    recordedAt: recordedAt(),
+    eventId: "healthy-created",
+  });
+  healthy = transitionOrdinaryRun({ state: healthy, transition: { type: "start" }, recordedAt: recordedAt(), eventId: "healthy-started" });
+  healthy = transitionOrdinaryRun({ state: healthy, transition: { type: "record_session_checkpoint", checkpoint: { kind: "start_leaf_captured", sessionId: healthySession.sessionId, startLeafRef: null } }, recordedAt: recordedAt(), eventId: "healthy-checkpoint-1" });
+  healthy = transitionOrdinaryRun({ state: healthy, transition: { type: "record_session_checkpoint", checkpoint: { kind: "input_entry_committed", sessionId: healthySession.sessionId, inputEntryRef: healthyInput } }, recordedAt: recordedAt(), eventId: "healthy-checkpoint-2" });
+  healthy = transitionOrdinaryRun({ state: healthy, transition: { type: "record_session_checkpoint", checkpoint: { kind: "assistant_response_entry_committed", sessionId: healthySession.sessionId, assistantEntryRef: healthyAnswer } }, recordedAt: recordedAt(), eventId: "healthy-checkpoint-3" });
+  healthy = transitionOrdinaryRun({
+    state: healthy,
+    transition: {
+      type: "complete",
+      session: { sessionId: healthySession.sessionId, startLeafRef: null, inputEntryRef: healthyInput, safeLeafRef: healthyAnswer, latestLeafRef: healthyAnswer, compactionEntryRefs: [] },
+      toolCalls: [],
+      usage: {},
+    },
+    recordedAt: recordedAt(),
+    eventId: "healthy-completed",
+  });
+
+  await repository.save(damaged, 0);
+  await repository.save(healthy, 0);
+  await controls.save({ conversationId: damaged.turn.conversationId, createdAt: damaged.timestamps.createdAt, sessionRef: damagedSession }, 0, damaged.timestamps.createdAt);
+  await controls.save({ conversationId: healthy.turn.conversationId, createdAt: healthy.timestamps.createdAt, sessionRef: healthySession }, 0, healthy.timestamps.createdAt);
+  sessions.failAssistantReadsFor(damagedSession.sessionId);
+
+  const diagnostics: string[] = [];
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: controls,
+    sessionRepository: sessions,
+    execution: { execute: (input) => completedOutcome(input, "new answer", sessions) },
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "conversation_unavailable") diagnostics.push(diagnostic.conversationId);
+    },
+    now: clock("2026-01-01T00:01:00.000Z"),
+    idFactory: ids(100),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  assert.deepEqual((await restarted.queries.listConversations()).map((conversation) => conversation.conversationId), ["healthy-conversation"]);
+  assert.equal(await restarted.queries.getConversation("damaged-conversation"), undefined);
+  const submitted = await restarted.commands.submitTurn({ input: { userMessage: "new task" }, birth });
+  await waitForStatus(restarted, submitted.run.runId, "completed");
+  assert.deepEqual(diagnostics, ["damaged-conversation"]);
+});
+
 test("feature release aborts live execution and releases its owned resources", async (t) => {
   const gate = createGate();
   const order: string[] = [];
@@ -1071,6 +1153,7 @@ class SessionHarness implements AgentSessionRepository {
   private readonly nodes = new Map<string, Map<string, SessionNode>>();
   private readonly activeLeaves = new Map<string, AgentSessionEntryRef | null>();
   private readonly calls = new Map<string, readonly ToolCallRequest[]>();
+  private readonly assistantReadFailures = new Set<string>();
   ensure(ref: AgentSessionRef): void { this.roots.set(ref.sessionId, ref); this.nodes.set(ref.sessionId, this.nodes.get(ref.sessionId) ?? new Map()); if (!this.activeLeaves.has(ref.sessionId)) this.activeLeaves.set(ref.sessionId, null); }
   active(ref: AgentSessionRef): AgentSessionEntryRef | null { return this.activeLeaves.get(ref.sessionId) ?? null; }
   append(ref: AgentSessionRef, entryId: string, parent = this.active(ref), text = ""): AgentSessionEntryRef { this.ensure(ref); const entry = { sessionId: ref.sessionId, entryId }; this.nodes.get(ref.sessionId)!.set(entryId, { ref: entry, parent, text }); this.activeLeaves.set(ref.sessionId, entry); return entry; }
@@ -1079,7 +1162,11 @@ class SessionHarness implements AgentSessionRepository {
   async getActiveLeaf(ref: AgentSessionRef): Promise<AgentSessionEntryRef | null> { return this.active(ref); }
   async moveActiveLeaf(ref: AgentSessionRef, target: AgentSessionEntryRef | null): Promise<AgentSessionEntryRef | null> { this.ensure(ref); this.activeLeaves.set(ref.sessionId, target); return target; }
   async getActiveBranchEntryRefs(ref: AgentSessionRef): Promise<readonly AgentSessionEntryRef[]> { const result: AgentSessionEntryRef[] = []; let current = this.active(ref); while (current !== null) { result.push(current); current = this.nodes.get(ref.sessionId)?.get(current.entryId)?.parent ?? null; } return result.reverse(); }
-  async readAssistantEntries(input: { readonly entryRefs: readonly AgentSessionEntryRef[] }) { return input.entryRefs.map((entryRef) => ({ entryRef, text: this.nodes.get(entryRef.sessionId)?.get(entryRef.entryId)?.text ?? "" })); }
+  failAssistantReadsFor(sessionId: string): void { this.assistantReadFailures.add(sessionId); }
+  async readAssistantEntries(input: { readonly sessionRef: AgentSessionRef; readonly entryRefs: readonly AgentSessionEntryRef[] }) {
+    if (this.assistantReadFailures.has(input.sessionRef.sessionId)) throw new Error("Session JSONL is damaged");
+    return input.entryRefs.map((entryRef) => ({ entryRef, text: this.nodes.get(entryRef.sessionId)?.get(entryRef.entryId)?.text ?? "" }));
+  }
   async readToolCalls(input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef }): Promise<readonly ToolCallRequest[]> { return this.calls.get(`${input.sessionRef.sessionId}:${input.assistantEntryRef.entryId}`) ?? []; }
   async reconcileToolResultEntries(input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef; readonly orderedResults: readonly ToolCallResult[] }): Promise<AgentSessionEntryRef> { this.reconciled.push({ orderedResults: structuredClone(input.orderedResults) }); return this.append(input.sessionRef, `${input.assistantEntryRef.entryId}-results-${this.reconciled.length}`, input.assistantEntryRef); }
   async delete(ref: AgentSessionRef): Promise<void> { this.roots.delete(ref.sessionId); this.nodes.delete(ref.sessionId); this.activeLeaves.delete(ref.sessionId); }

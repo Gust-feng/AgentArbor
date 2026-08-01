@@ -52,7 +52,7 @@ function stableFactsFixture(runId: string): OrdinaryStableTerminalRunFacts {
         durationMs: 90,
       },
     ],
-    status: { kind: "completed", answer: "done" },
+    status: { kind: "completed" },
     createdAt: "2026-07-26T08:00:00.000Z",
     terminalAt: "2026-07-26T08:00:09.000Z",
   };

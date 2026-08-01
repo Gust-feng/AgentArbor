@@ -15,6 +15,7 @@ import {
 import { assertOrdinaryToolFactGraph } from "./state.js";
 
 const MANIFEST_SCHEMA_VERSION = "ordinary-run-manifest/v1" as const;
+const PREVIOUS_RUN_SCHEMA_VERSION = "ordinary-run/v5" as const;
 
 export class OrdinaryRunSnapshotIncompatibleError extends Error {
   readonly code = "ordinary_run_snapshot_incompatible" as const;
@@ -208,7 +209,7 @@ const statusSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("queued") }).strict(),
   z.object({ kind: z.literal("running") }).strict(),
   z.object({ kind: z.literal("awaiting_approval"), confirmationRequests: z.array(confirmationSchema).min(1), continuationAvailability: z.literal("live_only") }).strict(),
-  z.object({ kind: z.literal("completed"), answer: z.string() }).strict(),
+  z.object({ kind: z.literal("completed") }).strict(),
   z.object({ kind: z.literal("failed"), error: z.object({ code: z.string().min(1), message: z.string() }).strict() }).strict(),
   z.object({ kind: z.literal("cancelled"), reason: z.string() }).strict(),
   z.object({ kind: z.literal("blocked"), reason: z.object({ code: z.string().min(1), message: z.string() }).strict(), continueBy: z.literal("new_turn") }).strict(),
@@ -275,6 +276,12 @@ const eventBase = {
 const eventSchema = z.discriminatedUnion("type", [
   z.object({ ...eventBase, type: z.literal("run.created") }).strict(),
   z.object({ ...eventBase, type: z.literal("run.started") }).strict(),
+  z.object({
+    ...eventBase,
+    type: z.literal("model.output.completed"),
+    modelRequestId: z.string().min(1),
+    assistantEntryRef: sessionEntryRefSchema,
+  }).strict(),
   z.object({
     ...eventBase,
     type: z.literal("model.reasoning.completed"),
@@ -416,7 +423,7 @@ const rawStateSchema = z.object({
   }
   const expectedLastEvent = {
     queued: "run.created",
-    running: ["run.started", "run.approval_decided", "model.reasoning.completed", "context.compaction.completed"],
+    running: ["run.started", "run.approval_decided", "model.output.completed", "model.reasoning.completed", "context.compaction.completed"],
     awaiting_approval: "run.approval_requested",
     completed: "run.completed",
     failed: "run.failed",
@@ -474,6 +481,17 @@ const rawStateSchema = z.object({
 const stateSchema: z.ZodType<OrdinaryRunState> = z.custom<OrdinaryRunState>((value) => rawStateSchema.safeParse(value).success);
 const documentSchema: z.ZodType<OrdinaryRunSnapshotDocument> = z.object({
   schemaVersion: z.literal(ORDINARY_RUN_SCHEMA_VERSION), revision: z.number().int().positive(), savedAt: z.string().min(1), state: stateSchema,
+}).strict();
+const v5DocumentEnvelopeSchema = z.object({
+  schemaVersion: z.literal(PREVIOUS_RUN_SCHEMA_VERSION),
+  revision: z.number().int().positive(),
+  savedAt: z.string().min(1),
+  state: z.object({
+    runId: z.string().min(1),
+    status: z.unknown(),
+    session: z.unknown(),
+    timeline: z.array(z.unknown()).min(1),
+  }).passthrough(),
 }).strict();
 const summarySchema = z.object({
   runId: z.string().min(1), conversationId: z.string().min(1), userTurnId: z.string().min(1), assistantTurnId: z.string().min(1),
@@ -615,8 +633,10 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
 }
 
 async function readSnapshot(rootDir: string, runId: string): Promise<OrdinaryRunSnapshotDocument | undefined> {
-  const raw = await readJson(snapshotPath(rootDir, runId), runId);
-  if (raw === undefined) return undefined;
+  const filePath = snapshotPath(rootDir, runId);
+  const stored = await readStoredJson(filePath, runId);
+  if (stored === undefined) return undefined;
+  const raw = await migrateV5Snapshot(rootDir, runId, stored.raw, stored.content);
   const rawState = typeof raw === "object" && raw !== null && "state" in raw
     ? (raw as { readonly state: unknown }).state
     : undefined;
@@ -629,6 +649,122 @@ async function readSnapshot(rootDir: string, runId: string): Promise<OrdinaryRun
     throw new OrdinaryRunSnapshotIncompatibleError(runId, result.success ? "run identity is invalid" : z.prettifyError(result.error));
   }
   return toPersistedJsonShape(result.data);
+}
+
+async function migrateV5Snapshot(
+  rootDir: string,
+  runId: string,
+  raw: unknown,
+  originalContent: string,
+): Promise<unknown> {
+  if (!isSchemaVersion(raw, PREVIOUS_RUN_SCHEMA_VERSION)) return raw;
+  const envelope = v5DocumentEnvelopeSchema.safeParse(raw);
+  if (!envelope.success || envelope.data.state.runId !== runId) {
+    throw new OrdinaryRunSnapshotIncompatibleError(
+      runId,
+      envelope.success ? "v5 run identity is invalid" : `v5 migration failed: ${z.prettifyError(envelope.error)}`,
+    );
+  }
+
+  const migratedState = toPersistedJsonShape(envelope.data.state) as Record<string, unknown>;
+  if (isCompletedV5Status(envelope.data.state.status, runId)) {
+    const session = v5CompletedSessionSchema.safeParse(envelope.data.state.session);
+    if (!session.success) {
+      throw new OrdinaryRunSnapshotIncompatibleError(runId, `v5 migration failed: ${z.prettifyError(session.error)}`);
+    }
+    const timeline = envelope.data.state.timeline.map((event) => toPersistedJsonShape(event));
+    if (timeline.some((event) => isEventType(event, "model.output.completed"))) {
+      throw new OrdinaryRunSnapshotIncompatibleError(runId, "v5 migration found an output event that v5 did not support");
+    }
+    const completedIndex = timeline.findIndex((event) => isEventType(event, "run.completed"));
+    if (completedIndex < 0) {
+      throw new OrdinaryRunSnapshotIncompatibleError(runId, "v5 completed run has no terminal event");
+    }
+    timeline.splice(completedIndex, 0, {
+      eventId: uniqueMigrationEventId(runId, timeline),
+      runId,
+      sequence: completedIndex + 1,
+      recordedAt: eventRecordedAt(timeline[completedIndex], runId),
+      type: "model.output.completed",
+      modelRequestId: `${runId}:migration:v5:completion`,
+      assistantEntryRef: session.data.endLeafRef,
+    });
+    migratedState.status = { kind: "completed" };
+    migratedState.timeline = timeline.map((event, index) => ({
+      ...(event as Record<string, unknown>),
+      sequence: index + 1,
+    }));
+  }
+
+  const migrated = {
+    schemaVersion: ORDINARY_RUN_SCHEMA_VERSION,
+    revision: envelope.data.revision,
+    savedAt: envelope.data.savedAt,
+    state: migratedState,
+  };
+  const validation = documentSchema.safeParse(migrated);
+  if (!validation.success) {
+    throw new OrdinaryRunSnapshotIncompatibleError(runId, `v5 migration failed: ${z.prettifyError(validation.error)}`);
+  }
+  await preserveV5Snapshot(rootDir, runId, originalContent);
+  await writeJsonAtomically(snapshotPath(rootDir, runId), validation.data);
+  return validation.data;
+}
+
+const v5CompletedStatusSchema = z.object({ kind: z.literal("completed"), answer: z.string() }).strict();
+const v5CompletedSessionSchema = z.object({
+  phase: z.literal("rollbackable"),
+  endLeafRef: sessionEntryRefSchema,
+}).passthrough();
+
+function isCompletedV5Status(value: unknown, runId: string): boolean {
+  const kind = typeof value === "object" && value !== null && "kind" in value
+    ? (value as { readonly kind?: unknown }).kind
+    : undefined;
+  if (kind !== "completed") return false;
+  const result = v5CompletedStatusSchema.safeParse(value);
+  if (!result.success) {
+    throw new OrdinaryRunSnapshotIncompatibleError(runId, `v5 migration failed: ${z.prettifyError(result.error)}`);
+  }
+  return true;
+}
+
+function isSchemaVersion(value: unknown, version: string): boolean {
+  return typeof value === "object" && value !== null && "schemaVersion" in value &&
+    (value as { readonly schemaVersion?: unknown }).schemaVersion === version;
+}
+
+function isEventType(value: unknown, type: string): boolean {
+  return typeof value === "object" && value !== null && "type" in value &&
+    (value as { readonly type?: unknown }).type === type;
+}
+
+function eventRecordedAt(value: unknown, runId: string): string {
+  const result = z.object({ recordedAt: z.string().min(1) }).passthrough().safeParse(value);
+  if (!result.success) throw new OrdinaryRunSnapshotIncompatibleError(runId, "v5 terminal event has no timestamp");
+  return result.data.recordedAt;
+}
+
+function uniqueMigrationEventId(runId: string, timeline: readonly unknown[]): string {
+  const existing = new Set(timeline.flatMap((event) => {
+    const result = z.object({ eventId: z.string() }).passthrough().safeParse(event);
+    return result.success ? [result.data.eventId] : [];
+  }));
+  const base = `${runId}:migration:v5:assistant-output`;
+  let candidate = base;
+  for (let suffix = 2; existing.has(candidate); suffix += 1) candidate = `${base}:${suffix}`;
+  return candidate;
+}
+
+async function preserveV5Snapshot(rootDir: string, runId: string, content: string): Promise<void> {
+  const backupPath = v5BackupPath(rootDir, runId);
+  await fs.writeFile(backupPath, content, { encoding: "utf8", mode: 0o600, flag: "wx" }).catch(async (error: unknown) => {
+    if (!isNodeError(error, "EEXIST")) throw error;
+    const existing = await fs.readFile(backupPath, "utf8");
+    if (existing !== content) {
+      throw new OrdinaryRunSnapshotIncompatibleError(runId, "existing v5 backup differs from the snapshot being migrated");
+    }
+  });
 }
 
 async function scanSummaries(rootDir: string): Promise<OrdinaryRunSummary[]> {
@@ -697,12 +833,16 @@ function summaryFromDocument(document: OrdinaryRunSnapshotDocument): OrdinaryRun
 }
 
 async function readJson(filePath: string, runId: string): Promise<unknown | undefined> {
+  return (await readStoredJson(filePath, runId))?.raw;
+}
+
+async function readStoredJson(filePath: string, runId: string): Promise<{ readonly raw: unknown; readonly content: string } | undefined> {
   const content = await fs.readFile(filePath, "utf8").catch((error: unknown) => {
     if (isNodeError(error, "ENOENT")) return undefined;
     throw error;
   });
   if (content === undefined) return undefined;
-  try { return JSON.parse(content) as unknown; }
+  try { return { raw: JSON.parse(content) as unknown, content }; }
   catch { throw new OrdinaryRunSnapshotIncompatibleError(runId, "stored JSON is invalid"); }
 }
 
@@ -717,5 +857,6 @@ async function writeJsonAtomically(filePath: string, value: unknown): Promise<vo
 }
 
 function snapshotPath(rootDir: string, runId: string): string { return path.join(runDirectory(rootDir, runId), "snapshot.json"); }
+function v5BackupPath(rootDir: string, runId: string): string { return path.join(runDirectory(rootDir, runId), "snapshot.ordinary-run-v5.json"); }
 function runDirectory(rootDir: string, runId: string): string { return path.join(rootDir, "runs", encodeURIComponent(runId)); }
 function manifestPath(rootDir: string): string { return path.join(rootDir, "manifest.json"); }

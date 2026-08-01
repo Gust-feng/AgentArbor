@@ -84,6 +84,7 @@ function isPendingOrPreSessionTerminal(run: OrdinaryRunState): boolean {
 export function projectOrdinaryConversation(input: {
   readonly control: OrdinaryConversationControlDocument;
   readonly runs: readonly OrdinaryRunState[];
+  readonly completedAssistantTextByRunId?: ReadonlyMap<string, string>;
 }): OrdinaryConversationReadModel | undefined {
   if (input.control.state.deletedAt !== undefined || input.runs.length === 0) return undefined;
   const first = input.runs[0]!;
@@ -117,7 +118,7 @@ export function projectOrdinaryConversation(input: {
       role: "assistant" as const,
       turnId: run.turn.assistantTurnId,
       runId: run.runId,
-      content: assistantContent(run),
+      content: assistantContent(run, input.completedAssistantTextByRunId?.get(run.runId)),
       status: run.status.kind,
       ...interruptionProjection(run),
       model: structuredClone(run.birth.config),
@@ -154,12 +155,17 @@ function compactTitle(value: string): string {
   return title.length <= 80 ? title : `${title.slice(0, 79)}…`;
 }
 
-function assistantContent(run: OrdinaryRunState): string {
+function assistantContent(run: OrdinaryRunState, completedAssistantText: string | undefined): string {
   if (interruptionProjection(run).interruption !== undefined) {
     return run.visibleAssistantText ?? "";
   }
   switch (run.status.kind) {
-    case "completed": return run.status.answer;
+    case "completed": {
+      if (completedAssistantText === undefined) {
+        throw new Error(`Completed Ordinary run ${run.runId} has no projected Session answer`);
+      }
+      return completedAssistantText;
+    }
     case "failed": return run.status.error.message;
     case "cancelled": return "";
     case "blocked": return run.status.reason.message;

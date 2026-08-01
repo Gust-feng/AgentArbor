@@ -29,6 +29,7 @@ export function ordinaryAgentSessionRepository(): AgentSessionRepository {
       return target;
     },
     async getActiveBranchEntryRefs() { return []; },
+    async readAssistantEntries() { return []; },
     async readToolCalls() { return []; },
     async reconcileToolResultEntries() {
       throw new Error("Test Agent Session repository has no transcript storage.");

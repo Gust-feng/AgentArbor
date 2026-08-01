@@ -101,10 +101,16 @@ export function projectOrdinaryPanelRunView(input: {
   const replay = input.replay ?? input.fullReplay;
   const run = projectBasicRun(input.run, input.fullReplay.cursor, fullEvents.length);
   const pendingConfirmation = pendingConfirmationFrom(input.run);
+  const completedAnswer = input.fullReplay.activities
+    .filter((activity) => activity.type === "model.output.completed")
+    .at(-1)?.content;
+  if (input.run.status.kind === "completed" && completedAnswer === undefined) {
+    throw new Error(`Completed Ordinary run ${input.run.runId} has no projected Session answer`);
+  }
   const answer = input.run.status.kind === "completed"
     ? {
         title: "已回答",
-        content: input.run.status.answer,
+        content: completedAnswer!,
         evidenceRefs: [],
         nextActions: [],
       }
@@ -301,6 +307,20 @@ function projectActivity(run: OrdinaryRunState, activity: OrdinaryRunActivity): 
       visibility: "compact",
     };
   }
+  if (activity.type === "model.output.completed") {
+    return {
+      id: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      type: activity.type,
+      title: "",
+      delta: activity.content,
+      status: "completed",
+      timestamp: activity.recordedAt,
+      refs: [{ kind: "model_call", id: activity.modelRequestId }],
+      visibility: "compact",
+    };
+  }
   if (activity.type === "model.reasoning.delta") {
     return {
       id: activity.activityId,
@@ -348,6 +368,10 @@ function projectTransition(
   switch (event.type) {
     case "run.created": return { ...base, type: event.type, title: "", status: "queued" };
     case "run.started": return { ...base, type: event.type, title: "", status: "running" };
+    case "model.output.completed": return {
+      ...base, type: event.type, title: "", status: "completed",
+      refs: [{ kind: "model_call", id: event.modelRequestId }],
+    };
     case "model.reasoning.completed": return {
       ...base,
       type: event.type,
@@ -384,7 +408,7 @@ function projectTransition(
       ...base,
       type: "final.result",
       title: "已回答",
-      summary: run.status.kind === "completed" ? run.status.answer : undefined,
+      summary: undefined,
       status: "completed",
     };
     case "run.failed": return {
@@ -482,6 +506,20 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
       refs: event.refs,
     };
   }
+  if (activity.type === "model.output.completed") {
+    return {
+      nodeId: activity.activityId,
+      runId: activity.runId,
+      sequence: activity.sequence,
+      eventType: activity.type,
+      kind: "body",
+      phase: "completed",
+      title: "",
+      text: activity.content,
+      timestamp: activity.recordedAt,
+      refs: event.refs,
+    };
+  }
   if (activity.type === "model.reasoning.delta") {
     return {
       nodeId: activity.activityId,
@@ -523,11 +561,7 @@ function projectTranscriptNode(run: OrdinaryRunState, activity: OrdinaryRunActiv
     phase: transcriptPhase(activity.event),
     title: event.title,
     summary: event.summary,
-    text: activity.event.type === "model.reasoning.completed"
-      ? activity.event.content
-      : activity.event.type === "run.completed" && run.status.kind === "completed"
-        ? run.status.answer
-        : undefined,
+    text: activity.event.type === "model.reasoning.completed" ? activity.event.content : undefined,
     timestamp: activity.recordedAt,
     confirmation,
     modelUsage: activity.event.type === "run.approval_requested" ||
@@ -607,7 +641,7 @@ function isTranscriptActivity(run: OrdinaryRunState, activity: OrdinaryRunActivi
       (activity.event.type === "run.cancelled" || activity.event.type === "run.blocked")) {
     return false;
   }
-  return activity.type === "model.request" ||
+  return activity.type === "model.output.completed" || activity.type === "model.request" ||
     activity.type === "tool.requested" ||
     activity.type === "tool.progress" || activity.type === "tool.result" ||
     (activity.type === "run.transition" &&
@@ -642,6 +676,7 @@ function isWorkViewEvent(run: OrdinaryRunState, event: RunEvent): boolean {
 }
 
 function transcriptKind(event: OrdinaryRunEvent): TranscriptNode["kind"] {
+  if (event.type === "model.output.completed") return "body";
   if (event.type === "model.reasoning.completed") return "thinking";
   if (event.type === "run.approval_requested") return "confirmation";
   if (event.type === "run.approval_decided") return "user_decision";
@@ -653,6 +688,7 @@ function transcriptPhase(event: OrdinaryRunEvent): TranscriptNode["phase"] {
   switch (event.type) {
     case "run.created": return "noted";
     case "run.started": return "executing";
+    case "model.output.completed": return "completed";
     case "model.reasoning.completed": return "completed";
     case "context.compaction.completed": return "completed";
     case "run.approval_requested": return "waiting_approval";

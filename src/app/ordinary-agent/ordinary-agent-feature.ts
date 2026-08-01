@@ -112,7 +112,6 @@ export function createOrdinaryAgentFeature(input: {
     for (const summary of await input.repository.list(Number.MAX_SAFE_INTEGER)) {
       let document = await input.repository.get(summary.runId);
       if (document === undefined) continue;
-      documents.set(summary.runId, document);
       // Settled terminal runs receive no further activities; their streams are
       // pure projections of the persisted timeline and are rebuilt on demand by
       // replay (which passes the rebuild inputs). Materializing them here would
@@ -121,13 +120,9 @@ export function createOrdinaryAgentFeature(input: {
       // rounds, lost approvals) keep an eager stream because those paths append
       // activities through bare streamFor(runId), which must not start empty.
       if (needsLiveActivityStream(document.state)) {
-        streamFor(
-          summary.runId,
-          document.state.timeline,
-          document.state.toolCalls,
-          document.state.toolResultRecordedAt,
-        );
+        await restorePersistedActivityStream(document.state);
       }
+      documents.set(summary.runId, document);
       if (document.state.status.kind === "awaiting_approval") {
         await blockLostApproval(summary.runId, {
           code: "confirmation_continuation_lost",
@@ -213,12 +208,12 @@ export function createOrdinaryAgentFeature(input: {
     if (cached !== undefined) return cached;
     const document = await input.repository.get(runId);
     if (document !== undefined) {
-      documents.set(runId, document);
       // Settled terminal runs get their stream lazily from replay; runs that may
       // still append activities (live, pending round, lost approval) need it now.
       if (needsLiveActivityStream(document.state)) {
-        streamFor(runId, document.state.timeline, document.state.toolCalls, document.state.toolResultRecordedAt);
+        await restorePersistedActivityStream(document.state);
       }
+      documents.set(runId, document);
     }
     return document;
   }
@@ -242,22 +237,35 @@ export function createOrdinaryAgentFeature(input: {
    * established `run.stream.reset` + full terminal replay contract instead of a
    * silently empty stream. Memory eviction must not change the HTTP protocol.
    */
-  function terminalReplayStream(document: OrdinaryRunSnapshotDocument): {
+  async function terminalReplayStream(document: OrdinaryRunSnapshotDocument): Promise<{
     streamId: string;
     nextSequence: number;
     activities: OrdinaryRunActivity[];
-  } {
-    const activities = durableActivities(
-      document.state.runId,
-      document.state.timeline,
-      document.state.toolCalls,
-      document.state.toolResultRecordedAt,
-    );
+  }> {
+    const assistantEntries = await readRunAssistantEntries(document.state);
+    const replay = durableOrdinaryRunReplayFromState(document.state, assistantEntries);
     return {
       streamId: `${streamEpoch}:terminal:${document.state.runId}:${document.revision}`,
-      nextSequence: activities.length + 1,
-      activities,
+      nextSequence: replay.activities.length + 1,
+      activities: [...replay.activities],
     };
+  }
+
+  async function readRunAssistantEntries(state: OrdinaryRunState) {
+    const entryRefs = state.timeline.flatMap((event) =>
+      event.type === "model.output.completed" ? [event.assistantEntryRef] : []);
+    if (entryRefs.length === 0) return [];
+    return input.sessionRepository.readAssistantEntries({
+      sessionRef: state.sessionRef,
+      entryRefs,
+    });
+  }
+
+  async function restorePersistedActivityStream(state: OrdinaryRunState) {
+    const existing = activityStreams.get(state.runId);
+    if (existing !== undefined) return existing;
+    const replay = durableOrdinaryRunReplayFromState(state, await readRunAssistantEntries(state));
+    return streamFor(state.runId, replay.activities);
   }
 
   async function enqueue<T>(runId: string, operation: () => Promise<T>): Promise<T> {
@@ -306,7 +314,10 @@ export function createOrdinaryAgentFeature(input: {
     documents.set(runId, saved);
     syncDurableToolResults(state);
     if (state.timeline.length > current.state.timeline.length) {
-      recordTransition(state.timeline.at(-1)!);
+      recordTransition(
+        state.timeline.at(-1)!,
+        transition.type === "record_session_checkpoint" ? transition.assistantText : undefined,
+      );
     }
     return clone(state);
   }
@@ -320,9 +331,7 @@ export function createOrdinaryAgentFeature(input: {
 
   function streamFor(
     runId: string,
-    durableEvents: readonly OrdinaryRunEvent[] = [],
-    durableToolResults: readonly ToolCallResult[] = [],
-    toolResultRecordedAt: Readonly<Record<string, string>> = {},
+    durableActivities: readonly OrdinaryRunActivity[] = [],
   ): {
     streamId: string;
     nextSequence: number;
@@ -330,14 +339,38 @@ export function createOrdinaryAgentFeature(input: {
   } {
     const existing = activityStreams.get(runId);
     if (existing !== undefined) return existing;
-    const activities = durableActivities(runId, durableEvents, durableToolResults, toolResultRecordedAt);
+    const activities = [...durableActivities];
     const created = { streamId: idFactory("ordinary-activity-stream"), nextSequence: activities.length + 1, activities };
     activityStreams.set(runId, created);
     return created;
   }
 
-  function recordTransition(event: OrdinaryRunEvent): void {
+  function recordTransition(event: OrdinaryRunEvent, assistantText?: string): void {
     const stream = streamFor(event.runId);
+    if (event.type === "model.output.completed") {
+      if (assistantText === undefined) {
+        throw new OrdinaryFeatureError(
+          "ordinary_run_state_conflict",
+          "Committed assistant output must be projected from its Session entry",
+        );
+      }
+      stream.activities = stream.activities.filter((activity) =>
+        activity.type !== "model.output.delta" || activity.modelRequestId !== event.modelRequestId);
+      const activity: OrdinaryRunActivity = {
+        activityId: `transition:${event.eventId}`,
+        runId: event.runId,
+        sequence: stream.nextSequence++,
+        recordedAt: event.recordedAt,
+        type: "model.output.completed",
+        durability: "durable",
+        modelRequestId: event.modelRequestId,
+        assistantEntryRef: clone(event.assistantEntryRef),
+        content: assistantText,
+      };
+      stream.activities.push(activity);
+      emit(activity);
+      return;
+    }
     if (event.type === "model.reasoning.completed") {
       stream.activities = stream.activities.filter((activity) =>
         activity.type !== "model.reasoning.delta" || activity.modelRequestId !== event.modelRequestId);
@@ -823,7 +856,7 @@ export function createOrdinaryAgentFeature(input: {
     const document = await load(runId);
     if (document === undefined || isTerminal(document.state)) return;
     if (outcome.status === "completed") {
-      const state = await mutate(runId, { type: "complete", answer: outcome.answer, session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+      const state = await mutate(runId, { type: "complete", session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
       await finalizeExecutionSession(runId, state, false);
       return;
     }
@@ -901,10 +934,29 @@ export function createOrdinaryAgentFeature(input: {
         onReasoningCompleted: (content) => completeReasoning(runId, content),
         onToolRequested: (request) => recordToolRequested(runId, request),
         onToolProgress: (progress) => recordToolProgress(runId, progress),
-        onSessionWriteCheckpoint: (checkpoint) => mutate(runId, {
-          type: "record_session_checkpoint",
-          checkpoint,
-        }).then(() => undefined),
+        onSessionWriteCheckpoint: async (checkpoint) => {
+          let assistantText: string | undefined;
+          if (checkpoint.kind === "assistant_tool_call_entry_committed" ||
+              checkpoint.kind === "assistant_response_entry_committed") {
+            const entry = (await input.sessionRepository.readAssistantEntries({
+              sessionRef,
+              entryRefs: [checkpoint.assistantEntryRef],
+            }))[0];
+            if (entry === undefined) {
+              throw new OrdinaryFeatureError(
+                "ordinary_run_state_conflict",
+                "Committed assistant Session entry could not be read",
+              );
+            }
+            assistantText = entry.text;
+          }
+          await mutate(runId, {
+            type: "record_session_checkpoint",
+            checkpoint,
+            modelRequestId: activeModelRequestIds.get(runId),
+            assistantText,
+          });
+        },
         onToolResult: async (result) => {
           rememberToolResults(runId, [result]);
           await persistToolResult(runId, result);
@@ -1448,7 +1500,22 @@ export function createOrdinaryAgentFeature(input: {
 
   async function conversationView(control: OrdinaryConversationControlDocument): Promise<OrdinaryConversationReadModel | undefined> {
     if (control.state.deletedAt !== undefined) return undefined;
-    return projectOrdinaryConversation({ control, runs: await visibleRuns(control) });
+    const runs = await visibleRuns(control);
+    const assistantEntries = await Promise.all(runs.map(async (run) => {
+      if (run.status.kind !== "completed" || run.session.phase !== "rollbackable") return undefined;
+      return (await input.sessionRepository.readAssistantEntries({
+        sessionRef: run.sessionRef,
+        entryRefs: [run.session.endLeafRef],
+      }))[0];
+    }));
+    return projectOrdinaryConversation({
+      control,
+      runs,
+      completedAssistantTextByRunId: new Map(runs.flatMap((run, index) => {
+        const entry = assistantEntries[index];
+        return entry === undefined ? [] : [[run.runId, entry.text] as const];
+      })),
+    });
   }
 
   async function requireConversationView(control: OrdinaryConversationControlDocument): Promise<OrdinaryConversationReadModel> {
@@ -1691,8 +1758,8 @@ export function createOrdinaryAgentFeature(input: {
         // cursor-stable without holding the duplicate timeline in memory.
         const stream = activityStreams.get(runId) ?? (
           needsLiveActivityStream(document.state)
-            ? streamFor(runId, document.state.timeline, document.state.toolCalls, document.state.toolResultRecordedAt)
-            : terminalReplayStream(document)
+            ? await restorePersistedActivityStream(document.state)
+            : await terminalReplayStream(document)
         );
         const reset = cursor !== undefined && (
           cursor.streamId !== stream.streamId || cursor.sequence < 0 || cursor.sequence >= stream.nextSequence
@@ -1811,6 +1878,7 @@ function durableActivities(
   events: readonly OrdinaryRunEvent[],
   toolResults: readonly ToolCallResult[],
   toolResultRecordedAt: Readonly<Record<string, string>>,
+  assistantTextByEntryId: ReadonlyMap<string, string>,
 ): OrdinaryRunActivity[] {
   const pending: Array<{
     readonly recordedAt: string;
@@ -1819,6 +1887,27 @@ function durableActivities(
     readonly activity: OrdinaryRunActivity;
   }> = [];
   for (const [insertion, event] of events.entries()) {
+    if (event.type === "model.output.completed") {
+      const content = assistantTextByEntryId.get(sessionEntryKey(event.assistantEntryRef));
+      if (content === undefined) continue;
+      pending.push({
+        recordedAt: event.recordedAt,
+        priority: 1,
+        insertion,
+        activity: {
+          activityId: `transition:${event.eventId}`,
+          runId,
+          sequence: 0,
+          recordedAt: event.recordedAt,
+          type: "model.output.completed",
+          durability: "durable",
+          modelRequestId: event.modelRequestId,
+          assistantEntryRef: clone(event.assistantEntryRef),
+          content,
+        },
+      });
+      continue;
+    }
     pending.push({
       recordedAt: event.recordedAt,
       priority: 1,
@@ -1859,12 +1948,18 @@ function durableActivities(
     .map((item, index) => ({ ...item.activity, sequence: index + 1 }));
 }
 
-export function durableOrdinaryRunReplayFromState(run: OrdinaryRunState): OrdinaryRunActivityReplay {
+export function durableOrdinaryRunReplayFromState(
+  run: OrdinaryRunState,
+  assistantEntries: readonly import("../model-runtime/agent-session.js").AgentSessionAssistantEntry[],
+): OrdinaryRunActivityReplay {
+  const assistantTextByEntryId = new Map(assistantEntries.map((entry) =>
+    [sessionEntryKey(entry.entryRef), entry.text] as const));
   const activities = durableActivities(
     run.runId,
     run.timeline,
     run.toolCalls,
     run.toolResultRecordedAt,
+    assistantTextByEntryId,
   );
   const lastEventId = run.timeline.at(-1)?.eventId ?? "initial";
   return {
@@ -1876,6 +1971,10 @@ export function durableOrdinaryRunReplayFromState(run: OrdinaryRunState): Ordina
     reset: false,
     activities,
   };
+}
+
+function sessionEntryKey(ref: import("../model-runtime/agent-session.js").AgentSessionEntryRef): string {
+  return `${ref.sessionId}\u0000${ref.entryId}`;
 }
 
 function toolCallIds(event: OrdinaryRunEvent): readonly string[] {

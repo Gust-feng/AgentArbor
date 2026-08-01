@@ -75,7 +75,6 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
     state: withCandidate,
     transition: {
       type: "complete",
-      answer: "done",
       session: executionRefs("answer-entry"),
       toolCalls: [],
       usage: { inputTokens: 7, outputTokens: 2, totalTokens: 9 },
@@ -86,7 +85,7 @@ test("Ordinary run reducer keeps one status, strips ephemeral attachments, and a
 
   assert.deepEqual(completed.timeline.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(completed.timeline.map((event) => event.type), ["run.created", "run.started", "run.completed"]);
-  assert.deepEqual(completed.status, { kind: "completed", answer: "done" });
+  assert.deepEqual(completed.status, { kind: "completed" });
   assert.deepEqual(completed.session, {
     phase: "rollbackable",
     startLeafRef: null,
@@ -532,7 +531,6 @@ test("Ordinary completion rejects a Session that has no rollbackable answer leaf
     state: running,
     transition: {
       type: "complete",
-      answer: "done",
       session: { ...executionRefs("answer-entry"), latestLeafRef: null },
       toolCalls: [],
       usage: {},

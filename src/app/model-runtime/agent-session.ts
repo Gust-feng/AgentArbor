@@ -23,6 +23,12 @@ export type AgentSessionExecutionRefs = {
   readonly compactionEntryRefs: readonly AgentSessionEntryRef[];
 };
 
+/** Ordered user-visible assistant entry read from one durable Session branch. */
+export type AgentSessionAssistantEntry = {
+  readonly entryRef: AgentSessionEntryRef;
+  readonly text: string;
+};
+
 /** Awaited durable checkpoints emitted in agent Session write order. */
 export type AgentSessionWriteCheckpoint = { readonly sessionId: string } & (
   | { readonly kind: "start_leaf_captured"; readonly startLeafRef: AgentSessionEntryRef | null }
@@ -55,6 +61,11 @@ export interface AgentSessionRepository {
   getActiveLeaf(ref: AgentSessionRef): Promise<AgentSessionEntryRef | null>;
   moveActiveLeaf(ref: AgentSessionRef, target: AgentSessionEntryRef | null): Promise<AgentSessionEntryRef | null>;
   getActiveBranchEntryRefs(ref: AgentSessionRef): Promise<readonly AgentSessionEntryRef[]>;
+  /** Reads exact assistant entries without transferring transcript ownership. */
+  readAssistantEntries(input: {
+    readonly sessionRef: AgentSessionRef;
+    readonly entryRefs: readonly AgentSessionEntryRef[];
+  }): Promise<readonly AgentSessionAssistantEntry[]>;
   readToolCalls(input: {
     readonly sessionRef: AgentSessionRef;
     readonly assistantEntryRef: AgentSessionEntryRef;

@@ -136,7 +136,7 @@ function completedRun(
   ordinal: number,
   endEntryId: string,
 ): OrdinaryRunState {
-  const base = interruptedRun(runId, { kind: "completed", answer: `answer:${runId}` });
+  const base = interruptedRun(runId, { kind: "completed" });
   return {
     ...base,
     turn: predecessorRunId === undefined

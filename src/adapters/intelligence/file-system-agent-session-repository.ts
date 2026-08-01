@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type {
   AgentSessionEntryRef,
+  AgentSessionAssistantEntry,
   AgentSessionRef,
   AgentSessionRepository,
 } from "../../app/model-runtime/agent-session.js";
@@ -164,6 +165,31 @@ export class FileSystemAgentSessionRepository implements AgentSessionRepository 
     return (await session.getBranch()).map((entry) => ({
       sessionId: ref.sessionId,
       entryId: entry.id,
+    }));
+  }
+
+  async readAssistantEntries(input: {
+    readonly sessionRef: AgentSessionRef;
+    readonly entryRefs: readonly AgentSessionEntryRef[];
+  }): Promise<readonly AgentSessionAssistantEntry[]> {
+    for (const entryRef of input.entryRefs) this.assertEntryBelongsToSession(input.sessionRef, entryRef);
+    const session = await this.openForRead(input.sessionRef);
+    return Promise.all(input.entryRefs.map(async (entryRef): Promise<AgentSessionAssistantEntry> => {
+      const entry = await session.getEntry(entryRef.entryId);
+      if (entry?.type !== "message" || entry.message.role !== "assistant") {
+        throw new AgentSessionRepositoryError(
+          "agent_session_ref_invalid",
+          `Agent session entry ${entryRef.entryId} is not an assistant message.`,
+        );
+      }
+      const text = entry.message.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("");
+      return {
+        entryRef: { sessionId: input.sessionRef.sessionId, entryId: entryRef.entryId },
+        text,
+      };
     }));
   }
 

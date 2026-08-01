@@ -39,6 +39,7 @@ export type {
 export type {
   AgentSessionExecutionRefs,
   AgentSessionEntryRef,
+  AgentSessionAssistantEntry,
   AgentSessionRef,
   AgentSessionRepository,
   AgentSessionWriteCheckpoint,

@@ -20,7 +20,13 @@ import { OrdinaryFeatureError } from "./contracts.js";
 
 export type OrdinaryRunTransition =
   | { readonly type: "start" }
-  | { readonly type: "record_session_checkpoint"; readonly checkpoint: AgentSessionWriteCheckpoint }
+  | {
+      readonly type: "record_session_checkpoint";
+      readonly checkpoint: AgentSessionWriteCheckpoint;
+      readonly modelRequestId?: string;
+      /** Ephemeral projection material read from the committed Session entry. */
+      readonly assistantText?: string;
+    }
   | { readonly type: "record_reasoning"; readonly modelRequestId: string; readonly content: string }
   | {
       readonly type: "request_approval";
@@ -34,7 +40,6 @@ export type OrdinaryRunTransition =
   | { readonly type: "approval_decided"; readonly decision: import("../../domain/confirmation/index.js").ConfirmationDecision }
   | {
       readonly type: "complete";
-      readonly answer: string;
       readonly session: AgentSessionExecutionRefs;
       readonly toolCalls: readonly ToolCallResult[];
       readonly usage: ModelUsage;
@@ -420,7 +425,7 @@ function statusAfter(status: OrdinaryRunStatus, transition: OrdinaryRunTransitio
       return { kind: "running" };
     case "complete":
       assertStatus(status, ["running"], transition.type);
-      return { kind: "completed", answer: transition.answer };
+      return { kind: "completed" };
     case "fail":
       assertStatus(status, ["queued", "running"], transition.type);
       return { kind: "failed", error: cloneJson(transition.error) };
@@ -822,14 +827,25 @@ function eventForTransition(
 ): OrdinaryRunEvent | undefined {
   switch (transition.type) {
     case "record_session_checkpoint":
-      return transition.checkpoint.kind === "compaction_entry_committed"
-        ? {
+      if (transition.checkpoint.kind === "compaction_entry_committed") {
+        return {
             ...base,
             type: "context.compaction.completed",
             compactionEntryRef: cloneJson(transition.checkpoint.compactionEntryRef),
             tokensBefore: transition.checkpoint.tokensBefore,
-          }
-        : undefined;
+          };
+      }
+      if ((transition.checkpoint.kind === "assistant_tool_call_entry_committed" ||
+          transition.checkpoint.kind === "assistant_response_entry_committed") &&
+          transition.modelRequestId !== undefined) {
+        return {
+          ...base,
+          type: "model.output.completed",
+          modelRequestId: transition.modelRequestId,
+          assistantEntryRef: cloneJson(transition.checkpoint.assistantEntryRef),
+        };
+      }
+      return undefined;
     case "start": return { ...base, type: "run.started" };
     case "record_reasoning": return {
       ...base,

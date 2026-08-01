@@ -9,7 +9,7 @@ import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js
 import { ordinaryAgentSessionRef, ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 import { OrdinaryToolMetricsCollector } from "./tool-runtime-metrics.js";
 
-test("file repository atomically replaces the v5 snapshot and advances revisions", async (t) => {
+test("file repository atomically replaces the v6 snapshot and advances revisions", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-repository-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -74,6 +74,131 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
   assert.equal(rawSnapshot.includes("read:file:image.png"), true);
 });
 
+test("v6 output events persist only Session entry refs instead of assistant text", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-output-ref-"));
+  t.after(() => removeTestDirectory(root));
+  const sessionRef = ordinaryAgentSessionRef();
+  let run = state("output-ref-run", "2026-01-01T00:00:00.000Z");
+  run = transitionOrdinaryRun({ state: run, transition: { type: "start" }, recordedAt: "2026-01-01T00:00:01.000Z", eventId: "event-start" });
+  run = transitionOrdinaryRun({ state: run, transition: {
+    type: "record_session_checkpoint",
+    checkpoint: { kind: "start_leaf_captured", sessionId: sessionRef.sessionId, startLeafRef: null },
+  }, recordedAt: "2026-01-01T00:00:02.000Z", eventId: "checkpoint-start" });
+  run = transitionOrdinaryRun({ state: run, transition: {
+    type: "record_session_checkpoint",
+    checkpoint: {
+      kind: "input_entry_committed",
+      sessionId: sessionRef.sessionId,
+      inputEntryRef: { sessionId: sessionRef.sessionId, entryId: "input-entry" },
+    },
+  }, recordedAt: "2026-01-01T00:00:03.000Z", eventId: "checkpoint-input" });
+  run = transitionOrdinaryRun({ state: run, transition: {
+    type: "record_session_checkpoint",
+    modelRequestId: "model-request-1",
+    checkpoint: {
+      kind: "assistant_response_entry_committed",
+      sessionId: sessionRef.sessionId,
+      assistantEntryRef: { sessionId: sessionRef.sessionId, entryId: "assistant-entry" },
+    },
+  }, recordedAt: "2026-01-01T00:00:04.000Z", eventId: "checkpoint-output" });
+
+  await createFileSystemOrdinaryRunRepository(root).save(run, 0);
+  const snapshot = await fs.readFile(path.join(root, "runs", "output-ref-run", "snapshot.json"), "utf8");
+
+  assert.equal(snapshot.includes('"assistantEntryRef"'), true);
+  assert.equal(snapshot.includes('"answer"'), false);
+  assert.equal(snapshot.includes("回答正文不得进入 Ordinary snapshot"), false);
+  assert.equal(snapshot.includes('"content"'), false);
+});
+
+test("file repository automatically migrates v5 snapshots and retains the original bytes", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-v5-migration-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("migrated-run", "2026-01-01T00:00:00.000Z");
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-start",
+  });
+  const completed = transitionOrdinaryRun({
+    state: withResponseCandidate(running),
+    transition: {
+      type: "complete",
+      session: executionRefs("answer-entry"),
+      toolCalls: [],
+      usage: { inputTokens: 2, outputTokens: 1, totalTokens: 3 },
+    },
+    recordedAt: "2026-01-01T00:00:02.000Z",
+    eventId: "event-completed",
+  });
+  const saved = await repository.save(completed, 0);
+  const runDirectory = path.join(root, "runs", "migrated-run");
+  const snapshotPath = path.join(runDirectory, "snapshot.json");
+  const v5 = {
+    ...saved,
+    schemaVersion: "ordinary-run/v5",
+    state: { ...saved.state, status: { kind: "completed", answer: "legacy answer" } },
+  };
+  const original = `${JSON.stringify(v5, null, 2)}\n`;
+  await fs.writeFile(snapshotPath, original, "utf8");
+
+  const restarted = createFileSystemOrdinaryRunRepository(root);
+  assert.deepEqual((await restarted.list()).map((summary) => summary.runId), ["migrated-run"]);
+  const migrated = await restarted.get("migrated-run");
+  assert.equal(migrated?.schemaVersion, "ordinary-run/v6");
+  assert.equal(migrated?.revision, saved.revision, "schema migration is not a business revision");
+  assert.deepEqual(migrated?.state.status, { kind: "completed" });
+  const outputEvent = migrated?.state.timeline.find((event) => event.type === "model.output.completed");
+  assert.deepEqual(outputEvent?.type === "model.output.completed" ? outputEvent.assistantEntryRef : undefined, entryRef("answer-entry"));
+  assert.equal(migrated?.state.timeline.at(-1)?.type, "run.completed");
+  assert.equal(await fs.readFile(path.join(runDirectory, "snapshot.ordinary-run-v5.json"), "utf8"), original);
+
+  await restarted.get("migrated-run");
+  await restarted.save(migrated!.state, migrated!.revision);
+  assert.equal(await fs.readFile(path.join(runDirectory, "snapshot.ordinary-run-v5.json"), "utf8"), original);
+});
+
+test("file repository migrates a nonterminal v5 snapshot without inventing output facts", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-v5-running-migration-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const running = transitionOrdinaryRun({
+    state: state("migrated-running", "2026-01-01T00:00:00.000Z"),
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-start",
+  });
+  const saved = await repository.save(running, 0);
+  const snapshotPath = path.join(root, "runs", "migrated-running", "snapshot.json");
+  await fs.writeFile(snapshotPath, JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v5" }), "utf8");
+
+  const migrated = await createFileSystemOrdinaryRunRepository(root).get("migrated-running");
+  assert.equal(migrated?.schemaVersion, "ordinary-run/v6");
+  assert.equal(migrated?.state.timeline.some((event) => event.type === "model.output.completed"), false);
+});
+
+test("v5 migration never overwrites a different retained snapshot", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-v5-backup-conflict-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const saved = await repository.save(state("migration-conflict", "2026-01-01T00:00:00.000Z"), 0);
+  const runDirectory = path.join(root, "runs", "migration-conflict");
+  const snapshotPath = path.join(runDirectory, "snapshot.json");
+  const original = JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v5" });
+  await fs.writeFile(snapshotPath, original, "utf8");
+  await fs.writeFile(path.join(runDirectory, "snapshot.ordinary-run-v5.json"), "different retained bytes", "utf8");
+
+  await assert.rejects(
+    createFileSystemOrdinaryRunRepository(root).get("migration-conflict"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
+      /existing v5 backup differs/u.test(error.message),
+  );
+  assert.equal(await fs.readFile(snapshotPath, "utf8"), original);
+  assert.equal(await fs.readFile(path.join(runDirectory, "snapshot.ordinary-run-v5.json"), "utf8"), "different retained bytes");
+});
+
 test("file repository rejects old or malformed snapshots instead of compatibility reading", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-incompatible-"));
   t.after(() => removeTestDirectory(root));
@@ -100,7 +225,7 @@ test("file repository explicitly rejects ordinary-run/v3 without migration", asy
   await assert.rejects(
     repository.get("v2-run"),
     (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
-      error.message.includes("ordinary-run/v5"),
+      error.message.includes("ordinary-run/v6"),
   );
 });
 
@@ -283,7 +408,7 @@ test("file repository round-trips optional latest Agent request usage and reject
   );
 });
 
-test("file repository restores v5 snapshots with or without optional tool metrics", async (t) => {
+test("file repository restores v6 snapshots with or without optional tool metrics", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-metrics-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -341,7 +466,6 @@ test("file repository persists the effective capability resolution and rejects m
     state: withResponseCandidate(running),
     transition: {
       type: "complete",
-      answer: "done",
       session: executionRefs("answer-entry"),
       toolCalls: [],
       usage: { requestCount: 2, inputTokens: 4, outputTokens: 1, totalTokens: 5 },
@@ -409,7 +533,6 @@ test("file repository round-trips nested tool facts that share one provider call
     state: withResponseCandidate(running),
     transition: {
       type: "complete",
-      answer: "done",
       session: executionRefs("answer-entry"),
       toolCalls,
       usage: {},

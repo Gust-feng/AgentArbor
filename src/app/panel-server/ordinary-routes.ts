@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OrdinaryRunActivity, OrdinaryRunActivityCursor, OrdinaryRunState } from "../ordinary-agent/contracts.js";
-import { durableOrdinaryRunReplayFromState } from "../ordinary-agent/ordinary-agent-feature.js";
 import { nowIso } from "../../kernel/id.js";
 import {
   encodeOrdinaryPanelCursor,
@@ -127,7 +126,7 @@ export async function handlePanelOrdinaryRoute(
   const cancel = /^\/api\/basic-agent\/runs\/([^/]+)\/cancel$/u.exec(url.pathname);
   if (request.method === "POST" && cancel !== null) {
     const state = await runtime.ordinaryAgentFeature.commands.cancel(decode(cancel[1]), "cancelled_by_user");
-    writeJson(response, 200, { ok: true, run: projectCommandRun(state).view.run });
+    writeJson(response, 200, { ok: true, run: (await projectCommandRun(runtime, state)).view.run });
     return true;
   }
   const confirmation = /^\/api\/basic-agent\/runs\/([^/]+)\/confirmations\/([^/]+)\/decision$/u.exec(url.pathname);
@@ -142,7 +141,7 @@ export async function handlePanelOrdinaryRoute(
       guidance: decision.guidance,
       decidedAt: nowIso(),
     });
-    writeJson(response, 200, { ok: true, run: projectCommandRun(state).view.run });
+    writeJson(response, 200, { ok: true, run: (await projectCommandRun(runtime, state)).view.run });
     return true;
   }
   return false;
@@ -163,7 +162,7 @@ async function submitTurn(
     input: { userMessage: runInput.goal, taskSoil: runInput.taskSoilInput },
     birth: await runtime.prepareOrdinaryRunBirth(runInput),
   });
-  const run = projectCommandRun(submitted.run);
+  const run = await projectCommandRun(runtime, submitted.run);
   writeJson(response, 202, {
     ok: true,
     conversation: projectOrdinaryPanelConversation({
@@ -204,15 +203,19 @@ async function projectConversation(
   });
 }
 
-function projectCommandRun(run: OrdinaryRunState): {
+async function projectCommandRun(runtime: PanelRuntime, run: OrdinaryRunState): Promise<{
   readonly state: OrdinaryRunState;
   readonly view: OrdinaryPanelRunView;
-} {
+}> {
+  const fullReplay = await runtime.ordinaryAgentFeature.events.replay(run.runId);
+  if (fullReplay === undefined) {
+    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行视图。");
+  }
   return {
     state: run,
     view: projectOrdinaryPanelRunView({
       run,
-      fullReplay: durableOrdinaryRunReplayFromState(run),
+      fullReplay,
     }),
   };
 }

@@ -175,7 +175,9 @@ test("Pi immediate schema failures become Ordinary facts before the tool-round c
   await feature.commands.start({ ...startInput(runId), sessionRef });
   const state = await waitForStatus(feature, runId, "completed");
 
-  assert.equal(state.status.kind === "completed" ? state.status.answer : undefined, "continued after the rejected call");
+  const replay = await feature.events.replay(runId);
+  assert.deepEqual(replay?.activities.filter((activity) => activity.type === "model.output.completed")
+    .map((activity) => activity.content), ["", "continued after the rejected call"]);
   assert.equal(state.pendingToolRound, undefined);
   assert.equal(state.toolCalls.length, 1);
   assert.equal(state.toolCalls[0]?.status, "failed");
@@ -510,11 +512,14 @@ test("restart converts a lost approval or running execution into an honest block
   running = transitionOrdinaryRun({ state: running, transition: { type: "start" }, recordedAt: "2026-01-01T00:01:00.001Z", eventId: "running-started" });
   running = transitionOrdinaryRun({ state: running, transition: { type: "record_session_checkpoint", checkpoint: { kind: "start_leaf_captured", sessionId: runningRef.sessionId, startLeafRef: null } }, recordedAt: "2026-01-01T00:01:00.002Z", eventId: "running-checkpoint-1" });
   running = transitionOrdinaryRun({ state: running, transition: { type: "record_session_checkpoint", checkpoint: { kind: "input_entry_committed", sessionId: runningRef.sessionId, inputEntryRef: runningInput } }, recordedAt: "2026-01-01T00:01:00.003Z", eventId: "running-checkpoint-2" });
+  const runningAnswer = sessions.append(runningRef, "running-answer", runningInput, "answer before restart");
+  running = transitionOrdinaryRun({ state: running, transition: { type: "record_session_checkpoint", checkpoint: { kind: "assistant_response_entry_committed", sessionId: runningRef.sessionId, assistantEntryRef: runningAnswer }, modelRequestId: "running-request" }, recordedAt: "2026-01-01T00:01:00.004Z", eventId: "running-checkpoint-3" });
   await repository.save(running, 0);
   await controls.save({ conversationId: "conversation-2", createdAt: running.timestamps.createdAt, sessionRef: runningRef }, 0, running.timestamps.createdAt);
 
   let executions = 0;
   const restarted = createOrdinaryAgentFeature({ repository, conversationRepository: controls, sessionRepository: sessions, execution: { async execute() { executions += 1; throw new Error("must not execute after restart"); } }, now: clock(), idFactory: ids(40) });
+  const unsubscribe = restarted.events.subscribe("lost-running", () => undefined);
   t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
   const blocked = await waitForStatus(restarted, "lost-approval", "blocked");
   assert.equal(blocked.status.kind, "blocked");
@@ -523,6 +528,10 @@ test("restart converts a lost approval or running execution into an honest block
   const interrupted = await waitForStatus(restarted, "lost-running", "blocked");
   assert.equal(interrupted.status.kind, "blocked");
   assert.equal(interrupted.status.reason.code, "execution_continuation_lost");
+  const replay = await restarted.events.replay("lost-running");
+  assert.deepEqual(replay?.activities.filter((activity) => activity.type === "model.output.completed")
+    .map((activity) => activity.content), ["answer before restart"]);
+  unsubscribe();
   assert.equal(executions, 0);
 });
 
@@ -675,7 +684,6 @@ test("restart does not activate a stale root queue when the Session branch is un
     state: completed,
     transition: {
       type: "complete",
-      answer: "done",
       session: {
         sessionId: sessionRef.sessionId,
         startLeafRef: null,
@@ -948,7 +956,7 @@ async function prepareSession(input: Parameters<OrdinaryExecutionPort["execute"]
 
 async function completedOutcome(input: Parameters<OrdinaryExecutionPort["execute"]>[0], answer: string, sessions: SessionHarness, prepared?: AgentSessionExecutionRefs): Promise<OrdinaryExecutionOutcome> {
   const session = prepared ?? await prepareSession(input, sessions);
-  const assistantEntryRef = sessions.append(input.sessionRef, `${input.runId}-answer`);
+  const assistantEntryRef = sessions.append(input.sessionRef, `${input.runId}-answer`, undefined, answer);
   await input.onSessionWriteCheckpoint?.({ kind: "assistant_response_entry_committed", sessionId: input.sessionRef.sessionId, assistantEntryRef });
   return { status: "completed", answer, session: { ...session, latestLeafRef: assistantEntryRef }, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
 }
@@ -1056,7 +1064,7 @@ async function removeTestDirectory(root: string): Promise<void> {
   }
 }
 
-type SessionNode = { readonly ref: AgentSessionEntryRef; readonly parent: AgentSessionEntryRef | null };
+type SessionNode = { readonly ref: AgentSessionEntryRef; readonly parent: AgentSessionEntryRef | null; readonly text: string };
 class SessionHarness implements AgentSessionRepository {
   readonly reconciled: Array<{ readonly orderedResults: readonly ToolCallResult[] }> = [];
   private readonly roots = new Map<string, AgentSessionRef>();
@@ -1065,12 +1073,13 @@ class SessionHarness implements AgentSessionRepository {
   private readonly calls = new Map<string, readonly ToolCallRequest[]>();
   ensure(ref: AgentSessionRef): void { this.roots.set(ref.sessionId, ref); this.nodes.set(ref.sessionId, this.nodes.get(ref.sessionId) ?? new Map()); if (!this.activeLeaves.has(ref.sessionId)) this.activeLeaves.set(ref.sessionId, null); }
   active(ref: AgentSessionRef): AgentSessionEntryRef | null { return this.activeLeaves.get(ref.sessionId) ?? null; }
-  append(ref: AgentSessionRef, entryId: string, parent = this.active(ref)): AgentSessionEntryRef { this.ensure(ref); const entry = { sessionId: ref.sessionId, entryId }; this.nodes.get(ref.sessionId)!.set(entryId, { ref: entry, parent }); this.activeLeaves.set(ref.sessionId, entry); return entry; }
+  append(ref: AgentSessionRef, entryId: string, parent = this.active(ref), text = ""): AgentSessionEntryRef { this.ensure(ref); const entry = { sessionId: ref.sessionId, entryId }; this.nodes.get(ref.sessionId)!.set(entryId, { ref: entry, parent, text }); this.activeLeaves.set(ref.sessionId, entry); return entry; }
   appendToolCalls(ref: AgentSessionRef, entryId: string, calls: readonly ToolCallRequest[], parent = this.active(ref)): AgentSessionEntryRef { const entry = this.append(ref, entryId, parent); this.calls.set(`${ref.sessionId}:${entryId}`, calls.map((call) => structuredClone(call))); return entry; }
   async create(input: { readonly sessionId: string; readonly sessionCwd: string }): Promise<AgentSessionRef> { const ref = { ...ordinaryAgentSessionRef(input.sessionId), sessionCwd: input.sessionCwd }; this.ensure(ref); return ref; }
   async getActiveLeaf(ref: AgentSessionRef): Promise<AgentSessionEntryRef | null> { return this.active(ref); }
   async moveActiveLeaf(ref: AgentSessionRef, target: AgentSessionEntryRef | null): Promise<AgentSessionEntryRef | null> { this.ensure(ref); this.activeLeaves.set(ref.sessionId, target); return target; }
   async getActiveBranchEntryRefs(ref: AgentSessionRef): Promise<readonly AgentSessionEntryRef[]> { const result: AgentSessionEntryRef[] = []; let current = this.active(ref); while (current !== null) { result.push(current); current = this.nodes.get(ref.sessionId)?.get(current.entryId)?.parent ?? null; } return result.reverse(); }
+  async readAssistantEntries(input: { readonly entryRefs: readonly AgentSessionEntryRef[] }) { return input.entryRefs.map((entryRef) => ({ entryRef, text: this.nodes.get(entryRef.sessionId)?.get(entryRef.entryId)?.text ?? "" })); }
   async readToolCalls(input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef }): Promise<readonly ToolCallRequest[]> { return this.calls.get(`${input.sessionRef.sessionId}:${input.assistantEntryRef.entryId}`) ?? []; }
   async reconcileToolResultEntries(input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef; readonly orderedResults: readonly ToolCallResult[] }): Promise<AgentSessionEntryRef> { this.reconciled.push({ orderedResults: structuredClone(input.orderedResults) }); return this.append(input.sessionRef, `${input.assistantEntryRef.entryId}-results-${this.reconciled.length}`, input.assistantEntryRef); }
   async delete(ref: AgentSessionRef): Promise<void> { this.roots.delete(ref.sessionId); this.nodes.delete(ref.sessionId); this.activeLeaves.delete(ref.sessionId); }

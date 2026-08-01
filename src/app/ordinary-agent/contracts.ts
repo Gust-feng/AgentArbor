@@ -24,7 +24,7 @@ import type {
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import type { OrdinaryToolMetricsSnapshot } from "./tool-runtime-metrics.js";
 
-export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v5" as const;
+export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v6" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v2" as const;
 
 export type OrdinaryFeatureErrorCode =
@@ -137,7 +137,7 @@ export type OrdinaryRunStatus =
       readonly confirmationRequests: readonly ConfirmationRequest[];
       readonly continuationAvailability: "live_only";
     }
-  | { readonly kind: "completed"; readonly answer: string }
+  | { readonly kind: "completed" }
   | {
       readonly kind: "failed";
       readonly error: { readonly code: string; readonly message: string };
@@ -186,6 +186,11 @@ type OrdinaryRunEventBase = {
 
 export type OrdinaryRunEvent = OrdinaryRunEventBase & (
   | { readonly type: "run.created" | "run.started" }
+  | {
+      readonly type: "model.output.completed";
+      readonly modelRequestId: string;
+      readonly assistantEntryRef: AgentSessionEntryRef;
+    }
   | { readonly type: "model.reasoning.completed"; readonly modelRequestId: string; readonly content: string }
   | {
       readonly type: "context.compaction.completed";
@@ -329,6 +334,13 @@ type OrdinaryRunActivityBase = {
 
 export type OrdinaryRunActivity = OrdinaryRunActivityBase & (
   | { readonly type: "run.transition"; readonly durability: "durable"; readonly event: OrdinaryRunEvent }
+  | {
+      readonly type: "model.output.completed";
+      readonly durability: "durable";
+      readonly modelRequestId: string;
+      readonly assistantEntryRef: AgentSessionEntryRef;
+      readonly content: string;
+    }
   | { readonly type: "model.request"; readonly durability: "live_only"; readonly reason: "initial" | "after_tool" | "after_approval" }
   | {
       readonly type: "model.output.delta";

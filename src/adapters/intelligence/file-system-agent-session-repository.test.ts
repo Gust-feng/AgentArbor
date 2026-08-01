@@ -96,6 +96,58 @@ test("file-system agent session repository reads the active branch while its wri
   await writer.release();
 });
 
+test("file-system agent session repository reads exact ordered assistant entries", async (t) => {
+  const fixture = await repositoryFixture(t);
+  const ref = await fixture.repository.create({ sessionId: "session-output-range", sessionCwd: fixture.workspace });
+  const writer = await fixture.repository.acquire(ref);
+  await writer.session.appendMessage({ role: "user", content: "inspect", timestamp: 1 });
+  const firstAssistantEntryId = await writer.session.appendMessage({
+    role: "assistant",
+    content: [
+      { type: "text", text: "我先检查文件。" },
+      { type: "toolCall", id: "call-1", name: "read", arguments: { path: "README.md" } },
+    ],
+    api: "openai-responses",
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "toolUse",
+    timestamp: 2,
+  });
+  await writer.session.appendMessage({
+    role: "toolResult",
+    toolCallId: "call-1",
+    toolName: "read",
+    content: [{ type: "text", text: "workspace" }],
+    isError: false,
+    timestamp: 3,
+  });
+  const finalAssistantEntryId = await writer.session.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "检查完成，结论如下。" }],
+    api: "openai-responses",
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "stop",
+    timestamp: 4,
+  });
+
+  const entries = await fixture.repository.readAssistantEntries({
+    sessionRef: ref,
+    entryRefs: [
+      { sessionId: ref.sessionId, entryId: firstAssistantEntryId },
+      { sessionId: ref.sessionId, entryId: finalAssistantEntryId },
+    ],
+  });
+
+  assert.deepEqual(entries.map((entry) => ({ entryId: entry.entryRef.entryId, text: entry.text })), [
+    { entryId: firstAssistantEntryId, text: "我先检查文件。" },
+    { entryId: finalAssistantEntryId, text: "检查完成，结论如下。" },
+  ]);
+  await writer.release();
+});
+
 test("file-system agent session repository moves the active leaf without deleting the abandoned branch", async (t) => {
   const fixture = await repositoryFixture(t);
   const ref = await fixture.repository.create({ sessionId: "session-one", sessionCwd: fixture.workspace });

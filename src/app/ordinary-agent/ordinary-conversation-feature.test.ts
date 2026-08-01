@@ -196,7 +196,7 @@ async function prepareSession(input: Parameters<OrdinaryExecutionPort["execute"]
 
 async function complete(input: Parameters<OrdinaryExecutionPort["execute"]>[0], sessions: SessionHarness, answer: string, prepared?: AgentSessionExecutionRefs): Promise<OrdinaryExecutionOutcome> {
   const session = prepared ?? await prepareSession(input, sessions);
-  const assistantEntryRef = sessions.append(input.sessionRef, `${input.runId}-answer`);
+  const assistantEntryRef = sessions.append(input.sessionRef, `${input.runId}-answer`, undefined, answer);
   await input.onSessionWriteCheckpoint?.({ kind: "assistant_response_entry_committed", sessionId: input.sessionRef.sessionId, assistantEntryRef });
   return { status: "completed", answer, session: { ...session, latestLeafRef: assistantEntryRef }, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
 }
@@ -230,18 +230,19 @@ async function removeTestDirectory(root: string): Promise<void> {
   }
 }
 
-type SessionNode = { readonly ref: AgentSessionEntryRef; readonly parent: AgentSessionEntryRef | null };
+type SessionNode = { readonly ref: AgentSessionEntryRef; readonly parent: AgentSessionEntryRef | null; readonly text: string };
 class SessionHarness implements AgentSessionRepository {
   readonly deleted: string[] = [];
   private readonly nodes = new Map<string, Map<string, SessionNode>>();
   private readonly active = new Map<string, AgentSessionEntryRef | null>();
   private readonly refs = new Map<string, AgentSessionRef>();
   ensure(ref: AgentSessionRef): void { this.refs.set(ref.sessionId, ref); this.nodes.set(ref.sessionId, this.nodes.get(ref.sessionId) ?? new Map()); if (!this.active.has(ref.sessionId)) this.active.set(ref.sessionId, null); }
-  append(ref: AgentSessionRef, entryId: string, parent = this.active.get(ref.sessionId) ?? null): AgentSessionEntryRef { this.ensure(ref); const entry = { sessionId: ref.sessionId, entryId }; this.nodes.get(ref.sessionId)!.set(entryId, { ref: entry, parent }); this.active.set(ref.sessionId, entry); return entry; }
+  append(ref: AgentSessionRef, entryId: string, parent = this.active.get(ref.sessionId) ?? null, text = ""): AgentSessionEntryRef { this.ensure(ref); const entry = { sessionId: ref.sessionId, entryId }; this.nodes.get(ref.sessionId)!.set(entryId, { ref: entry, parent, text }); this.active.set(ref.sessionId, entry); return entry; }
   async create(input: { readonly sessionId: string; readonly sessionCwd: string }): Promise<AgentSessionRef> { const ref = { ...ordinaryAgentSessionRef(input.sessionId), sessionCwd: input.sessionCwd }; this.ensure(ref); return ref; }
   async getActiveLeaf(ref: AgentSessionRef): Promise<AgentSessionEntryRef | null> { this.ensure(ref); return this.active.get(ref.sessionId) ?? null; }
   async moveActiveLeaf(ref: AgentSessionRef, target: AgentSessionEntryRef | null): Promise<AgentSessionEntryRef | null> { this.ensure(ref); this.active.set(ref.sessionId, target); return target; }
   async getActiveBranchEntryRefs(ref: AgentSessionRef): Promise<readonly AgentSessionEntryRef[]> { const result: AgentSessionEntryRef[] = []; let current = this.active.get(ref.sessionId) ?? null; while (current !== null) { result.push(current); current = this.nodes.get(ref.sessionId)?.get(current.entryId)?.parent ?? null; } return result.reverse(); }
+  async readAssistantEntries(input: { readonly entryRefs: readonly AgentSessionEntryRef[] }) { return input.entryRefs.map((entryRef) => ({ entryRef, text: this.nodes.get(entryRef.sessionId)?.get(entryRef.entryId)?.text ?? "" })); }
   async readToolCalls(_input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef }): Promise<readonly ToolCallRequest[]> { return []; }
   async reconcileToolResultEntries(input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef; readonly orderedResults: readonly ToolCallResult[] }): Promise<AgentSessionEntryRef> { return this.append(input.sessionRef, `${input.assistantEntryRef.entryId}-results`); }
   async delete(ref: AgentSessionRef): Promise<void> { if (this.refs.has(ref.sessionId)) this.deleted.push(ref.sessionId); this.nodes.delete(ref.sessionId); this.active.delete(ref.sessionId); this.refs.delete(ref.sessionId); }

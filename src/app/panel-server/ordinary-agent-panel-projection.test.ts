@@ -9,6 +9,7 @@ import type {
   OrdinaryRunState,
   OrdinaryRunStatus,
 } from "../ordinary-agent/contracts.js";
+import { durableOrdinaryRunReplayFromState } from "../ordinary-agent/ordinary-agent-feature.js";
 import {
   ordinaryAgentSessionRef,
   ordinaryCapabilityResolution,
@@ -68,7 +69,7 @@ test("run and conversation projection are protocol-neutral for both supported Op
 });
 
 test("legacy conversation projection treats a missing workspace selection as the configured default", () => {
-  const base = runState({ runId: "default-workspace-run", status: { kind: "completed", answer: "done" } });
+  const base = runState({ runId: "default-workspace-run", status: { kind: "completed" }, answer: "done" });
   const run: OrdinaryRunState = {
     ...base,
     birth: {
@@ -106,7 +107,7 @@ test("queued, running, approval and terminal states map without manufacturing an
       panelStatus: "approval_needed",
       stage: "awaiting_approval",
     },
-    { status: { kind: "completed", answer: "done" }, panelStatus: "completed", stage: "completed" },
+    { status: { kind: "completed" }, panelStatus: "completed", stage: "completed" },
     {
       status: { kind: "failed", error: { code: "model_failed", message: "provider failed" } },
       panelStatus: "failed",
@@ -223,6 +224,70 @@ test("running transcript projects consecutive output deltas as one logical body"
     view.replay.events.filter((event) => event.type === "model.output.delta").map((event) => event.delta),
     deltas,
   );
+});
+
+test("durable replay preserves answer and tool interleaving after a conversation switch", () => {
+  const base = runState({
+    runId: "durable-interleaved-run",
+    status: { kind: "completed" },
+    answer: "我先检查文件。检查完成，结论如下。",
+    toolCalls: [{
+      callId: "call-read",
+      toolName: "Read",
+      input: { path: "README.md" },
+      output: { content: "workspace" },
+      status: "completed",
+      durationMs: 4,
+    }],
+  });
+  const firstAnswer: OrdinaryRunEvent = {
+    eventId: "event-answer-before-tool",
+    runId: base.runId,
+    sequence: 3,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+    type: "model.output.completed",
+    modelRequestId: "model-request-1",
+    assistantEntryRef: { sessionId: base.sessionRef.sessionId, entryId: "assistant-before-tool" },
+  };
+  const secondAnswer: OrdinaryRunEvent = {
+    eventId: "event-answer-after-tool",
+    runId: base.runId,
+    sequence: 4,
+    recordedAt: "2026-01-01T00:00:05.000Z",
+    type: "model.output.completed",
+    modelRequestId: "model-request-2",
+    assistantEntryRef: { sessionId: base.sessionRef.sessionId, entryId: "assistant-after-tool" },
+  };
+  const completed: OrdinaryRunEvent = {
+    eventId: "event-run-completed",
+    runId: base.runId,
+    sequence: 5,
+    recordedAt: "2026-01-01T00:00:06.000Z",
+    type: "run.completed",
+    toolCallIds: ["call-read"],
+  };
+  const run: OrdinaryRunState = {
+    ...base,
+    timeline: [createdEvent(base), startedEvent(base), firstAnswer, secondAnswer, completed],
+    toolResultRecordedAt: { "call-read:completed": "2026-01-01T00:00:04.000Z" },
+  };
+
+  const view = projectOrdinaryPanelRunView({
+    run,
+    fullReplay: durableOrdinaryRunReplayFromState(run, [
+      { entryRef: firstAnswer.assistantEntryRef, text: "我先检查文件。" },
+      { entryRef: secondAnswer.assistantEntryRef, text: "检查完成，结论如下。" },
+    ]),
+  });
+  const visibleSequence = view.workView.transcriptNodes
+    .filter((node) => node.kind === "body" || node.kind === "tool")
+    .map((node) => node.kind === "body" ? `body:${node.text}` : `tool:${node.toolName}`);
+
+  assert.deepEqual(visibleSequence, [
+    "body:我先检查文件。",
+    "tool:Read",
+    "body:检查完成，结论如下。",
+  ]);
 });
 
 test("model request activity is visible as quiet workflow progress", () => {
@@ -511,7 +576,8 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
   const answer = "最终回答 <raw>，不要替换。";
   const run = runState({
     runId: "completed-run",
-    status: { kind: "completed", answer },
+    status: { kind: "completed" },
+    answer,
     usage: {
       inputTokens: 120,
       cachedInputTokens: 80,
@@ -545,23 +611,24 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
       activities: [
         transitionActivity(run, createdEvent(run), 1),
         transitionActivity(run, startedEvent(run), 2),
+        completedOutputActivity(run, answer, 3),
         {
           activityId: "tool:call-read:completed",
           runId: run.runId,
-          sequence: 3,
+          sequence: 4,
           recordedAt: completed.recordedAt,
           type: "tool.result",
           durability: "durable",
           result: run.toolCalls[0]!,
         },
-        transitionActivity(run, completed, 4),
+        transitionActivity(run, completed, 5),
       ],
     },
   });
 
   assert.equal(view.workView.answer?.content, answer);
-  assert.equal(view.workView.transcriptNodes.at(-1)?.text, answer);
-  assert.equal(view.replay.events.at(-1)?.summary, answer);
+  assert.equal(view.workView.transcriptNodes.find((node) => node.kind === "body")?.text, answer);
+  assert.equal(view.replay.events.find((event) => event.type === "model.output.completed")?.delta, answer);
   assert.deepEqual(view.detail.toolResults, run.toolCalls);
   assert.deepEqual(view.detail.usage, run.usage);
   assert.equal("canvas" in view.detail, false);
@@ -575,7 +642,7 @@ test("terminal projection preserves raw answer, full tool output, usage and atta
 });
 
 test("completed reasoning projects as a durable thinking node with full text", () => {
-  const run = runState({ runId: "reasoning-run", status: { kind: "completed", answer: "最终答案" } });
+  const run = runState({ runId: "reasoning-run", status: { kind: "completed" }, answer: "最终答案" });
   const reasoning: OrdinaryRunEvent = {
     eventId: "event-reasoning",
     runId: run.runId,
@@ -705,6 +772,7 @@ function runState(input: {
   readonly usage?: OrdinaryRunState["usage"];
   readonly withAttachment?: boolean;
   readonly visibleAssistantText?: string;
+  readonly answer?: string;
 }): OrdinaryRunState {
   const baseBirth = ordinaryRunBirth();
   const protocol = input.protocol ?? "openai_responses";
@@ -761,7 +829,7 @@ function runState(input: {
     birth,
     status: input.status,
     session: { phase: "not_started" },
-    visibleAssistantText: input.visibleAssistantText,
+    visibleAssistantText: input.visibleAssistantText ?? input.answer,
     toolCalls: input.toolCalls ?? [],
     toolResultRecordedAt: Object.fromEntries((input.toolCalls ?? []).map((result) => [
       `${result.callId}:${result.status}`,
@@ -810,7 +878,7 @@ function conversationFrom(run: OrdinaryRunState): OrdinaryConversationReadModel 
       role: "assistant",
       turnId: run.turn.assistantTurnId,
       runId: run.runId,
-      content: run.status.kind === "completed" ? run.status.answer : run.visibleAssistantText ?? "",
+      content: run.visibleAssistantText ?? "",
       status: run.status.kind,
       interruption: run.status.kind === "cancelled"
         ? "user_cancelled"
@@ -829,11 +897,34 @@ function replay(
   events: readonly OrdinaryRunEvent[],
   streamId = "ordinary-stream-1",
 ): OrdinaryRunActivityReplay {
-  const activities = events.map((event, index) => transitionActivity(run, event, index + 1));
+  const activities: OrdinaryRunActivity[] = [];
+  for (const event of events) {
+    if (event.type === "run.completed") {
+      activities.push(completedOutputActivity(run, run.visibleAssistantText ?? "done", activities.length + 1));
+    }
+    activities.push(transitionActivity(run, event, activities.length + 1));
+  }
+  if (run.status.kind === "completed" && !events.some((event) => event.type === "run.completed")) {
+    activities.push(completedOutputActivity(run, run.visibleAssistantText ?? "done", activities.length + 1));
+  }
   return {
     cursor: { streamId, sequence: activities.at(-1)?.sequence ?? 0 },
     reset: false,
     activities,
+  };
+}
+
+function completedOutputActivity(run: OrdinaryRunState, content: string, sequence: number): OrdinaryRunActivity {
+  return {
+    activityId: `${run.runId}:assistant-output`,
+    runId: run.runId,
+    sequence,
+    recordedAt: "2026-01-01T00:00:02.500Z",
+    type: "model.output.completed",
+    durability: "durable",
+    modelRequestId: `${run.runId}:model-request`,
+    assistantEntryRef: { sessionId: run.sessionRef.sessionId, entryId: `${run.runId}:assistant-entry` },
+    content,
   };
 }
 

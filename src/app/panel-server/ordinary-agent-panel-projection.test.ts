@@ -685,8 +685,8 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
   });
   const ordinary = conversationFrom(run);
   const currentRun = projectOrdinaryPanelRunView({ run, fullReplay: replay(run, []) });
-  const projected = projectOrdinaryPanelConversation({ conversation: ordinary, currentRun, workspaceRun: run });
-  const summary = projectOrdinaryPanelConversationSummary(ordinary, run);
+  const projected = projectOrdinaryPanelConversation({ conversation: ordinary, currentRun, workspaceRun: run, spaceId: "space-one" });
+  const summary = projectOrdinaryPanelConversationSummary(ordinary, run, "space-one");
 
   assert.equal(projected.status, "approval_needed");
   assert.equal(projected.requiresUserAction, true);
@@ -696,6 +696,8 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
     assistantTurnId: run.turn.assistantTurnId,
   });
   assert.equal(projected.currentRun?.run.runId, run.runId);
+  assert.equal(projected.spaceId, "space-one");
+  assert.equal(summary.spaceId, "space-one");
   assert.deepEqual(projected.workspaceFolder, { label: "workspace", path: "Z:/workspace", selection: "explicit" });
   assert.deepEqual(summary.workspaceFolder, projected.workspaceFolder);
   assert.equal(projected.turns[0]?.attachments?.[0]?.summary, "附件摘要 <raw>");

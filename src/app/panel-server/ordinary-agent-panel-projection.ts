@@ -161,6 +161,7 @@ export function projectOrdinaryPanelRunView(input: {
 
 export function projectOrdinaryPanelConversation(input: {
   readonly conversation: OrdinaryConversationReadModel;
+  readonly spaceId?: string;
   readonly currentRun?: OrdinaryPanelRunView;
   readonly workspaceRun?: OrdinaryRunState;
 }): OrdinaryPanelConversation {
@@ -174,6 +175,7 @@ export function projectOrdinaryPanelConversation(input: {
   const latestText = [...turns].reverse().find((turn) => turn.content.length > 0)?.content ?? "";
   return {
     conversationId: input.conversation.conversationId,
+    spaceId: input.spaceId,
     title: input.conversation.title,
     titleEditedAt: input.conversation.titleEditedAt,
     preview: compact(latestText, 180),
@@ -201,10 +203,12 @@ export function projectOrdinaryPanelConversation(input: {
 export function projectOrdinaryPanelConversationSummary(
   conversation: OrdinaryConversationReadModel,
   workspaceRun?: OrdinaryRunState,
+  spaceId?: string,
 ): OrdinaryPanelConversationSummary {
   const { turns: _turns, currentRun: _currentRun, ...summary } = projectOrdinaryPanelConversation({
     conversation,
     workspaceRun,
+    spaceId,
   });
   return summary;
 }

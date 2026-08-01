@@ -116,6 +116,64 @@ test("Ordinary Panel entry submits directly to the feature and exposes the canon
   }
 });
 
+test("Ordinary turns inherit only the local references from their owning Space", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-space-access-"));
+  const firstFile = path.join(directory, "first.md");
+  const secondFile = path.join(directory, "second.md");
+  await fs.writeFile(firstFile, "first", "utf8");
+  await fs.writeFile(secondFile, "second", "utf8");
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    ordinaryAgentExecution: completedExecution("space answer", {}),
+  });
+  try {
+    const conversation = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "start" },
+    });
+    const conversationId = conversation.body.conversation.conversationId as string;
+    const firstSpace = await requestJson(server.url, "/api/spaces", { method: "POST", body: { title: "一" } });
+    const secondSpace = await requestJson(server.url, "/api/spaces", { method: "POST", body: { title: "二" } });
+    const firstSpaceId = firstSpace.body.space.id as string;
+    const secondSpaceId = secondSpace.body.space.id as string;
+    await requestJson(server.url, `/api/spaces/${encodeURIComponent(firstSpaceId)}/references`, {
+      method: "POST",
+      body: { title: "一号文件", reference: { kind: "local_file", path: firstFile } },
+    });
+    await requestJson(server.url, `/api/spaces/${encodeURIComponent(secondSpaceId)}/references`, {
+      method: "POST",
+      body: { title: "二号文件", reference: { kind: "local_file", path: secondFile } },
+    });
+    await requestJson(server.url, `/api/spaces/${encodeURIComponent(firstSpaceId)}/references`, {
+      method: "POST",
+      body: { title: "当前对话", reference: { kind: "conversation", conversationId } },
+    });
+
+    const duplicateOwner = await requestJson(server.url, `/api/spaces/${encodeURIComponent(secondSpaceId)}/references`, {
+      method: "POST",
+      body: { title: "重复对话", reference: { kind: "conversation", conversationId } },
+    });
+    assert.equal(duplicateOwner.status, 409);
+    assert.equal(duplicateOwner.body.error.code, "space_conversation_ownership_conflict");
+
+    const submitted = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      body: { goal: "use my Space files" },
+    });
+    assert.equal(submitted.body.conversation.spaceId, firstSpaceId);
+    const view = await waitForView(server.url, submitted.body.run.runId, "completed");
+    assert.deepEqual(
+      view.body.view.workView.contextAttachments.map((attachment: { title: string }) => attachment.title),
+      ["一号文件"],
+    );
+    assert.equal(JSON.stringify(view.body.view).includes("二号文件"), false);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Ordinary HTTP boundary returns stable validation errors before feature execution", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-panel-validation-"));
   const server = await startLocalPanelServer({

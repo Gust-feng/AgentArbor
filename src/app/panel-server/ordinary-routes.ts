@@ -20,6 +20,8 @@ import {
 } from "./request-parsers.js";
 import type { PanelRuntime } from "./runtime.js";
 import { SseResponseWriter } from "./sse-response-writer.js";
+import { resolveConversationSpaceAccess } from "./space-agent-access.js";
+import { SpaceFeatureError } from "../spaces/index.js";
 
 const ORDINARY_STREAM_HEARTBEAT_INTERVAL_MS = 5_000;
 const ORDINARY_STREAM_DELTA_COALESCE_MS = 16;
@@ -157,10 +159,19 @@ async function submitTurn(
   if (runInput.requestedRunMode !== undefined && runInput.requestedRunMode !== "agent") {
     throw new PanelHttpError(400, "conversation_run_mode_not_supported", "对话入口只支持普通 Agent。");
   }
+  const spaceAccess = await resolveConversationSpaceAccess(
+    runtime.spaceFeature,
+    conversationId,
+    runInput.taskSoilInput,
+  );
+  const effectiveRunInput = {
+    ...runInput,
+    taskSoilInput: spaceAccess.taskSoilInput,
+  };
   const submitted = await runtime.ordinaryAgentFeature.commands.submitTurn({
     conversationId,
-    input: { userMessage: runInput.goal, taskSoil: runInput.taskSoilInput },
-    birth: await runtime.prepareOrdinaryRunBirth(runInput),
+    input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
+    birth: await runtime.prepareOrdinaryRunBirth(effectiveRunInput),
   });
   const run = await projectCommandRun(runtime, submitted.run);
   writeJson(response, 202, {
@@ -169,6 +180,7 @@ async function submitTurn(
       conversation: submitted.conversation,
       currentRun: run.view,
       workspaceRun: run.state,
+      spaceId: spaceAccess.spaceId,
     }),
     run: run.view.run,
   });
@@ -179,8 +191,26 @@ async function listConversations(runtime: PanelRuntime) {
     const workspaceRun = conversation.latestRunId === undefined
       ? undefined
       : await runtime.ordinaryAgentFeature.queries.getRun(conversation.latestRunId);
-    return projectOrdinaryPanelConversationSummary(conversation, workspaceRun);
+    const owner = await conversationOwnerForList(runtime, conversation.conversationId);
+    return projectOrdinaryPanelConversationSummary(conversation, workspaceRun, owner?.spaceId);
   }));
+}
+
+async function conversationOwnerForList(
+  runtime: PanelRuntime,
+  conversationId: string,
+) {
+  try {
+    return await runtime.spaceFeature.queries.findConversationOwner(conversationId);
+  } catch (error) {
+    // Historical builds allowed duplicate links. Keep the global conversation
+    // list usable, while explicit open/submit still reports the conflict and
+    // grants no ambiguous Space access.
+    if (error instanceof SpaceFeatureError && error.code === "space_conversation_ownership_conflict") {
+      return undefined;
+    }
+    throw error;
+  }
 }
 
 async function projectConversation(
@@ -190,16 +220,18 @@ async function projectConversation(
     : never,
 ) {
   const runId = conversation.activeRunId ?? conversation.latestRunId;
-  const [currentRun, workspaceRun] = await Promise.all([
+  const [currentRun, workspaceRun, owner] = await Promise.all([
     runId === undefined ? Promise.resolve(undefined) : projectRunView(runtime, runId),
     conversation.latestRunId === undefined
       ? Promise.resolve(undefined)
       : runtime.ordinaryAgentFeature.queries.getRun(conversation.latestRunId),
+    runtime.spaceFeature.queries.findConversationOwner(conversation.conversationId),
   ]);
   return projectOrdinaryPanelConversation({
     conversation,
     currentRun: currentRun?.view,
     workspaceRun,
+    spaceId: owner?.spaceId,
   });
 }
 

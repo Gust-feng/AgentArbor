@@ -117,6 +117,8 @@ export type OrdinaryPanelConversationPendingAction = {
 
 export type OrdinaryPanelConversation = {
   readonly conversationId: string;
+  /** Unique Space owning this conversation through its conversation reference. */
+  readonly spaceId?: string;
   readonly title: string;
   readonly titleEditedAt?: string;
   readonly preview: string;

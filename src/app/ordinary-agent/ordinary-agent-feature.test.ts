@@ -656,6 +656,51 @@ test("restart reconciles a lost approval from a rolled-back file-system Session 
   assert.equal(branch.length, 3);
 });
 
+test("restart activates a healthy persisted root queue and completes it", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-healthy-root-recovery-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const sessions = new SessionHarness();
+  const runId = "healthy-root-queued";
+  const sessionRef = ordinaryAgentSessionRef("healthy-root-session");
+  const recordedAt = clock();
+  const queued = createInitialOrdinaryRunState({
+    runId,
+    sessionRef,
+    turn: ordinaryRunTurn(runId),
+    runInput: { userMessage: "recover this queued root" },
+    birth: ordinaryRunBirth(),
+    recordedAt: recordedAt(),
+    eventId: "healthy-root-created",
+  });
+  await repository.save(queued, 0);
+  await controls.save({
+    conversationId: queued.turn.conversationId,
+    createdAt: queued.timestamps.createdAt,
+    sessionRef,
+  }, 0, queued.timestamps.createdAt);
+
+  let executions = 0;
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: controls,
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        executions += 1;
+        return completedOutcome(input, "recovered root answer", sessions);
+      },
+    },
+    now: clock("2026-01-01T00:01:00.000Z"),
+    idFactory: ids(120),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  const recovered = await waitForStatus(restarted, runId, "completed");
+  assert.equal(recovered.status.kind, "completed");
+  assert.equal(executions, 1);
+});
+
 test("restart does not activate a stale root queue when the Session branch is unavailable", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-stale-root-recovery-"));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -952,6 +997,68 @@ test("successor activation retries one transient persistence failure", async (t)
   releasePredecessor();
   await waitForStatus(feature, "activation-successor", "completed");
   assert.equal(activationSaveFailures, 0);
+});
+
+test("successor activation leaves the run queued and diagnoses repeated persistence failures", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-successor-activation-exhausted-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  let activationSaveAttempts = 0;
+  let releasePredecessor!: () => void;
+  const predecessorReleased = new Promise<void>((resolve) => { releasePredecessor = resolve; });
+  let markPredecessorStarted!: () => void;
+  const predecessorStarted = new Promise<void>((resolve) => { markPredecessorStarted = resolve; });
+  const diagnostics: string[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async save(state, expectedRevision) {
+        if (state.runId === "activation-exhausted-successor" && state.status.kind === "running") {
+          activationSaveAttempts += 1;
+          throw new Error("successor persistence remains unavailable");
+        }
+        return durableRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        const prepared = await prepareSession(input, sessions);
+        if (input.runId === "activation-exhausted-predecessor") {
+          markPredecessorStarted();
+          await predecessorReleased;
+        }
+        return completedOutcome(input, `answer ${input.runId}`, sessions, prepared);
+      },
+    },
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "successor_activation_failed") {
+        diagnostics.push(diagnostic.predecessorRunId);
+      }
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("activation-exhausted-predecessor"));
+  await predecessorStarted;
+  const successor = startInput("activation-exhausted-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "activation-exhausted-predecessor" },
+  });
+  assert.equal((await feature.queries.getRun(successor.runId))?.status.kind, "queued");
+
+  releasePredecessor();
+  const deadline = Date.now() + 5_000;
+  while (diagnostics.length === 0 && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.equal(activationSaveAttempts, 2);
+  assert.deepEqual(diagnostics, ["activation-exhausted-predecessor"]);
+  assert.equal((await feature.queries.getRun(successor.runId))?.status.kind, "queued");
 });
 
 test("stable terminal facts appear only after terminal commit and notify subscribers", async (t) => {

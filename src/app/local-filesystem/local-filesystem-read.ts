@@ -58,13 +58,18 @@ export function languageForPath(value: string): { readonly language?: string } {
   const namedLanguage: Readonly<Record<string, string>> = {
     ".gitignore": "gitignore",
     ".gitattributes": "gitattributes",
+    ".gitmodules": "gitmodules",
+    ".editorconfig": "editorconfig",
+    ".npmrc": "npmrc",
+    ".nvmrc": "nvmrc",
     ".env": "dotenv",
     "dockerfile": "dockerfile",
     "makefile": "makefile",
+    "license": "license",
   };
   if (namedLanguage[basename] !== undefined) return { language: namedLanguage[basename] };
   const extension = path.extname(value).toLowerCase().slice(1);
-  const aliases: Readonly<Record<string, string>> = { jsonc: "json", mjs: "javascript", cjs: "javascript", js: "javascript", ts: "typescript", tsx: "typescript", yml: "yaml", ps1: "powershell", sh: "shell" };
+  const aliases: Readonly<Record<string, string>> = { jsonc: "json", mjs: "javascript", cjs: "javascript", js: "javascript", ts: "typescript", tsx: "typescript", py: "python", yml: "yaml", ps1: "powershell", sh: "shell" };
   return extension.length === 0 ? { language: "plaintext" } : { language: aliases[extension] ?? extension };
 }
 

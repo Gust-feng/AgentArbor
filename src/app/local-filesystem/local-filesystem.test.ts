@@ -10,6 +10,7 @@ import {
   createFile,
   deleteEntry,
   joinRelativePath,
+  languageForPath,
   listDirectory,
   normalizeRelativePath,
   renameEntry,
@@ -17,6 +18,13 @@ import {
   resolveWithinRoot,
   writeText,
 } from "./index.js";
+
+test("local filesystem normalizes language aliases used by document presentation", () => {
+  assert.deepEqual(languageForPath("script.py"), { language: "python" });
+  assert.deepEqual(languageForPath(".gitmodules"), { language: "gitmodules" });
+  assert.deepEqual(languageForPath(".editorconfig"), { language: "editorconfig" });
+  assert.deepEqual(languageForPath("LICENSE"), { language: "license" });
+});
 
 test("local filesystem resolves only normalized paths inside an authorized root", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-local-fs-path-"));

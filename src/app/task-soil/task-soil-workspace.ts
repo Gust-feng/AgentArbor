@@ -3,7 +3,9 @@ import type { Constraint } from "../../domain/constraints.js";
 import { createTaskSoil, type ReadonlySoilStore, type TaskSoil, type TaskSoilContextRef } from "../../domain/soil/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
 
-const MAX_REF_LENGTH = 220;
+// Desktop-selected local paths are authorization facts and may exceed legacy
+// UI label lengths. Truncating them would silently break the exact permission.
+const MAX_REF_LENGTH = 4_096;
 const MAX_SUMMARY_LENGTH = 360;
 const MAX_PREVIEW_LENGTH = 640;
 

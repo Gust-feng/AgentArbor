@@ -194,6 +194,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
               providerFetch: options.host.providerFetch,
               featureContributions: options.resolveFeatureToolContributions?.({
                 workspaceRoot: resources.workspaceRoot,
+                taskSoil,
               }),
             }),
             createSkillToolRegistryContribution(skillContexts),

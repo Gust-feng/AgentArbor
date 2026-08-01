@@ -10,6 +10,7 @@ export {
   type SpaceReferenceItem,
   type SpaceRepository,
   type SpaceSummary,
+  type SpaceConversationOwner,
   type SpaceTarget,
   type SpaceTree,
   type SpaceTreeEntry,
@@ -26,7 +27,15 @@ export {
   createSpaceMoveTool,
   createSpaceRemoveReferenceTool,
   createSpaceRenameTool,
+  createSpaceWriteTool,
+  createSpaceEditTool,
   createSpaceToolRegistryContribution,
   createSpaceTools,
   type SpaceToolOptions,
 } from "./space-tools.js";
+export {
+  isSpaceReferenceWritePermission,
+  spaceReferenceAttachmentId,
+  spaceReferenceIdFromAttachmentId,
+  spaceReferenceWritePermission,
+} from "./space-file-access.js";

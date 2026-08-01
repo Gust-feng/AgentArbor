@@ -10,10 +10,13 @@ import type {
   AgentToolRegistryContribution,
   AgentToolRuntimeContext,
 } from "../tool-center/factory.js";
+import type { TaskSoil } from "../../domain/soil/index.js";
+import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import type { AgentHostRunResources } from "./agent-run-resources.js";
 
 export type HostFeatureAgentToolContributionResolver = (input: {
   readonly workspaceRoot: string;
+  readonly taskSoil?: TaskSoil;
 }) => readonly AgentToolRegistryContribution[];
 
 /** Selects feature-owned tool contributions once at the Host composition boundary. */
@@ -21,14 +24,19 @@ export function createHostFeatureAgentToolContributionResolver(input: {
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
   readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
   readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
+  readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
 }): HostFeatureAgentToolContributionResolver {
-  return ({ workspaceRoot }) => [
+  return ({ workspaceRoot, taskSoil }) => [
     ...(input.agentNotes === undefined
       ? []
       : [createAgentNotesToolRegistryContribution({ notes: input.agentNotes, workspaceRoot })]),
     ...(input.spaces === undefined
       ? []
-      : [createSpaceToolRegistryContribution({ spaces: input.spaces })]),
+      : [createSpaceToolRegistryContribution({
+          spaces: input.spaces,
+          taskSoil,
+          mutationCoordinator: input.fileMutationCoordinator,
+        })]),
     ...(input.personalKnowledge === undefined
       ? []
       : [createPersonalKnowledgeToolRegistryContribution({ knowledge: input.personalKnowledge })]),

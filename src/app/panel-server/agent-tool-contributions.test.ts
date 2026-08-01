@@ -57,14 +57,18 @@ test("Host selects feature-owned Space and Personal Knowledge contributions", ()
     "SpaceCreate",
     "SpaceMove",
     "SpaceAddReference",
+    "SpaceUnlinkReference",
     "SpaceRemoveReference",
     "SpaceRename",
+    "SpaceWrite",
+    "SpaceEdit",
   ]);
   assert.deepEqual(registrations.filter((name) => name.startsWith("Knowledge")), [
     "KnowledgeSearch",
     "KnowledgeRead",
     "KnowledgeCreateNote",
     "KnowledgeUpdateNote",
+    "KnowledgeDeleteNote",
     "KnowledgeCollect",
   ]);
 });

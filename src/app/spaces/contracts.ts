@@ -43,6 +43,12 @@ export type SpaceSummary = Pick<Space, "id" | "title" | "createdAt" | "updatedAt
   readonly referenceItemCount: number;
 };
 
+/** A conversation reference is its unique owning link into one Space. */
+export type SpaceConversationOwner = {
+  readonly spaceId: string;
+  readonly referenceItemId: string;
+};
+
 export interface SpaceRepository {
   read(): Promise<SpaceTreeSnapshot>;
   write(snapshot: SpaceTreeSnapshot): Promise<void>;
@@ -57,6 +63,7 @@ export type SpaceFeatureErrorCode =
   | "space_reference_not_found"
   | "space_invalid_move"
   | "space_workspace_mount_conflict"
+  | "space_conversation_ownership_conflict"
   | "space_invalid_input"
   | "space_id_collision"
   | "space_snapshot_incompatible"
@@ -72,9 +79,9 @@ export class SpaceFeatureError extends Error {
 export type SpaceEvent =
   | { readonly type: "space.created"; readonly space: Space }
   | { readonly type: "space.reference_added"; readonly item: SpaceReferenceItem }
-  | { readonly type: "space.renamed"; readonly target: SpaceTarget }
-  | { readonly type: "space.moved"; readonly target: SpaceMovableTarget; readonly destinationSpaceId: string }
-  | { readonly type: "space.reference_removed"; readonly itemId: string };
+  | { readonly type: "space.renamed"; readonly target: SpaceTarget; readonly spaceId: string }
+  | { readonly type: "space.moved"; readonly target: SpaceMovableTarget; readonly sourceSpaceId: string; readonly destinationSpaceId: string }
+  | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string };
 
 export type SpaceFeature = {
   readonly commands: {
@@ -82,13 +89,16 @@ export type SpaceFeature = {
     addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceReference }): Promise<SpaceReferenceItem>;
     rename(input: { readonly target: SpaceTarget; readonly title: string }): Promise<SpaceTarget>;
     move(input: { readonly target: SpaceMovableTarget; readonly destinationSpaceId: string }): Promise<SpaceMovableTarget>;
-    /** Metadata-only command. Host application services own physical deletion policy. */
+    /** Removes only the Space metadata link and never deletes source content. */
+    unlinkReference(itemId: string): Promise<void>;
+    /** Removes the reference using the Host-provided ownership policy. */
     removeReference(itemId: string): Promise<void>;
   };
   readonly queries: {
     list(): Promise<readonly SpaceSummary[]>;
     getTree(spaceId: string): Promise<SpaceTree | undefined>;
     getReference(itemId: string): Promise<SpaceReferenceItem | undefined>;
+    findConversationOwner(conversationId: string): Promise<SpaceConversationOwner | undefined>;
     hasWorkspaceMountConflict(itemId: string): Promise<boolean>;
   };
   readonly events: { subscribe(listener: (event: SpaceEvent) => void): () => void };

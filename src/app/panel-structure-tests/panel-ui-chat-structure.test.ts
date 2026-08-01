@@ -2,16 +2,19 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { readAppSource, readPanelUiSource } from "./panel-structure-test-utils.js";
+import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
 
 test("panel conversation rendering has one Redesign-owned production path", async () => {
-  const [main, personalWorkbench, workbench, transcript, evidence, confirmation, styleEntry] = await Promise.all([
+  const [main, personalWorkbench, workbench, transcript, evidence, confirmation, richText, richTextStyle, globalStyles, styleEntry] = await Promise.all([
     readPanelUiSource("main.tsx"),
     readPanelUiSource(path.join("personal-workbench", "personal-workbench.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "agentarbor-workbench.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "RedesignTranscript.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "ActivityEvidence.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "ConfirmationCard.tsx")),
+    readPanelUiSource(path.join("components", "rich-text.tsx")),
+    readPanelUiStyle("rich-text.css"),
+    readPanelUiSource("styles.css"),
     readPanelUiSource(path.join("personal-workbench", "redesign", "styles", "index.css")),
   ]);
 
@@ -37,6 +40,11 @@ test("panel conversation rendering has one Redesign-owned production path", asyn
 
   assert.match(styleEntry, /@import '\.\/activity-evidence\.css'/u);
   assert.doesNotMatch(styleEntry, /transcript\.css/u);
+  assert.match(richText, /import "\.\.\/styles\/rich-text\.css"/u);
+  assert.match(richTextStyle, /\.rich-list-unordered\s*\{[^}]*list-style-type:\s*disc/u);
+  assert.match(richTextStyle, /\.rich-list-ordered\s*\{[^}]*list-style-type:\s*decimal/u);
+  assert.match(richTextStyle, /\.rich-list \.task-list-item\s*\{[^}]*list-style-type:\s*none/u);
+  assert.doesNotMatch(globalStyles, /@import "\.\/styles\/rich-text\.css"/u);
 
   await Promise.all([
     assertPanelUiSourceMissing(path.join("components", "chat-active.tsx")),

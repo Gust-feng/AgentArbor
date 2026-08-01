@@ -120,6 +120,18 @@
   padding-left: 22px;
 }
 
+.rich-list-unordered {
+  list-style-type: disc;
+}
+
+.rich-list-ordered {
+  list-style-type: decimal;
+}
+
+.rich-list .task-list-item {
+  list-style-type: none;
+}
+
 .rich-list li {
   min-width: 0;
   padding-left: 2px;

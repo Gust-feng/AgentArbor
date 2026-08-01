@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyActionButton } from "./copy-action-button";
 import { splitStreamingMarkdown, stabilizeStreamingMarkdown } from "../streaming-text";
+import "../styles/rich-text.css";
 
 export const RichText = React.memo(function RichText({ text }: { readonly text: string }): React.ReactElement {
   return (

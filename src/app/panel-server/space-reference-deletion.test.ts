@@ -4,12 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import { runSpaceReferenceRemoval, stageOwnedSpaceReferenceDeletion } from "./space-reference-deletion.js";
 
 test("staged owned-file deletion can roll back a failed metadata commit", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-delete-stage-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const source = path.join(root, "note.md");
   await fs.writeFile(source, "keep", "utf8");
   const staged = await stageOwnedSpaceReferenceDeletion({
@@ -22,7 +23,7 @@ test("staged owned-file deletion can roll back a failed metadata commit", async 
 
 test("missing local-file deletion commits stale Space metadata without a filesystem stage", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-delete-missing-file-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   let metadataRemoved = false;
 
   await runSpaceReferenceRemoval(
@@ -44,7 +45,7 @@ test("missing local-file deletion commits stale Space metadata without a filesys
 
 test("Space reference removal stages and rolls back every owned item in a removed subtree", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-delete-subtree-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const managedRoot = path.join(root, "managed");
   const managedFolder = path.join(managedRoot, "folder");
   const localFile = path.join(root, "note.md");

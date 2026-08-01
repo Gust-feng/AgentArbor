@@ -44,7 +44,7 @@ export type RunRealAiSmokeOptions = {
   readonly configDirectory?: string;
   readonly timeoutMs?: number;
   /** Deterministic test seam. Production uses the composed Agent Session loop. */
-  readonly ordinaryAgentExecution?: OrdinaryExecutionPort;
+  readonly ordinaryAgentExecution?: (configDirectory: string) => OrdinaryExecutionPort;
 };
 
 const DEFAULT_GOAL = [
@@ -101,7 +101,7 @@ export async function runRealAiSmoke(
       configDirectory,
       configCenter: local.configCenter,
       providerFetch: options.providerFetch,
-      ordinaryAgentExecution: options.ordinaryAgentExecution,
+      ordinaryAgentExecution: options.ordinaryAgentExecution?.(configDirectory),
     });
     const submitted = submitSchema.parse(await requestJson(new URL("api/conversations", server.url), {
       method: "POST",

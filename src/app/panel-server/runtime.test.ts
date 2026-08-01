@@ -3,6 +3,9 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { FileSystemAgentSessionRepository } from "../../adapters/intelligence/file-system-agent-session-repository.js";
 import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort } from "../ordinary-agent/contracts.js";
 import { ordinaryAgentSessionRef, ordinaryRunBirth, ordinaryRunTurn } from "../ordinary-agent/test-support.js";
 import { releasePanelRuntimeResources } from "./request-handler.js";
@@ -81,14 +84,19 @@ test("Panel capability snapshots freeze Personal Knowledge tools for Ordinary ru
 
 test("Panel composition wires Ordinary terminal runs into durable PathMemory records", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-path-memory-wiring-"));
+  const sessionEnvironment = new NodeExecutionEnv({ cwd: directory });
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
   try {
+    const sessionRepository = new FileSystemAgentSessionRepository({
+      fileSystem: sessionEnvironment,
+      sessionsRoot: path.join(directory, "runtime", "ordinary-agent", "agent-sessions"),
+    });
+    const sessionRef = await sessionRepository.create({ sessionId: "wired-session", sessionCwd: directory });
     runtime = createPanelRuntime({
       configDirectory: directory,
       testOnlySkipInitialWorkbenchData: true,
-      ordinaryAgentExecution: completedExecution("memory answer"),
+      ordinaryAgentExecution: completedExecution("memory answer", sessionRepository),
     });
-    const sessionRef = ordinaryAgentSessionRef();
     await runtime.ordinaryAgentFeature.commands.start({
       runId: "wired-run",
       sessionRef,
@@ -118,7 +126,9 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
     const files = await fs.readdir(path.join(directory, "runtime", "path-memory", "records"));
     assert.equal(files.filter((name) => name.endsWith(".json")).length, 1);
   } finally {
-    await cleanupRuntime(runtime, directory);
+    if (runtime !== undefined) await releasePanelRuntimeResources(runtime);
+    await sessionEnvironment.cleanup();
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -222,41 +232,59 @@ async function cleanupRuntime(runtime: PanelRuntime | undefined, directory: stri
   await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
-function completedExecution(answer: string): OrdinaryExecutionPort {
+function completedExecution(
+  answer: string,
+  sessionRepository: FileSystemAgentSessionRepository,
+): OrdinaryExecutionPort {
   return {
     async execute(input) {
-      await input.onSessionWriteCheckpoint?.({
-        kind: "start_leaf_captured",
-        sessionId: input.sessionRef.sessionId,
-        startLeafRef: null,
-      });
-      const inputEntryRef = { sessionId: input.sessionRef.sessionId, entryId: `${input.runId}-input` };
-      await input.onSessionWriteCheckpoint?.({
-        kind: "input_entry_committed",
-        sessionId: input.sessionRef.sessionId,
-        inputEntryRef,
-      });
-      const assistantEntryRef = { sessionId: input.sessionRef.sessionId, entryId: `${input.runId}-assistant` };
-      await input.onSessionWriteCheckpoint?.({
-        kind: "assistant_response_entry_committed",
-        sessionId: input.sessionRef.sessionId,
-        assistantEntryRef,
-      });
-      const outcome: OrdinaryExecutionOutcome = {
-        status: "completed",
-        answer,
-        session: {
+      const lease = await sessionRepository.acquire(input.sessionRef);
+      try {
+        const startLeafId = await lease.session.getLeafId();
+        const startLeafRef = startLeafId === null
+          ? null
+          : { sessionId: input.sessionRef.sessionId, entryId: startLeafId };
+        await input.onSessionWriteCheckpoint?.({
+          kind: "start_leaf_captured",
           sessionId: input.sessionRef.sessionId,
-          startLeafRef: null,
+          startLeafRef,
+        });
+        const inputEntryId = await lease.session.appendMessage({
+          role: "user",
+          content: input.runInput.userMessage,
+          timestamp: Date.now(),
+        });
+        const inputEntryRef = { sessionId: input.sessionRef.sessionId, entryId: inputEntryId };
+        await input.onSessionWriteCheckpoint?.({
+          kind: "input_entry_committed",
+          sessionId: input.sessionRef.sessionId,
           inputEntryRef,
-          safeLeafRef: assistantEntryRef,
-          latestLeafRef: assistantEntryRef,
-          compactionEntryRefs: [],
-        },
-        toolCalls: [],
-        usage: {},
-      };
-      return outcome;
+        });
+        const assistantEntryId = await lease.session.appendMessage(fauxAssistantMessage(answer));
+        const assistantEntryRef = { sessionId: input.sessionRef.sessionId, entryId: assistantEntryId };
+        await input.onSessionWriteCheckpoint?.({
+          kind: "assistant_response_entry_committed",
+          sessionId: input.sessionRef.sessionId,
+          assistantEntryRef,
+        });
+        const outcome: OrdinaryExecutionOutcome = {
+          status: "completed",
+          answer,
+          session: {
+            sessionId: input.sessionRef.sessionId,
+            startLeafRef,
+            inputEntryRef,
+            safeLeafRef: inputEntryRef,
+            latestLeafRef: assistantEntryRef,
+            compactionEntryRefs: [],
+          },
+          toolCalls: [],
+          usage: {},
+        };
+        return outcome;
+      } finally {
+        await lease.release();
+      }
     },
   };
 }

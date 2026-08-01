@@ -472,7 +472,7 @@ test("tool stream projection derives structured directory displays from attachme
   assert.equal(detail.display?.kind, "directory_listing");
   assert.equal(detail.display?.kind === "directory_listing" ? detail.display.entries[0]?.path : undefined, "README.md");
   assert.equal(JSON.stringify(detail.display).includes("totalEntries"), false);
-  assert.equal(JSON.stringify(detail.display).includes("truncated"), false);
+  assert.equal(detail.display.truncated, true);
   assertNoToolShadowFields(detail);
 });
 
@@ -495,9 +495,9 @@ test("tool stream projection keeps MCP text in display items without raw media p
     },
   });
 
-  assert.equal(detail.display?.kind, "generic_tool_summary");
+  assert.equal(detail.display?.kind, "raw_tool_result");
   assert.equal(
-    detail.display?.kind === "generic_tool_summary"
+    detail.display?.kind === "raw_tool_result"
       ? detail.display.items?.some((item) => item.includes("冻结快照"))
       : false,
     true,

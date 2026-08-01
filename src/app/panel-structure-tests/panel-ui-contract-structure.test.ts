@@ -16,7 +16,6 @@ test("panel UI contracts stay split by product concern", async () => {
     appConfigProjection,
     appRunController,
     appState,
-    chatActive,
     modelSettings,
   ] = await Promise.all([
     readPanelUiSource("types.ts"),
@@ -30,7 +29,6 @@ test("panel UI contracts stay split by product concern", async () => {
     readPanelUiSource("app-config-projection.ts"),
     readPanelUiSource("app-run-controller.ts"),
     readPanelUiSource("app-state.ts"),
-    readPanelUiSource(path.join("components", "chat-active.tsx")),
     readPanelUiSource(path.join("components", "model-settings.tsx")),
   ]);
 
@@ -96,6 +94,5 @@ test("panel UI contracts stay split by product concern", async () => {
   assert.equal(contractConversation.includes("responseModel?:"), true);
   assert.equal(appRunController.includes('from "./types"'), false);
   assert.equal(appState.includes('from "./types"'), false);
-  assert.equal(chatActive.includes('from "../types"'), false);
   assert.equal(modelSettings.includes('from "../types"'), false);
 });

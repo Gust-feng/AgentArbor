@@ -5,12 +5,13 @@ import path from "node:path";
 import test from "node:test";
 
 import type { SpaceReferenceItem } from "../spaces/index.js";
+import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import { PanelHttpError } from "./http-utils.js";
 import { captureKnowledgeAsset, reconcileKnowledgeAssets, stageKnowledgeAssetRemoval } from "./knowledge-asset-store.js";
 
 test("knowledge asset capture copies only the selected child file", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-child-"));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(directory));
   const source = path.join(directory, "source");
   const assets = path.join(directory, "assets");
   await fs.mkdir(path.join(source, "nested"), { recursive: true });
@@ -27,7 +28,7 @@ test("knowledge asset capture copies only the selected child file", async (t) =>
 
 test("knowledge asset capture rejects oversized content and removes temporary directories", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-limit-"));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(directory));
   const source = path.join(directory, "large.bin");
   const assets = path.join(directory, "assets");
   await fs.writeFile(source, "");
@@ -42,7 +43,7 @@ test("knowledge asset capture rejects oversized content and removes temporary di
 
 test("knowledge asset reconciliation restores interrupted active deletions and removes completed ones", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-reconcile-"));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(directory));
   const active = encoded("active");
   const interrupted = encoded("interrupted");
   await Promise.all([
@@ -60,7 +61,7 @@ test("knowledge asset reconciliation restores interrupted active deletions and r
 
 test("knowledge asset removal can commit or roll back before metadata changes", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-remove-"));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(directory));
   const assetDirectory = path.join(directory, encoded("asset-one"));
   await fs.mkdir(assetDirectory, { recursive: true });
   await fs.writeFile(path.join(assetDirectory, "content"), "keep", "utf8");

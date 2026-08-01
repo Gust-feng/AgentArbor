@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 
+import { isNodeError } from "../../kernel/values/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import { SpaceFeatureError, type SpaceFeature } from "../spaces/index.js";
 import { spaceReferenceIdFromAttachmentId } from "../spaces/space-file-access.js";
@@ -62,12 +63,8 @@ async function inspectLocalPath(absolutePath: string): Promise<SpaceFileInspecti
     await fs.lstat(absolutePath);
     return { status: "present" };
   } catch (error) {
-    return isNodeError(error) && error.code === "ENOENT"
+    return isNodeError(error, "ENOENT")
       ? { status: "missing" }
       : { status: "failed", error };
   }
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }

@@ -12,6 +12,8 @@ import type {
   OrdinaryExecutionPort,
 } from "../../ordinary-agent/index.js";
 import { startLocalPanelServer } from "../../panel-server.js";
+import type { AgentSessionExecutionRefs } from "../../model-runtime/agent-session.js";
+import { createAgentSessionExecutionTestDriver } from "../../testing/agent-session-execution-driver.js";
 import { closePanelServer, createPanelRequestHandler } from "../request-handler.js";
 import { createPanelRuntime } from "../runtime.js";
 import { PanelRuntimeDirectoryInUseError } from "../runtime-directory-lease.js";
@@ -26,14 +28,14 @@ test("Panel host rejects a second writer for the same runtime directory", async 
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecution("first owner", {}),
+    ordinaryAgentExecution: completedExecution(directory, "first owner", {}),
   });
   try {
     await assert.rejects(
       startLocalPanelServer({
         port: 0,
         configDirectory: directory,
-        ordinaryAgentExecution: completedExecution("second owner", {}),
+        ordinaryAgentExecution: completedExecution(directory, "second owner", {}),
       }),
       (error: unknown) => error instanceof PanelRuntimeDirectoryInUseError,
     );
@@ -62,7 +64,7 @@ test("Panel host releases runtime resources and its lease when port binding fail
         host: "127.0.0.1",
         port: address.port,
         configDirectory: directory,
-        ordinaryAgentExecution: completedExecution("must not start", {}),
+        ordinaryAgentExecution: completedExecution(directory, "must not start", {}),
       }),
       (error: unknown) => error instanceof Error && "code" in error && error.code === "EADDRINUSE",
     );
@@ -70,7 +72,7 @@ test("Panel host releases runtime resources and its lease when port binding fail
     const restarted = await startLocalPanelServer({
       port: 0,
       configDirectory: directory,
-      ordinaryAgentExecution: completedExecution("started after bind failure", {}),
+      ordinaryAgentExecution: completedExecution(directory, "started after bind failure", {}),
     });
     await restarted.close();
   } finally {
@@ -86,7 +88,7 @@ test("Ordinary Panel entry submits directly to the feature and exposes the canon
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecution("ordinary answer", { inputTokens: 8, outputTokens: 3, totalTokens: 11, cachedInputTokens: 5 }),
+    ordinaryAgentExecution: completedExecution(directory, "ordinary answer", { inputTokens: 8, outputTokens: 3, totalTokens: 11, cachedInputTokens: 5 }),
   });
   try {
     const submitted = await requestJson(server.url, "/api/conversations", {
@@ -125,7 +127,7 @@ test("Ordinary turns inherit only the local references from their owning Space",
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecution("space answer", {}),
+    ordinaryAgentExecution: completedExecution(directory, "space answer", {}),
   });
   try {
     const conversation = await requestJson(server.url, "/api/conversations", {
@@ -179,7 +181,7 @@ test("Ordinary HTTP boundary returns stable validation errors before feature exe
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecution("must not run", {}),
+    ordinaryAgentExecution: completedExecution(directory, "must not run", {}),
   });
   try {
     const missing = await requestJson(server.url, "/api/conversations", { method: "POST", body: {} });
@@ -219,7 +221,7 @@ test("Ordinary conversation projects its frozen run workspace before and after r
   let server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecution("workspace answer", {}),
+    ordinaryAgentExecution: completedExecution(directory, "workspace answer", {}),
   });
   try {
     const submitted = await requestJson(server.url, "/api/conversations", {
@@ -242,7 +244,7 @@ test("Ordinary conversation projects its frozen run workspace before and after r
     server = await startLocalPanelServer({
       port: 0,
       configDirectory: directory,
-      ordinaryAgentExecution: completedExecution("unused", {}),
+      ordinaryAgentExecution: completedExecution(directory, "unused", {}),
     });
     const restored = await requestJson(server.url, `/api/conversations/${conversationId}`);
     const restoredList = await requestJson(server.url, "/api/conversations");
@@ -271,7 +273,7 @@ test("Ordinary submit admitted before shutdown returns an explicit quiescing res
     port: 0,
     configDirectory: directory,
     configCenter: local.configCenter,
-    ordinaryAgentExecution: completedExecution("must not run", {}),
+    ordinaryAgentExecution: completedExecution(directory, "must not run", {}),
   });
   let closed = false;
   try {
@@ -306,7 +308,7 @@ test("Ordinary submit response keeps its command facts when a concurrent delete 
     ordinaryAgentExecution: {
       async execute(input) {
         if (input.runInput.userMessage !== "race submit") {
-          return completedOutcomeFor(input, "seed answer", {});
+          return completedOutcomeFor(directory, input, "seed answer", {});
         }
         raceRunId = input.runId;
         deleteRequest = requestJson(baseUrl, `/api/conversations/${conversationId}`, { method: "DELETE" });
@@ -375,7 +377,7 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
       if (input.runInput.userMessage === "needs approval") {
         const request = confirmation(input.runId);
         const approval = approvalToolResult(request);
-        const session = await prepareToolRound(input, [approval]);
+        const session = await prepareToolRound(directory, input, [approval]);
         await input.onToolResult?.(approval);
         return {
           status: "approval_required",
@@ -391,18 +393,14 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
               assert.equal("toolCallFactId" in decision, false);
               const resolved = resolvedApprovalToolResult(request);
               await input.onToolResult?.(resolved);
-              const toolRoundLeafRef = sessionEntry(input, "tool-result");
-              await input.onSessionWriteCheckpoint?.({
-                kind: "tool_result_entries_committed",
-                sessionId: input.sessionRef.sessionId,
-                toolRoundLeafRef,
-                toolCallIds: [request.toolCallFactId],
-              });
+              const completedSession = await createAgentSessionExecutionTestDriver(directory)
+                .commitToolResults(input, session, [resolved]);
               return completedOutcomeFor(
+                directory,
                 input,
                 "approved",
                 { inputTokens: 4, outputTokens: 1, totalTokens: 5 },
-                toolRoundLeafRef,
+                completedSession,
                 [resolved],
               );
             },
@@ -474,7 +472,7 @@ test("Ordinary conversation HTTP commands preserve queue ownership and attachmen
       if (executionCount === 1) {
         return new Promise((resolve) => { finishFirst = resolve; });
       }
-      return completedOutcomeFor(input, "second answer", { inputTokens: 2, outputTokens: 1, totalTokens: 3 });
+      return completedOutcomeFor(directory, input, "second answer", { inputTokens: 2, outputTokens: 1, totalTokens: 3 });
     },
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, ordinaryAgentExecution: execution });
@@ -517,7 +515,7 @@ test("Ordinary conversation HTTP commands preserve queue ownership and attachmen
 
     assert.notEqual(finishFirst, undefined);
     assert.notEqual(firstExecutionInput, undefined);
-    finishFirst!(await completedOutcomeFor(firstExecutionInput!, "first answer", { inputTokens: 3, outputTokens: 1, totalTokens: 4 }));
+    finishFirst!(await completedOutcomeFor(directory, firstExecutionInput!, "first answer", { inputTokens: 3, outputTokens: 1, totalTokens: 4 }));
     await waitForView(server.url, first.body.run.runId, "completed");
     await waitForView(server.url, second.body.run.runId, "completed");
     assert.equal(executionCount, 2);
@@ -547,7 +545,7 @@ test("Ordinary SSE replays the complete terminal activity history through final.
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecution("streamed answer", { inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+    ordinaryAgentExecution: completedExecution(directory, "streamed answer", { inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
   });
   try {
     const submitted = await requestJson(server.url, "/api/conversations", {
@@ -562,7 +560,12 @@ test("Ordinary SSE replays the complete terminal activity history through final.
     );
     const events = ordinarySseEvents(stream.events);
     assert.equal(stream.status, 200);
-    assert.deepEqual(events.map((event) => event.type), ["run.created", "run.started", "final.result"]);
+    assert.deepEqual(events.map((event) => event.type), [
+      "run.created",
+      "run.started",
+      "model.output.completed",
+      "final.result",
+    ]);
     assert.equal(events.at(-1)?.type, "final.result");
     assert.deepEqual(events.map((event) => event.sequence), [...events.map((event) => event.sequence)].sort((left, right) => left - right));
   } finally {
@@ -576,7 +579,7 @@ test("Ordinary SSE preserves tool.completed before final.result in terminal repl
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecutionWithTool("tool-backed answer", { inputTokens: 2, outputTokens: 1, totalTokens: 3 }),
+    ordinaryAgentExecution: completedExecutionWithTool(directory, "tool-backed answer", { inputTokens: 2, outputTokens: 1, totalTokens: 3 }),
   });
   try {
     const submitted = await requestJson(server.url, "/api/conversations", {
@@ -655,16 +658,11 @@ test("Ordinary SSE delivers request, progress and completion continuously withou
       durationMs: 25,
     };
     assert.notEqual(executionInput, undefined);
-    const session = await prepareToolRound(executionInput!, [result]);
+    const session = await prepareToolRound(directory, executionInput!, [result]);
     await executionInput!.onToolResult?.(result);
-    const toolRoundLeafRef = sessionEntry(executionInput!, "tool-result");
-    await executionInput!.onSessionWriteCheckpoint?.({
-      kind: "tool_result_entries_committed",
-      sessionId: executionInput!.sessionRef.sessionId,
-      toolRoundLeafRef,
-      toolCallIds: [result.callId],
-    });
-    finish?.(await completedOutcomeFor(executionInput!, "done", {}, toolRoundLeafRef, [result]));
+    const completedSession = await createAgentSessionExecutionTestDriver(directory)
+      .commitToolResults(executionInput!, session, [result]);
+    finish?.(await completedOutcomeFor(directory, executionInput!, "done", {}, completedSession, [result]));
 
     const stream = await streamPromise;
     const events = ordinarySseEvents(stream.events);
@@ -688,7 +686,7 @@ test("Ordinary SSE reports an opaque-cursor reset and completes terminal replay 
   let server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    ordinaryAgentExecution: completedExecutionWithTool("persisted answer", { inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+    ordinaryAgentExecution: completedExecutionWithTool(directory, "persisted answer", { inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
   });
   try {
     const submitted = await requestJson(server.url, "/api/conversations", {
@@ -701,7 +699,7 @@ test("Ordinary SSE reports an opaque-cursor reset and completes terminal replay 
     server = await startLocalPanelServer({
       port: 0,
       configDirectory: directory,
-      ordinaryAgentExecution: completedExecution("unused", {}),
+      ordinaryAgentExecution: completedExecution(directory, "unused", {}),
     });
 
     const stream = await requestSse(
@@ -775,7 +773,7 @@ test("Panel close releases a pending Ordinary approval continuation once", async
         async execute(input) {
           const request = confirmation(input.runId);
           const approval = approvalToolResult(request);
-          const session = await prepareToolRound(input, [approval]);
+          const session = await prepareToolRound(directory, input, [approval]);
           await input.onToolResult?.(approval);
           return {
             status: "approval_required",
@@ -785,7 +783,7 @@ test("Panel close releases a pending Ordinary approval continuation once", async
             usage: {},
             continuation: {
             availability: "live_only",
-            async decide() { return completedOutcomeFor(input, "unused", {}); },
+            async decide() { return completedOutcomeFor(directory, input, "unused", {}, session); },
             async release() { releases += 1; },
           },
         };
@@ -808,29 +806,32 @@ test("Panel close releases a pending Ordinary approval continuation once", async
   }
 });
 
-function completedExecution(answer: string, usage: OrdinaryExecutionOutcome["usage"]): OrdinaryExecutionPort {
+function completedExecution(
+  configDirectory: string,
+  answer: string,
+  usage: OrdinaryExecutionOutcome["usage"],
+): OrdinaryExecutionPort {
   return {
     async execute(input) {
       input.onTextDelta?.(answer);
-      return completedOutcomeFor(input, answer, usage);
+      return completedOutcomeFor(configDirectory, input, answer, usage);
     },
   };
 }
 
-function completedExecutionWithTool(answer: string, usage: OrdinaryExecutionOutcome["usage"]): OrdinaryExecutionPort {
+function completedExecutionWithTool(
+  configDirectory: string,
+  answer: string,
+  usage: OrdinaryExecutionOutcome["usage"],
+): OrdinaryExecutionPort {
   return {
     async execute(input) {
       const toolResult = completedToolResult();
-      await prepareToolRound(input, [toolResult]);
+      const session = await prepareToolRound(configDirectory, input, [toolResult]);
       await input.onToolResult?.(toolResult);
-      const toolRoundLeafRef = sessionEntry(input, "tool-result");
-      await input.onSessionWriteCheckpoint?.({
-        kind: "tool_result_entries_committed",
-        sessionId: input.sessionRef.sessionId,
-        toolRoundLeafRef,
-        toolCallIds: [toolResult.callId],
-      });
-      return completedOutcomeFor(input, answer, usage, toolRoundLeafRef, [toolResult]);
+      const completedSession = await createAgentSessionExecutionTestDriver(configDirectory)
+        .commitToolResults(input, session, [toolResult]);
+      return completedOutcomeFor(configDirectory, input, answer, usage, completedSession, [toolResult]);
     },
   };
 }
@@ -873,104 +874,31 @@ function manualGate(): {
   };
 }
 
-function completedOutcome(
+async function completedOutcomeFor(
+  configDirectory: string,
+  input: Parameters<OrdinaryExecutionPort["execute"]>[0],
   answer: string,
   usage: OrdinaryExecutionOutcome["usage"],
-  sessionId = "agent-session-test",
-): OrdinaryExecutionOutcome {
+  session?: AgentSessionExecutionRefs,
+  toolCalls: readonly ToolCallResult[] = [],
+): Promise<OrdinaryExecutionOutcome> {
+  const completedSession = await createAgentSessionExecutionTestDriver(configDirectory)
+    .complete(input, answer, session);
   return {
     status: "completed",
     answer,
-    session: {
-      sessionId,
-      startLeafRef: null,
-      inputEntryRef: { sessionId, entryId: "input-entry" },
-      safeLeafRef: { sessionId, entryId: "assistant-entry" },
-      latestLeafRef: { sessionId, entryId: "assistant-entry" },
-      compactionEntryRefs: [],
-    },
-    toolCalls: [],
+    session: completedSession,
+    toolCalls,
     usage,
   };
 }
 
-async function completedOutcomeFor(
-  input: Parameters<OrdinaryExecutionPort["execute"]>[0],
-  answer: string,
-  usage: OrdinaryExecutionOutcome["usage"],
-  currentLeafRef: ReturnType<typeof sessionEntry> | null = null,
-  toolCalls: readonly ToolCallResult[] = [],
-): Promise<OrdinaryExecutionOutcome> {
-  if (currentLeafRef === null) {
-    await input.onSessionWriteCheckpoint?.({
-      kind: "start_leaf_captured",
-      sessionId: input.sessionRef.sessionId,
-      startLeafRef: null,
-    });
-    await input.onSessionWriteCheckpoint?.({
-      kind: "input_entry_committed",
-      sessionId: input.sessionRef.sessionId,
-      inputEntryRef: sessionEntry(input, "input"),
-    });
-  }
-  const assistantEntryRef = sessionEntry(input, "assistant");
-  await input.onSessionWriteCheckpoint?.({
-    kind: "assistant_response_entry_committed",
-    sessionId: input.sessionRef.sessionId,
-    assistantEntryRef,
-  });
-  return {
-    ...completedOutcome(answer, usage, input.sessionRef.sessionId),
-    session: {
-      sessionId: input.sessionRef.sessionId,
-      startLeafRef: null,
-      inputEntryRef: sessionEntry(input, "input"),
-      safeLeafRef: assistantEntryRef,
-      latestLeafRef: assistantEntryRef,
-      compactionEntryRefs: [],
-    },
-    toolCalls,
-  };
-}
-
 async function prepareToolRound(
+  configDirectory: string,
   input: Parameters<OrdinaryExecutionPort["execute"]>[0],
   results: readonly ToolCallResult[],
-) {
-  await input.onSessionWriteCheckpoint?.({
-    kind: "start_leaf_captured",
-    sessionId: input.sessionRef.sessionId,
-    startLeafRef: null,
-  });
-  const inputEntryRef = sessionEntry(input, "input");
-  await input.onSessionWriteCheckpoint?.({
-    kind: "input_entry_committed",
-    sessionId: input.sessionRef.sessionId,
-    inputEntryRef,
-  });
-  const assistantEntryRef = sessionEntry(input, "tool-call");
-  const toolCallIds = results.map((result) => result.factId ?? result.callId);
-  await input.onSessionWriteCheckpoint?.({
-    kind: "assistant_tool_call_entry_committed",
-    sessionId: input.sessionRef.sessionId,
-    assistantEntryRef,
-    toolCallIds,
-  });
-  return {
-    sessionId: input.sessionRef.sessionId,
-    startLeafRef: null,
-    inputEntryRef,
-    safeLeafRef: assistantEntryRef,
-    latestLeafRef: assistantEntryRef,
-    compactionEntryRefs: [],
-  } as const;
-}
-
-function sessionEntry(
-  input: Parameters<OrdinaryExecutionPort["execute"]>[0],
-  kind: string,
-) {
-  return { sessionId: input.sessionRef.sessionId, entryId: `${input.runId}-${kind}` } as const;
+): Promise<AgentSessionExecutionRefs> {
+  return createAgentSessionExecutionTestDriver(configDirectory).prepareToolRound(input, results);
 }
 
 function confirmation(runId: string): ConfirmationRequest {

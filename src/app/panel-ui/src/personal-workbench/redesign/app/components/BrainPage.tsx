@@ -28,7 +28,7 @@ import { CodeDocumentSurface } from './CodeDocumentSurface'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { useBrain, type ResolvedPage } from './brainStore'
 import { useThemes, type Theme } from './themesStore'
-import { ImageWithFallback } from './figma/ImageWithFallback'
+import { ImageWithFallback } from './ImageWithFallback'
 import { ReferencePreview } from './ReferencePreview'
 
 /**

@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createTaskSoil } from "../../domain/soil/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
+import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import { createSpaceFeature } from "./space-feature.js";
 import { createSpaceToolRegistryContribution, createSpaceTools } from "./space-tools.js";
 import type { SpaceRepository, SpaceTreeSnapshot } from "./contracts.js";
@@ -107,7 +108,7 @@ test("Space tools return malformed and missing user inputs as factual outputs", 
 
 test("Space file tools write only references frozen into the current Task Soil", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-tools-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const allowedFile = path.join(root, "allowed.md");
   const deniedFile = path.join(root, "denied.md");
   await fs.writeFile(allowedFile, "old", "utf8");
@@ -136,7 +137,7 @@ test("Space file tools write only references frozen into the current Task Soil",
 
 test("Space folder grants keep edits relative to their frozen root", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-folder-tools-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const note = path.join(root, "note.md");
   await fs.writeFile(note, "before", "utf8");
   const { spaces } = toolsFixture();

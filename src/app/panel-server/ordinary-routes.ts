@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { OrdinaryRunActivity, OrdinaryRunActivityCursor, OrdinaryRunState } from "../ordinary-agent/contracts.js";
+import { durableOrdinaryRunReplayFromState } from "../ordinary-agent/ordinary-agent-feature.js";
 import { nowIso } from "../../kernel/id.js";
 import {
   encodeOrdinaryPanelCursor,
@@ -239,7 +240,8 @@ async function projectCommandRun(runtime: PanelRuntime, run: OrdinaryRunState): 
   readonly state: OrdinaryRunState;
   readonly view: OrdinaryPanelRunView;
 }> {
-  const fullReplay = await runtime.ordinaryAgentFeature.events.replay(run.runId);
+  const fullReplay = await runtime.ordinaryAgentFeature.events.replay(run.runId)
+    ?? (run.status.kind === "completed" ? undefined : durableOrdinaryRunReplayFromState(run, []));
   if (fullReplay === undefined) {
     throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行视图。");
   }

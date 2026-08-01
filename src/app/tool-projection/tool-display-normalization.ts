@@ -1,12 +1,12 @@
 import { stringOrUndefined } from "../../kernel/values/index.js";
 import type { ToolDisplayProjection } from "../../domain/observation/index.js";
-import type { ToolFileDisplayOperation } from "../../domain/tools/index.js";
-import { normalizeToolFactValue, toolDisplayName } from "../../domain/tools/index.js";
+import type { ToolFactValue, ToolFileDisplayOperation } from "../../domain/tools/index.js";
+import { toolDisplayName } from "../../domain/tools/index.js";
 
 export type ToolDisplayNormalizationInput = {
   readonly toolName: string;
-  readonly input?: unknown;
-  readonly output?: unknown;
+  readonly input?: ToolFactValue;
+  readonly output?: ToolFactValue;
 };
 
 export function normalizeToolDisplayForOperation(input: ToolDisplayNormalizationInput): ToolDisplayProjection {
@@ -369,12 +369,12 @@ function genericToolDisplayForOperation(input: ToolDisplayNormalizationInput): T
   };
 }
 
-export function projectToolDisplayResultFacts(output: unknown): Pick<ToolDisplayProjection, "truncated" | "continuation"> {
+export function projectToolDisplayResultFacts(output: ToolFactValue | undefined): Pick<ToolDisplayProjection, "truncated" | "continuation"> {
   const record = asRecord(output);
   const continuation = asRecord(record.continuation);
   const ref = stringOrUndefined(continuation.ref);
   const note = stringOrUndefined(continuation.note);
-  const nextInput = normalizeToolFactValue(continuation.nextInput);
+  const nextInput = continuation.nextInput as ToolFactValue | undefined;
   return {
     truncated: booleanOrUndefined(record.truncated),
     continuation: ref === undefined && note === undefined && nextInput === undefined

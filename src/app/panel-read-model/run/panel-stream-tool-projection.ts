@@ -48,7 +48,7 @@ export function toolStreamDetail(
     callId: stringOrUndefined(payload.callId) ?? "panel-tool",
     toolName,
     input: cloneToolFactValue(input),
-  }, output);
+  }, cloneToolFactValue(output));
   const errorDomain = errorDomainFromToolFacts(payload, outputRecord);
   const errorFacts = errorFactsFromToolFacts(payload, outputRecord);
   return {

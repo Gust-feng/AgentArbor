@@ -6,11 +6,12 @@ import test from "node:test";
 
 import { createSpaceFeature, emptySpaceTreeSnapshot } from "../spaces/space-feature.js";
 import { spaceReferenceAttachmentId } from "../spaces/space-file-access.js";
+import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import { reconcileMissingRunSpaceFiles } from "./space-file-reference-reconciliation.js";
 
 test("Ordinary terminal reconciliation unlinks a frozen local file only after it is missing", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-file-reconcile-"));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(directory));
   const source = path.join(directory, "linked.md");
   await fs.writeFile(source, "content", "utf8");
   const feature = memorySpaceFeature();

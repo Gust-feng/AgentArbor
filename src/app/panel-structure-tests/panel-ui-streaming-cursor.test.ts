@@ -1,30 +1,20 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
+
 import { readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
 
-test("streaming assistant answers keep streaming text without a visible cursor node", async () => {
-  const [chatTranscriptChain, chatMessageStyles, richTextStyles] = await Promise.all([
-    readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
-    readPanelUiStyle("chat-message.css"),
+test("streaming assistant answers render through RichText without a visible cursor node", async () => {
+  const [transcript, richText, richTextStyles] = await Promise.all([
+    readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "RedesignTranscript.tsx")),
+    readPanelUiSource(path.join("components", "rich-text.tsx")),
     readPanelUiStyle("rich-text.css"),
   ]);
 
-  assert.equal(chatTranscriptChain.includes("LiveStreamBox"), true);
-  assert.equal(chatTranscriptChain.includes('className="rich-text rich-text-streaming"'), false);
-  assert.equal(chatTranscriptChain.includes(
-    'renderText={(displayed) => <StreamingRichText text={displayed} live={false} />}',
-  ), true);
-  assert.equal(chatTranscriptChain.includes(
-    'renderStreamingText={(displayed) => <StreamingRichText text={displayed} />}',
-  ), true);
-  assert.equal(chatTranscriptChain.includes("stabilizeStreamingMarkdown(displayed)"), false);
-  assert.equal(chatTranscriptChain.includes('"data-entering"'), false);
-  assert.equal(chatTranscriptChain.includes('className="stream-cursor"'), false);
-  assert.equal(chatMessageStyles.includes(".assistant-message[data-entering]"), false);
-  assert.equal(chatMessageStyles.includes(".stream-cursor"), false);
-  assert.equal(chatMessageStyles.includes("stream-cursor-blink"), false);
-  assert.equal(richTextStyles.includes(".rich-text-streaming"), false);
-  assert.equal(richTextStyles.includes(".stream-cursor"), false);
-  assert.equal(richTextStyles.includes("stream-cursor-blink"), false);
+  assert.match(transcript, /props\.live \? <StreamingRichText text=\{props\.text\} live \/>/u);
+  assert.match(richText, /splitStreamingMarkdown\(text\)/u);
+  assert.match(richText, /stabilizeStreamingMarkdown\(segments\.activeBlock\)/u);
+  assert.doesNotMatch(transcript, /stream-cursor|data-entering/u);
+  assert.doesNotMatch(richText, /stream-cursor|data-entering/u);
+  assert.doesNotMatch(richTextStyles, /stream-cursor|stream-cursor-blink/u);
 });

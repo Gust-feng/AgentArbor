@@ -1,5 +1,5 @@
 import type { ToolDisplayProjection } from "../../domain/observation/index.js";
-import type { ToolCallRequest } from "../../domain/tools/index.js";
+import type { ToolCallRequest, ToolFactValue } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
 import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
 import {
@@ -18,14 +18,14 @@ import {
 } from "./tool-result-facts.js";
 const SEARCH_DISPLAY_RESULTS_LIMIT = 20;
 
-export function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
+export function projectToolDisplay(request: ToolCallRequest, output: ToolFactValue | undefined): ToolDisplayProjection {
   return {
     ...projectToolDisplayCore(request, output),
     ...projectToolDisplayResultFacts(output),
   };
 }
 
-function projectToolDisplayCore(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
+function projectToolDisplayCore(request: ToolCallRequest, output: ToolFactValue | undefined): ToolDisplayProjection {
   const record = asRecord(output);
   const input = asRecord(request.input);
   if (request.toolName === "ResearchSearch") {

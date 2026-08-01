@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import {
   contentFingerprint,
   createDirectory,
@@ -28,7 +29,7 @@ test("local filesystem normalizes language aliases used by document presentation
 
 test("local filesystem resolves only normalized paths inside an authorized root", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-local-fs-path-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   await fs.mkdir(path.join(root, "notes"));
   await fs.writeFile(path.join(root, "notes", "one.md"), "one", "utf8");
 
@@ -43,7 +44,7 @@ test("local filesystem resolves only normalized paths inside an authorized root"
 
 test("local filesystem lists deterministic entry kinds and performs explicit mutations", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-local-fs-mutation-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   await fs.mkdir(path.join(root, "z-folder"));
   await fs.writeFile(path.join(root, "b.txt"), "b", "utf8");
   await fs.writeFile(path.join(root, "a.txt"), "a", "utf8");
@@ -68,7 +69,7 @@ test("local filesystem lists deterministic entry kinds and performs explicit mut
 
 test("local filesystem text writes enforce the expected content fingerprint", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-local-fs-write-"));
-  t.after(async () => await fs.rm(root, { recursive: true, force: true }));
+  t.after(() => removeTestDirectory(root));
   const file = path.join(root, "note.md");
   await fs.writeFile(file, "first", "utf8");
 

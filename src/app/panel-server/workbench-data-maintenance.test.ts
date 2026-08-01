@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import { createSqlitePersonalKnowledgeRepository } from "../personal-knowledge/index.js";
 import { createSqliteSpaceRepository } from "../spaces/index.js";
+import { makeTestDirectory, removeTestDirectory } from "../testing/fs-test-directories.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import {
   applyPendingWorkbenchRestore,
@@ -15,8 +15,8 @@ import {
 } from "./workbench-data-maintenance.js";
 
 test("Workbench data maintenance backs up, stages and atomically applies a validated restore", async (t) => {
-  const runtimeHome = await mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-data-"));
-  t.after(() => rm(runtimeHome, { recursive: true, force: true }));
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-data-");
+  t.after(() => removeTestDirectory(runtimeHome));
   const currentPath = path.join(runtimeHome, "workbench.sqlite3");
   const restorePath = path.join(runtimeHome, "selected.sqlite3");
   const current = new SqliteRuntimeDatabase(currentPath);
@@ -80,8 +80,8 @@ test("Workbench data maintenance backs up, stages and atomically applies a valid
 });
 
 test("Workbench backup leaves no selectable partial bundle after a failed database snapshot", async (t) => {
-  const runtimeHome = await mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-backup-failure-"));
-  t.after(() => rm(runtimeHome, { recursive: true, force: true }));
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-backup-failure-");
+  t.after(() => removeTestDirectory(runtimeHome));
   const database = {
     filePath: path.join(runtimeHome, "workbench.sqlite3"),
     health: () => ({ ok: true, checks: ["ok"], migrations: [] }),
@@ -99,8 +99,8 @@ test("Workbench backup leaves no selectable partial bundle after a failed databa
 });
 
 test("Workbench backup holds the owned-storage root lease for the complete snapshot", async (t) => {
-  const runtimeHome = await mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-backup-lease-"));
-  t.after(() => rm(runtimeHome, { recursive: true, force: true }));
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-backup-lease-");
+  t.after(() => removeTestDirectory(runtimeHome));
   const coordinator = new InMemoryLocalWorkspaceMutationCoordinator();
   const mutationEvents: string[] = [];
   coordinator.events.subscribe((event) => mutationEvents.push(event.absolutePath));
@@ -139,8 +139,8 @@ test("Workbench backup holds the owned-storage root lease for the complete snaps
 });
 
 test("Workbench restore normalizes legacy v1 knowledge-only backup bundles", async (t) => {
-  const runtimeHome = await mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-v1-restore-"));
-  t.after(() => rm(runtimeHome, { recursive: true, force: true }));
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-v1-restore-");
+  t.after(() => removeTestDirectory(runtimeHome));
   const currentPath = path.join(runtimeHome, "workbench.sqlite3");
   const legacyPath = path.join(runtimeHome, "legacy.sqlite3");
   const current = new SqliteRuntimeDatabase(currentPath);
@@ -172,8 +172,8 @@ test("Workbench restore normalizes legacy v1 knowledge-only backup bundles", asy
 });
 
 test("Workbench restore rejects an incomplete pending bundle before replacing current data", async (t) => {
-  const runtimeHome = await mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-restore-invalid-"));
-  t.after(() => rm(runtimeHome, { recursive: true, force: true }));
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-restore-invalid-");
+  t.after(() => removeTestDirectory(runtimeHome));
   const currentPath = path.join(runtimeHome, "workbench.sqlite3");
   const current = new SqliteRuntimeDatabase(currentPath);
   createSqliteSpaceRepository(current);

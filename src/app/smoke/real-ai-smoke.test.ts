@@ -5,6 +5,7 @@ import test from "node:test";
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
 import type { OrdinaryExecutionPort } from "../ordinary-agent/index.js";
+import { createAgentSessionExecutionTestDriver } from "../testing/agent-session-execution-driver.js";
 import { runRealAiSmoke } from "./real-ai-smoke-runner.js";
 
 const configuredEnv = {
@@ -37,7 +38,7 @@ test("real AI smoke traverses the production Agent Session loop through a local 
 test("real AI smoke uses the formal Ordinary feature entry and reports canonical completion", async () => {
   const summary = await runRealAiSmoke("finish the smoke", {
     env: configuredEnv,
-    ordinaryAgentExecution: completedExecution("formal Ordinary answer"),
+    ordinaryAgentExecution: (configDirectory) => completedExecution(configDirectory, "formal Ordinary answer"),
   });
 
   assert.equal(summary.status, "completed");
@@ -52,9 +53,10 @@ test("real AI smoke uses the formal Ordinary feature entry and reports canonical
 test("real AI smoke rejects a completed run without a persisted tool fact", async () => {
   const summary = await runRealAiSmoke("finish without tools", {
     env: configuredEnv,
-    ordinaryAgentExecution: {
+    ordinaryAgentExecution: (configDirectory) => ({
       async execute(input) {
-        const session = await prepareCompletedSession(input);
+        const session = await createAgentSessionExecutionTestDriver(configDirectory)
+          .complete(input, "unsupported smoke success");
         return {
           status: "completed",
           answer: "unsupported smoke success",
@@ -63,7 +65,7 @@ test("real AI smoke rejects a completed run without a persisted tool fact", asyn
           usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
         };
       },
-    },
+    }),
   });
 
   assert.equal(summary.status, "failed");
@@ -76,10 +78,11 @@ test("real AI smoke returns an approval pause immediately instead of waiting for
   const summary = await runRealAiSmoke("request approval", {
     env: configuredEnv,
     timeoutMs: 2_000,
-    ordinaryAgentExecution: {
+    ordinaryAgentExecution: (configDirectory) => ({
       async execute(input) {
         const approval = approvalToolResult(request);
-        const session = await prepareToolRound(input, approval);
+        const session = await createAgentSessionExecutionTestDriver(configDirectory)
+          .prepareToolRound(input, [approval]);
         await input.onToolResult?.(approval);
         return {
           status: "approval_required",
@@ -94,7 +97,7 @@ test("real AI smoke returns an approval pause immediately instead of waiting for
           },
         };
       },
-    },
+    }),
   });
 
   assert.equal(summary.status, "failed");
@@ -105,7 +108,7 @@ test("real AI smoke returns an approval pause immediately instead of waiting for
 test("real AI smoke reports an Ordinary terminal failure without inventing an answer", async () => {
   const summary = await runRealAiSmoke("fail the smoke", {
     env: { ...configuredEnv, AGENTARBOR_MODEL_PROTOCOL: "openai_responses" },
-    ordinaryAgentExecution: {
+    ordinaryAgentExecution: () => ({
       async execute() {
         return {
           status: "failed",
@@ -114,7 +117,7 @@ test("real AI smoke reports an Ordinary terminal failure without inventing an an
           usage: {},
         };
       },
-    },
+    }),
   });
 
   assert.deepEqual(summary.status, "failed");
@@ -133,23 +136,19 @@ test("real AI smoke skips before creating runtime resources when configuration i
   });
 });
 
-function completedExecution(answer: string): OrdinaryExecutionPort {
+function completedExecution(configDirectory: string, answer: string): OrdinaryExecutionPort {
   return {
     async execute(input) {
+      const driver = createAgentSessionExecutionTestDriver(configDirectory);
       const toolResult = completedToolResult();
-      await prepareToolRound(input, toolResult);
+      const session = await driver.prepareToolRound(input, [toolResult]);
       await input.onToolResult?.(toolResult);
-      await input.onSessionWriteCheckpoint?.({
-        kind: "tool_result_entries_committed",
-        sessionId: input.sessionRef.sessionId,
-        toolRoundLeafRef: entry(input, "tool-result"),
-        toolCallIds: [toolResult.callId],
-      });
-      const session = await prepareCompletedSession(input, true);
+      const completedToolSession = await driver.commitToolResults(input, session, [toolResult]);
+      const completedSession = await driver.complete(input, answer, completedToolSession);
       return {
         status: "completed",
         answer,
-        session,
+        session: completedSession,
         toolCalls: [toolResult],
         usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
       };
@@ -166,74 +165,6 @@ function completedToolResult(): ToolCallResult {
     status: "completed",
     durationMs: 2,
   };
-}
-
-async function prepareCompletedSession(
-  input: Parameters<OrdinaryExecutionPort["execute"]>[0],
-  hasExistingSession = false,
-) {
-  if (!hasExistingSession) {
-    await input.onSessionWriteCheckpoint?.({
-      kind: "start_leaf_captured",
-      sessionId: input.sessionRef.sessionId,
-      startLeafRef: null,
-    });
-    await input.onSessionWriteCheckpoint?.({
-      kind: "input_entry_committed",
-      sessionId: input.sessionRef.sessionId,
-      inputEntryRef: entry(input, "input"),
-    });
-  }
-  const assistantEntryRef = entry(input, "assistant");
-  await input.onSessionWriteCheckpoint?.({
-    kind: "assistant_response_entry_committed",
-    sessionId: input.sessionRef.sessionId,
-    assistantEntryRef,
-  });
-  return {
-    sessionId: input.sessionRef.sessionId,
-    startLeafRef: null,
-    inputEntryRef: entry(input, "input"),
-    safeLeafRef: assistantEntryRef,
-    latestLeafRef: assistantEntryRef,
-    compactionEntryRefs: [],
-  } as const;
-}
-
-async function prepareToolRound(
-  input: Parameters<OrdinaryExecutionPort["execute"]>[0],
-  result: ToolCallResult,
-) {
-  await input.onSessionWriteCheckpoint?.({
-    kind: "start_leaf_captured",
-    sessionId: input.sessionRef.sessionId,
-    startLeafRef: null,
-  });
-  const inputEntryRef = entry(input, "input");
-  await input.onSessionWriteCheckpoint?.({
-    kind: "input_entry_committed",
-    sessionId: input.sessionRef.sessionId,
-    inputEntryRef,
-  });
-  const assistantEntryRef = entry(input, "tool-call");
-  await input.onSessionWriteCheckpoint?.({
-    kind: "assistant_tool_call_entry_committed",
-    sessionId: input.sessionRef.sessionId,
-    assistantEntryRef,
-    toolCallIds: [result.callId],
-  });
-  return {
-    sessionId: input.sessionRef.sessionId,
-    startLeafRef: null,
-    inputEntryRef,
-    safeLeafRef: assistantEntryRef,
-    latestLeafRef: assistantEntryRef,
-    compactionEntryRefs: [],
-  } as const;
-}
-
-function entry(input: Parameters<OrdinaryExecutionPort["execute"]>[0], kind: string) {
-  return { sessionId: input.sessionRef.sessionId, entryId: `${input.runId}-${kind}` } as const;
 }
 
 function confirmation(runId: string): ConfirmationRequest {

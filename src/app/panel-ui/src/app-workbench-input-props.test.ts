@@ -13,10 +13,40 @@ describe("ordinary workbench input", () => {
     view.inputProps.onCancel?.();
     expect(cancelCalls).toBe(1);
   });
+
+  it("queues a message while the current response is active", () => {
+    let queued = "";
+    let goal = "next instruction";
+    let startCalls = 0;
+    const view = buildWorkbenchInputProps(options({
+      busy: true,
+      goal,
+      enqueueMessage: (content) => { queued = content; },
+      setGoal: (value) => { goal = value; },
+      startTask: () => { startCalls += 1; },
+    }));
+
+    expect(view.inputProps.allowInputWhileBusy).toBe(true);
+    view.inputProps.onSubmit();
+    expect(queued).toBe("next instruction");
+    expect(goal).toBe("");
+    expect(startCalls).toBe(0);
+  });
+
+  it("starts a task when no response is active", () => {
+    let startCalls = 0;
+    const view = buildWorkbenchInputProps(options({
+      modelResponding: false,
+      startTask: () => { startCalls += 1; },
+    }));
+
+    view.inputProps.onSubmit();
+    expect(startCalls).toBe(1);
+  });
 });
 
 function options(
-  overrides: Partial<Pick<WorkbenchInputPropsOptions, "modelResponding" | "cancelRun">> = {},
+  overrides: Partial<WorkbenchInputPropsOptions> = {},
 ): WorkbenchInputPropsOptions {
   return {
     agentClusterActive: false,

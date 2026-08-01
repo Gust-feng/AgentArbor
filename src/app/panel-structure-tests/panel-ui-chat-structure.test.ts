@@ -5,13 +5,14 @@ import test from "node:test";
 import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
 
 test("panel conversation rendering has one Redesign-owned production path", async () => {
-  const [main, personalWorkbench, workbench, transcript, evidence, confirmation, richText, richTextStyle, globalStyles, styleEntry] = await Promise.all([
+  const [main, personalWorkbench, workbench, transcript, evidence, confirmation, topBar, richText, richTextStyle, globalStyles, styleEntry] = await Promise.all([
     readPanelUiSource("main.tsx"),
     readPanelUiSource(path.join("personal-workbench", "personal-workbench.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "agentarbor-workbench.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "RedesignTranscript.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "ActivityEvidence.tsx")),
     readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "ConfirmationCard.tsx")),
+    readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "TopBar.tsx")),
     readPanelUiSource(path.join("components", "rich-text.tsx")),
     readPanelUiStyle("rich-text.css"),
     readPanelUiSource("styles.css"),
@@ -22,6 +23,8 @@ test("panel conversation rendering has one Redesign-owned production path", asyn
   assert.match(personalWorkbench, /from "\.\/redesign\/app\/App"/u);
   assert.match(workbench, /<RedesignTranscript/u);
   assert.match(workbench, /projectChatActiveView/u);
+  assert.match(workbench, /surfaceTitle=\{surfaceTitle\}/u);
+  assert.doesNotMatch(topBar, /关于机器学习的学习方法|认知偏见与阅读整理/u);
 
   assert.match(transcript, /projectConversationDisplayList/u);
   assert.match(transcript, /useSyncExternalStore/u);

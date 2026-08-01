@@ -44,6 +44,24 @@ test('does not render the search trigger on the search page', () => {
   expect(screen.queryByRole('button', { name: '搜索内容与文件' })).toBeNull()
 })
 
+test('renders the active surface title supplied by the workbench', () => {
+  render(
+    <TopBar
+      view="conv-active"
+      surfaceTitle="当前真实会话"
+      onNavigate={vi.fn()}
+      onSearch={vi.fn()}
+      sidebarCollapsed={false}
+      onToggleSidebar={vi.fn()}
+      brainFileTitle={null}
+      onBrainRoot={vi.fn()}
+    />,
+  )
+
+  expect(screen.getByText('当前真实会话')).toBeTruthy()
+  expect(screen.queryByText('关于机器学习的学习方法')).toBeNull()
+})
+
 test('connects frameless desktop window controls to the preload bridge', () => {
   const minimizeWindow = vi.fn()
   const toggleMaximizeWindow = vi.fn()

@@ -99,6 +99,11 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
 
   const activeConversation = props.conversation;
   const hasAttention = needsConversationAttention(props);
+  const surfaceTitle = view === "space"
+    ? props.spaces?.find((space) => space.spaceId === activeSpaceId)?.title ?? "空间"
+    : isConversationView(view)
+      ? activeConversation?.title ?? "新的对话"
+      : undefined;
 
   useEffect(() => {
     setPersonalKnowledgePersistenceEnabled(props.personalKnowledgePersistenceEnabled === true);
@@ -225,6 +230,7 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
           onSearch={() => navigate("search")}
           sidebarCollapsed={props.sidebarCollapsed}
           onToggleSidebar={props.onToggleSidebar}
+          surfaceTitle={surfaceTitle}
           brainFileTitle={brainSelectedId === null ? null : resolveById(brainSelectedId, props.spaces ?? [])?.title ?? null}
           onBrainRoot={() => setBrainSelectedId(null)}
         />

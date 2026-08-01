@@ -9,6 +9,7 @@ interface TopBarProps {
   onSearch: () => void
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
+  surfaceTitle?: string
   // 知识库路径面包屑:打开的文件标题(无则在知识库根部);点根部回到知识库列表。
   brainFileTitle: string | null
   onBrainRoot: () => void
@@ -17,23 +18,17 @@ interface TopBarProps {
 // 有自己完整 header 的视图 → TopBar 只保留返回 + 标题
 const MINIMAL_VIEWS: View[] = ['conv-active', 'conv-done', 'space']
 
-const VIEW_TITLE: Partial<Record<View, string>> = {
-  'conv-active': '关于机器学习的学习方法',
-  'conv-done': '认知偏见与阅读整理',
-  space: '学习空间',
-}
-
 export function TopBar({
   view,
   onNavigate,
   onSearch,
   sidebarCollapsed,
   onToggleSidebar,
+  surfaceTitle,
   brainFileTitle,
   onBrainRoot,
 }: TopBarProps) {
   const isMinimal = MINIMAL_VIEWS.includes(view)
-  const title = VIEW_TITLE[view]
   const desktopShell = typeof window !== 'undefined' && window.agentarborDesktop !== undefined
 
   return (
@@ -129,12 +124,12 @@ export function TopBar({
             </button>
 
             {/* minimal 视图：在 TopBar 展示当前页标题作为路径标记 */}
-            {isMinimal && title && (
+            {isMinimal && surfaceTitle && (
               <span
                 className="text-xs truncate max-w-[200px] -ml-1"
                 style={{ color: 'var(--aa-text-3)' }}
               >
-                {title}
+                {surfaceTitle}
               </span>
             )}
           </>

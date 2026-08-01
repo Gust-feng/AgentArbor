@@ -813,6 +813,36 @@ test("startup isolates a damaged Session while healthy conversations and new tas
   assert.deepEqual(diagnostics, ["damaged-conversation"]);
 });
 
+test("startup enumeration failures stay diagnostic while new runs remain available", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-startup-enumeration-"));
+  const durableRuns = createFileSystemOrdinaryRunRepository(root);
+  const durableConversations = createFileSystemOrdinaryConversationControlRepository(root);
+  const sessions = new SessionHarness();
+  const diagnostics: string[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRuns,
+      async list() { throw new Error("run enumeration unavailable"); },
+    },
+    conversationRepository: {
+      ...durableConversations,
+      async list() { throw new Error("conversation enumeration unavailable"); },
+    },
+    sessionRepository: sessions,
+    execution: { execute: (input) => completedOutcome(input, "new answer", sessions) },
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "startup_recovery_failed") diagnostics.push(diagnostic.source);
+    },
+    now: clock("2026-01-01T00:01:00.000Z"),
+    idFactory: ids(100),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("live-after-enumeration-failure"));
+  await waitForStatus(feature, "live-after-enumeration-failure", "completed");
+  assert.deepEqual(diagnostics.sort(), ["conversation_repository", "run_repository"]);
+});
+
 test("feature release aborts live execution and releases its owned resources", async (t) => {
   const gate = createGate();
   const order: string[] = [];
@@ -871,6 +901,57 @@ test("a failed Session finalization surfaces a diagnostic and does not permanent
   const state = await waitForStatus(feature, "finalize-retry-2", "completed");
   assert.equal(state.status.kind, "completed");
   assert.equal(finalizeAttempts >= 3, true);
+});
+
+test("successor activation retries one transient persistence failure", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-successor-activation-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  let activationSaveFailures = 1;
+  let releasePredecessor!: () => void;
+  const predecessorReleased = new Promise<void>((resolve) => { releasePredecessor = resolve; });
+  let markPredecessorStarted!: () => void;
+  const predecessorStarted = new Promise<void>((resolve) => { markPredecessorStarted = resolve; });
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async save(state, expectedRevision) {
+        if (state.runId === "activation-successor" && state.status.kind === "running" && activationSaveFailures > 0) {
+          activationSaveFailures -= 1;
+          throw new Error("transient successor save failure");
+        }
+        return durableRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        const prepared = await prepareSession(input, sessions);
+        if (input.runId === "activation-predecessor") {
+          markPredecessorStarted();
+          await predecessorReleased;
+        }
+        return completedOutcome(input, `answer ${input.runId}`, sessions, prepared);
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("activation-predecessor"));
+  await predecessorStarted;
+  const successor = startInput("activation-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "activation-predecessor" },
+  });
+  assert.equal((await feature.queries.getRun("activation-successor"))?.status.kind, "queued");
+
+  releasePredecessor();
+  await waitForStatus(feature, "activation-successor", "completed");
+  assert.equal(activationSaveFailures, 0);
 });
 
 test("stable terminal facts appear only after terminal commit and notify subscribers", async (t) => {

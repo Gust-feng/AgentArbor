@@ -88,6 +88,7 @@ export function createOrdinaryAgentFeature(input: {
   const sessionFinalizationPending = new Set<string>();
   const sessionFinalizationFailures = new Map<string, unknown>();
   const sessionFinalizationRetries = new Map<string, Promise<void>>();
+  const successorActivationAttempts = new Map<string, Promise<void>>();
   const visibleAssistantBuffers = new Map<string, string>();
   const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
   let released = false;
@@ -105,62 +106,77 @@ export function createOrdinaryAgentFeature(input: {
   void readyPromise.catch(() => undefined);
 
   async function recoverPersistedRuns(): Promise<void> {
-    for (const summary of await input.conversationRepository.list(Number.MAX_SAFE_INTEGER)) {
-      const document = await input.conversationRepository.get(summary.conversationId);
-      if (document !== undefined) conversationDocuments.set(summary.conversationId, document);
+    let conversationSummaries: readonly Awaited<ReturnType<OrdinaryConversationControlRepository["list"]>>[number][] = [];
+    try {
+      conversationSummaries = await input.conversationRepository.list(Number.MAX_SAFE_INTEGER);
+    } catch (error) {
+      emitDiagnostic({ kind: "startup_recovery_failed", source: "conversation_repository", error });
     }
-    for (const summary of await input.repository.list(Number.MAX_SAFE_INTEGER)) {
+    for (const summary of conversationSummaries) {
+      try {
+        const document = await input.conversationRepository.get(summary.conversationId);
+        if (document !== undefined) conversationDocuments.set(summary.conversationId, document);
+      } catch (error) {
+        markConversationUnavailable(summary.conversationId, error);
+      }
+    }
+    let runSummaries: readonly Awaited<ReturnType<OrdinaryRunRepository["list"]>>[number][] = [];
+    try {
+      runSummaries = await input.repository.list(Number.MAX_SAFE_INTEGER);
+    } catch (error) {
+      emitDiagnostic({ kind: "startup_recovery_failed", source: "run_repository", error });
+    }
+    for (const summary of runSummaries) {
       if (unavailableConversationIds.has(summary.conversationId)) continue;
-      let document = await input.repository.get(summary.runId);
-      if (document === undefined) continue;
-      // Cache the durable run before Session recovery so an unavailable transcript
-      // cannot force unrelated conversations to reopen this run during startup.
-      documents.set(summary.runId, document);
-      // Settled terminal runs receive no further activities; their streams are
-      // pure projections of the persisted timeline and are rebuilt on demand by
-      // replay (which passes the rebuild inputs). Materializing them here would
-      // duplicate every historical run's timeline in memory for the whole
-      // process lifetime. Runs that still need recovery below (pending tool
-      // rounds, lost approvals) keep an eager stream because those paths append
-      // activities through bare streamFor(runId), which must not start empty.
-      if (needsLiveActivityStream(document.state)) {
-        try {
+      try {
+        let document = await input.repository.get(summary.runId);
+        if (document === undefined) continue;
+        // Cache the durable run before Session recovery so an unavailable transcript
+        // cannot force unrelated conversations to reopen this run during startup.
+        documents.set(summary.runId, document);
+        // Settled terminal runs receive no further activities; their streams are
+        // pure projections of the persisted timeline and are rebuilt on demand by
+        // replay (which passes the rebuild inputs). Materializing them here would
+        // duplicate every historical run's timeline in memory for the whole
+        // process lifetime. Runs that still need recovery below (pending tool
+        // rounds, lost approvals) keep an eager stream because those paths append
+        // activities through bare streamFor(runId), which must not start empty.
+        if (needsLiveActivityStream(document.state)) {
           await restorePersistedActivityStream(document.state);
-        } catch (error) {
-          markConversationUnavailable(summary.conversationId, error);
+        }
+        if (document.state.status.kind === "awaiting_approval") {
+          await blockLostApproval(summary.runId, {
+            code: "confirmation_continuation_lost",
+            message: "The live confirmation continuation was lost when the process restarted.",
+          });
           continue;
         }
-      }
-      if (document.state.status.kind === "awaiting_approval") {
-        await blockLostApproval(summary.runId, {
-          code: "confirmation_continuation_lost",
-          message: "The live confirmation continuation was lost when the process restarted.",
-        });
-        continue;
-      }
-      if (document.state.pendingToolRound !== undefined) {
-        await reconcilePendingToolRound(summary.runId);
-        document = await load(summary.runId);
-        if (document === undefined) continue;
-      }
-      if (document.state.toolCalls.some((result) => result.status === "approval_required")) {
-        await reconcileLostApprovalResults(summary.runId);
-        document = await load(summary.runId);
-        if (document === undefined) continue;
-      }
-      if (document.state.status.kind === "running") {
-        const unknownToolOutcome = document.state.toolCalls.some((result) =>
-          result.errorFacts?.code === "tool_execution_outcome_unknown");
-        await mutate(summary.runId, {
-          type: "block",
-          reason: {
-            code: unknownToolOutcome ? "tool_execution_outcome_unknown" : "execution_continuation_lost",
-            message: unknownToolOutcome
-              ? "The process restarted before at least one tool outcome could be determined. The call was not replayed."
-              : "The live execution was interrupted when the process restarted.",
-          },
-          continueBy: "new_turn",
-        });
+        if (document.state.pendingToolRound !== undefined) {
+          await reconcilePendingToolRound(summary.runId);
+          document = await load(summary.runId);
+          if (document === undefined) continue;
+        }
+        if (document.state.toolCalls.some((result) => result.status === "approval_required")) {
+          await reconcileLostApprovalResults(summary.runId);
+          document = await load(summary.runId);
+          if (document === undefined) continue;
+        }
+        if (document.state.status.kind === "running") {
+          const unknownToolOutcome = document.state.toolCalls.some((result) =>
+            result.errorFacts?.code === "tool_execution_outcome_unknown");
+          await mutate(summary.runId, {
+            type: "block",
+            reason: {
+              code: unknownToolOutcome ? "tool_execution_outcome_unknown" : "execution_continuation_lost",
+              message: unknownToolOutcome
+                ? "The process restarted before at least one tool outcome could be determined. The call was not replayed."
+                : "The live execution was interrupted when the process restarted.",
+            },
+            continueBy: "new_turn",
+          });
+        }
+      } catch (error) {
+        markConversationUnavailable(summary.conversationId, error);
       }
     }
     for (const [conversationId, control] of conversationDocuments) {
@@ -174,26 +190,30 @@ export function createOrdinaryAgentFeature(input: {
         markConversationUnavailable(conversationId, error);
       }
     }
-    for (const document of documents.values()) {
+    for (const document of [...documents.values()]) {
       if (document.state.status.kind !== "queued") continue;
       const conversationId = document.state.turn.conversationId;
       if (unavailableConversationIds.has(conversationId)) continue;
-      if (document.state.turn.predecessorRunId === undefined) {
-        await activateRootQueued(document.state.runId);
-        continue;
-      }
-      const predecessor = documents.get(document.state.turn.predecessorRunId);
-      if (predecessor === undefined) {
-        await mutate(document.state.runId, {
-          type: "block",
-          reason: {
-            code: "predecessor_run_unavailable",
-            message: "The predecessor run is unavailable or incompatible. This queued run was not started.",
-          },
-          continueBy: "new_turn",
-        });
-      } else if (isTerminal(predecessor.state)) {
-        await activateSuccessor(predecessor.state.runId);
+      try {
+        if (document.state.turn.predecessorRunId === undefined) {
+          await activateRootQueued(document.state.runId);
+          continue;
+        }
+        const predecessor = documents.get(document.state.turn.predecessorRunId);
+        if (predecessor === undefined) {
+          await mutate(document.state.runId, {
+            type: "block",
+            reason: {
+              code: "predecessor_run_unavailable",
+              message: "The predecessor run is unavailable or incompatible. This queued run was not started.",
+            },
+            continueBy: "new_turn",
+          });
+        } else if (isTerminal(predecessor.state)) {
+          await activateSuccessor(predecessor.state.runId);
+        }
+      } catch (error) {
+        markConversationUnavailable(conversationId, error);
       }
     }
   }
@@ -1210,6 +1230,34 @@ export function createOrdinaryAgentFeature(input: {
 
   async function activateSuccessor(predecessorRunId: string): Promise<void> {
     if (released) return;
+    const existing = successorActivationAttempts.get(predecessorRunId);
+    if (existing !== undefined) {
+      await existing;
+      return;
+    }
+    const attempt = (async () => {
+      let lastError: unknown;
+      for (let retry = 0; retry < 2; retry += 1) {
+        try {
+          await activateSuccessorOnce(predecessorRunId);
+          return;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      emitDiagnostic({ kind: "successor_activation_failed", predecessorRunId, error: lastError });
+    })();
+    successorActivationAttempts.set(predecessorRunId, attempt);
+    try {
+      await attempt;
+    } finally {
+      if (successorActivationAttempts.get(predecessorRunId) === attempt) {
+        successorActivationAttempts.delete(predecessorRunId);
+      }
+    }
+  }
+
+  async function activateSuccessorOnce(predecessorRunId: string): Promise<void> {
     await retryFailedSessionFinalization(predecessorRunId);
     const predecessor = await load(predecessorRunId);
     if (predecessor === undefined || !isSchedulingBarrierCleared(predecessor.state)) return;
@@ -1225,9 +1273,7 @@ export function createOrdinaryAgentFeature(input: {
       const latestRuns = await schedulingRuns(current.state.turn.conversationId, latestControl);
       const latestCandidate = nextEligibleQueuedRun(latestRuns);
       if (latestCandidate?.runId !== current.state.runId) return undefined;
-      return commitTransition(current.state.runId, {
-        type: "start",
-      });
+      return commitTransition(current.state.runId, { type: "start" });
     });
     if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
   }

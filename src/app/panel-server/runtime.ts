@@ -409,8 +409,12 @@ function assemblePanelRuntime(input: {
     onDiagnostic: (diagnostic) => {
       if (diagnostic.kind === "session_finalization_failed") {
         console.error(`[panel-server] Ordinary run ${diagnostic.runId} Session finalization failed; the conversation queue stays paused until a retry succeeds`, diagnostic.error);
-      } else {
+      } else if (diagnostic.kind === "conversation_unavailable") {
         console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} is unavailable after startup recovery; its data remains on disk for diagnosis`, diagnostic.error);
+      } else if (diagnostic.kind === "successor_activation_failed") {
+        console.error(`[panel-server] Ordinary successor activation failed after bounded retry for predecessor ${diagnostic.predecessorRunId}; the successor remains queued`, diagnostic.error);
+      } else {
+        console.error(`[panel-server] Ordinary startup recovery could not enumerate ${diagnostic.source}; new live conversations remain available`, diagnostic.error);
       }
     },
     execution: input.ordinaryAgentExecution ?? createOrdinaryAgentLoopExecutionPort({

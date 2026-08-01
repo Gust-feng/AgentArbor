@@ -70,6 +70,18 @@ export type OrdinaryFeatureDiagnostic =
       readonly kind: "conversation_unavailable";
       readonly conversationId: string;
       readonly error?: unknown;
+    }
+  | {
+      /** A repository-wide startup enumeration failed; live new conversations may still be created. */
+      readonly kind: "startup_recovery_failed";
+      readonly source: "conversation_repository" | "run_repository";
+      readonly error: unknown;
+    }
+  | {
+      /** A successor remained queued after the bounded activation retry was exhausted. */
+      readonly kind: "successor_activation_failed";
+      readonly predecessorRunId: string;
+      readonly error: unknown;
     };
 
 export type OrdinaryRunBirth = {

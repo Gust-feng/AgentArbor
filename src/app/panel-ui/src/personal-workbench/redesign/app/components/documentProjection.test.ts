@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import type { DocumentPresentation, SpaceReferencePreview } from '../../../../../../panel-api-contracts'
+import type { DocumentPresentation, DocumentPreview } from '../../../../../../panel-api-contracts'
 import { classifyReferencePreview, isMarkdownDocument } from './documentProjection'
 
 describe('document projection', () => {
@@ -24,11 +24,11 @@ describe('document projection', () => {
   })
 })
 
-function textPreview(source: string, language: string, value: DocumentPresentation): SpaceReferencePreview {
+function textPreview(source: string, language: string, value: DocumentPresentation): DocumentPreview {
   return previewWithContent({ kind: 'text', text: 'content', truncated: false, editable: true, language, encoding: 'UTF-8' }, value, source)
 }
 
-function previewWithContent(content: SpaceReferencePreview['content'], value: DocumentPresentation, source = 'managed://asset'): SpaceReferencePreview {
+function previewWithContent(content: DocumentPreview['content'], value: DocumentPresentation, source = 'managed://asset'): DocumentPreview {
   return {
     itemId: 'asset-one',
     title: source.replaceAll('\\', '/').split('/').pop() ?? 'asset',

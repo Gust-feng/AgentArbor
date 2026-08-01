@@ -21,11 +21,12 @@ import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
 import { useModalA11y } from './useModalA11y'
 
-export type View = 'home' | 'conv-active' | 'conv-done' | 'conv-new' | 'space' | 'search' | 'focus' | 'brain'
+export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'focus' | 'brain'
 
 interface SidebarProps {
   view: View
   onNavigate: (v: View) => void
+  onNewConversation: () => void
   onOpenSettings: () => void
   collapsed: boolean
   conversations: readonly ConversationSummary[]
@@ -417,6 +418,7 @@ function ConversationScrollArea({ maxHeight, children }: { maxHeight: number; ch
 export function Sidebar({
   view,
   onNavigate,
+  onNewConversation,
   onOpenSettings,
   collapsed,
   conversations,
@@ -564,6 +566,15 @@ export function Sidebar({
             icon={<Home size={14}/>}
             label="首页"
           />
+          <NavRow
+            active={false}
+            onClick={onNewConversation}
+            labelsVisible={labelsVisible}
+            collapsed={collapsed}
+            tooltip="新对话"
+            icon={<Plus size={14}/>}
+            label="新对话"
+          />
         </div>
 
         {/* Spaces */}
@@ -628,16 +639,6 @@ export function Sidebar({
         <SectionLabel
           label="最近对话"
           labelsVisible={labelsVisible}
-          action={
-            <button
-              onClick={() => onNavigate('conv-new')}
-              aria-label="新对话"
-              className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/convs:opacity-50 hover:!opacity-100"
-              style={{ width: 16, height: 16, color: 'var(--aa-text-3)', marginRight: -3 }}
-            >
-              <Plus size={12}/>
-            </button>
-          }
         />
         <ConversationScrollArea maxHeight={170}>
           {orderedConversations.map((conversation, index) => (

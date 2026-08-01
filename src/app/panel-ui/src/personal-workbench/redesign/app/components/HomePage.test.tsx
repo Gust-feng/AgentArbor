@@ -1,6 +1,7 @@
 import React from 'react'
 import { act, fireEvent, render } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
+import type { ChatInputProps } from '../../../../components/chat-empty'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { HomePage } from './HomePage'
 
@@ -25,10 +26,10 @@ test('carries wheel input through a decelerating trail and lets reverse input ta
   const { container } = render(
     <HomePage
       onNavigate={() => undefined}
-      onStartConversation={() => undefined}
       onOpenConversation={() => true}
       conversations={conversations}
-      spaces={[]}
+      input={inputProps()}
+      focusRequest={0}
     />,
   )
   const trail = container.querySelector<HTMLElement>('[data-home-activity-trail]')!
@@ -57,3 +58,24 @@ test('carries wheel input through a decelerating trail and lets reverse input ta
   act(() => animationFrames.shift()!(2000 / 60))
   expect(trail.scrollLeft).toBeLessThan(positionBeforeReverseFrame)
 })
+
+function inputProps(): ChatInputProps {
+  return {
+    value: '',
+    onChange: vi.fn(),
+    busy: false,
+    models: [],
+    selectedModelId: '',
+    reasoningEffort: '',
+    reasoningEffortEnabled: false,
+    onReasoningEffortChange: vi.fn(),
+    toolConfirmationPolicy: 'prompt',
+    onToolConfirmationPolicyChange: vi.fn(),
+    onModelSelect: vi.fn(),
+    onOpenSettings: vi.fn(),
+    onSubmit: vi.fn(),
+    attachments: [],
+    onSelectAttachment: vi.fn(),
+    onRemoveAttachment: vi.fn(),
+  }
+}

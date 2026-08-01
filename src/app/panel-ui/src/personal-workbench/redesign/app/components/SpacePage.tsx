@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   Pencil,
   Trash2,
+  Unlink,
   GripVertical,
 } from 'lucide-react'
 import { type View } from './Sidebar'
@@ -29,7 +30,7 @@ import type {
 } from '../../../space'
 import { ReferencePreview, type ReferencePreviewHandle } from './ReferencePreview'
 import { NoteEditor } from './NoteEditor'
-import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
+import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchDocumentPreview, getCachedReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
 import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
 import {
   useMountedTree,
@@ -88,9 +89,11 @@ function TreeNode({
   onSelect,
   selectedId,
   onRename,
+  onUnlink,
   onDelete,
   onCreateEntry,
   renameEnabled,
+  unlinkEnabled,
   removeEnabled,
   removeManagedFolderEnabled,
   isExpanded,
@@ -105,9 +108,11 @@ function TreeNode({
   onSelect: (id: string) => void
   selectedId: string | null
   onRename: (item: SpaceItem, name: string) => void
+  onUnlink: (item: SpaceItem) => void
   onDelete: (item: SpaceItem) => void
   onCreateEntry: (item: SpaceItem) => void
   renameEnabled: boolean
+  unlinkEnabled: boolean
   removeEnabled: boolean
   removeManagedFolderEnabled: boolean
   isExpanded: (id: string) => boolean
@@ -125,9 +130,13 @@ function TreeNode({
   const isManagedFolder = !item.externalChild && item.domainKind === 'managed_folder'
   const canCreateExternalEntry = item.type === 'folder' && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)
   const canRename = canMutateExternalEntry || (!item.externalChild && renameEnabled)
+  const canUnlink = !item.externalChild
+    && item.domainKind !== 'folder'
+    && item.domainKind !== 'managed_folder'
+    && unlinkEnabled
   const canRemove = canMutateExternalEntry
     || (isManagedFolder && removeManagedFolderEnabled)
-    || (!item.externalChild && item.domainKind !== 'managed_folder' && removeEnabled)
+    || (!item.externalChild && (item.domainKind === 'folder' || item.domainKind === 'local_file') && removeEnabled)
   const pl = 10 + depth * 14
 
   return (
@@ -181,13 +190,14 @@ function TreeNode({
           </span>
         )}
 
-        {!editing && (canCreateExternalEntry || canRename || canRemove) && (
+        {!editing && (canCreateExternalEntry || canRename || canUnlink || canRemove) && (
           <RowMenu
             label={`${item.name}操作`}
             visible={hovered}
             actions={[
               ...(canCreateExternalEntry ? [{ label: '新建文件', icon: <FilePlus size={12} />, onClick: () => onCreateEntry(item) }] : []),
               ...(canRename ? [{ label: '重命名', icon: <Pencil size={12} />, onClick: () => setEditing(true) }] : []),
+              ...(canUnlink ? [{ label: '取消链接', icon: <Unlink size={12} />, onClick: () => onUnlink(item) }] : []),
               ...(canRemove ? [{ label: deleteLabelFor(item), icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item) }] : []),
             ]}
           />
@@ -214,9 +224,11 @@ function TreeNode({
               onSelect={onSelect}
               selectedId={selectedId}
               onRename={onRename}
+              onUnlink={onUnlink}
               onDelete={onDelete}
               onCreateEntry={onCreateEntry}
               renameEnabled={renameEnabled}
+              unlinkEnabled={unlinkEnabled}
               removeEnabled={removeEnabled}
               removeManagedFolderEnabled={removeManagedFolderEnabled}
               isExpanded={isExpanded}
@@ -240,7 +252,7 @@ function countItems(tree: SpaceItem[]): number {
 function deleteLabelFor(item: SpaceItem): string {
   if (item.externalChild) return item.type === 'folder' ? '删除文件夹' : '删除'
   if (item.domainKind === 'folder' || item.domainKind === 'managed_folder') return '删除文件夹'
-  return item.domainKind === 'local_file' ? '删除' : '取消链接'
+  return item.domainKind === 'local_file' ? '删除文件' : '删除'
 }
 
 interface SpacePageProps {
@@ -278,7 +290,7 @@ export function SpacePage({
     [noteStore.notes, spaceId],
   )
   const { create, update, remove, reorder } = noteStore
-  const brain = useBrain(space === undefined ? [] : [space])
+  const brain = useBrain()
 
   // Store order is the normal render source. A separate order exists only
   // during a drag gesture; keeping a permanent duplicate made creation render
@@ -343,7 +355,7 @@ export function SpacePage({
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
     if (getCachedReferencePreview(referenceId, relativePath) !== undefined) return
-    void fetchSpaceReferencePreview(referenceId, relativePath).catch(() => undefined)
+    void fetchDocumentPreview(referenceId, relativePath).catch(() => undefined)
   }
 
   function selectTreeItem(id: string) {
@@ -355,7 +367,7 @@ export function SpacePage({
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
     if (getCachedReferencePreview(referenceId, relativePath) === undefined) {
-      void fetchSpaceReferencePreview(referenceId, relativePath).catch((error: unknown) => setActionError(actionErrorMessage(error)))
+      void fetchDocumentPreview(referenceId, relativePath).catch((error: unknown) => setActionError(actionErrorMessage(error)))
     }
     selectItem(id)
   }
@@ -438,7 +450,7 @@ export function SpacePage({
         if (selectedId === item.id) await referencePreviewRef.current?.flush()
         const nextRelativePath = await renameSpaceReferenceEntry(item.referenceId, item.relativePath, name)
         await mountedTree.refreshParentOf(item.referenceId, item.relativePath)
-        await fetchSpaceReferencePreview(item.referenceId, nextRelativePath)
+        await fetchDocumentPreview(item.referenceId, nextRelativePath)
         setSelectedId((current) => current === item.id ? referenceChildId(item.referenceId!, nextRelativePath) : current)
       } catch (error) {
         setActionError(actionErrorMessage(error))
@@ -468,11 +480,11 @@ export function SpacePage({
       return
     }
     if (item.domainKind === 'managed_folder') {
-      if (actions?.deleteManagedFolder === undefined) return
+      if (actions?.removeReference === undefined) return
       if (!window.confirm(`确定删除“${item.name}”及其中的所有文件吗？此操作会从软件存储中物理删除。`)) return
       setActionError(null)
       try {
-        await actions.deleteManagedFolder(item.id)
+        await actions.removeReference(item.id)
         setSelectedId((prev) => (prev === item.id ? null : prev))
       } catch (error) {
         setActionError(actionErrorMessage(error))
@@ -481,13 +493,27 @@ export function SpacePage({
     }
     if (actions?.removeReference === undefined) return
     const deletesLocalFile = item.domainKind === 'local_file'
+    const deletesOwnedSubtree = item.domainKind === 'folder'
     if (!window.confirm(deletesLocalFile
       ? `确定要删除“${item.name}”吗？此操作会从磁盘上删除该文件。`
-      : `取消“${item.name}”与当前空间的链接吗？磁盘内容不会被删除。`)) return
+      : deletesOwnedSubtree
+        ? `确定删除“${item.name}”及其所有子项吗？其中本地文件和软件自建文件夹会从磁盘删除，其他内容仅取消链接。`
+        : `取消“${item.name}”与当前空间的链接吗？磁盘内容不会被删除。`)) return
     setActionError(null)
     try {
       await actions.removeReference(item.id)
       setSelectedId((prev) => (prev === item.id ? null : prev))
+    } catch (error) {
+      setActionError(actionErrorMessage(error))
+    }
+  }
+
+  async function handleUnlinkItem(item: SpaceItem) {
+    if (actions?.unlinkReference === undefined) return
+    setActionError(null)
+    try {
+      await actions.unlinkReference(item.id)
+      setSelectedId((current) => current === item.id ? null : current)
     } catch (error) {
       setActionError(actionErrorMessage(error))
     }
@@ -566,7 +592,7 @@ export function SpacePage({
     try {
       const relativePath = await createSpaceReferenceEntry(target.referenceId, target.parentPath, name)
       await mountedTree.refreshByReference(target.referenceId, target.parentPath)
-      await fetchSpaceReferencePreview(target.referenceId, relativePath)
+      await fetchDocumentPreview(target.referenceId, relativePath)
       setSelectedId(referenceChildId(target.referenceId, relativePath))
     } catch (error) {
       setActionError(actionErrorMessage(error))
@@ -717,11 +743,13 @@ export function SpacePage({
                 onSelect={selectTreeItem}
                 selectedId={selectedId}
                 onRename={handleRenameItem}
+                onUnlink={handleUnlinkItem}
                 onDelete={handleDeleteItem}
                 onCreateEntry={beginCreateReferenceFile}
                 renameEnabled={actions?.rename !== undefined}
+                unlinkEnabled={actions?.unlinkReference !== undefined}
                 removeEnabled={actions?.removeReference !== undefined}
-                removeManagedFolderEnabled={actions?.deleteManagedFolder !== undefined}
+                removeManagedFolderEnabled={actions?.removeReference !== undefined}
                 isExpanded={(id) => expandedIds.has(id)}
                 onToggleExpand={toggleExpanded}
                 onPrefetch={prefetchTreeItem}

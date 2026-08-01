@@ -40,6 +40,7 @@ import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settin
 import { SkillSettings } from "./skill-settings";
 import { SubAgentSettings } from "./sub-agent-settings";
 import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
+import { ResponsivenessDiagnostics } from "./responsiveness-diagnostics";
 import { PathMemorySettings } from "./path-memory-settings";
 import { WorkspaceSettings } from "./workspace-settings";
 
@@ -61,6 +62,8 @@ export function SettingsDialog(props: {
   readonly onModelUsageDisplayChange: (enabled: boolean) => void;
   readonly agentClusterEnabled: boolean;
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
+  readonly developerModeEnabled: boolean;
+  readonly onDeveloperModeChange: (enabled: boolean) => void;
   readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => Promise<void> | void;
   readonly savingModel?: boolean;
   readonly savingWorkspace?: boolean;
@@ -136,9 +139,16 @@ export function SettingsDialog(props: {
     };
   }, [props.open]);
 
+  useEffect(() => {
+    if (!props.developerModeEnabled && DEVELOPER_SETTINGS_GROUPS.has(activeGroup)) {
+      setActiveGroup("about");
+    }
+  }, [activeGroup, props.developerModeEnabled]);
+
   if (!props.open) return null;
 
-  const activeInfo = SETTINGS_GROUPS.find((group) => group.id === activeGroup) ?? SETTINGS_GROUPS[0]!;
+  const visibleGroups = settingsGroupsForDeveloperMode(props.developerModeEnabled);
+  const activeInfo = visibleGroups.find((group) => group.id === activeGroup) ?? visibleGroups[0]!;
   return (
     <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="设置">
       <button type="button" className="settings-backdrop" aria-label="关闭设置" onClick={props.onClose} />
@@ -148,7 +158,7 @@ export function SettingsDialog(props: {
             <X size={16} />
           </button>
           <nav aria-label="设置分组">
-            {SETTINGS_GROUPS.map((group) => (
+            {visibleGroups.map((group) => (
               <button
                 type="button"
                 key={group.id}
@@ -254,13 +264,20 @@ export function SettingsDialog(props: {
             {activeGroup === "appearance" && <AppearanceSettings />}
             {activeGroup === "statistics" && <UsageStatisticsSettings />}
             {activeGroup === "pathMemory" && <PathMemorySettings />}
-            {activeGroup === "developer" && <DeveloperToolStatistics />}
+            {activeGroup === "developer" && (
+              <>
+                <ResponsivenessDiagnostics />
+                <DeveloperToolStatistics />
+              </>
+            )}
             {activeGroup === "about" && (
               <AboutSettings
                 config={props.config}
                 appUpdate={props.appUpdate}
                 agentClusterEnabled={props.agentClusterEnabled}
                 onAgentClusterEnabledChange={props.onAgentClusterEnabledChange}
+                developerModeEnabled={props.developerModeEnabled}
+                onDeveloperModeChange={props.onDeveloperModeChange}
                 onCheckAppUpdate={props.onCheckAppUpdate}
                 onInstallAppUpdate={props.onInstallAppUpdate}
               />
@@ -286,13 +303,21 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 
+const DEVELOPER_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["pathMemory", "developer"]);
+
+export function settingsGroupsForDeveloperMode(enabled: boolean): typeof SETTINGS_GROUPS {
+  return enabled ? SETTINGS_GROUPS : SETTINGS_GROUPS.filter((group) => !DEVELOPER_SETTINGS_GROUPS.has(group.id));
+}
+
 const AGENTARBOR_GITHUB_REPOSITORY_URL = "https://github.com/Gust-feng/AgentArbor";
 
-function AboutSettings(props: {
+export function AboutSettings(props: {
   readonly config?: ConfigResponse;
   readonly appUpdate?: AppUpdateInfo;
   readonly agentClusterEnabled: boolean;
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
+  readonly developerModeEnabled: boolean;
+  readonly onDeveloperModeChange: (enabled: boolean) => void;
   readonly onCheckAppUpdate: () => Promise<void> | void;
   readonly onInstallAppUpdate: () => Promise<void> | void;
 }): React.ReactElement {
@@ -342,7 +367,7 @@ function AboutSettings(props: {
             <h3>{productName}</h3>
             <div className="about-product-tags">
               <span className="about-product-version">v{version}</span>
-              {runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 && (
+              {props.developerModeEnabled && runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 && (
                 <span className="about-product-runtime">{runtimeModeLabel}</span>
               )}
             </div>
@@ -359,13 +384,37 @@ function AboutSettings(props: {
         </a>
       </section>
 
-      <section className="about-fact-grid" aria-label="产品运行信息">
-        <AboutFact icon={<Monitor size={16} />} label="默认入口" value={defaultEntry} />
-        {runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 ? (
-          <AboutFact icon={<Cpu size={16} />} label="运行模式" value={runtimeModeLabel} />
-        ) : (
-          <AboutFact icon={<CheckCircle2 size={16} />} label="版本" value={version} />
-        )}
+      {props.developerModeEnabled && (
+        <section className="about-fact-grid" aria-label="产品运行信息">
+          <AboutFact icon={<Monitor size={16} />} label="默认入口" value={defaultEntry} />
+          {runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 ? (
+            <AboutFact icon={<Cpu size={16} />} label="运行模式" value={runtimeModeLabel} />
+          ) : (
+            <AboutFact icon={<CheckCircle2 size={16} />} label="版本" value={version} />
+          )}
+        </section>
+      )}
+
+      <section className="settings-card about-agent-cluster-card">
+        <div className="settings-card-title-row">
+          <h3>开发者模式</h3>
+        </div>
+        <div className="about-agent-cluster-row">
+          <div className="about-agent-cluster-copy">
+            <strong>显示开发者信息</strong>
+            <span>显示路径记忆、完整工具结果、运行信息和本机数据目录。</span>
+          </div>
+          <button
+            type="button"
+            className="appearance-toggle-switch about-agent-cluster-switch"
+            role="switch"
+            aria-checked={props.developerModeEnabled}
+            aria-label="显示开发者信息"
+            onClick={() => props.onDeveloperModeChange(!props.developerModeEnabled)}
+          >
+            <span />
+          </button>
+        </div>
       </section>
 
       {MULTI_AGENT_ENTRY_AVAILABLE && (
@@ -446,7 +495,7 @@ function AboutSettings(props: {
         )}
       </section>
 
-      <section className="settings-card about-path-card">
+      {props.developerModeEnabled && <section className="settings-card about-path-card">
         <div className="settings-card-title-row">
           <h3>本机数据</h3>
           <span>仅此设备</span>
@@ -455,7 +504,7 @@ function AboutSettings(props: {
           <AboutPath icon={<Folder size={16} />} label="配置目录" value={configDirectory} />
           <AboutPath icon={<HardDrive size={16} />} label="运行数据目录" value={runtimeDirectory} />
         </div>
-      </section>
+      </section>}
     </div>
   );
 }

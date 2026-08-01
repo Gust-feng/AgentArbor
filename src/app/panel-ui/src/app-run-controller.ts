@@ -21,6 +21,7 @@ export type AppRunController = {
   readonly viewEpochRef: React.MutableRefObject<number>;
   readonly loadConversation: (conversationId: string) => Promise<boolean>;
   readonly startTask: (explicitGoal?: string) => Promise<void>;
+  readonly startNewConversation: (explicitGoal?: string) => Promise<boolean>;
   readonly refreshConversations: () => Promise<void>;
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
   readonly cancelRun: () => Promise<void>;
@@ -85,11 +86,22 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
   }
 
   async function startTask(explicitGoal?: string): Promise<void> {
-    await submitPanelTask({
+    await submitTask("continue", explicitGoal);
+  }
+
+  async function startNewConversation(explicitGoal?: string): Promise<boolean> {
+    return await submitTask("new", explicitGoal);
+  }
+
+  async function submitTask(
+    conversationBehavior: "continue" | "new",
+    explicitGoal?: string,
+  ): Promise<boolean> {
+    return await submitPanelTask({
       ...options,
       refreshConversations,
       startLiveUpdates: liveUpdates.startLiveUpdates,
-    }, explicitGoal);
+    }, explicitGoal, conversationBehavior);
   }
 
   async function refreshConversations(): Promise<void> {
@@ -171,6 +183,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     viewEpochRef: options.viewEpochRef,
     loadConversation,
     startTask,
+    startNewConversation,
     refreshConversations,
     startLiveUpdates: liveUpdates.startLiveUpdates,
     cancelRun,

@@ -14,6 +14,62 @@
   border-radius: 14px;
 }
 
+.appearance-preference-card {
+  display: grid;
+  gap: var(--space-3);
+  border-width: 1px;
+  border-radius: 14px;
+}
+
+.appearance-preference-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.appearance-preference-option {
+  display: grid;
+  min-width: 0;
+  min-height: 48px;
+  place-content: center;
+  gap: 3px;
+  border: 1px solid color-mix(in oklch, var(--field-border) 88%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--field-bg);
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  text-align: center;
+  transition:
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    background-color var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.appearance-preference-option span {
+  font-size: 13px;
+  font-weight: var(--weight-label);
+  line-height: 1.2;
+}
+
+.appearance-preference-option small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.appearance-preference-option:hover {
+  border-color: var(--field-hover-border);
+  background: var(--field-hover-bg);
+  color: var(--fg);
+}
+
+.appearance-preference-option.active {
+  border-color: var(--field-focus-border);
+  background: color-mix(in oklch, var(--accent-soft) 68%, var(--surface));
+  color: var(--accent-active);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent);
+}
+
 .appearance-motion-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -59,6 +115,7 @@
 }
 
 .appearance-motion-option:focus-visible,
+.appearance-preference-option:focus-visible,
 .appearance-toggle-switch:focus-visible {
   border-color: var(--field-focus-border);
   box-shadow: var(--field-focus-ring);
@@ -607,6 +664,10 @@ html[data-style] .theme-settings-card .theme-palette-preview {
   }
 
   .appearance-motion-options {
+    grid-template-columns: 1fr;
+  }
+
+  .appearance-preference-options {
     grid-template-columns: 1fr;
   }
 }

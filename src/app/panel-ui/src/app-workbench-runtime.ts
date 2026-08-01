@@ -82,7 +82,7 @@ export type AppWorkbenchRuntime = {
   readonly savingTools: boolean;
   readonly runActions: Pick<
     ReturnType<typeof createAppRunController>,
-    "loadConversation" | "startTask" | "cancelRun" | "decideConfirmation" | "resetChat"
+    "loadConversation" | "startTask" | "startNewConversation" | "cancelRun" | "decideConfirmation" | "resetChat"
   >;
   readonly deepEntryActions: {
     openNormalAgentEntry: () => void;
@@ -395,6 +395,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     runActions: {
       loadConversation: runController.loadConversation,
       startTask: runController.startTask,
+      startNewConversation: runController.startNewConversation,
       cancelRun: runController.cancelRun,
       decideConfirmation: runController.decideConfirmation,
       resetChat: runController.resetChat,

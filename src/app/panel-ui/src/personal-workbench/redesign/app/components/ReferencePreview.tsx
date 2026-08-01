@@ -1,14 +1,14 @@
 import { Fragment, forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef, type ReactNode, type UIEvent } from 'react'
 import { diffLines, type Change } from 'diff'
 import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Folder, RefreshCw } from 'lucide-react'
-import { fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, saveSpaceReferenceText, type SpaceReferencePreview } from './referencePreviewClient'
+import { fetchDocumentPreview, getCachedReferencePreview, refreshDocumentPreview, saveDocumentText, subscribeReferencePreviewCache, type DocumentPreview } from './referencePreviewClient'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
+import { PdfDocumentSurface } from './PdfDocumentSurface'
 import { VideoDocumentSurface } from './VideoDocumentSurface'
 import { isMarkdownDocument } from './documentProjection'
 import './reference-preview.css'
 
-const REVALIDATE_MS = 15_000
 const AUTOSAVE_MS = 500
 const MAX_DOCUMENT_VIEW_MEMORY = 128
 type DocumentScrollSurface = 'content' | 'source' | 'diff'
@@ -98,8 +98,8 @@ function ReferenceDocumentSessionView({
 }: ReferenceDocumentSessionProps & { sessionRef: ForwardedRef<ReferencePreviewHandle> }) {
   const targetKey = `${apiBase}:${itemId}:${initialRelativePath}`
   const cachedPreview = getCachedReferencePreview(itemId, initialRelativePath, apiBase)
-  const [preview, setPreview] = useState<SpaceReferencePreview | undefined>(cachedPreview)
-  const [incoming, setIncoming] = useState<SpaceReferencePreview>()
+  const [preview, setPreview] = useState<DocumentPreview | undefined>(cachedPreview)
+  const [incoming, setIncoming] = useState<DocumentPreview>()
   const [showDiff, setShowDiff] = useState(false)
   const [error, setError] = useState<string>()
   const [relativePath, setRelativePath] = useState(initialRelativePath)
@@ -128,8 +128,7 @@ function ReferenceDocumentSessionView({
       if (pending.epoch !== saveEpochRef.current) return
       const expectedFingerprint = fingerprintsRef.current.get(targetKey)
       if (expectedFingerprint === undefined) return
-      const saved = await saveSpaceReferenceText({
-        itemId: pending.itemId,
+      const saved = await saveDocumentText(pending.itemId, {
         relativePath: pending.relativePath,
         expectedFingerprint,
         text: pending.text,
@@ -145,7 +144,7 @@ function ReferenceDocumentSessionView({
       if (pending.epoch !== saveEpochRef.current) return
       const status = typeof reason === 'object' && reason !== null && 'status' in reason ? Number(reason.status) : undefined
       if (status === 409) {
-        const next = await refreshSpaceReferencePreview(pending.itemId, pending.relativePath, undefined, apiBase).catch(() => undefined)
+        const next = await refreshDocumentPreview(pending.itemId, pending.relativePath, undefined, apiBase).catch(() => undefined)
         if (next !== undefined) setIncoming(next)
       }
       setSaveState('error')
@@ -159,7 +158,7 @@ function ReferenceDocumentSessionView({
     if (fingerprintsRef.current.get(targetKey) === undefined) return
     setDraft(text)
     setSaveState('saving')
-    pendingSaveRef.current = { epoch: saveEpochRef.current, itemId, relativePath: initialRelativePath, text }
+    pendingSaveRef.current = { epoch: saveEpochRef.current, itemId, relativePath, text }
     if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current)
     if (immediate) persistPendingSave()
     else saveTimerRef.current = setTimeout(persistPendingSave, AUTOSAVE_MS)
@@ -201,7 +200,7 @@ function ReferenceDocumentSessionView({
     setShowDiff(false)
     setError(undefined)
     setSaveState('saved')
-    void fetchSpaceReferencePreview(itemId, initialRelativePath, controller.signal, apiBase).then((value) => {
+    void fetchDocumentPreview(itemId, initialRelativePath, controller.signal, apiBase).then((value) => {
       if (loadVersion !== loadVersionRef.current) return
       setPreview(value)
       setRelativePath(initialRelativePath)
@@ -222,7 +221,7 @@ function ReferenceDocumentSessionView({
     let disposed = false
     const revalidate = async () => {
       try {
-        const next = await fetchSpaceReferencePreview(itemId, relativePath, undefined, apiBase)
+        const next = await fetchDocumentPreview(itemId, relativePath, undefined, apiBase)
         if (disposed) return
         if (hasSourceChanged(preview, next)) setIncoming(next)
       } catch {
@@ -230,12 +229,14 @@ function ReferenceDocumentSessionView({
       }
     }
     const onFocus = () => void revalidate()
+    const unsubscribe = subscribeReferencePreviewCache(() => {
+      if (getCachedReferencePreview(itemId, relativePath, apiBase) === undefined) void revalidate()
+    }, apiBase)
     window.addEventListener('focus', onFocus)
-    const interval = window.setInterval(() => void revalidate(), REVALIDATE_MS)
     return () => {
       disposed = true
+      unsubscribe()
       window.removeEventListener('focus', onFocus)
-      window.clearInterval(interval)
     }
   }, [apiBase, itemId, preview, relativePath])
 
@@ -275,7 +276,7 @@ function ReferenceDocumentSessionView({
     const loadVersion = ++loadVersionRef.current
     setError(undefined)
     try {
-      const next = incoming ?? await fetchSpaceReferencePreview(itemId, relativePath, undefined, apiBase)
+      const next = incoming ?? await fetchDocumentPreview(itemId, relativePath, undefined, apiBase)
       if (loadVersion !== loadVersionRef.current) return
       setPreview(next)
       setDraft(next.content.kind === 'text' ? next.content.text : '')
@@ -326,7 +327,7 @@ function ReferenceDocumentSessionView({
       {error !== undefined && <div className="aa-reference-preview__error" role="alert">{error}</div>}
       {changes !== undefined ? <TextDiff changes={changes} /> : sourceModeActive && markdownDocument ? (
         <textarea className="aa-reference-preview__editor" data-document-scroll="source" value={draft} onChange={(event) => scheduleSave(event.target.value)} spellCheck={false} />
-      ) : <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} markdownDocument={markdownDocument} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />}
+      ) : <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />}
     </div>
   )
 }
@@ -384,78 +385,104 @@ function ReferenceBreadcrumb({ rootTitle, relativePath, source }: { rootTitle: s
   )
 }
 
-function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft, editable, markdownDocument, onChange, onReload, onNavigatePath }: { preview: SpaceReferencePreview; itemId: string; apiBase: string; relativePath: string; targetKey: string; draft: string; editable: boolean; markdownDocument: boolean; onChange: (value: string) => void; onReload: () => void; onNavigatePath?: (relativePath: string) => void }) {
+function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft, editable, onChange, onReload, onNavigatePath }: { preview: DocumentPreview; itemId: string; apiBase: string; relativePath: string; targetKey: string; draft: string; editable: boolean; onChange: (value: string) => void; onReload: () => void; onNavigatePath?: (relativePath: string) => void }) {
   const content = preview.content
-  if (content.kind === 'unavailable') return <PreviewState title={preview.title} message={content.message} error={preview.status === 'missing'} onRetry={onReload} />
-  if (content.kind === 'text') {
-    return (
-      markdownDocument ? (
+  // Presentation owns renderer selection; source-specific content only supplies that surface's payload.
+  switch (preview.presentation.kind) {
+    case 'unavailable':
+      return content.kind === 'unavailable'
+        ? <PreviewState title={preview.title} message={content.message} error={preview.status === 'missing'} onRetry={onReload} />
+        : <InvalidPresentationState preview={preview} onReload={onReload} />
+    case 'markdown':
+      if (content.kind !== 'text') return <InvalidPresentationState preview={preview} onReload={onReload} />
+      return (
         <div className="aa-reference-preview__reader" data-document-scroll="content">
           <article className="aa-reference-preview__markdown reading-prose">
             <MarkdownDocumentSurface key={targetKey} markdown={draft} sourceVersion={`${targetKey}:${preview.fingerprint ?? ''}`} editable={editable} resolveImageUrl={referenceMarkdownUrlTransform(apiBase, itemId, relativePath)} onChange={onChange} />
             {content.truncated && <p className="aa-reference-preview__truncated">仅显示前 512 KiB 内容。</p>}
           </article>
         </div>
-      ) : (
-        <div className="aa-reference-preview__text" data-editable={editable || undefined} data-document-scroll={editable ? undefined : 'content'}>
+      )
+    case 'code':
+    case 'text':
+      if (content.kind !== 'text') return <InvalidPresentationState preview={preview} onReload={onReload} />
+      return (
+        <div className="aa-reference-preview__text" data-presentation={preview.presentation.kind} data-editable={editable || undefined} data-document-scroll={editable ? undefined : 'content'}>
           {editable ? (
             <textarea className="aa-reference-preview__editor aa-reference-preview__editor--inline" data-document-scroll="content" value={draft} readOnly={!editable} onChange={(event) => onChange(event.target.value)} spellCheck={false} />
-          ) : <CodeDocumentSurface source={draft} filename={preview.title} language={content.language ?? 'plaintext'} encoding={content.encoding} />}
+          ) : preview.presentation.kind === 'code'
+            ? <CodeDocumentSurface source={draft} filename={preview.title} language={content.language ?? 'plaintext'} encoding={content.encoding} />
+            : <article className="aa-reference-preview__plain"><pre>{draft}</pre></article>}
           {content.truncated && <p className="aa-reference-preview__truncated">仅显示前 512 KiB 内容。</p>}
         </div>
       )
-    )
-  }
-  if (content.kind === 'directory') {
-    if (onNavigatePath !== undefined) {
-      const parent = content.relativePath.split('/').filter(Boolean).slice(0, -1).join('/')
+    case 'directory': {
+      if (content.kind !== 'directory') return <InvalidPresentationState preview={preview} onReload={onReload} />
+      if (onNavigatePath !== undefined) {
+        const parent = content.relativePath.split('/').filter(Boolean).slice(0, -1).join('/')
+        return (
+          <div className="aa-reference-preview__directory" data-document-scroll="content">
+            {content.relativePath.length > 0 && <button type="button" onClick={() => onNavigatePath(parent)}><ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} />上一级</button>}
+            {content.entries.map((entry) => (
+              <button type="button" key={entry.relativePath} onClick={() => onNavigatePath(entry.relativePath)}>
+                {entry.kind === 'directory' ? <Folder size={14} /> : <FileText size={14} />}
+                <span>{entry.name}</span>
+                {entry.kind === 'directory' && <ChevronRight size={13} />}
+              </button>
+            ))}
+            {content.entries.length === 0 && <span>这个文件夹是空的。</span>}
+          </div>
+        )
+      }
+      return <PreviewState title={preview.title} message="从左侧资源树选择文件。" error={false} onRetry={onReload} />
+    }
+    case 'web':
+      if (content.kind !== 'web') return <InvalidPresentationState preview={preview} onReload={onReload} />
+      if (content.body !== undefined) {
+        return (
+          <div className="aa-reference-preview__reader" data-document-scroll="content">
+            <article className="aa-reference-preview__markdown reading-prose">
+              <div className="aa-reference-preview__web-source">
+                <span>{content.site ?? preview.title}</span>
+                <a href={content.url} target="_blank" rel="noreferrer">访问原网页<ExternalLink size={12} /></a>
+              </div>
+              <MarkdownDocumentSurface markdown={content.body} sourceVersion={`${targetKey}:${preview.fingerprint ?? ''}`} />
+            </article>
+          </div>
+        )
+      }
       return (
-        <div className="aa-reference-preview__directory" data-document-scroll="content">
-          {content.relativePath.length > 0 && <button type="button" onClick={() => onNavigatePath(parent)}><ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} />上一级</button>}
-          {content.entries.map((entry) => (
-            <button type="button" key={entry.relativePath} onClick={() => onNavigatePath(entry.relativePath)}>
-              {entry.kind === 'directory' ? <Folder size={14} /> : <FileText size={14} />}
-              <span>{entry.name}</span>
-              {entry.kind === 'directory' && <ChevronRight size={13} />}
-            </button>
-          ))}
-          {content.entries.length === 0 && <span>这个文件夹是空的。</span>}
+        <div className="aa-reference-preview__web" data-document-scroll="content">
+          <FileText size={28} />
+          <strong>{preview.title}</strong>
+          <a href={content.url} target="_blank" rel="noreferrer">{content.url}<ExternalLink size={12} /></a>
         </div>
       )
-    }
-    return <PreviewState title={preview.title} message="从左侧资源树选择文件。" error={false} onRetry={onReload} />
+    case 'pdf':
+      if (content.kind === 'pages') {
+        return <div className="aa-reference-preview__reader" data-document-scroll="content"><PdfDocumentSurface source={{ kind: 'pages', pages: content.pages }} /></div>
+      }
+      if (content.kind === 'media' && content.mediaKind === 'pdf') {
+        return <div className="aa-reference-preview__reader" data-document-scroll="content"><PdfDocumentSurface source={{ kind: 'url', url: content.url }} /></div>
+      }
+      return <InvalidPresentationState preview={preview} onReload={onReload} />
+    case 'image':
+      return content.kind === 'media' && content.mediaKind === 'image'
+        ? <div className={`aa-reference-preview__media${content.caption ? ' aa-reference-preview__media--described' : ''}`} data-document-scroll="content"><img src={content.url} alt={content.alt ?? preview.title} />{content.caption && <p>{content.caption}</p>}</div>
+        : <InvalidPresentationState preview={preview} onReload={onReload} />
+    case 'video':
+      return content.kind === 'media' && content.mediaKind === 'video'
+        ? <VideoDocumentSurface url={content.url} title={preview.title} poster={content.poster} duration={content.duration} />
+        : <InvalidPresentationState preview={preview} onReload={onReload} />
+    case 'audio':
+      return content.kind === 'media' && content.mediaKind === 'audio'
+        ? <div className="aa-reference-preview__audio" data-document-scroll="content"><audio aria-label={preview.title} controls preload="metadata" src={content.url} />{content.duration && <span>{content.duration}</span>}{content.transcript && <p>{content.transcript}</p>}</div>
+        : <InvalidPresentationState preview={preview} onReload={onReload} />
   }
-  if (content.kind === 'web') {
-    if (content.body !== undefined) {
-      return (
-        <div className="aa-reference-preview__reader" data-document-scroll="content">
-          <article className="aa-reference-preview__markdown reading-prose">
-            <div className="aa-reference-preview__web-source">
-              <span>{content.site ?? preview.title}</span>
-              <a href={content.url} target="_blank" rel="noreferrer">访问原网页<ExternalLink size={12} /></a>
-            </div>
-            <MarkdownDocumentSurface markdown={content.body} sourceVersion={`${targetKey}:${preview.fingerprint ?? ''}`} />
-          </article>
-        </div>
-      )
-    }
-    return (
-      <div className="aa-reference-preview__web" data-document-scroll="content">
-        <FileText size={28} />
-        <strong>{preview.title}</strong>
-        <a href={content.url} target="_blank" rel="noreferrer">{content.url}<ExternalLink size={12} /></a>
-      </div>
-    )
-  }
-  if (content.kind === 'pages') {
-    return <div className="aa-reference-preview__reader" data-document-scroll="content"><div className="aa-reference-preview__pages">{content.pages.map((page, index) => <article key={index}><pre>{page}</pre><span>{index + 1} / {content.pages.length}</span></article>)}</div></div>
-  }
-  switch (content.mediaKind) {
-    case 'image': return <div className="aa-reference-preview__media aa-reference-preview__media--described" data-document-scroll="content"><img src={content.url} alt={content.alt ?? preview.title} />{content.caption && <p>{content.caption}</p>}</div>
-    case 'pdf': return <object className="aa-reference-preview__pdf" data={content.url} type={content.mimeType}><a href={content.url}>打开 PDF</a></object>
-    case 'video': return <VideoDocumentSurface url={content.url} title={preview.title} poster={content.poster} duration={content.duration} />
-    case 'audio': return <div className="aa-reference-preview__audio" data-document-scroll="content"><audio controls src={content.url} />{content.duration && <span>{content.duration}</span>}{content.transcript && <p>{content.transcript}</p>}</div>
-  }
+}
+
+function InvalidPresentationState({ preview, onReload }: { preview: DocumentPreview; onReload: () => void }) {
+  return <PreviewState title={preview.title} message="这个文件的预览数据不完整。" error onRetry={onReload} />
 }
 
 function referenceMarkdownUrlTransform(apiBase: string, itemId: string, relativePath: string): (value: string) => string {
@@ -517,6 +544,6 @@ function PreviewState({ title, message, error, onRetry }: { title: string; messa
   )
 }
 
-function hasSourceChanged(current: SpaceReferencePreview, next: SpaceReferencePreview): boolean {
+function hasSourceChanged(current: DocumentPreview, next: DocumentPreview): boolean {
   return current.fingerprint !== next.fingerprint || current.status !== next.status
 }

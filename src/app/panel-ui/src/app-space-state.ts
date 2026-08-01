@@ -2,41 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { deleteJson, getJson, postJson } from "./api";
 import { selectLocalContextAttachment } from "./app-attachments";
 import { selectTaskWorkspaceDirectory } from "./app-workspace-selection";
+import type { SpaceReference, SpaceSummary, SpaceTree, SpaceTreeEntry } from "../../spaces";
 import type { PersonalSpaceItemProjection, PersonalSpaceProjection } from "./personal-workbench/space";
+import { subscribeWorkbenchProjectionChanges } from "./app-workbench-projection-changes";
+import { invalidateDocumentPreviews } from "./personal-workbench/redesign/app/components/referencePreviewClient";
 
 type SpaceSummaryResponse = {
-  readonly spaces: readonly { readonly id: string; readonly title: string }[];
+  readonly spaces: readonly SpaceSummary[];
 };
 
 type SpaceTreeResponse = {
-  readonly tree: SpaceTreeResponseTree;
+  readonly tree: SpaceTree;
 };
 
-type SpaceTreeResponseTree = {
-  readonly space: { readonly id: string; readonly title: string };
-  readonly entries: readonly SpaceTreeEntry[];
-};
-
-type SpaceTreeEntry = {
-  readonly kind: "reference";
-  readonly item: {
-        readonly id: string;
-        readonly title: string;
-        readonly parentId?: string;
-        readonly updatedAt: string;
-        readonly reference: {
-          readonly kind: "local_file" | "workspace_folder" | "managed_folder" | "asset_folder" | "workbench_asset" | "web_page" | "generated_artifact" | "conversation";
-          readonly path?: string;
-          readonly url?: string;
-          readonly artifactRef?: string;
-          readonly conversationId?: string;
-          readonly conversationTitle?: string;
-          readonly assetId?: string;
-        };
-  };
-};
-
-type SpaceReferenceKind = "local_file" | "workspace_folder" | "managed_folder" | "asset_folder" | "workbench_asset" | "web_page" | "generated_artifact" | "conversation";
+type SpaceReferenceKind = SpaceReference["kind"];
 
 /** Panel query state for SpaceFeature's one-way tree projection. */
 export function useSpaceProjection(enabled = true): {
@@ -53,8 +32,8 @@ export function useSpaceProjection(enabled = true): {
     destinationSpaceId: string,
   ) => Promise<void>;
   readonly rename: (target: { readonly kind: "space" | "reference"; readonly id: string }, title: string) => Promise<void>;
+  readonly unlinkReference: (itemId: string) => Promise<void>;
   readonly removeReference: (itemId: string) => Promise<void>;
-  readonly deleteManagedFolder: (itemId: string) => Promise<void>;
   readonly openReference: (spaceId: string, itemId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
   readonly loading: boolean;
@@ -66,8 +45,41 @@ export function useSpaceProjection(enabled = true): {
   const [error, setError] = useState<string | undefined>();
   const refreshAbortRef = useRef<AbortController | undefined>(undefined);
   const refreshEpochRef = useRef(0);
+  const spaceRefreshRevisionRef = useRef(new Map<string, number>());
+  const spaceRefreshControllersRef = useRef(new Map<string, AbortController>());
   const mutationPromisesRef = useRef(new Map<string, Promise<void>>());
   const [mutationPendingCount, setMutationPendingCount] = useState(0);
+
+  const refreshSpaceTree = useCallback(async (spaceId: string): Promise<void> => {
+    const revision = (spaceRefreshRevisionRef.current.get(spaceId) ?? 0) + 1;
+    spaceRefreshRevisionRef.current.set(spaceId, revision);
+    spaceRefreshControllersRef.current.get(spaceId)?.abort();
+    const abortController = new AbortController();
+    spaceRefreshControllersRef.current.set(spaceId, abortController);
+    try {
+      const { tree } = await getJson<SpaceTreeResponse>(
+        `/api/spaces/${encodeURIComponent(spaceId)}`,
+        { signal: abortController.signal },
+      );
+      if (spaceRefreshRevisionRef.current.get(spaceId) !== revision) return;
+      setSpaces((current) => current.map((space) => space.spaceId === spaceId ? projectTree(tree) : space));
+    } catch (reason: unknown) {
+      // A newer refresh for the same Space owns the result. Superseded reads
+      // are normal during quick successive mutations and must not surface as
+      // failed user actions.
+      if (isAbortError(reason) || spaceRefreshRevisionRef.current.get(spaceId) !== revision) return;
+      throw reason;
+    } finally {
+      if (spaceRefreshControllersRef.current.get(spaceId) === abortController) {
+        spaceRefreshControllersRef.current.delete(spaceId);
+      }
+    }
+  }, []);
+
+  const refreshAffectedSpaces = useCallback(async (spaceIds: readonly string[]): Promise<void> => {
+    const uniqueIds = [...new Set(spaceIds.filter((spaceId) => spaceId.length > 0))];
+    await Promise.all(uniqueIds.map((spaceId) => refreshSpaceTree(spaceId)));
+  }, [refreshSpaceTree]);
 
   const refresh = useCallback(async (): Promise<void> => {
     const epoch = ++refreshEpochRef.current;
@@ -79,6 +91,9 @@ export function useSpaceProjection(enabled = true): {
     try {
       const listed = await getJson<SpaceSummaryResponse>("/api/spaces", { signal: abortController.signal });
       if (epoch !== refreshEpochRef.current) return;
+      const revisionsAtStart = new Map(
+        listed.spaces.map((summary) => [summary.id, spaceRefreshRevisionRef.current.get(summary.id) ?? 0]),
+      );
       const trees = await Promise.all(listed.spaces.map(async (summary) => {
         const { tree } = await getJson<SpaceTreeResponse>(
           `/api/spaces/${encodeURIComponent(summary.id)}`,
@@ -87,7 +102,14 @@ export function useSpaceProjection(enabled = true): {
         return projectTree(tree);
       }));
       if (epoch !== refreshEpochRef.current) return;
-      setSpaces(trees);
+      setSpaces((current) => {
+        const currentById = new Map(current.map((space) => [space.spaceId, space]));
+        return trees.map((tree) => {
+          const revisionAtStart = revisionsAtStart.get(tree.spaceId) ?? 0;
+          const currentRevision = spaceRefreshRevisionRef.current.get(tree.spaceId) ?? 0;
+          return currentRevision === revisionAtStart ? tree : currentById.get(tree.spaceId) ?? tree;
+        });
+      });
     } catch (reason: unknown) {
       if (epoch !== refreshEpochRef.current || isAbortError(reason)) return;
       setError(reason instanceof Error ? reason.message : "空间数据加载失败。");
@@ -100,23 +122,25 @@ export function useSpaceProjection(enabled = true): {
     }
   }, []);
 
-  const runMutation = useCallback((key: string, request: () => Promise<unknown>): Promise<void> => {
+  const runMutation = useCallback((key: string, request: () => Promise<unknown>, affectedSpaceIds?: readonly string[]): Promise<void> => {
     const existing = mutationPromisesRef.current.get(key);
     if (existing !== undefined) return existing;
     setMutationPendingCount((count) => count + 1);
     setError(undefined);
     const pending = (async () => {
       try {
-        await request();
-        await refresh();
-      } catch (reason: unknown) {
         try {
-          await refresh();
-        } catch {
-          // Preserve the write failure below; a manual refresh remains available.
+          await request();
+        } catch (reason: unknown) {
+          setError(reason instanceof Error ? reason.message : "空间数据保存失败。");
+          throw reason;
         }
-        setError(reason instanceof Error ? reason.message : "空间数据保存失败。");
-        throw reason;
+        try {
+          if (affectedSpaceIds === undefined) await refresh();
+          else await refreshAffectedSpaces(affectedSpaceIds);
+        } catch {
+          setError("操作已完成，但空间数据刷新失败。请手动刷新。");
+        }
       } finally {
         mutationPromisesRef.current.delete(key);
         setMutationPendingCount((count) => Math.max(0, count - 1));
@@ -124,16 +148,31 @@ export function useSpaceProjection(enabled = true): {
     })();
     mutationPromisesRef.current.set(key, pending);
     return pending;
-  }, [refresh]);
+  }, [refresh, refreshAffectedSpaces]);
 
   useEffect(() => {
     if (!enabled) {
       refreshAbortRef.current?.abort();
+      for (const controller of spaceRefreshControllersRef.current.values()) controller.abort();
+      spaceRefreshControllersRef.current.clear();
       setLoading(false);
       return undefined;
     }
     void refresh().catch(() => undefined);
-    return () => refreshAbortRef.current?.abort();
+    return () => {
+      refreshAbortRef.current?.abort();
+      for (const controller of spaceRefreshControllersRef.current.values()) controller.abort();
+      spaceRefreshControllersRef.current.clear();
+    };
+  }, [enabled, refresh]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    return subscribeWorkbenchProjectionChanges((change) => {
+      if (!change.owners.includes("spaces")) return;
+      invalidateDocumentPreviews(change.referenceIds);
+      void refresh().catch(() => undefined);
+    });
   }, [enabled, refresh]);
 
   const createSpace = useCallback(async (title: string): Promise<void> => {
@@ -143,7 +182,7 @@ export function useSpaceProjection(enabled = true): {
   const createManagedFolder = useCallback(async (spaceId: string, title: string): Promise<void> => {
     await runMutation(`create-managed-folder:${spaceId}:${title.trim()}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
       title,
-    }));
+    }), [spaceId]);
   }, [runMutation]);
 
   const addLocalFile = useCallback(async (spaceId: string): Promise<void> => {
@@ -154,7 +193,7 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`add-local-file:${spaceId}:${attachment.ref}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title: attachment.title,
       reference,
-    }));
+    }), [spaceId]);
   }, [runMutation]);
 
   const addWorkspaceFolder = useCallback(async (spaceId: string): Promise<void> => {
@@ -163,7 +202,7 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`add-workspace:${spaceId}:${directory}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title: basename(directory),
       reference: { kind: "workspace_folder", path: directory },
-    }));
+    }), [spaceId]);
   }, [runMutation]);
 
   const addWebReference = useCallback(async (
@@ -174,7 +213,7 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`add-web:${spaceId}:${url}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title,
       reference: { kind: "web_page", url },
-    }));
+    }), [spaceId]);
   }, [runMutation]);
 
   const addConversation = useCallback(async (
@@ -185,7 +224,7 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`add-conversation:${spaceId}:${conversationId}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       title: conversationTitle,
       reference: { kind: "conversation", conversationId, conversationTitle },
-    }));
+    }), [spaceId]);
   }, [runMutation]);
 
   const move = useCallback(async (
@@ -196,7 +235,7 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`move:${target.kind}:${target.id}`, () => postJson(`/api/spaces/${encodeURIComponent(sourceSpaceId)}/move`, {
       target,
       destinationSpaceId,
-    }));
+    }), [sourceSpaceId, destinationSpaceId]);
   }, [runMutation]);
 
   const rename = useCallback(async (
@@ -213,8 +252,8 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`remove-reference:${itemId}`, () => deleteJson(`/api/spaces/references/${encodeURIComponent(itemId)}`));
   }, [runMutation]);
 
-  const deleteManagedFolder = useCallback(async (itemId: string): Promise<void> => {
-    await runMutation(`delete-managed-folder:${itemId}`, () => deleteJson(`/api/spaces/references/${encodeURIComponent(itemId)}`));
+  const unlinkReference = useCallback(async (itemId: string): Promise<void> => {
+    await runMutation(`unlink-reference:${itemId}`, () => postJson(`/api/spaces/references/${encodeURIComponent(itemId)}/unlink`, {}));
   }, [runMutation]);
 
   const openReference = useCallback(async (_spaceId: string, itemId: string): Promise<void> => {
@@ -231,8 +270,8 @@ export function useSpaceProjection(enabled = true): {
     addConversation,
     move,
     rename,
+    unlinkReference,
     removeReference,
-    deleteManagedFolder,
     openReference,
     refresh,
     loading,
@@ -266,7 +305,7 @@ function basename(value: string): string {
   return segment === undefined || segment.length === 0 ? "工作区文件夹" : segment;
 }
 
-function projectTree(tree: SpaceTreeResponseTree): PersonalSpaceProjection {
+function projectTree(tree: SpaceTree): PersonalSpaceProjection {
   return {
     spaceId: tree.space.id,
     title: tree.space.title,
@@ -326,7 +365,7 @@ function itemKind(kind: SpaceReferenceKind): PersonalSpaceItemProjection["kind"]
   }
 }
 
-function itemDetail(reference: Extract<SpaceTreeEntry, { readonly kind: "reference" }>["item"]["reference"]): string | undefined {
+function itemDetail(reference: SpaceReference): string | undefined {
   switch (reference.kind) {
     case "local_file":
     case "workspace_folder":

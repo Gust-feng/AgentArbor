@@ -1,14 +1,165 @@
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ReferencePreview } from './ReferencePreview'
-import type { SpaceReferencePreview } from './referencePreviewClient'
-import { clearReferencePreviewCacheForTesting, createSpaceReferenceEntry, fetchSpaceReferencePreview, getCachedReferencePreview, getReferencePreviewError, saveSpaceReferenceText, subscribeReferencePreviewCache } from './referencePreviewClient'
+import type { DocumentPreview } from './referencePreviewClient'
+import { clearReferencePreviewCacheForTesting, createSpaceReferenceEntry, fetchDocumentPreview, getCachedReferencePreview, getReferencePreviewError, invalidateDocumentPreviews, saveDocumentText, subscribeReferencePreviewCache } from './referencePreviewClient'
+
+const getPdfDocumentMock = vi.hoisted(() => vi.fn())
+const createPdfWorkerMock = vi.hoisted(() => vi.fn(() => ({ destroy: vi.fn() })))
+vi.mock('unpdf/pdfjs', () => ({
+  getDocument: getPdfDocumentMock,
+  PDFWorker: { create: createPdfWorkerMock },
+}))
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  getPdfDocumentMock.mockReset()
+  createPdfWorkerMock.mockClear()
   clearReferencePreviewCacheForTesting()
+})
+
+test('drops deleted Agent-side references from the preview cache', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ preview: textPreview('1:1', '旧内容') }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })))
+
+  await fetchDocumentPreview('deleted-reference')
+  expect(getCachedReferencePreview('deleted-reference')).toBeDefined()
+  invalidateDocumentPreviews(['deleted-reference'])
+  expect(getCachedReferencePreview('deleted-reference')).toBeUndefined()
+})
+
+test('refreshes an opened preview when an Agent-side change invalidates its cache', async () => {
+  let current = textPreview('1:4', '旧内容')
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ preview: current }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<ReferencePreview itemId="reference-one" fallbackTitle="note.txt" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByDisplayValue('旧内容')).toBeTruthy()
+
+  current = textPreview('2:4', '新内容')
+  invalidateDocumentPreviews(['reference-one'])
+
+  expect(await screen.findByText('来源已更新，当前内容仍保持不变。')).toBeTruthy()
+  expect(screen.getByDisplayValue('旧内容')).toBeTruthy()
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+})
+
+test('renders structured and file PDFs through the same application surface', async () => {
+  const previews: Record<string, DocumentPreview> = {
+    structured: previewWithPresentation('structured', 'pdf', { kind: 'pages', pages: ['第一页'] }),
+    file: previewWithPresentation('file', 'pdf', { kind: 'media', mediaKind: 'pdf', mimeType: 'application/pdf', url: '/api/files/file/content' }),
+  }
+  const destroy = vi.fn(async () => undefined)
+  getPdfDocumentMock.mockReturnValue({ promise: Promise.resolve({ numPages: 0, destroy }) })
+  vi.stubGlobal('Worker', class {
+    terminate() {}
+  })
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const id = String(input).includes('/file/') ? 'file' : 'structured'
+    return new Response(JSON.stringify({ preview: previews[id] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  const rendered = render(<ReferencePreview itemId="structured" fallbackTitle="预置.pdf" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByText('第一页')).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-pdf-document[data-pdf-source="structured"]')).not.toBeNull()
+  expect(rendered.container.querySelector('object')).toBeNull()
+
+  rendered.rerender(<ReferencePreview itemId="file" fallbackTitle="本地.pdf" canOpen={false} onOpen={() => undefined} />)
+  await waitFor(() => expect(rendered.container.querySelector('.aa-pdf-document[data-pdf-source="file"]')).not.toBeNull())
+  expect(rendered.container.querySelector('object')).toBeNull()
+  expect(getPdfDocumentMock).toHaveBeenCalledWith(expect.objectContaining({ url: '/api/files/file/content' }))
+})
+
+test('uses the backend presentation as the renderer authority for text surfaces', async () => {
+  const previews: Record<string, DocumentPreview> = {
+    code: previewWithPresentation('code', 'code', { kind: 'text', text: 'plain words', truncated: false, editable: false, language: 'plaintext' }),
+    text: previewWithPresentation('text', 'text', { kind: 'text', text: 'const value = 1', truncated: false, editable: false, language: 'typescript' }),
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const id = String(input).includes('/text/') ? 'text' : 'code'
+    return new Response(JSON.stringify({ preview: previews[id] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  const rendered = render(<ReferencePreview itemId="code" fallbackTitle="无扩展名" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByText('plain words')).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-code-document')).not.toBeNull()
+
+  rendered.rerender(<ReferencePreview itemId="text" fallbackTitle="source.ts" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByText('const value = 1')).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-reference-preview__plain')).not.toBeNull()
+  expect(rendered.container.querySelector('.aa-code-document')).toBeNull()
+})
+
+test('keeps image, video, audio, and web content inside application-owned surfaces', async () => {
+  const drawImage = vi.fn()
+  let firstFrameCallback: (() => void) | undefined
+  const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    clearRect: vi.fn(),
+    drawImage,
+  } as unknown as CanvasRenderingContext2D)
+  const previews: Record<string, DocumentPreview> = {
+    image: previewWithPresentation('image', 'image', { kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image.png', alt: '图像替代文本' }),
+    video: previewWithPresentation('video', 'video', { kind: 'media', mediaKind: 'video', mimeType: 'video/mp4', url: '/video.mp4', poster: '/poster.jpg', duration: '02:14' }),
+    audio: previewWithPresentation('audio', 'audio', { kind: 'media', mediaKind: 'audio', mimeType: 'audio/mpeg', url: '/audio.mp3' }),
+    web: previewWithPresentation('web', 'web', { kind: 'web', url: 'https://example.test', site: 'example.test', body: '# 网页正文' }),
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const id = String(input).match(/references\/([^/]+)\/preview/u)?.[1] ?? 'image'
+    return new Response(JSON.stringify({ preview: previews[id] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  const rendered = render(<ReferencePreview itemId="image" fallbackTitle="image.png" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByAltText('图像替代文本')).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-reference-preview__media img')).not.toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-preview__media--described')).toBeNull()
+
+  rendered.rerender(<ReferencePreview itemId="video" fallbackTitle="video.mp4" canOpen={false} onOpen={() => undefined} />)
+  await screen.findByLabelText('video.pdf 画面')
+  const video = rendered.container.querySelector('video')
+  expect(video).not.toBeNull()
+  expect(video!.closest('.aa-video-document')).not.toBeNull()
+  expect(video!.closest('.aa-reference-preview__media')).toBeNull()
+  expect(screen.getByRole('status', { name: '正在加载视频' })).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-video-document__placeholder img')?.getAttribute('src')).toBe('/poster.jpg')
+  expect(video!.getAttribute('preload')).toBe('auto')
+  expect(video!.hasAttribute('playsinline')).toBe(true)
+  expect(video!.hasAttribute('controls')).toBe(false)
+  expect(screen.getByRole('button', { name: '播放' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '静音' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '全屏' })).toBeTruthy()
+  expect(screen.getByText('0:00 / 02:14')).toBeTruthy()
+  Object.defineProperties(video!, {
+    videoWidth: { configurable: true, value: 2560 },
+    videoHeight: { configurable: true, value: 1440 },
+    requestVideoFrameCallback: { configurable: true, value: vi.fn((callback: () => void) => { firstFrameCallback = callback; return 1 }) },
+    cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
+  })
+  fireEvent.loadedData(video!)
+  expect(video!.closest('.aa-video-document')?.getAttribute('data-state')).toBe('loading')
+  act(() => firstFrameCallback?.())
+  expect(video!.closest('.aa-video-document')?.getAttribute('data-state')).toBe('ready')
+  expect(screen.queryByRole('status', { name: '正在加载视频' })).toBeNull()
+  expect(getContext).toHaveBeenCalledWith('2d', expect.objectContaining({ alpha: false, colorSpace: 'srgb' }))
+  expect(drawImage).toHaveBeenCalled()
+  fireEvent.error(video!)
+  expect(screen.getByRole('alert').textContent).toContain('无法播放这个视频。')
+
+  rendered.rerender(<ReferencePreview itemId="audio" fallbackTitle="audio.mp3" canOpen={false} onOpen={() => undefined} />)
+  const audio = await screen.findByLabelText('audio.pdf')
+  expect(audio.closest('.aa-reference-preview__audio')).not.toBeNull()
+  expect(audio.getAttribute('preload')).toBe('metadata')
+
+  rendered.rerender(<ReferencePreview itemId="web" fallbackTitle="网页" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByRole('heading', { name: '网页正文' })).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-reference-preview__web-source')).not.toBeNull()
 })
 
 test('keeps an edited reference stable until the user loads the external version', async () => {
@@ -41,6 +192,25 @@ test('keeps an edited reference stable until the user loads the external version
 
   await user.click(screen.getByRole('button', { name: '加载新版' }))
   await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('外部新版'))
+})
+
+test('saves an edited child file with its current relative path', async () => {
+  let savedBody: Record<string, unknown> | undefined
+  vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === 'PUT') {
+      const body = JSON.parse(String(init.body)) as { relativePath: string; text: string }
+      savedBody = body
+      return new Response(JSON.stringify({ preview: textPreview('2:8', body.text) }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    return new Response(JSON.stringify({ preview: textPreview('1:4', '原始内容') }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  render(<ReferencePreview itemId="reference-one" initialRelativePath="docs/note.txt" fallbackTitle="项目文件" canOpen={false} onOpen={() => undefined} />)
+  const editor = await screen.findByDisplayValue('原始内容')
+  fireEvent.change(editor, { target: { value: '子文件内容' } })
+
+  await waitFor(() => expect(savedBody).toMatchObject({ relativePath: 'docs/note.txt', text: '子文件内容' }))
+  expect(savedBody).not.toHaveProperty('itemId')
 })
 
 test('keeps the preview header visible while a new document is loading', async () => {
@@ -89,8 +259,8 @@ test('does not let a late preview GET replace a newer saved preview', async () =
     return await new Promise<Response>((resolve) => { resolveGet = resolve })
   }))
 
-  const staleRequest = fetchSpaceReferencePreview('reference-one')
-  await saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
+  const staleRequest = fetchDocumentPreview('reference-one')
+  await saveDocumentText('reference-one', { relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
   resolveGet?.(new Response(JSON.stringify({ preview: stale }), { status: 200, headers: { 'content-type': 'application/json' } }))
 
   expect(await staleRequest).toEqual(saved)
@@ -107,8 +277,8 @@ test('lets an older preview GET converge on a save that is still in flight', asy
     return await new Promise<Response>((resolve) => { resolveGet = resolve })
   }))
 
-  const staleRequest = fetchSpaceReferencePreview('reference-one')
-  const saveRequest = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
+  const staleRequest = fetchDocumentPreview('reference-one')
+  const saveRequest = saveDocumentText('reference-one', { relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
   resolveGet?.(new Response(JSON.stringify({ preview: stale }), { status: 200, headers: { 'content-type': 'application/json' } }))
   resolvePut?.(new Response(JSON.stringify({ preview: saved }), { status: 200, headers: { 'content-type': 'application/json' } }))
 
@@ -126,8 +296,8 @@ test('waits for an in-flight save before starting a preview GET', async () => {
   })
   vi.stubGlobal('fetch', fetchMock)
 
-  const saveRequest = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
-  const previewRequest = fetchSpaceReferencePreview('reference-one')
+  const saveRequest = saveDocumentText('reference-one', { relativePath: '', expectedFingerprint: '1:4', text: '新内容' })
+  const previewRequest = fetchDocumentPreview('reference-one')
   expect(fetchMock).toHaveBeenCalledTimes(1)
   resolvePut?.(new Response(JSON.stringify({ preview: saved }), { status: 200, headers: { 'content-type': 'application/json' } }))
 
@@ -148,9 +318,9 @@ test('refreshes a read after a failed save instead of propagating the write erro
   })
   vi.stubGlobal('fetch', fetchMock)
 
-  await fetchSpaceReferencePreview('reference-one')
-  const saveRequest = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '冲突内容' })
-  const previewRequest = fetchSpaceReferencePreview('reference-one')
+  await fetchDocumentPreview('reference-one')
+  const saveRequest = saveDocumentText('reference-one', { relativePath: '', expectedFingerprint: '1:4', text: '冲突内容' })
+  const previewRequest = fetchDocumentPreview('reference-one')
   resolvePut?.(new Response(JSON.stringify({ error: { message: '文件已被外部修改' } }), { status: 409, headers: { 'content-type': 'application/json' } }))
 
   await expect(saveRequest).rejects.toMatchObject({ status: 409 })
@@ -168,8 +338,8 @@ test('keeps each save promise bound to its own HTTP result', async () => {
   })
   vi.stubGlobal('fetch', fetchMock)
 
-  const firstSave = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '第一次' })
-  const secondSave = saveSpaceReferenceText({ itemId: 'reference-one', relativePath: '', expectedFingerprint: '1:4', text: '第二次' })
+  const firstSave = saveDocumentText('reference-one', { relativePath: '', expectedFingerprint: '1:4', text: '第一次' })
+  const secondSave = saveDocumentText('reference-one', { relativePath: '', expectedFingerprint: '1:4', text: '第二次' })
   expect(putResolvers).toHaveLength(2)
 
   putResolvers[0]?.(new Response(JSON.stringify({ preview: saved }), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -186,8 +356,8 @@ test('cancels one preview read without affecting another caller', async () => {
   vi.stubGlobal('fetch', fetchMock)
   const firstController = new AbortController()
 
-  const first = fetchSpaceReferencePreview('reference-one', '', firstController.signal)
-  const second = fetchSpaceReferencePreview('reference-one')
+  const first = fetchDocumentPreview('reference-one', '', firstController.signal)
+  const second = fetchDocumentPreview('reference-one')
   firstController.abort()
 
   await expect(first).rejects.toMatchObject({ name: 'AbortError' })
@@ -209,10 +379,10 @@ test('starts a fresh preview request after a file mutation invalidates an older 
   })
   vi.stubGlobal('fetch', fetchMock)
 
-  const staleRequest = fetchSpaceReferencePreview('reference-one')
+  const staleRequest = fetchDocumentPreview('reference-one')
   await waitFor(() => expect(pendingGets).toHaveLength(1))
   await createSpaceReferenceEntry('reference-one', '', 'new.txt')
-  const refreshedRequest = fetchSpaceReferencePreview('reference-one')
+  const refreshedRequest = fetchDocumentPreview('reference-one')
   await waitFor(() => expect(pendingGets).toHaveLength(2))
 
   pendingGets[0]?.(new Response(JSON.stringify({ preview: stale }), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -233,14 +403,14 @@ test('batches preview notifications and keeps API data domains isolated', async 
   const unsubscribeSpace = subscribeReferencePreviewCache(spaceListener)
 
   await Promise.all([
-    fetchSpaceReferencePreview('managed-one', '', undefined, '/api/personal-knowledge/assets'),
-    fetchSpaceReferencePreview('managed-two', '', undefined, '/api/personal-knowledge/assets'),
-    fetchSpaceReferencePreview('space-one'),
+    fetchDocumentPreview('managed-one', '', undefined, '/api/personal-knowledge/assets'),
+    fetchDocumentPreview('managed-two', '', undefined, '/api/personal-knowledge/assets'),
+    fetchDocumentPreview('space-one'),
   ])
 
   await waitFor(() => expect(managedListener).toHaveBeenCalledTimes(1))
   expect(spaceListener).toHaveBeenCalledTimes(1)
-  await fetchSpaceReferencePreview('managed-one', '', undefined, '/api/personal-knowledge/assets')
+  await fetchDocumentPreview('managed-one', '', undefined, '/api/personal-knowledge/assets')
   await new Promise((resolve) => setTimeout(resolve, 30))
   expect(managedListener).toHaveBeenCalledTimes(1)
   unsubscribeManaged()
@@ -256,8 +426,8 @@ test('keeps same-named files in different relative paths isolated', async () => 
   }))
 
   await Promise.all([
-    fetchSpaceReferencePreview('reference-one', 'folder-a/config.json'),
-    fetchSpaceReferencePreview('reference-one', 'folder-b/config.json'),
+    fetchDocumentPreview('reference-one', 'folder-a/config.json'),
+    fetchDocumentPreview('reference-one', 'folder-b/config.json'),
   ])
 
   expect(getCachedReferencePreview('reference-one', 'folder-a/config.json')?.content).toMatchObject({ kind: 'text', text: 'A' })
@@ -379,7 +549,7 @@ test('initializes the editable draft from a cached preview without saving empty 
     if (init?.method === 'PUT') writes.push((JSON.parse(String(init.body)) as { text: string }).text)
     return new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } })
   }))
-  await fetchSpaceReferencePreview('reference-cached')
+  await fetchDocumentPreview('reference-cached')
 
   render(<ReferencePreview itemId="reference-cached" fallbackTitle="cached.md" canOpen={false} onOpen={() => undefined} />)
   expect(screen.getByRole('heading', { name: '缓存正文' })).toBeTruthy()
@@ -419,7 +589,7 @@ test('uses the latest successful fingerprint when edits queue behind an in-fligh
 })
 
 test('keeps the preview shell mounted but isolates document state while switching files', async () => {
-  const previews: Record<string, SpaceReferencePreview> = {
+  const previews: Record<string, DocumentPreview> = {
     'reference-one': textPreview('1:3', '文件一'),
     'reference-two': { ...textPreview('2:3', '文件二'), itemId: 'reference-two', title: 'two.txt', source: 'C:/notes/two.txt' },
   }
@@ -452,7 +622,7 @@ test('keeps the preview shell mounted but isolates document state while switchin
 })
 
 test('does not autosave the previous markdown document into a newly selected file', async () => {
-  const previews: Record<string, SpaceReferencePreview> = {
+  const previews: Record<string, DocumentPreview> = {
     'reference-one': markdownPreview('reference-one', '1:8', '# 文件一'),
     'reference-two': markdownPreview('reference-two', '2:8', '# 文件二'),
   }
@@ -484,7 +654,7 @@ test('does not autosave the previous markdown document into a newly selected fil
 })
 
 test('restores document scroll and source mode by target identity', async () => {
-  const previews: Record<string, SpaceReferencePreview> = {
+  const previews: Record<string, DocumentPreview> = {
     'reference-view-memory-one': markdownPreview('reference-view-memory-one', '1:8', '# 文档一\n\n正文一'),
     'reference-view-memory-two': markdownPreview('reference-view-memory-two', '2:8', '# 文档二'),
   }
@@ -510,7 +680,7 @@ test('restores document scroll and source mode by target identity', async () => 
   await waitFor(() => expect(rendered.container.querySelector<HTMLElement>('[data-document-scroll="content"]')?.scrollTop).toBe(180))
 })
 
-function textPreview(fingerprint: string, text: string): SpaceReferencePreview {
+function textPreview(fingerprint: string, text: string): DocumentPreview {
   return {
     itemId: 'reference-one',
     title: 'note.txt',
@@ -525,7 +695,7 @@ function textPreview(fingerprint: string, text: string): SpaceReferencePreview {
   }
 }
 
-function markdownPreview(itemId: string, fingerprint: string, text: string): SpaceReferencePreview {
+function markdownPreview(itemId: string, fingerprint: string, text: string): DocumentPreview {
   return {
     ...textPreview(fingerprint, text),
     itemId,
@@ -533,5 +703,21 @@ function markdownPreview(itemId: string, fingerprint: string, text: string): Spa
     source: `C:/notes/${itemId}.md`,
     presentation: { kind: 'markdown', editable: true, sourceMode: true },
     content: { kind: 'text', text, truncated: false, editable: true, language: 'md' },
+  }
+}
+
+function previewWithPresentation(
+  itemId: string,
+  kind: DocumentPreview['presentation']['kind'],
+  content: DocumentPreview['content'],
+): DocumentPreview {
+  return {
+    itemId,
+    title: `${itemId}.pdf`,
+    sourceKind: itemId === 'structured' ? 'workbench_asset' : 'local_file',
+    source: itemId === 'structured' ? `workbench-asset:${itemId}` : `C:/documents/${itemId}.pdf`,
+    status: 'ready',
+    presentation: { kind, editable: false, sourceMode: false },
+    content,
   }
 }

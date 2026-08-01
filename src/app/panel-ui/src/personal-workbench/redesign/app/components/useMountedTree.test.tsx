@@ -2,14 +2,14 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import type { PersonalSpaceProjection } from '../../../space'
-import { refreshSpaceReferencePreview } from './referencePreviewClient'
+import { refreshDocumentPreview } from './referencePreviewClient'
 import { useMountedTree } from './useMountedTree'
 
 vi.mock('./referencePreviewClient', () => ({
-  refreshSpaceReferencePreview: vi.fn(),
+  refreshDocumentPreview: vi.fn(),
 }))
 
-const refreshPreview = vi.mocked(refreshSpaceReferencePreview)
+const refreshPreview = vi.mocked(refreshDocumentPreview)
 
 describe('useMountedTree', () => {
   beforeEach(() => {

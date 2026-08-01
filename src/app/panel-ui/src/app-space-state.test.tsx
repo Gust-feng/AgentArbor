@@ -1,9 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { useSpaceProjection } from "./app-space-state";
+import { resetWorkbenchProjectionChangesForTesting } from "./app-workbench-projection-changes";
 import {
   getPersonalKnowledgeLoadState,
   getPersonalKnowledgeSnapshot,
+  getCommittedLocalNoteRevision,
   getPersonalNoteSaveState,
   initializePersonalKnowledge,
   createPersonalNote,
@@ -15,7 +17,88 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetWorkbenchProjectionChangesForTesting();
   resetPersonalKnowledgeForTesting();
+});
+
+test("refreshes the Space projection when an Agent-side change arrives", async () => {
+  const streams: ProjectionEventSource[] = [];
+  vi.stubGlobal("EventSource", class extends ProjectionEventSource {
+    constructor(url: string) {
+      super(url);
+      streams.push(this);
+    }
+  });
+  const fetchMock = vi.fn(async () => jsonResponse({ spaces: [] }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { result } = renderHook(() => useSpaceProjection());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+
+  act(() => streams[0]!.emit(JSON.stringify({
+    revision: 1,
+    reset: false,
+    owners: ["spaces"],
+    referenceIds: ["deleted-reference"],
+  })));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+});
+
+test("refreshes Personal Knowledge when an Agent-side note change arrives", async () => {
+  const streams: ProjectionEventSource[] = [];
+  vi.stubGlobal("EventSource", class extends ProjectionEventSource {
+    constructor(url: string) {
+      super(url);
+      streams.push(this);
+    }
+  });
+  const updated = { ...emptyServerSnapshot(), notes: [serverNote({ bodyMarkdown: "Agent 新正文" })] };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ snapshot: emptyServerSnapshot() }))
+    .mockResolvedValueOnce(jsonResponse({ snapshot: updated }));
+  vi.stubGlobal("fetch", fetchMock);
+  setPersonalKnowledgePersistenceEnabled(true);
+  await initializePersonalKnowledge("space-1");
+
+  streams[0]!.emit(JSON.stringify({
+    revision: 1,
+    reset: false,
+    owners: ["personal_knowledge"],
+    noteIds: ["note-1"],
+  }));
+
+  await waitFor(() => expect(getPersonalKnowledgeSnapshot().notes[0]?.bodyMarkdown).toBe("Agent 新正文"));
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+test("re-reads Personal Knowledge when a newer Agent change arrives during refresh", async () => {
+  const streams: ProjectionEventSource[] = [];
+  vi.stubGlobal("EventSource", class extends ProjectionEventSource {
+    constructor(url: string) {
+      super(url);
+      streams.push(this);
+    }
+  });
+  let resolveStale!: (response: Response) => void;
+  const stale = new Promise<Response>((resolve) => { resolveStale = resolve; });
+  const updated = { ...emptyServerSnapshot(), notes: [serverNote({ bodyMarkdown: "最终正文" })] };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ snapshot: emptyServerSnapshot() }))
+    .mockReturnValueOnce(stale)
+    .mockResolvedValueOnce(jsonResponse({ snapshot: updated }));
+  vi.stubGlobal("fetch", fetchMock);
+  setPersonalKnowledgePersistenceEnabled(true);
+  await initializePersonalKnowledge("space-1");
+
+  streams[0]!.emit(JSON.stringify({ revision: 1, reset: false, owners: ["personal_knowledge"] }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  streams[0]!.emit(JSON.stringify({ revision: 2, reset: false, owners: ["personal_knowledge"] }));
+  resolveStale(jsonResponse({ snapshot: emptyServerSnapshot() }));
+
+  await waitFor(() => expect(getPersonalKnowledgeSnapshot().notes[0]?.bodyMarkdown).toBe("最终正文"));
+  expect(fetchMock).toHaveBeenCalledTimes(3);
 });
 
 test("aborts stale Space refreshes and keeps the newest projection authoritative", async () => {
@@ -98,6 +181,81 @@ test("deduplicates an in-flight Space mutation and reconciles from the backend",
   expect(result.current.error).toBeUndefined();
 });
 
+test("refreshes only the owning Space after a reference mutation", async () => {
+  const requests: Array<{ path: string; method: string }> = [];
+  let folderCreated = false;
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request, init?: RequestInit) => {
+    const request = { path: String(path), method: init?.method ?? "GET" };
+    requests.push(request);
+    if (request.path === "/api/spaces" && request.method === "GET") {
+      return jsonResponse({ spaces: [{ id: "space-a", title: "空间 A" }] });
+    }
+    if (request.path === "/api/spaces/space-a" && request.method === "GET") {
+      return jsonResponse({ tree: {
+        space: { id: "space-a", title: "空间 A", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+        entries: folderCreated ? [{
+          kind: "reference",
+          item: {
+            id: "managed-one",
+            spaceId: "space-a",
+            title: "软件资料",
+            reference: { kind: "managed_folder", path: "C:/agentarbor/space-folders/managed-one" },
+            createdAt: "2026-01-01",
+            updatedAt: "2026-01-01",
+          },
+        }] : [],
+      } });
+    }
+    if (request.path === "/api/spaces/space-a/managed-folders" && request.method === "POST") {
+      folderCreated = true;
+      return jsonResponse({ ok: true });
+    }
+    throw new Error(`unexpected request: ${request.method} ${request.path}`);
+  }));
+
+  const { result } = renderHook(() => useSpaceProjection());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  await act(async () => result.current.createManagedFolder("space-a", "软件资料"));
+
+  expect(result.current.spaces[0]?.items[0]?.itemId).toBe("managed-one");
+  expect(requests.filter((request) => request.path === "/api/spaces")).toHaveLength(1);
+  expect(requests.filter((request) => request.path === "/api/spaces/space-a")).toHaveLength(2);
+});
+
+test("keeps a successful Space mutation successful when projection refresh fails", async () => {
+  let treeReads = 0;
+  let writes = 0;
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request, init?: RequestInit) => {
+    const requestPath = String(path);
+    const method = init?.method ?? "GET";
+    if (requestPath === "/api/spaces" && method === "GET") {
+      return jsonResponse({ spaces: [{ id: "space-a", title: "空间 A" }] });
+    }
+    if (requestPath === "/api/spaces/space-a" && method === "GET") {
+      treeReads += 1;
+      if (treeReads > 1) throw new Error("refresh unavailable");
+      return jsonResponse({ tree: {
+        space: { id: "space-a", title: "空间 A", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+        entries: [],
+      } });
+    }
+    if (requestPath === "/api/spaces/space-a/managed-folders" && method === "POST") {
+      writes += 1;
+      return jsonResponse({ ok: true });
+    }
+    throw new Error(`unexpected request: ${method} ${requestPath}`);
+  }));
+
+  const { result } = renderHook(() => useSpaceProjection());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+
+  await act(async () => result.current.createManagedFolder("space-a", "软件资料"));
+
+  expect(writes).toBe(1);
+  expect(result.current.mutationPending).toBe(false);
+  expect(result.current.error).toBe("操作已完成，但空间数据刷新失败。请手动刷新。");
+});
+
 test("exposes knowledge initialization failure and retries in place", async () => {
   const fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
@@ -150,6 +308,7 @@ test("persists a newly created note followed by an immediate edit in order", asy
   expect(getPersonalNoteSaveState(note.id)).toBe("saving");
 
   await waitFor(() => expect(getPersonalNoteSaveState(note.id)).toBe("saved"));
+  expect(getCommittedLocalNoteRevision(note.id)).toBe(2);
   const mutationRequests = requests.filter((request) => request.path.includes("/api/personal-knowledge/notes"));
   expect(mutationRequests.map((request) => request.method)).toEqual(["POST", "PATCH"]);
   expect(JSON.parse(mutationRequests[1]?.body ?? "{}")).toMatchObject({
@@ -234,4 +393,18 @@ function serverNote(overrides: Partial<Record<"bodyMarkdown" | "revision", strin
     updatedAt: 1,
     ...overrides,
   };
+}
+
+class ProjectionEventSource {
+  readonly listeners = new Map<string, EventListener[]>();
+  constructor(readonly url: string) {}
+  addEventListener(type: string, listener: EventListener): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+  close(): void {}
+  emit(data: string): void {
+    for (const listener of this.listeners.get("workbench.projection.changed") ?? []) {
+      listener({ data } as MessageEvent<string>);
+    }
+  }
 }

@@ -6,11 +6,21 @@
 
 .topbar-shell[data-desktop-shell='true'] {
   padding-right: 8px;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
-.topbar-shell[data-desktop-shell='true'] button {
+.topbar-shell[data-desktop-shell='true'] button,
+.topbar-shell[data-desktop-shell='true'] a,
+.topbar-shell[data-desktop-shell='true'] input,
+.topbar-shell[data-desktop-shell='true'] select,
+.topbar-shell[data-desktop-shell='true'] textarea,
+.topbar-shell[data-desktop-shell='true'] [role='button'] {
   -webkit-app-region: no-drag;
+}
+
+.topbar-shell[data-desktop-shell='true'] .topbar-drag-region {
+  min-width: 24px;
+  -webkit-app-region: drag;
 }
 
 .topbar-nav-button {

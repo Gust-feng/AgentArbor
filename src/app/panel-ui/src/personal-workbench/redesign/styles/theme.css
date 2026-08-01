@@ -32,11 +32,17 @@
   --aa-status-error: #C84040;
   --aa-status-done: #48A870;
 
-  /* 阅读偏好 —— 由 SettingsModal 写入，被所有阅读界面（对话流、专注模式、未来的材料视图）消费。 */
+  /* 阅读偏好由共享设置入口写入，被对话流、专注模式和材料视图消费。 */
   --reading-sans: "Noto Sans SC", Inter, system-ui, -apple-system, sans-serif;
   --reading-serif: "Noto Serif SC", Georgia, "Songti SC", serif;
   --reading-font: var(--reading-sans);
   --reading-width: 680px;
+  --reading-body-size: 16px;
+
+  /* Stable workbench type roles. Reading content scales independently. */
+  --aa-font-ui: 14px;
+  --aa-font-meta: 12px;
+  --aa-font-caption: 11px;
 
   --background: #f4f2ef;
   --foreground: #292722;

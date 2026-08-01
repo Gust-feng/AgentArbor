@@ -39,6 +39,7 @@ test("redesign transcript expands structured activity into its canonical tool re
       durationMs: 90,
     }]}
     showModelUsage={false}
+    developerModeEnabled
     standaloneRun={{
       currentRunId: "run-1",
       runStatus: "completed",
@@ -50,12 +51,102 @@ test("redesign transcript expands structured activity into its canonical tool re
     confirmationBusy={false}
   />);
 
-  fireEvent.click(screen.getByRole("button", { name: /工具调用 1 已完成/ }));
+  fireEvent.click(screen.getByRole("button", { name: /完成 1 项操作/ }));
   fireEvent.click(screen.getByRole("button", { name: /运行 终端/ }));
 
   expect(screen.getByText("完整工具结果")).toBeTruthy();
   expect(screen.getAllByText(/29 tests passed/)).toHaveLength(2);
   expect(screen.getByText("tool-fact-1")).toBeTruthy();
+});
+
+test("redesign transcript keeps normal tool evidence while hiding the canonical result", () => {
+  const turns: readonly ConversationTurn[] = [{
+    turnId: "user-1",
+    role: "user",
+    content: "运行检查",
+    status: "completed",
+  }];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = [{
+    turn: turns[0]!,
+    claimedCurrentRun: false,
+  }];
+  const nodes = [toolNode()];
+
+  render(<RedesignTranscript
+    conversationId="conversation-normal"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunId="run-1"
+    currentRunNodes={nodes}
+    currentRunToolResults={[{
+      callId: "provider-call-1",
+      factId: "tool-fact-1",
+      toolName: "Shell",
+      input: { command: "pnpm test" },
+      output: { stdout: "29 tests passed", stderr: "" },
+      status: "completed",
+      durationMs: 90,
+    }]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    standaloneRun={{
+      currentRunId: "run-1",
+      runStatus: "completed",
+      runProjection: { nodes },
+    }}
+    models={[]}
+    selectedModelId=""
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  expect(screen.getByText("完成 1 项操作")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /完成 1 项操作/ }));
+  fireEvent.click(screen.getByRole("button", { name: /运行 终端/ }));
+
+  expect(screen.getByText("运行 终端")).toBeTruthy();
+  expect(screen.getByText("pnpm test")).toBeTruthy();
+  expect(screen.getByText("29 tests passed")).toBeTruthy();
+  expect(screen.queryByText("完整工具结果")).toBeNull();
+  expect(screen.queryByText("tool-fact-1")).toBeNull();
+});
+
+test("redesign transcript uses the shared markdown renderer without hover layout shifts", () => {
+  const turns: readonly ConversationTurn[] = [
+    { turnId: "user-1", role: "user", content: "整理工具", status: "completed" },
+    {
+      turnId: "assistant-1",
+      role: "assistant",
+      content: "| 工具 | 用途 |\n| --- | --- |\n| `Read` | 读取文件 |\n\n第一段   不应保留多余空格。",
+      status: "completed",
+    },
+  ];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = turns.map((turn) => ({
+    turn,
+    claimedCurrentRun: false,
+  }));
+
+  render(<RedesignTranscript
+    conversationId="conversation-markdown"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunNodes={[]}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    models={[]}
+    selectedModelId=""
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  expect(document.querySelector(".rich-table")).not.toBeNull();
+  const answer = document.querySelector(".aa-answer-block");
+  expect(answer).not.toBeNull();
+  expect(screen.getByRole("button", { name: "复制回答" })).toBeTruthy();
+  const before = answer?.querySelectorAll(".aa-answer-copy").length;
+  fireEvent.mouseEnter(answer!);
+  expect(answer?.querySelectorAll(".aa-answer-copy").length).toBe(before);
 });
 
 test("redesign confirmation keeps approval and denial behavior without legacy transcript styling", () => {

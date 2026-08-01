@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { AlertCircle, RotateCcw } from 'lucide-react'
+import { AlertCircle, ChevronDown, RotateCcw } from 'lucide-react'
 
 interface DeferredSurfaceBoundaryProps {
   readonly children: ReactNode
@@ -49,20 +49,47 @@ function DeferredFailure(props: {
 }) {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center px-6" role="alert">
-      <div className="flex max-w-md items-start gap-3">
-        <AlertCircle className="mt-0.5 shrink-0" size={16} style={{ color: 'var(--aa-status-error)' }} />
-        <div className="min-w-0">
+      <div
+        className="w-full max-w-md border-l-2 py-1 pl-5"
+        style={{ borderColor: 'var(--aa-status-error)' }}
+      >
+        <div className="flex items-center gap-2">
+          <AlertCircle className="shrink-0" size={16} style={{ color: 'var(--aa-status-error)' }} />
           <p className="text-sm font-medium" style={{ color: 'var(--aa-text-1)' }}>{props.label}</p>
-          <p className="mt-1 break-words text-xs leading-5" style={{ color: 'var(--aa-text-3)' }}>{props.detail}</p>
+        </div>
+        <p className="mt-2 text-xs leading-5" style={{ color: 'var(--aa-text-2)' }}>
+          重新加载后再试。
+        </p>
+        <div className="relative mt-4 h-7">
           <button
             type="button"
             onClick={props.onRetry}
-            className="mt-3 flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-black/5"
-            style={{ color: 'var(--aa-accent)', border: '1px solid var(--aa-border)' }}
+            className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{ background: 'var(--aa-accent-bg)', color: 'var(--aa-accent)' }}
           >
             <RotateCcw size={12} />
             重新加载
           </button>
+          {props.detail.length > 0 && (
+            <details className="group absolute top-0 left-24 z-10 min-w-0">
+              <summary className="flex cursor-pointer list-none items-center gap-1 text-xs transition-colors hover:opacity-75" style={{ color: 'var(--aa-text-3)' }}>
+                错误详情
+                <ChevronDown className="transition-transform group-open:rotate-180" size={13} />
+              </summary>
+              <pre
+                className="absolute top-full mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-md border px-3 py-2.5 select-text text-xs leading-5 shadow-sm"
+                style={{
+                  left: '-6rem',
+                  width: 'min(24rem, calc(100vw - 4rem))',
+                  background: 'var(--aa-surface)',
+                  borderColor: 'var(--aa-border)',
+                  color: 'var(--aa-text-2)',
+                }}
+              >
+                {props.detail}
+              </pre>
+            </details>
+          )}
         </div>
       </div>
     </div>

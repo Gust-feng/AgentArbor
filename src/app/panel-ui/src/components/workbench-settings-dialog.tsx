@@ -23,6 +23,8 @@ type WorkbenchSettingsDialogPreferences = {
   readonly onModelUsageDisplayChange: (enabled: boolean) => void;
   readonly agentClusterEnabled: boolean;
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
+  readonly developerModeEnabled: boolean;
+  readonly onDeveloperModeChange: (enabled: boolean) => void;
 };
 
 type WorkbenchSettingsDialogSavingState = {
@@ -62,6 +64,8 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       onModelUsageDisplayChange={props.preferences.onModelUsageDisplayChange}
       agentClusterEnabled={props.preferences.agentClusterEnabled}
       onAgentClusterEnabledChange={props.preferences.onAgentClusterEnabledChange}
+      developerModeEnabled={props.preferences.developerModeEnabled}
+      onDeveloperModeChange={props.preferences.onDeveloperModeChange}
       onSaveCommandShell={props.actions.saveCommandShell}
       savingModel={props.saving.model}
       savingWorkspace={props.saving.workspace}

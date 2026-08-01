@@ -44,6 +44,7 @@ export type ConversationTurn = {
 
 export type Conversation = {
   readonly conversationId: string;
+  readonly spaceId?: string;
   readonly title: string;
   readonly titleEditedAt?: string;
   readonly turns: readonly ConversationTurn[];
@@ -64,6 +65,7 @@ export type ConversationPendingAction = {
 
 export type ConversationSummary = {
   readonly conversationId: string;
+  readonly spaceId?: string;
   readonly title: string;
   readonly titleEditedAt?: string;
   readonly preview?: string;

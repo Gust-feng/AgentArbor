@@ -64,12 +64,14 @@ export function App(): React.ReactElement {
     modelUsageDisplayEnabled,
     setModelUsageDisplayEnabled,
     agentClusterEnabled,
+    developerModeEnabled,
     inputCloseSignal,
     setInputCloseSignal,
     openSettings,
     closeSettings,
     changeModelUsageDisplay,
     changeAgentClusterEnabled,
+    changeDeveloperMode,
   } = shellState;
   // The personal workbench is the production Ordinary entry. Deferred Deep
   // remains a settings/runtime compatibility concern, not a rendered surface.
@@ -230,6 +232,8 @@ export function App(): React.ReactElement {
       onModelUsageDisplayChange: changeModelUsageDisplay,
       agentClusterEnabled,
       onAgentClusterEnabledChange: changeAgentClusterEnabled,
+      developerModeEnabled,
+      onDeveloperModeChange: changeDeveloperMode,
     },
     saving: {
       model: savingModel,
@@ -254,10 +258,13 @@ export function App(): React.ReactElement {
       currentRun={currentRun}
       inputProps={inputProps}
       showModelUsage={modelUsageDisplayEnabled}
+      developerModeEnabled={developerModeEnabled}
       error={app.error}
       pendingConfirmation={pendingConfirmation}
       confirmationBusy={confirmationBusy}
       onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
+      onNewConversation={runActions.resetChat}
+      onStartNewConversation={runActions.startNewConversation}
       onOpenConversation={openNormalConversation}
       pendingConversationIds={pendingConversationIds}
       onRenameConversation={sidebarActions.renameConversation}
@@ -280,8 +287,8 @@ export function App(): React.ReactElement {
         addConversation: spaceProjection.addConversation,
         move: spaceProjection.move,
         rename: spaceProjection.rename,
+        unlinkReference: spaceProjection.unlinkReference,
         removeReference: spaceProjection.removeReference,
-        deleteManagedFolder: spaceProjection.deleteManagedFolder,
       }}
       onOpenSettings={() => openSettings("models")}
       appUpdate={app.appUpdate}

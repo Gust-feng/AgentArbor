@@ -6,7 +6,7 @@ import type { ToolCallResult } from "../../../../../../../domain/tools";
 import { ActivityEvidencePanel } from "./ActivityEvidence";
 
 test("activity evidence renders sources with only title, link, and domain", () => {
-  render(<ActivityEvidencePanel item={item({
+  render(<ActivityEvidencePanel showCanonicalToolResult={false} item={item({
     title: "来源",
     content: "Official guide · developers.openai.com",
     format: "source_list",
@@ -29,7 +29,7 @@ test("activity evidence renders sources with only title, link, and domain", () =
 });
 
 test("activity evidence keeps file locations scannable without parsing display text", () => {
-  render(<ActivityEvidencePanel item={item({
+  render(<ActivityEvidencePanel showCanonicalToolResult={false} item={item({
     title: "匹配位置",
     content: "src/index.ts:4 - needle",
     format: "path_list",
@@ -66,7 +66,7 @@ test("linked read evidence keeps only the source and omits partial page content"
     ],
   };
 
-  render(<ActivityEvidencePanel item={readItem} />);
+  render(<ActivityEvidencePanel item={readItem} showCanonicalToolResult={false} />);
 
   expect(document.querySelector(".agent-evidence-source-title")).toBeNull();
   expect(screen.getByRole("link", { name: "example.com" })).toBeTruthy();
@@ -105,7 +105,7 @@ test("web search evidence renders one source link and ignores duplicate excerpts
     ],
   };
 
-  render(<ActivityEvidencePanel item={searchItem} />);
+  render(<ActivityEvidencePanel item={searchItem} showCanonicalToolResult={false} />);
 
   expect(document.querySelector('a.agent-evidence-source[href="https://www.example.com/guide"]')).toBeTruthy();
   expect(screen.getByText("AgentArbor guide")).toBeTruthy();
@@ -130,7 +130,7 @@ test("command evidence keeps the command and output without internal execution m
     ],
   };
 
-  render(<ActivityEvidencePanel item={commandItem} />);
+  render(<ActivityEvidencePanel item={commandItem} showCanonicalToolResult={false} />);
 
   expect(screen.getByText("pnpm test")).toBeTruthy();
   expect(screen.getByText("10 tests passed")).toBeTruthy();
@@ -160,7 +160,7 @@ test("activity evidence keeps structured sections and exposes the complete canon
     durationMs: 1250,
   };
 
-  render(<ActivityEvidencePanel item={item({
+  render(<ActivityEvidencePanel showCanonicalToolResult item={item({
     title: "输出",
     content: "bounded summary",
     format: "console",
@@ -177,6 +177,31 @@ test("activity evidence keeps structured sections and exposes the complete canon
   expect(screen.getByText("Command exited with code 1")).toBeTruthy();
   expect(screen.getByText("execution_failure")).toBeTruthy();
   expect(screen.getByText(/tool-output:1/)).toBeTruthy();
+});
+
+test("activity evidence can hide only the canonical tool result", () => {
+  render(<ActivityEvidencePanel
+    item={item({
+      title: "输出",
+      content: "normal tool output",
+      format: "console",
+    })}
+    toolResult={{
+      callId: "provider-call-1",
+      factId: "tool-fact-1",
+      toolName: "Shell",
+      input: { command: "pnpm test" },
+      output: { stdout: "raw stdout" },
+      status: "completed",
+      durationMs: 10,
+    }}
+    showCanonicalToolResult={false}
+  />);
+
+  expect(screen.getByText("normal tool output")).toBeTruthy();
+  expect(screen.queryByText("完整工具结果")).toBeNull();
+  expect(screen.queryByText("provider-call-1")).toBeNull();
+  expect(screen.queryByText("raw stdout")).toBeNull();
 });
 
 function item(section: NonNullable<ActivityItem["expandedSections"]>[number]): ActivityItem {

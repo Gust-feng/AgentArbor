@@ -21,7 +21,7 @@ import {
   savePrefs,
   type ReadingFont,
   type ReadingWidth,
-} from './readingPrefs'
+} from '../../../../reading-preferences'
 import { useModalA11y } from './useModalA11y'
 
 interface SettingsModalProps {

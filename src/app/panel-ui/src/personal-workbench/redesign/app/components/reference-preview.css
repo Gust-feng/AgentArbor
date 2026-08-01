@@ -32,6 +32,9 @@
 .aa-reference-preview__text, .aa-reference-preview__diff, .aa-reference-preview__editor { flex: 1; min-height: 0; margin: 0; overflow: auto; background: var(--aa-canvas, #f7f5f2); }
 .aa-reference-preview__text { display: flex; flex-direction: column; padding: 28px 24px 80px; }
 .aa-reference-preview__text[data-editable] { padding: 22px 24px 80px; }
+.aa-reference-preview__text[data-presentation='text'] { background: var(--aa-canvas, #f7f5f2); }
+.aa-reference-preview__plain { width: min(100%, var(--reading-width, 680px)); min-height: 480px; margin: 0 auto; padding: 56px 64px 80px; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 4px; background: #fff; box-shadow: 0 1px 8px rgba(45,40,34,.06); }
+.aa-reference-preview__plain pre { margin: 0; color: var(--aa-text-1, #292722); white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.8 var(--reading-font, ui-serif, Georgia, serif); }
 .aa-reference-preview__diff { padding: 22px 24px 80px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .aa-code-document-layout { width: min(100%, 920px); margin: 0 auto; padding: 36px 24px 80px; }
 .aa-reference-preview__text .aa-code-document { width: min(100%, 920px); margin: 0 auto; }
@@ -57,9 +60,9 @@
 .aa-reference-preview__directory > button { width: 100%; min-height: 32px; justify-content: flex-start; padding: 5px 9px; font-size: 12px; }
 .aa-reference-preview__directory > button > span { min-width: 0; flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .aa-reference-preview__directory > span { display: block; padding: 20px 9px; color: var(--aa-text-3, #aba39b); font-size: 12px; }
-.aa-reference-preview__media img, .aa-reference-preview__media video { max-width: 100%; max-height: 100%; object-fit: contain; }
+.aa-reference-preview__media img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .aa-reference-preview__media--described { flex-direction: column; gap: 14px; }
-.aa-reference-preview__media--described img, .aa-reference-preview__media--described video { max-height: calc(100% - 40px); }
+.aa-reference-preview__media--described img { max-height: calc(100% - 40px); }
 .aa-reference-preview__media--described p, .aa-reference-preview__audio p { max-width: var(--reading-width, 680px); margin: 0; color: var(--aa-text-2, #87827c); font-size: 12px; line-height: 1.7; }
 .aa-video-document { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--aa-canvas, #f7f5f2); color: var(--aa-text-2, #87827c); }
 .aa-video-document__stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; overflow: auto; }
@@ -93,11 +96,18 @@
 .aa-video-document__player:fullscreen .aa-video-document__viewport { flex: 1; min-height: 0; aspect-ratio: auto; }
 .aa-reference-preview__web-source { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; padding-bottom: 14px; border-bottom: 1px solid var(--aa-border, rgba(45,40,34,.09)); color: var(--aa-text-3, #aba39b); font-size: 12px; }
 .aa-reference-preview__web-source a { margin-left: auto; color: var(--aa-accent, #6865a7); text-decoration: none; }
-.aa-reference-preview__pages { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 32px 24px 80px; }
-.aa-reference-preview__pages article { position: relative; width: min(100%, 720px); min-height: 480px; padding: 56px 64px; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 4px; background: #fff; box-shadow: 0 1px 8px rgba(45,40,34,.06); }
-.aa-reference-preview__pages pre { margin: 0; color: var(--aa-text-1, #292722); white-space: pre-wrap; font: 14px/1.8 var(--reading-font, ui-serif, Georgia, serif); }
-.aa-reference-preview__pages article > span { position: absolute; right: 24px; bottom: 20px; color: var(--aa-text-3, #aba39b); font-size: 11px; }
-.aa-reference-preview__pdf { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+.aa-pdf-document { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 32px 24px 80px; background: var(--aa-canvas, #f7f5f2); }
+.aa-pdf-document__page { position: relative; width: min(100%, 720px); min-height: 480px; overflow: hidden; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 4px; background: #fff; box-shadow: 0 1px 8px rgba(45,40,34,.06); }
+.aa-pdf-document__page--text { padding: 56px 64px; }
+.aa-pdf-document__page--text pre { margin: 0; color: var(--aa-text-1, #292722); white-space: pre-wrap; font: 14px/1.8 var(--reading-font, ui-serif, Georgia, serif); }
+.aa-pdf-document__page--canvas { min-height: 0; }
+.aa-pdf-document__page--canvas canvas { display: block; width: 100%; height: 100%; }
+.aa-pdf-document__page-number { position: absolute; right: 24px; bottom: 20px; padding: 2px 4px; border-radius: 3px; background: rgba(255,255,255,.86); color: var(--aa-text-3, #aba39b); font-size: 11px; }
+.aa-pdf-document__continuation { display: flex; min-height: 42px; align-items: center; gap: 10px; color: var(--aa-text-3, #aba39b); font-size: 11px; }
+.aa-pdf-document__continuation button { min-height: 30px; padding: 0 10px; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 5px; background: var(--aa-surface, #fff); color: var(--aa-accent, #6865a7); }
+.aa-pdf-document__page-error, .aa-pdf-document__state { color: var(--aa-text-3, #aba39b); font-size: 12px; }
+.aa-pdf-document__page-error { position: absolute; inset: 0; display: grid; place-items: center; }
+.aa-pdf-document__state { min-height: 240px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 32px; }
 .aa-reference-preview__audio, .aa-reference-preview__web, .aa-reference-preview__state { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 28px; text-align: center; color: var(--aa-text-3, #aba39b); }
 .aa-reference-preview__web strong, .aa-reference-preview__state strong { color: var(--aa-text-1, #292722); font-size: 14px; }
 .aa-reference-preview__web a { max-width: min(620px, 80vw); overflow-wrap: anywhere; color: var(--aa-accent, #6865a7); }

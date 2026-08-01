@@ -40,6 +40,7 @@ export function upsertConversationSummary(
 ): readonly ConversationSummary[] {
   const summary: ConversationSummary = {
     conversationId: conversation.conversationId,
+    spaceId: conversation.spaceId,
     title: conversation.title,
     titleEditedAt: conversation.titleEditedAt,
     activeRunId: conversation.activeRunId,

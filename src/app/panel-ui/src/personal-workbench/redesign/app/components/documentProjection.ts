@@ -1,12 +1,12 @@
-import type { SpaceReferencePreview } from '../../../../../../panel-api-contracts'
+import type { DocumentPreview } from '../../../../../../panel-api-contracts'
 
 export type DocumentMaterialKind = 'file' | 'markdown' | 'pdf' | 'web' | 'image' | 'video' | 'audio' | 'code'
 
-export function isMarkdownDocument(preview: SpaceReferencePreview): boolean {
+export function isMarkdownDocument(preview: DocumentPreview): boolean {
   return preview.presentation.kind === 'markdown'
 }
 
-export function classifyReferencePreview(preview: SpaceReferencePreview | undefined): DocumentMaterialKind {
+export function classifyReferencePreview(preview: DocumentPreview | undefined): DocumentMaterialKind {
   switch (preview?.presentation.kind) {
     case 'markdown': return 'markdown'
     case 'code': return 'code'

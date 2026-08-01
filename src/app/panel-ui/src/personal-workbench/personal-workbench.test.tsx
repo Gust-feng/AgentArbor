@@ -12,23 +12,62 @@ import {
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
 } from "./redesign/app/components/personalKnowledgeClient";
-import { fetchSpaceReferencePreview, getCachedReferencePreview } from "./redesign/app/components/referencePreviewClient";
+import { fetchDocumentPreview, getCachedReferencePreview } from "./redesign/app/components/referencePreviewClient";
 import { resolvePage } from "./redesign/app/components/brainStore";
 
 beforeEach(() => resetPersonalKnowledgeForTesting());
 
 test("submits a real Ordinary task from the redesign home", async () => {
   const user = userEvent.setup();
-  const onSubmit = vi.fn();
-  render(<ControlledWorkbench onSubmit={onSubmit} />);
+  const onStartNewConversation = vi.fn(async () => true);
+  const onContinueConversation = vi.fn();
+  render(<ControlledWorkbench
+    onStartNewConversation={onStartNewConversation}
+    onContinueConversation={onContinueConversation}
+  />);
 
   const composer = await screen.findByRole("textbox", undefined, { timeout: 5_000 });
   await user.type(composer, "整理当前设计改造");
   await user.keyboard("{Enter}");
 
-  expect(onSubmit).toHaveBeenCalledTimes(1);
+  expect(onStartNewConversation).toHaveBeenCalledTimes(1);
+  expect(onContinueConversation).not.toHaveBeenCalled();
   expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
 }, 10_000);
+
+test("keeps the home entry visible when a new conversation cannot start", async () => {
+  const user = userEvent.setup();
+  const onStartNewConversation = vi.fn(async () => false);
+  render(<ControlledWorkbench
+    onStartNewConversation={onStartNewConversation}
+    onContinueConversation={vi.fn()}
+  />);
+
+  const composer = await screen.findByRole("textbox", undefined, { timeout: 5_000 });
+  await user.type(composer, "稍后重试");
+  await user.keyboard("{Enter}");
+
+  await waitFor(() => expect(onStartNewConversation).toHaveBeenCalledOnce());
+  expect(screen.getByRole("main", { name: "个人首页" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
+}, 10_000);
+
+test("continues the active conversation through the ordinary submit command", async () => {
+  const user = userEvent.setup();
+  const onContinueConversation = vi.fn();
+  const onStartNewConversation = vi.fn(async () => true);
+  render(<ControlledActiveConversationWorkbench
+    onStartNewConversation={onStartNewConversation}
+    onContinueConversation={onContinueConversation}
+  />);
+
+  const composer = await screen.findByPlaceholderText("继续对话...");
+  await user.type(composer, "继续完善");
+  await user.keyboard("{Enter}");
+
+  expect(onContinueConversation).toHaveBeenCalledOnce();
+  expect(onStartNewConversation).not.toHaveBeenCalled();
+});
 
 test("projects real Space references without substituting built-in initial assets", async () => {
   const user = userEvent.setup();
@@ -50,6 +89,32 @@ test("projects real Space references without substituting built-in initial asset
 
   expect((await screen.findAllByText("阅读摘要.md")).length).toBeGreaterThan(0);
   expect(screen.queryByText("PyTorch 入门笔记.pdf")).toBeNull();
+});
+
+test("falls back to a valid Space item when the selected reference disappears from the authoritative projection", async () => {
+  const user = userEvent.setup();
+  const initialSpace = {
+    spaceId: "space-study",
+    title: "学习空间",
+    items: [
+      { itemId: "conversation-removed", title: "即将删除的对话", kind: "conversation_reference" as const, conversationId: "conversation-removed" },
+      { itemId: "conversation-kept", title: "保留的对话", kind: "conversation_reference" as const, conversationId: "conversation-kept" },
+    ],
+  };
+  const rendered = render(<PersonalWorkbench {...baseProps({ spaces: [initialSpace] })} />);
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  const tree = await screen.findByRole("tree", { name: "学习空间资料" });
+  await user.click(within(tree).getByText("即将删除的对话"));
+  expect(screen.getAllByText("即将删除的对话").length).toBeGreaterThan(1);
+
+  rendered.rerender(<PersonalWorkbench {...baseProps({
+    spaces: [{ ...initialSpace, items: [initialSpace.items[1]!] }],
+  })} />);
+
+  await waitFor(() => {
+    expect(within(screen.getByRole("tree", { name: "学习空间资料" })).queryByText("即将删除的对话")).toBeNull();
+    expect(screen.getAllByText("保留的对话").length).toBeGreaterThan(1);
+  });
 });
 
 test("renders initialized assets as ordinary persisted Space items", async () => {
@@ -226,10 +291,10 @@ test("updates a visible knowledge card when its managed preview finishes", async
   let finishPreview: ((response: Response) => void) | undefined;
   vi.stubGlobal("fetch", vi.fn(async () => await new Promise<Response>((resolve) => { finishPreview = resolve; })));
   resetPersonalKnowledgeForTesting({ pages: [page] });
-  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} spaces={[]} onOpenSpaceReference={() => undefined} />);
+  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} />);
   expect(screen.getByText("托管笔记.md")).toBeTruthy();
 
-  const previewRequest = fetchSpaceReferencePreview("asset-card-live", "", undefined, "/api/personal-knowledge/assets");
+  const previewRequest = fetchDocumentPreview("asset-card-live", "", undefined, "/api/personal-knowledge/assets");
   await waitFor(() => expect(finishPreview).toBeTypeOf("function"));
   finishPreview?.(jsonResponse({ preview: {
     itemId: "asset-card-live",
@@ -251,10 +316,10 @@ test("updates a visible Workbench asset card when its preview finishes", async (
   let finishPreview: ((response: Response) => void) | undefined;
   vi.stubGlobal("fetch", vi.fn(async () => await new Promise<Response>((resolve) => { finishPreview = resolve; })));
   resetPersonalKnowledgeForTesting({ pages: [page] });
-  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} spaces={[]} onOpenSpaceReference={() => undefined} />);
+  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} />);
   expect(screen.getByText("(材料加载中)")).toBeTruthy();
 
-  const previewRequest = fetchSpaceReferencePreview("workbench-card-live", "", undefined, "/api/workbench-assets");
+  const previewRequest = fetchDocumentPreview("workbench-card-live", "", undefined, "/api/workbench-assets");
   await waitFor(() => expect(finishPreview).toBeTypeOf("function"));
   finishPreview?.(jsonResponse({ preview: {
     itemId: "workbench-card-live",
@@ -281,8 +346,8 @@ test("shows a Workbench asset preview failure instead of an endless loading labe
     text: async () => "预览暂不可用",
   }) as Response));
   resetPersonalKnowledgeForTesting({ pages: [page] });
-  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} spaces={[]} onOpenSpaceReference={() => undefined} />);
-  const request = fetchSpaceReferencePreview(page.refId, '', undefined, '/api/workbench-assets');
+  const rendered = render(<BrainPage selectedId={null} onSelect={() => undefined} />);
+  const request = fetchDocumentPreview(page.refId, '', undefined, '/api/workbench-assets');
   await expect(request).rejects.toThrow();
   expect(await screen.findByText("材料暂不可用")).toBeTruthy();
   expect(screen.queryByText("(材料加载中)")).toBeNull();
@@ -483,6 +548,20 @@ test("keeps bootstrap failures inside the Redesign workbench and retries in plac
   expect(screen.queryByText("新任务")).toBeNull();
 });
 
+test("uses the motion-only Workbench loader while bootstrap data is pending", () => {
+  const { container } = renderWorkbench({
+    bootstrapState: {
+      status: "loading",
+      onRetry: vi.fn(),
+    },
+  });
+
+  expect(screen.getByRole("status", { name: "正在准备工作台" })).toBeTruthy();
+  expect(screen.queryByText("正在准备工作台")).toBeNull();
+  expect(container.querySelector(".workbench-bootstrap-loading__progress")).toBeTruthy();
+  expect(screen.queryByText("新任务")).toBeNull();
+});
+
 test("keeps folder expansion isolated per Space when switching projections", async () => {
   const user = userEvent.setup();
   renderWorkbench({
@@ -558,17 +637,28 @@ test("prefetches nested local folder entries and keeps folders out of the previe
   expect(screen.getByText("1 个对象")).toBeTruthy();
 });
 
-test("routes real Space reference rename and removal through backend actions", async () => {
+test("routes Space rename, unlink, and physical deletion through distinct actions", async () => {
   const user = userEvent.setup();
   const rename = vi.fn().mockResolvedValue(undefined);
+  const unlinkReference = vi.fn().mockResolvedValue(undefined);
   const removeReference = vi.fn().mockResolvedValue(undefined);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   renderWorkbench({
     spaces: [{
       spaceId: "space-reading",
       title: "阅读资料",
-      items: [{ itemId: "reference-material", title: "阅读摘要.md", kind: "local_file" }],
+      items: [
+        { itemId: "reference-material", title: "阅读摘要.md", kind: "local_file" },
+        { itemId: "workspace-reference", title: "项目目录", kind: "workspace_folder" },
+        {
+          itemId: "reference-group",
+          title: "资料组",
+          kind: "folder",
+          children: [{ itemId: "nested-material", title: "原始材料.md", kind: "local_file" }],
+        },
+      ],
     }],
-    spaceActions: { rename, removeReference },
+    spaceActions: { rename, unlinkReference, removeReference },
   });
 
   await user.click(screen.getByRole("button", { name: "阅读资料" }));
@@ -580,14 +670,30 @@ test("routes real Space reference rename and removal through backend actions", a
   expect(rename).toHaveBeenCalledWith({ kind: "reference", id: "reference-material" }, "阅读摘录.md");
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
-  vi.spyOn(window, "confirm").mockReturnValue(true);
-  await user.click(screen.getByRole("button", { name: "删除" }));
+  await user.click(screen.getByRole("button", { name: "取消链接" }));
+  expect(unlinkReference).toHaveBeenCalledWith("reference-material");
+  expect(confirm).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
+  await user.click(screen.getByRole("button", { name: "删除文件" }));
   expect(removeReference).toHaveBeenCalledWith("reference-material");
+  expect(confirm).toHaveBeenLastCalledWith("确定要删除“阅读摘要.md”吗？此操作会从磁盘上删除该文件。");
+
+  await user.click(screen.getByRole("button", { name: "项目目录操作" }));
+  expect(screen.getByRole("button", { name: "取消链接" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "删除文件夹" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "取消链接" }));
+  expect(unlinkReference).toHaveBeenCalledWith("workspace-reference");
+
+  await user.click(screen.getByRole("button", { name: "资料组操作" }));
+  await user.click(screen.getByRole("button", { name: "删除文件夹" }));
+  expect(removeReference).toHaveBeenCalledWith("reference-group");
+  expect(confirm).toHaveBeenLastCalledWith("确定删除“资料组”及其所有子项吗？其中本地文件和软件自建文件夹会从磁盘删除，其他内容仅取消链接。");
 });
 
 test("deletes app-owned folders and creates files from a linked workspace folder", async () => {
   const user = userEvent.setup();
-  const deleteManagedFolder = vi.fn().mockResolvedValue(undefined);
+  const removeReference = vi.fn().mockResolvedValue(undefined);
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === "POST" && url.endsWith("/references/managed-folder/entry")) {
@@ -644,7 +750,7 @@ test("deletes app-owned folders and creates files from a linked workspace folder
         { itemId: "folder-reference", title: "项目文件", kind: "workspace_folder", referenceId: "folder-reference" },
       ],
     }],
-    spaceActions: { deleteManagedFolder },
+    spaceActions: { removeReference },
   });
 
   await user.click(screen.getByRole("button", { name: "项目空间" }));
@@ -658,7 +764,7 @@ test("deletes app-owned folders and creates files from a linked workspace folder
 
   await user.click(screen.getByRole("button", { name: "软件资料操作" }));
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
-  expect(deleteManagedFolder).toHaveBeenCalledWith("managed-folder");
+  expect(removeReference).toHaveBeenCalledWith("managed-folder");
 
   await user.click(screen.getByRole("button", { name: "项目文件操作" }));
   await user.click(screen.getByRole("button", { name: "新建文件" }));
@@ -773,8 +879,7 @@ test("resolves a managed Brain asset without consulting the current Space projec
         sourceRelativePath: "研究资料.pdf",
       },
     },
-    [],
-  )).toMatchObject({
+   )).toMatchObject({
     refId: "reference-brain",
     kind: "space_reference",
     title: "研究资料.pdf",
@@ -809,7 +914,7 @@ test("projects managed code content for the same knowledge card cover as initial
     content: { kind: "text", text: "import requests\nrequests.get('https://example.com')", truncated: false, editable: false, language: "python", encoding: "UTF-8" },
   } })));
 
-  await fetchSpaceReferencePreview(page.refId, "", undefined, "/api/personal-knowledge/assets");
+  await fetchDocumentPreview(page.refId, "", undefined, "/api/personal-knowledge/assets");
 
   expect(resolvePage(page)).toMatchObject({
     materialKind: "code",
@@ -947,6 +1052,69 @@ test("keeps a recovered running Ordinary run visible after startup", async () =>
   expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
 });
 
+test("resets a failed conversation and focuses the single home entry", async () => {
+  const user = userEvent.setup();
+  render(<FailedConversationWorkbench />);
+
+  await user.click(screen.getByRole("button", { name: "新对话" }));
+
+  const composer = await screen.findByPlaceholderText("想从哪里开始？");
+  expect(document.activeElement).toBe(composer);
+  expect(screen.getByRole("main", { name: "个人首页" })).toBeTruthy();
+  expect(screen.queryByText("失败的对话")).toBeNull();
+});
+
+test("starts from a clean home after a completed conversation was loaded", async () => {
+  renderWorkbench({
+    conversation: { conversationId: "conversation-completed", title: "已完成的对话", turns: [] },
+    currentRun: {
+      events: [],
+      transcriptNodes: [{
+        nodeId: "node-1",
+        runId: "run-1",
+        sequence: 1,
+        eventType: "assistant.completed",
+        kind: "answer",
+        phase: "completed",
+        title: "已完成回答",
+        text: "历史内容",
+        timestamp: new Date().toISOString(),
+        refs: [],
+      }],
+      run: {
+        runId: "run-1",
+        conversationId: "conversation-completed",
+        title: "已完成的对话",
+        goalSummary: "已完成的对话",
+        status: "completed",
+        runMode: "agent",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        requiresUserAction: false,
+        eventCursor: { lastSequence: 1, eventCount: 1 },
+      },
+    },
+  });
+
+  expect(await screen.findByPlaceholderText("想从哪里开始？")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
+});
+
+test("runs the new-conversation command from a persistent primary sidebar action", async () => {
+  const user = userEvent.setup();
+  const onNewConversation = vi.fn();
+  renderWorkbench({ onNewConversation });
+
+  const newConversation = screen.getByRole("button", { name: "新对话" });
+  expect(newConversation).toBeTruthy();
+  expect(newConversation.closest("[class*='group/convs']")).toBeNull();
+
+  await user.click(newConversation);
+
+  expect(onNewConversation).toHaveBeenCalledOnce();
+  expect(await screen.findByPlaceholderText("想从哪里开始？")).toBeTruthy();
+});
+
 test("renders and opens backend conversation projections in pinned and updated order", async () => {
   const user = userEvent.setup();
   const onOpenConversation = vi.fn();
@@ -1038,10 +1206,74 @@ test("exposes model, context usage, and reasoning controls in the redesign compo
   expect(onReasoningEffortChange).toHaveBeenCalledWith("high");
 });
 
-function ControlledWorkbench(props: { readonly onSubmit: () => void }) {
+function ControlledWorkbench(props: {
+  readonly onStartNewConversation: () => Promise<boolean>;
+  readonly onContinueConversation: () => void;
+}) {
   const [value, setValue] = useState("");
   return <PersonalWorkbench {...baseProps({
-    inputProps: inputProps({ value, onChange: setValue, onSubmit: props.onSubmit }),
+    inputProps: inputProps({ value, onChange: setValue, onSubmit: props.onContinueConversation }),
+    onStartNewConversation: props.onStartNewConversation,
+  })} />;
+}
+
+function ControlledActiveConversationWorkbench(props: {
+  readonly onStartNewConversation: () => Promise<boolean>;
+  readonly onContinueConversation: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  return <PersonalWorkbench {...baseProps({
+    conversation: {
+      conversationId: "conversation-active",
+      title: "进行中的对话",
+      turns: [],
+    },
+    currentRun: {
+      events: [],
+      transcriptNodes: [],
+      run: {
+        runId: "run-active",
+        conversationId: "conversation-active",
+        title: "进行中的对话",
+        goalSummary: "继续完善",
+        status: "running",
+        runMode: "agent",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        requiresUserAction: false,
+        eventCursor: { lastSequence: 0, eventCount: 0 },
+      },
+    },
+    inputProps: inputProps({ value, onChange: setValue, onSubmit: props.onContinueConversation }),
+    onStartNewConversation: props.onStartNewConversation,
+  })} />;
+}
+
+function FailedConversationWorkbench() {
+  const [showFailedConversation, setShowFailedConversation] = useState(true);
+  const now = new Date().toISOString();
+  return <PersonalWorkbench {...baseProps({
+    conversation: showFailedConversation
+      ? { conversationId: "conversation-failed", title: "失败的对话", turns: [] }
+      : undefined,
+    currentRun: showFailedConversation ? {
+      events: [],
+      transcriptNodes: [],
+      run: {
+        runId: "run-failed",
+        conversationId: "conversation-failed",
+        title: "失败的对话",
+        goalSummary: "失败的对话",
+        status: "failed",
+        runMode: "agent",
+        createdAt: now,
+        updatedAt: now,
+        requiresUserAction: false,
+        eventCursor: { lastSequence: 0, eventCount: 0 },
+      },
+    } : { events: [], transcriptNodes: [] },
+    onNewConversation: () => setShowFailedConversation(false),
   })} />;
 }
 
@@ -1060,8 +1292,11 @@ function baseProps(overrides: Partial<PersonalWorkbenchProps> = {}): PersonalWor
     currentRun: { events: [], transcriptNodes: [] },
     inputProps: inputProps(),
     showModelUsage: false,
+    developerModeEnabled: false,
     confirmationBusy: false,
     onDecision: vi.fn(),
+    onNewConversation: vi.fn(),
+    onStartNewConversation: vi.fn(async () => true),
     onOpenConversation: vi.fn(),
     onRenameConversation: vi.fn(),
     onToggleConversationPinned: vi.fn(),

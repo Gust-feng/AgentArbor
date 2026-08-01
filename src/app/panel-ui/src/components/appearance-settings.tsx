@@ -11,6 +11,12 @@ import {
   type MotionPreferenceId,
 } from "../app-motion";
 import { getInitialTheme } from "../app-theme";
+import {
+  loadPrefs,
+  savePrefs,
+  SIZE_PX,
+  type ReadingSize,
+} from "../reading-preferences";
 import { ThemeSwitcher } from "./theme-switcher";
 
 const MOTION_OPTIONS: readonly { readonly id: MotionPreferenceId; readonly label: string }[] = [
@@ -19,12 +25,19 @@ const MOTION_OPTIONS: readonly { readonly id: MotionPreferenceId; readonly label
   { id: "reduced", label: "减少动效" },
 ];
 
+const READING_SIZE_OPTIONS: readonly { readonly id: ReadingSize; readonly label: string }[] = [
+  { id: "small", label: "紧凑" },
+  { id: "medium", label: "标准" },
+  { id: "large", label: "大号" },
+];
+
 export function AppearanceSettings(): React.ReactElement {
   const [initialTheme] = useState(() => getInitialTheme());
   const [currentStyleId, setCurrentStyleId] = useState(initialTheme.styleId);
   const [currentColorId, setCurrentColorId] = useState(initialTheme.colorId);
   const [motionPreference, setMotionPreference] = useState(() => getSavedMotionPreference());
   const [startupAnimationEnabled, setStartupAnimationEnabled] = useState(() => getStartupAnimationEnabled());
+  const [readingPrefs, setReadingPrefs] = useState(() => loadPrefs());
 
   React.useEffect(() => subscribeMotionSettingsChanged(() => {
     setMotionPreference(getSavedMotionPreference());
@@ -47,6 +60,13 @@ export function AppearanceSettings(): React.ReactElement {
     dispatchMotionSettingsChanged();
   }
 
+  function changeReadingSize(size: ReadingSize): void {
+    if (size === readingPrefs.size) return;
+    const next = { ...readingPrefs, size };
+    savePrefs(next);
+    setReadingPrefs(next);
+  }
+
   const effectiveMotionLabel = getEffectiveMotionPreference(motionPreference) === "reduced" ? "减少动效" : "标准";
 
   return (
@@ -57,6 +77,28 @@ export function AppearanceSettings(): React.ReactElement {
         onStyleChange={setCurrentStyleId}
         onColorChange={setCurrentColorId}
       />
+      <section className="settings-card appearance-preference-card">
+        <div className="settings-card-title-row">
+          <h3>阅读字号</h3>
+          <span>{SIZE_PX[readingPrefs.size]}px</span>
+        </div>
+        <div className="appearance-preference-options" role="radiogroup" aria-label="阅读字号">
+          {READING_SIZE_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={`appearance-preference-option${readingPrefs.size === option.id ? " active" : ""}`}
+              role="radio"
+              aria-label={`${option.label} ${SIZE_PX[option.id]}px`}
+              aria-checked={readingPrefs.size === option.id}
+              onClick={() => changeReadingSize(option.id)}
+            >
+              <span>{option.label}</span>
+              <small>{SIZE_PX[option.id]}px</small>
+            </button>
+          ))}
+        </div>
+      </section>
       <section className="settings-card appearance-motion-card">
         <div className="settings-card-title-row">
           <h3>动效</h3>

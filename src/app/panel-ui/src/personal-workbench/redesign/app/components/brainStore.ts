@@ -1,6 +1,5 @@
 import { useMemo, useSyncExternalStore } from 'react'
 import { getNote } from './notesStore'
-import type { PersonalSpaceProjection } from '../../../space'
 import { getCachedReferencePreview, getReferencePreviewCacheVersion, getReferencePreviewError, subscribeReferencePreviewCache } from './referencePreviewClient'
 import {
   executePersonalKnowledgeCommand,
@@ -90,7 +89,7 @@ export interface ResolvedPage {
   detail?: string
   previewText?: string
   language?: string
-  managedAsset?: BrainPage['asset']
+  documentTarget?: { readonly apiBase: string; readonly itemId: string }
   exists: boolean
 }
 
@@ -99,48 +98,36 @@ const WORKBENCH_ASSET_PREVIEW_BASE = '/api/workbench-assets'
 const subscribeManagedAssetPreviewCache = (listener: () => void) => subscribeReferencePreviewCache(listener, MANAGED_ASSET_PREVIEW_BASE)
 const getManagedAssetPreviewCacheVersion = () => getReferencePreviewCacheVersion(MANAGED_ASSET_PREVIEW_BASE)
 
-function managedAssetPreviewText(page: BrainPage): string | undefined {
-  const preview = getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)
-  return preview?.content.kind === 'text' ? preview.content.text : undefined
-}
-
-function managedAssetLanguage(page: BrainPage): string | undefined {
-  const preview = getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)
-  return preview?.content.kind === 'text' ? preview.content.language : undefined
-}
-
-export function resolvePage(page: BrainPage, _spaces: readonly PersonalSpaceProjection[] = []): ResolvedPage {
+export function resolvePage(page: BrainPage): ResolvedPage {
   if (page.kind === 'note') {
     const note = getNote(page.refId)
     return { refId: page.refId, kind: 'note', title: note?.title || '无标题笔记', collectedAt: page.collectedAt, exists: note !== undefined }
   }
-  if (page.kind === 'space_reference') {
-    return {
-      refId: page.refId,
-      kind: 'space_reference',
-      title: page.asset?.title ?? '(知识资产不可用)',
-      collectedAt: page.collectedAt,
-      materialKind: classifyReferencePreview(getCachedReferencePreview(page.refId, '', MANAGED_ASSET_PREVIEW_BASE)),
-      detail: page.asset?.sourceLabel,
-      previewText: managedAssetPreviewText(page),
-      language: managedAssetLanguage(page),
-      exists: page.asset?.status === 'managed',
-      managedAsset: page.asset,
-    }
-  }
-  const preview = getCachedReferencePreview(page.refId, '', WORKBENCH_ASSET_PREVIEW_BASE)
-  const previewError = getReferencePreviewError(page.refId, '', WORKBENCH_ASSET_PREVIEW_BASE)
+  const managed = page.kind === 'space_reference'
+  const apiBase = managed ? MANAGED_ASSET_PREVIEW_BASE : WORKBENCH_ASSET_PREVIEW_BASE
+  const preview = getCachedReferencePreview(page.refId, '', apiBase)
+  const previewError = getReferencePreviewError(page.refId, '', apiBase)
+  const fields = documentCardFields(preview)
   return {
     refId: page.refId,
-    kind: 'material',
-    title: preview?.title ?? (previewError === undefined ? '(材料加载中)' : '材料暂不可用'),
+    kind: managed ? 'space_reference' : 'material',
+    title: managed
+      ? page.asset?.title ?? '(知识资产不可用)'
+      : preview?.title ?? (previewError === undefined ? '(材料加载中)' : '材料暂不可用'),
     collectedAt: page.collectedAt,
+    ...fields,
+    detail: managed ? page.asset?.sourceLabel : previewError,
+    documentTarget: { apiBase, itemId: page.refId },
+    exists: managed ? page.asset?.status === 'managed' : true,
+  }
+}
+
+function documentCardFields(preview: ReturnType<typeof getCachedReferencePreview>): Pick<ResolvedPage, 'materialKind' | 'previewText' | 'thumbnail' | 'language'> {
+  return {
     materialKind: classifyReferencePreview(preview),
     previewText: previewTextOf(preview),
-    detail: previewError,
     thumbnail: preview?.content.kind === 'media' && preview.content.mediaKind === 'image' ? preview.content.url : undefined,
     language: preview?.content.kind === 'text' ? preview.content.language : undefined,
-    exists: true,
   }
 }
 
@@ -151,12 +138,12 @@ function previewTextOf(preview: ReturnType<typeof getCachedReferencePreview>): s
   if (preview?.content.kind === 'media') return preview.content.caption ?? preview.content.transcript
   return undefined
 }
-export function resolveById(refId: string, spaces: readonly PersonalSpaceProjection[] = []): ResolvedPage | undefined {
+export function resolveById(refId: string): ResolvedPage | undefined {
   const page = getPages().find((candidate) => candidate.refId === refId)
-  return page === undefined ? undefined : resolvePage(page, spaces)
+  return page === undefined ? undefined : resolvePage(page)
 }
 
-export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
+export function useBrain() {
   const snapshot = useSyncExternalStore(
     subscribePersonalKnowledge,
     getPersonalKnowledgeSnapshot,
@@ -194,10 +181,10 @@ export function useBrain(spaces: readonly PersonalSpaceProjection[] = []) {
     recentlyCollected: (limit = 6) => pages.slice(0, limit).map((page) => page.refId),
     outgoing,
     backlinks,
-    resolvePage: (page: BrainPage) => resolvePage(page, spaces),
+    resolvePage,
     resolveById: (refId: string) => {
       const page = pageById.get(refId)
-      return page === undefined ? undefined : resolvePage(page, spaces)
+      return page === undefined ? undefined : resolvePage(page)
     },
   }
 }

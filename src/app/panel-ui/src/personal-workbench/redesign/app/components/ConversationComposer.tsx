@@ -26,7 +26,7 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
   }
 
   return (
-    <div style={composerSurface(focused)}>
+    <div className="aa-conversation-composer" style={composerSurface(focused)}>
       {input.attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-3 pt-3">
           {input.attachments.map((attachment) => (
@@ -64,7 +64,7 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
         placeholder={input.placeholder ?? (input.running ? '运行中，继续输入会在完成后发送…' : '继续对话…')}
         rows={2}
         disabled={!canEdit}
-        className="w-full resize-none px-4 pt-3 text-sm outline-none disabled:cursor-not-allowed"
+        className="aa-conversation-composer__input w-full resize-none px-4 pt-3 outline-none disabled:cursor-not-allowed"
         style={{ color: 'var(--aa-text-1)', background: 'transparent', lineHeight: 1.65 }}
       />
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
@@ -94,9 +94,6 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
               {input.cancelLabel ?? '停止'}
             </button>
           )}
-          <span className="text-[10px]" style={{ color: 'var(--aa-text-3)' }}>
-            {input.running ? '运行中 · Enter 排队' : 'Enter 发送'}
-          </span>
           <button
             type="button"
             onClick={submit}
@@ -147,7 +144,7 @@ function ComposerContextUsage({ usage }: { readonly usage: NonNullable<ChatInput
       aria-valuemax={100}
       aria-valuenow={usage.percent === undefined ? undefined : Math.round(percent)}
     >
-      <span className="truncate text-[10px]" style={{ color: warning ? 'var(--aa-status-wait)' : 'var(--aa-text-3)' }}>
+      <span className="aa-conversation-composer__meta truncate" style={{ color: warning ? 'var(--aa-status-wait)' : 'var(--aa-text-3)' }}>
         {usage.percent === undefined ? '上下文 --' : `上下文 ${Math.round(percent)}%`}
       </span>
       <span className="h-1 min-w-8 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--aa-surface-hover)' }}>

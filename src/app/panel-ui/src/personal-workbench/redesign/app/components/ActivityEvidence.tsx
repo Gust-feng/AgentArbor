@@ -13,9 +13,10 @@ const PRIMARY_LIST_LIMIT = 8;
 export function ActivityEvidencePanel(props: {
   readonly item: ActivityItem;
   readonly toolResult?: ToolCallResult;
+  readonly showCanonicalToolResult: boolean;
 }): React.ReactElement | null {
   const structuredEvidence = <StructuredActivityEvidencePanel item={props.item} />;
-  if (props.toolResult === undefined) {
+  if (props.toolResult === undefined || !props.showCanonicalToolResult) {
     return structuredEvidence;
   }
   return (

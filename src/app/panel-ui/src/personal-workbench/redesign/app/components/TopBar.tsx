@@ -66,25 +66,7 @@ export function TopBar({
             </span>
           </button>
         )}
-        {view === 'conv-new' ? (
-          /* 新对话:走「首页 / 新对话」路径面包屑 */
-          <>
-            <button
-              type="button"
-              onClick={() => onNavigate('home')}
-              className="topbar-nav-button topbar-back-button shrink-0"
-            >
-              <ChevronLeft size={15} />
-              <span className="text-xs" style={{ color: 'var(--aa-text-3)' }}>
-                首页
-              </span>
-            </button>
-            <span className="text-xs -ml-0.5" style={{ color: 'var(--aa-text-3)', opacity: 0.6 }}>/</span>
-            <span className="text-xs -ml-0.5" style={{ color: 'var(--aa-text-2)' }}>
-              新对话
-            </span>
-          </>
-        ) : view === 'brain' ? (
+        {view === 'home' ? null : view === 'brain' ? (
           /* 知识库:走真正的路径面包屑「知识库 › 文件」,不再是「首页」返回。
              复用与其它视图完全一致的按钮 / 标题样式,只是把返回目标换成知识库根部。 */
           <>
@@ -136,6 +118,7 @@ export function TopBar({
         )}
       </div>
 
+      <div className="topbar-drag-region flex-1 self-stretch" data-desktop-drag-region aria-hidden="true" />
       <DesktopWindowControls />
     </header>
   )

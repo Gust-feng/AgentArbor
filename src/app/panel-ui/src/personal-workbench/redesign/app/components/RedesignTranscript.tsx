@@ -13,7 +13,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
-  Copy,
   FileText,
   Terminal,
   Search,
@@ -39,10 +38,10 @@ import {
 } from "../../../../panel-ui-transcript-store";
 import type { ChatModelOption } from "../../../../components/chat-empty";
 import { RichText, StreamingRichText } from "../../../../components/rich-text";
+import { CopyActionButton } from "../../../../components/copy-action-button";
 import { ActivityEvidencePanel } from "./ActivityEvidence";
 import { toolResultForActivity } from "../../../../tool-result-association";
 import { ConfirmationCard, type ConfirmationProjection } from "./ConfirmationCard";
-import { RADII, contentCard } from "./tokens";
 import type {
   ConversationDisplayItem,
 } from "../../../../../../panel-conversation/panel-conversation-display-list";
@@ -74,6 +73,7 @@ export type RedesignTranscriptProps = {
   readonly workView?: DesktopWorkView;
   readonly pending?: ConfirmationProjection;
   readonly showModelUsage: boolean;
+  readonly developerModeEnabled: boolean;
   readonly standaloneRun?: {
     readonly currentRunId?: string;
     readonly runStatus?: string;
@@ -136,7 +136,7 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
   if (items.length === 0) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="aa-conversation-stream">
       {items.map((item) => {
         if (item.kind === "user") {
           return <RedesignUserMessage key={item.key} content={item.turn.content} attachments={item.turn.attachments} />;
@@ -149,6 +149,7 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
               terminalStatus={item.terminalStatus}
               workflow={item.workflow}
               toolResultsByRunId={toolResultsByRunId}
+              developerModeEnabled={props.developerModeEnabled}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy}
             />
@@ -160,6 +161,7 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
             live={item.live}
             workflow={item.workflow}
             toolResultsByRunId={toolResultsByRunId}
+            developerModeEnabled={props.developerModeEnabled}
             onDecision={props.onDecision}
             confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
           />
@@ -177,8 +179,8 @@ const RedesignUserMessage = React.memo(function RedesignUserMessage(props: {
 }) {
   const attachments = props.attachments?.filter((a) => a.attachmentId.trim().length > 0) ?? [];
   return (
-    <div className="flex justify-end">
-      <div className="flex max-w-[520px] flex-col items-end gap-1.5">
+    <div className="aa-conversation-turn aa-conversation-turn--user flex justify-end">
+      <div className="aa-user-message flex max-w-[520px] flex-col items-end gap-1.5">
         {attachments.length > 0 && (
           <div className="flex flex-wrap justify-end gap-1.5">
             {attachments.map((attachment) => (
@@ -195,8 +197,8 @@ const RedesignUserMessage = React.memo(function RedesignUserMessage(props: {
         )}
         {props.content.trim().length > 0 && (
           <div
-            className="px-4 py-3 text-sm"
-            style={{ ...contentCard, background: "#ffffff", lineHeight: 1.75, color: "var(--aa-text-1)" }}
+            className="aa-user-message__body user-message-content px-3.5 py-2.5"
+            style={{ lineHeight: 1.7, color: "var(--aa-text-1)" }}
           >
             <RichText text={props.content} />
           </div>
@@ -212,6 +214,7 @@ function RedesignAssistantMessage(props: {
   readonly live?: boolean;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
+  readonly developerModeEnabled: boolean;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
 }) {
@@ -220,7 +223,7 @@ function RedesignAssistantMessage(props: {
     return <RedesignPendingDots />;
   }
   return (
-    <div className="space-y-3">
+    <div className="aa-conversation-turn aa-conversation-turn--assistant space-y-3">
       {workflow.segments.map((segment, index) => {
         if (segment.kind === "activity") {
           return (
@@ -232,6 +235,7 @@ function RedesignAssistantMessage(props: {
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy === true}
               toolResultsByRunId={props.toolResultsByRunId}
+              developerModeEnabled={props.developerModeEnabled}
             />
           );
         }
@@ -257,6 +261,7 @@ function RedesignFailureMessage(props: {
   readonly terminalStatus?: AssistantTerminalStatus;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
+  readonly developerModeEnabled: boolean;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }) {
@@ -264,7 +269,7 @@ function RedesignFailureMessage(props: {
   const bodySegments = workflow?.segments.filter((s) => s.kind !== "activity") ?? [];
   const activitySegments = workflow?.segments.filter((s) => s.kind === "activity") ?? [];
   return (
-    <div className="space-y-3">
+    <div className="aa-conversation-turn aa-conversation-turn--assistant space-y-3">
       {bodySegments.map((segment, index) => {
         if (segment.kind === "awaiting") return <RedesignPendingDots key={`a-${index}`} />;
         return <RedesignAnswerBlock key={segment.segmentKey} text={segment.text} live={false} />;
@@ -294,6 +299,7 @@ function RedesignFailureMessage(props: {
             onDecision={props.onDecision}
             confirmationBusy={props.confirmationBusy}
             toolResultsByRunId={props.toolResultsByRunId}
+            developerModeEnabled={props.developerModeEnabled}
           />
         ) : null
       ))}
@@ -307,28 +313,14 @@ const RedesignAnswerBlock = React.memo(function RedesignAnswerBlock(props: {
   readonly text: string;
   readonly live: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
-  const [hovered, setHovered] = useState(false);
   if (props.text.trim().length === 0) return null;
   return (
     <div
-      className="reading-prose group text-sm"
+      className="aa-answer-block assistant-answer reading-prose"
       style={{ color: "var(--aa-text-1)", lineHeight: 1.85 }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       {props.live ? <StreamingRichText text={props.text} live /> : <RichText text={props.text} />}
-      {!props.live && hovered && (
-        <button
-          type="button"
-          onClick={() => { navigator.clipboard.writeText(props.text).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1800); }}
-          className="mt-1.5 flex items-center gap-1 rounded px-2 py-0.5 text-[11px] transition-colors hover:bg-black/5"
-          style={{ color: "var(--aa-text-3)" }}
-        >
-          {copied ? <Check size={10} style={{ color: "var(--aa-status-done)" }} /> : <Copy size={10} />}
-          {copied ? "已复制" : "复制"}
-        </button>
-      )}
+      {!props.live && <CopyActionButton value={props.text} label="复制回答" className="aa-answer-copy" />}
     </div>
   );
 });
@@ -359,6 +351,7 @@ function RedesignActivityTimeline(props: {
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
   readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
+  readonly developerModeEnabled: boolean;
 }) {
   const { confirmation, items, hasContent } = props.timeline;
   if (!hasContent) return null;
@@ -368,28 +361,53 @@ function RedesignActivityTimeline(props: {
   const autoOpen = props.lifecycle === "open" || props.lifecycle === "attention" || confirmation.current !== undefined;
   const [open, setOpen] = useState(autoOpen || props.collapsed !== true);
 
-  const doneCount = visibleItems.filter((i) => i.phase === "completed" || i.phase === "failed").length;
+  const doneCount = visibleItems.filter((i) => i.phase === "completed").length;
+  const failedCount = visibleItems.filter((i) => i.phase === "failed").length;
   const running = visibleItems.some((i) => i.phase === "executing" || i.phase === "preparing");
-  const summaryLabel = running
-    ? `工具调用 ${doneCount}/${visibleItems.length}`
-    : `工具调用 ${visibleItems.length} 已完成`;
+  const summaryState = confirmation.current !== undefined
+    ? "attention"
+    : running
+      ? "running"
+      : failedCount > 0
+        ? "failed"
+        : "settled";
+  const summaryLabel = summaryState === "attention"
+    ? "等待你的确认"
+    : summaryState === "running"
+      ? `正在处理 ${doneCount}/${visibleItems.length}`
+      : summaryState === "failed"
+        ? `${failedCount} 项操作未完成`
+        : `完成 ${visibleItems.length} 项操作`;
+  const summaryColor = summaryState === "running"
+    ? "var(--aa-accent)"
+    : summaryState === "attention"
+      ? "var(--aa-status-wait)"
+      : summaryState === "failed"
+        ? "var(--aa-status-error)"
+        : "var(--aa-text-2)";
+  const summaryContent = (
+    <>
+      <Wrench size={11} style={{ color: "var(--aa-text-3)" }} />
+      <span className="font-medium" style={{ color: summaryColor }}>
+        {summaryLabel}
+      </span>
+      {running && (
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--aa-accent)", animation: "pulse 1.2s infinite" }} />
+      )}
+    </>
+  );
 
   return (
-    <div className="overflow-hidden" style={{ ...contentCard, borderRadius: RADII.md }}>
+    <div className="aa-activity-timeline overflow-hidden" data-state={summaryState}>
       {/* 摘要行 */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs"
+        aria-expanded={open}
+        className="aa-activity-summary flex w-full items-center gap-2 text-left"
         style={{ color: "var(--aa-text-2)" }}
       >
-        <Wrench size={11} style={{ color: "var(--aa-text-3)" }} />
-        <span className="font-medium" style={{ color: running ? "var(--aa-accent)" : "var(--aa-status-done, #48A870)" }}>
-          {summaryLabel}
-        </span>
-        {running && (
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--aa-accent)", animation: "pulse 1.2s infinite" }} />
-        )}
+        {summaryContent}
         <span className="ml-auto" style={{ color: "var(--aa-text-3)" }}>
           {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
         </span>
@@ -397,14 +415,15 @@ function RedesignActivityTimeline(props: {
 
       {/* 展开的活动列表 */}
       {open && visibleItems.length > 0 && (
-        <div className="space-y-1 px-3 pb-2.5" style={{ borderTop: "1px solid var(--aa-border)" }}>
-          <div className="space-y-1.5 pt-2">
+        <div className="aa-activity-details space-y-1">
+          <div className="space-y-2">
             {visibleItems.map((item) => (
               <RedesignActivityItem
                 key={item.key}
                 item={item}
                 toolResult={toolResultForActivity(item, props.timeline.nodes, props.toolResultsByRunId)}
                 resolveChildResult={(child) => toolResultForActivity(child, props.timeline.nodes, props.toolResultsByRunId)}
+                showCanonicalToolResult={props.developerModeEnabled}
               />
             ))}
           </div>
@@ -413,7 +432,7 @@ function RedesignActivityTimeline(props: {
 
       {/* 确认卡片 */}
       {confirmation.current !== undefined && (
-        <div className="px-3 pb-3" style={{ borderTop: "1px solid var(--aa-border)" }}>
+        <div className="aa-activity-confirmation">
           <ConfirmationCard
             confirmation={confirmation.current}
             busy={props.confirmationBusy}
@@ -441,6 +460,7 @@ function RedesignActivityItem(props: {
   readonly item: ActivityItem;
   readonly toolResult?: ToolCallResult;
   readonly resolveChildResult: (item: ActivityItem) => ToolCallResult | undefined;
+  readonly showCanonicalToolResult: boolean;
 }) {
   const { item } = props;
   const toolKind = item.toolKind ?? resolveActivityToolKind(item);
@@ -451,11 +471,11 @@ function RedesignActivityItem(props: {
   const badgeLabel = item.badges?.[0]?.label;
   const hasEvidence = (item.expandedSections?.length ?? 0) > 0 ||
     item.copy.expandedDetail !== undefined ||
-    props.toolResult !== undefined;
+    (props.toolResult !== undefined && props.showCanonicalToolResult);
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="min-w-0 text-xs" style={{ color: "var(--aa-text-2)" }}>
+    <div className="aa-activity-item min-w-0" style={{ color: "var(--aa-text-2)" }}>
       <button
         type="button"
         className="flex w-full min-w-0 items-center gap-2 text-left"
@@ -480,7 +500,7 @@ function RedesignActivityItem(props: {
       <span className="min-w-0 truncate">{displayText}</span>
       {/* 详情 */}
       {badgeLabel !== undefined && (
-        <span className="ml-auto shrink-0 text-[10px]" style={{ color: "var(--aa-text-3)" }}>{badgeLabel}</span>
+        <span className="aa-activity-item__badge ml-auto shrink-0" style={{ color: "var(--aa-text-3)" }}>{badgeLabel}</span>
       )}
       {hasEvidence && (
         <span className="ml-auto shrink-0" style={{ color: "var(--aa-text-3)" }}>
@@ -490,7 +510,11 @@ function RedesignActivityItem(props: {
       </button>
       {open && hasEvidence && (
         <div className="min-w-0 pb-1 pl-[34px] pt-2">
-          <ActivityEvidencePanel item={item} toolResult={props.toolResult} />
+          <ActivityEvidencePanel
+            item={item}
+            toolResult={props.toolResult}
+            showCanonicalToolResult={props.showCanonicalToolResult}
+          />
         </div>
       )}
       {item.children !== undefined && item.children.length > 0 && (
@@ -501,6 +525,7 @@ function RedesignActivityItem(props: {
               item={child}
               toolResult={props.resolveChildResult(child)}
               resolveChildResult={props.resolveChildResult}
+              showCanonicalToolResult={props.showCanonicalToolResult}
             />
           ))}
         </div>

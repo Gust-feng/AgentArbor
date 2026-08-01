@@ -1,17 +1,18 @@
 import { useCallback, useRef, useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
-import { ArrowUp, BookOpen, Compass, FileText, Globe, MessageSquare, Zap } from 'lucide-react'
+import { FileText, Globe, MessageSquare } from 'lucide-react'
+import type { ChatInputProps } from '../../../../components/chat-empty'
 import { type View } from './Sidebar'
-import { RADII, composerSurface } from './tokens'
+import { ConversationComposer } from './ConversationComposer'
+import { RADII } from './tokens'
 import type { ConversationSummary } from '../../../../contracts/conversation'
-import type { PersonalSpaceProjection } from '../../../space'
 
 interface HomePageProps {
   onNavigate: (v: View) => void
-  onStartConversation: (message: string) => void
   onOpenConversation: (conversationId: string) => boolean | Promise<boolean>
   conversations: readonly ConversationSummary[]
-  spaces: readonly PersonalSpaceProjection[]
+  input: ChatInputProps
+  focusRequest: number
 }
 
 /* ─── ambient light ───────────────────────────────────────────────────────────
@@ -124,18 +125,8 @@ const ENTRY_COLOR: Record<EntryType, string> = {
   web: '#6686a2',
 }
 
-/* ─── suggestions ─── */
-const SUGGESTIONS = [
-  { icon: <BookOpen size={11} />, label: '整理笔记', prompt: '帮我整理最近的学习笔记，提炼核心要点。' },
-  { icon: <Zap size={11} />, label: '继续研究', prompt: '继续帮我整理机器学习相关的学习路径。' },
-  { icon: <Compass size={11} />, label: '探索想法', prompt: '我想探索一个关于' },
-]
-
 /* ─── main ─── */
-export function HomePage({ onNavigate, onStartConversation, onOpenConversation, conversations, spaces }: HomePageProps) {
-  const [inputValue, setInputValue] = useState('')
-  const [focused, setFocused] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+export function HomePage({ onNavigate, onOpenConversation, conversations, input, focusRequest }: HomePageProps) {
   const timelineEntries = useMemo(
     () => homeTimelineEntries(conversations),
     [conversations],
@@ -146,12 +137,6 @@ export function HomePage({ onNavigate, onStartConversation, onOpenConversation, 
   const greeting = h < 5 ? '深夜好' : h < 9 ? '早上好' : h < 12 ? '上午好' : h < 18 ? '下午好' : '晚上好'
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
   const dateLine = `${now.getMonth() + 1} 月 ${now.getDate()} 日 · ${weekdays[now.getDay()]}`
-
-  function submit() {
-    const t = inputValue.trim()
-    if (!t) return
-    onStartConversation(t)
-  }
 
   async function openTimelineEntry(entry: TimelineEntry) {
     if (entry.conversationId !== undefined) {
@@ -166,13 +151,6 @@ export function HomePage({ onNavigate, onStartConversation, onOpenConversation, 
     if (entry.navigateTo !== undefined) onNavigate(entry.navigateTo)
   }
 
-  useEffect(() => {
-    const ta = textareaRef.current
-    if (!ta) return
-    ta.style.height = 'auto'
-    ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
-  }, [inputValue])
-
   return (
     <div className="relative flex-1 overflow-hidden" style={{ background: 'var(--aa-canvas)', minHeight: '100%' }}>
       <HomeBackdrop />
@@ -181,61 +159,14 @@ export function HomePage({ onNavigate, onStartConversation, onOpenConversation, 
       <div className="relative z-10 h-full flex flex-col">
         {/* ── 上区：问候 + 输入框 ── */}
         <div className="flex-1 flex flex-col justify-center" style={{ paddingLeft: 48, paddingRight: 48, maxHeight: '62%' }}>
-          <div style={{ width: 'min(540px, 100%)' }}>
-            <p className="mb-2 text-xs" style={{ color: 'var(--aa-text-3)', letterSpacing: '0.07em' }}>
+          <div style={{ width: 'min(680px, 100%)' }}>
+            <p className="mb-2 text-xs" style={{ color: 'var(--aa-text-3)' }}>
               {dateLine}
             </p>
-            <h1 style={{ fontSize: 36, fontWeight: 600, lineHeight: 1.15, color: 'var(--aa-text-1)', margin: '0 0 22px 0', letterSpacing: '-0.02em' }}>
+            <h1 style={{ fontSize: 30, fontWeight: 600, lineHeight: 1.25, color: 'var(--aa-text-1)', margin: '0 0 22px 0' }}>
               {greeting}。
             </h1>
-
-            <div className="overflow-hidden" style={composerSurface(focused)}>
-              <textarea
-                ref={textareaRef}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
-                placeholder="想从哪里开始？"
-                rows={3}
-                className="w-full px-4 pt-4 pb-1 resize-none text-sm outline-none"
-                style={{ color: 'var(--aa-text-1)', background: 'transparent', lineHeight: 1.75, minHeight: 72 }}
-              />
-              <div className="px-3 pb-3 pt-1 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s.label}
-                      onClick={() => { setInputValue(s.prompt); setTimeout(() => textareaRef.current?.focus(), 0) }}
-                      className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs transition-all"
-                      style={{ background: 'rgba(45,40,34,0.05)', color: 'var(--aa-text-2)' }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.cssText += ';background:rgba(104,101,167,0.1);color:var(--aa-accent)' }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.cssText += ';background:rgba(45,40,34,0.05);color:var(--aa-text-2)' }}
-                    >
-                      {s.icon}{s.label}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={submit}
-                  disabled={!inputValue.trim()}
-                  className="flex items-center justify-center shrink-0 transition-all"
-                  style={{
-                    width: 30, height: 30, borderRadius: RADII.md,
-                    background: inputValue.trim() ? 'var(--aa-accent)' : 'rgba(45,40,34,0.07)',
-                    color: inputValue.trim() ? '#fff' : 'var(--aa-text-3)',
-                    transform: inputValue.trim() ? 'scale(1.05)' : 'scale(1)',
-                  }}
-                >
-                  <ArrowUp size={13} />
-                </button>
-              </div>
-            </div>
-
-            <p className="mt-2 text-[11px]" style={{ color: 'var(--aa-text-3)', paddingLeft: 2 }}>
-              Enter 发送 · Shift+Enter 换行
-            </p>
+            <ConversationComposer key={focusRequest} input={input} />
           </div>
         </div>
 

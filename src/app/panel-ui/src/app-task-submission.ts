@@ -60,21 +60,28 @@ export type PanelTaskSubmissionOptions = {
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
 };
 
+export type PanelTaskConversationBehavior = "continue" | "new";
+
 export async function submitPanelTask(
   options: PanelTaskSubmissionOptions,
-  explicitGoal?: string
-): Promise<void> {
+  explicitGoal?: string,
+  conversationBehavior: PanelTaskConversationBehavior = "continue",
+): Promise<boolean> {
   const trimmed = (explicitGoal ?? options.goal).trim();
-  if (trimmed.length === 0 || options.app.busy) return;
+  if (trimmed.length === 0 || options.app.busy) return false;
+  const startsNewConversation = conversationBehavior === "new";
+  const conversationForSubmit = startsNewConversation ? undefined : options.app.conversation;
+  const runForSubmit = startsNewConversation ? undefined : options.app.run;
   const epoch = options.viewEpochRef.current + 1;
-  const previousObservedRunId = options.activeRunIdRef.current ?? options.app.run?.runId;
+  const previousObservedRunId = startsNewConversation
+    ? undefined
+    : options.activeRunIdRef.current ?? options.app.run?.runId;
   const appBeforeSubmit = options.app;
   const attachmentsBeforeSubmit = options.attachments;
-  const conversationBeforeSubmit = options.app.conversation;
-  const likelyQueuesBehindActiveRun = options.app.conversation !== undefined &&
+  const likelyQueuesBehindActiveRun = conversationForSubmit !== undefined &&
     previousObservedRunId !== undefined &&
-    options.app.run !== undefined &&
-    shouldKeepRefreshing(options.app.run.status);
+    runForSubmit !== undefined &&
+    shouldKeepRefreshing(runForSubmit.status);
   options.conversationLoadAbortRef.current?.abort();
   options.conversationLoadAbortRef.current = undefined;
   options.viewEpochRef.current = epoch;
@@ -95,7 +102,7 @@ export async function submitPanelTask(
       ...capabilityState,
       busy: true,
       conversation: optimisticConversationForSubmit(
-        previous.conversation,
+        conversationForSubmit,
         trimmed,
         undefined,
         conversationTurnAttachmentsFromContextAttachments(attachmentsBeforeSubmit)
@@ -104,6 +111,7 @@ export async function submitPanelTask(
       run: likelyQueuesBehindActiveRun ? previous.run : undefined,
       events: likelyQueuesBehindActiveRun ? previous.events : [],
       transcriptNodes: likelyQueuesBehindActiveRun ? previous.transcriptNodes : [],
+      transcriptNodesByRunId: startsNewConversation ? {} : previous.transcriptNodesByRunId,
       live: likelyQueuesBehindActiveRun ? previous.live : undefined,
       detail: likelyQueuesBehindActiveRun ? previous.detail : undefined,
       workView: likelyQueuesBehindActiveRun ? previous.workView : undefined,
@@ -111,9 +119,9 @@ export async function submitPanelTask(
   });
   try {
     const path =
-      options.app.conversation?.conversationId === undefined
+      conversationForSubmit?.conversationId === undefined
         ? "/api/conversations"
-        : `/api/conversations/${encodeURIComponent(options.app.conversation.conversationId)}/messages`;
+        : `/api/conversations/${encodeURIComponent(conversationForSubmit.conversationId)}/messages`;
     const response = await postJson<{
       readonly conversation: Conversation;
       readonly run: StartedConversationRun;
@@ -123,7 +131,7 @@ export async function submitPanelTask(
       toolConfirmationPolicy: options.toolConfirmationPolicy,
       modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
       workspaceDirectory: options.selectedWorkspaceDirectory,
-      taskSoilInput: taskSoilInputFromAttachments(options.attachments),
+      taskSoilInput: taskSoilInputFromAttachments(attachmentsBeforeSubmit),
       ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
     });
     const immediateObservedRunId = runIdToObserveAfterStart({
@@ -134,7 +142,7 @@ export async function submitPanelTask(
       previousObservedRunId,
     });
     const immediateRun = immediateRunForStartedConversation({
-      previousRun: options.app.run,
+      previousRun: runForSubmit,
       responseRun: response.run,
       observedRunId: immediateObservedRunId,
       goal: trimmed,
@@ -144,7 +152,7 @@ export async function submitPanelTask(
       : undefined;
     const shouldSwitchLiveStream = immediateLiveRunId !== undefined &&
       (!likelyQueuesBehindActiveRun || immediateLiveRunId !== previousObservedRunId);
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
     options.activeRunIdRef.current = immediateObservedRunId;
     options.setApp((previous) => {
       const capabilityState = immediateRun === undefined
@@ -155,7 +163,7 @@ export async function submitPanelTask(
         ...capabilityState,
         busy: false,
         conversation: response.conversation,
-        run: immediateRun ?? previous.run,
+        run: immediateRun ?? (startsNewConversation ? undefined : previous.run),
         events: immediateRun?.runId === previous.run?.runId ? previous.events : [],
         live: immediateLiveRunId === undefined
           ? previous.live
@@ -195,13 +203,13 @@ export async function submitPanelTask(
         ? undefined
         : observedRunId === response.run.runId
           ? immediateRun
-          : options.app.run?.runId === observedRunId
-            ? options.app.run
+          : runForSubmit?.runId === observedRunId
+            ? runForSubmit
             : undefined);
     const workView = observed?.workView;
     const detail = observed?.detail;
     const replay = observed?.replay;
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
     options.activeRunIdRef.current = observedRunId;
     options.setApp((previous) => {
       const capabilityState =
@@ -260,7 +268,7 @@ export async function submitPanelTask(
         .filter((id) => id !== observedRunId);
       if (historicalRunIds.length > 0) {
         const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds);
-        if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+        if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
         const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
         const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
         for (const entry of entries) {
@@ -270,31 +278,37 @@ export async function submitPanelTask(
         updateTranscriptRunCache(effectiveConversation.conversationId, { nodesByRunId, toolResultsByRunId });
       }
     } catch (error) {
-      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
       options.setApp((previous) => ({
         ...previous,
         error: error instanceof Error ? error.message : "历史会话记录加载失败。",
       }));
     }
+    return true;
   } catch (error) {
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
     options.setGoal(trimmed);
     options.setAttachments(attachmentsBeforeSubmit);
+    if (startsNewConversation) {
+      options.activeRunIdRef.current = undefined;
+      options.setScreen("chat-empty");
+    }
     options.setApp((previous) => ({
       ...previous,
       busy: false,
-      conversation: conversationBeforeSubmit,
-      run: appBeforeSubmit.run,
-      events: appBeforeSubmit.events,
-      transcriptNodes: appBeforeSubmit.transcriptNodes,
-      transcriptNodesByRunId: appBeforeSubmit.transcriptNodesByRunId,
-      live: appBeforeSubmit.live,
-      detail: appBeforeSubmit.detail,
-      workView: appBeforeSubmit.workView,
-      capabilityResolution: appBeforeSubmit.capabilityResolution,
-      capabilityResolutionRunId: appBeforeSubmit.capabilityResolutionRunId,
+      conversation: startsNewConversation ? undefined : appBeforeSubmit.conversation,
+      run: startsNewConversation ? undefined : appBeforeSubmit.run,
+      events: startsNewConversation ? [] : appBeforeSubmit.events,
+      transcriptNodes: startsNewConversation ? [] : appBeforeSubmit.transcriptNodes,
+      transcriptNodesByRunId: startsNewConversation ? {} : appBeforeSubmit.transcriptNodesByRunId,
+      live: startsNewConversation ? undefined : appBeforeSubmit.live,
+      detail: startsNewConversation ? undefined : appBeforeSubmit.detail,
+      workView: startsNewConversation ? undefined : appBeforeSubmit.workView,
+      capabilityResolution: startsNewConversation ? undefined : appBeforeSubmit.capabilityResolution,
+      capabilityResolutionRunId: startsNewConversation ? undefined : appBeforeSubmit.capabilityResolutionRunId,
       error: error instanceof Error ? error.message : "任务启动失败。",
     }));
+    return false;
   }
 }
 

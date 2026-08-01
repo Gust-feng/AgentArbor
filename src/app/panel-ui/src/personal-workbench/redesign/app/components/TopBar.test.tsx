@@ -23,6 +23,7 @@ test('keeps global search as an accessible icon trigger', () => {
 
   const trigger = screen.getByRole('button', { name: '搜索内容与文件' })
   expect(trigger.classList.contains('topbar-search-trigger')).toBe(true)
+  expect(screen.queryByRole('button', { name: '返回首页' })).toBeNull()
 
   fireEvent.click(trigger)
   expect(onSearch).toHaveBeenCalledOnce()
@@ -77,7 +78,7 @@ test('connects frameless desktop window controls to the preload bridge', () => {
     },
   })
 
-  render(
+  const rendered = render(
     <TopBar
       view="home"
       onNavigate={vi.fn()}
@@ -88,6 +89,8 @@ test('connects frameless desktop window controls to the preload bridge', () => {
       onBrainRoot={vi.fn()}
     />,
   )
+
+  expect(rendered.container.querySelector('[data-desktop-drag-region]')).not.toBeNull()
 
   fireEvent.click(screen.getByRole('button', { name: '最小化窗口' }))
   fireEvent.click(screen.getByRole('button', { name: '最大化窗口' }))

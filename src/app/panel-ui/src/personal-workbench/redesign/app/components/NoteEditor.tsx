@@ -6,6 +6,7 @@ import { useBrain } from './brainStore'
 import type { Note } from './notesStore'
 import {
   fetchPersonalNoteRemoteState,
+  getCommittedLocalNoteRevision,
   getPersonalNoteSaveState,
   isPersonalKnowledgePersistenceEnabled,
   refreshPersonalKnowledge,
@@ -26,7 +27,6 @@ interface NoteEditorProps {
 }
 
 const AUTOSAVE_MS = 500
-const REMOTE_CHECK_MS = 8_000
 
 export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew }: NoteEditorProps) {
   const [title, setTitle] = useState(note.title)
@@ -125,7 +125,20 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
   useEffect(() => {
     if (titleRef.current === observedTitleRef.current) setTitle(note.title)
     observedTitleRef.current = note.title
-  }, [note.revision, note.title])
+    const committedLocalRevision = getCommittedLocalNoteRevision(note.id)
+    if (committedLocalRevision !== undefined && committedLocalRevision > baseRevisionRef.current) {
+      baseRevisionRef.current = committedLocalRevision
+    }
+    if (note.revision <= baseRevisionRef.current) return
+    if (getPersonalNoteSaveState(note.id) !== 'saved') return
+
+    const draft = currentDraft()
+    if (note.title === draft.title && note.bodyMarkdown === draft.bodyMarkdown) {
+      // A same-content revision needs no conflict choice even when it came
+      // from another window.
+      baseRevisionRef.current = note.revision
+    }
+  }, [durableSaveState, note.bodyMarkdown, note.id, note.revision, note.title])
 
   useEffect(() => {
     if (!isPersonalKnowledgePersistenceEnabled()) return
@@ -135,8 +148,14 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
       if (checking) return
       checking = true
       try {
+        if (getPersonalNoteSaveState(note.id) === 'saving') return
         const remote = await fetchPersonalNoteRemoteState(note.id)
         if (disposed) return
+        if (getPersonalNoteSaveState(note.id) === 'saving') return
+        const committedLocalRevision = getCommittedLocalNoteRevision(note.id)
+        if (committedLocalRevision !== undefined && committedLocalRevision > baseRevisionRef.current) {
+          baseRevisionRef.current = committedLocalRevision
+        }
         if (remote.status === 'deleted') {
           if (remote.latestRevision !== undefined && remote.latestRevision.revision > baseRevisionRef.current) {
             discardPending()
@@ -159,15 +178,13 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
     }
     const onFocus = () => void check()
     window.addEventListener('focus', onFocus)
-    const interval = window.setInterval(() => void check(), REMOTE_CHECK_MS)
     void check()
     return () => {
       disposed = true
       window.removeEventListener('focus', onFocus)
-      window.clearInterval(interval)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id])
+  }, [note.id, note.revision])
 
   useEffect(() => flush, [])
 
@@ -273,7 +290,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
       )}
 
       <div className="shrink-0 mx-auto w-full px-6 pt-8" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
-        <input value={title} onChange={(event) => { setTitle(event.target.value); scheduleSave({ title: event.target.value }) }} placeholder="无标题" className="w-full outline-none bg-transparent reading-prose" style={{ color: 'var(--aa-text-1, #292722)', fontSize: 22, fontWeight: 600 }} />
+        <input aria-label="笔记名称" value={title} onChange={(event) => { setTitle(event.target.value); scheduleSave({ title: event.target.value }) }} placeholder="无标题" className="w-full outline-none bg-transparent reading-prose" style={{ color: 'var(--aa-text-1, #292722)', fontSize: 22, fontWeight: 600 }} />
       </div>
 
       <div className="flex-1 overflow-y-auto">

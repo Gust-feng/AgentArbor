@@ -8,6 +8,7 @@ import type { Screen } from "./app-screen";
 import type { AgentMode } from "./app-config-projection";
 import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
 import { isMultiAgentEntryEnabled } from "./app-multi-agent-availability";
+import { getDeveloperModeEnabled, saveDeveloperModeEnabled } from "./app-developer-mode";
 
 export type AppShellStateOptions = {
   readonly agentMode: AgentMode;
@@ -25,6 +26,7 @@ export type AppShellState = {
   readonly modelUsageDisplayEnabled: boolean;
   readonly setModelUsageDisplayEnabled: Dispatch<SetStateAction<boolean>>;
   readonly agentClusterEnabled: boolean;
+  readonly developerModeEnabled: boolean;
   readonly pinningConversationIds: ReadonlySet<string>;
   readonly setPinningConversationIds: Dispatch<SetStateAction<ReadonlySet<string>>>;
   readonly inputCloseSignal: number;
@@ -33,6 +35,7 @@ export type AppShellState = {
   readonly closeSettings: () => void;
   readonly changeModelUsageDisplay: (enabled: boolean) => void;
   readonly changeAgentClusterEnabled: (enabled: boolean) => void;
+  readonly changeDeveloperMode: (enabled: boolean) => void;
 };
 
 export function useAppShellState(options: AppShellStateOptions): AppShellState {
@@ -44,6 +47,7 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
   const [agentClusterEnabled, setAgentClusterEnabled] = useState(() =>
     isMultiAgentEntryEnabled(loadAgentClusterEnabledPreference())
   );
+  const [developerModeEnabled, setDeveloperModeEnabled] = useState(getDeveloperModeEnabled);
   const [pinningConversationIds, setPinningConversationIds] = useState<ReadonlySet<string>>(() => new Set());
   const [inputCloseSignal, setInputCloseSignal] = useState(0);
 
@@ -71,6 +75,11 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     }
   }
 
+  function changeDeveloperMode(enabled: boolean): void {
+    setDeveloperModeEnabled(enabled);
+    saveDeveloperModeEnabled(enabled);
+  }
+
   return {
     screen,
     setScreen,
@@ -82,6 +91,7 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     modelUsageDisplayEnabled,
     setModelUsageDisplayEnabled,
     agentClusterEnabled,
+    developerModeEnabled,
     pinningConversationIds,
     setPinningConversationIds,
     inputCloseSignal,
@@ -90,6 +100,7 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     closeSettings,
     changeModelUsageDisplay,
     changeAgentClusterEnabled,
+    changeDeveloperMode,
   };
 }
 

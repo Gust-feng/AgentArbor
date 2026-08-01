@@ -3,7 +3,9 @@ import type {
   PersonalSpaceItemProjection,
   PersonalSpaceProjection,
 } from '../../../space'
-import { refreshSpaceReferencePreview } from './referencePreviewClient'
+import { refreshDocumentPreview } from './referencePreviewClient'
+import { invalidateDocumentPreviews } from './referencePreviewClient'
+import { subscribeWorkbenchProjectionChanges } from '../../../../app-workbench-projection-changes'
 
 /**
  * 挂载树状态收口 —— 把「引用目录的加载 / 缓存 / 展开」从 SpacePage 的分散状态
@@ -290,7 +292,7 @@ export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeRe
     })
 
     const request = (async () => {
-      const preview = await refreshSpaceReferencePreview(referenceId, relativePath)
+      const preview = await refreshDocumentPreview(referenceId, relativePath)
       if (activeSpaceIdRef.current !== requestSpaceId) return
       if (preview.content.kind !== 'directory') throw new Error('目标路径不再是文件夹。')
       const entries = projectReferenceChildren(referenceId, sourceKind, preview.content.entries)
@@ -452,6 +454,27 @@ export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeRe
     return () => window.removeEventListener('focus', refreshAllExpanded)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedIds, tree])
+
+  useEffect(() => subscribeWorkbenchProjectionChanges((change) => {
+    if (change.owners.includes('mounted_files')) {
+      invalidateDocumentPreviews()
+      refreshAllExpanded()
+    }
+    if (change.owners.includes('spaces') && change.referenceIds !== undefined) {
+      const removed = new Set(change.referenceIds)
+      setDirectories((current) => {
+        const next = new Map(current)
+        for (const [key, state] of next) {
+          if ([...removed].some((id) => state.directoryId === id || state.directoryId.startsWith(`${id}::`))) next.delete(key)
+        }
+        return next.size === current.size ? current : next
+      })
+      setExpandedIds((current) => {
+        const next = new Set([...current].filter((id) => ![...removed].some((root) => id === root || id.startsWith(`${root}::`))))
+        return next.size === current.size ? current : next
+      })
+    }
+  }), [expandedIds, refreshAllExpanded, tree])
 
   return {
     projectedTree,

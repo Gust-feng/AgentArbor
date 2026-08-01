@@ -1,7 +1,8 @@
 import { ApiError, requestJson } from '../../../../api'
-import { fetchSpaceReferencePreview, getCachedReferencePreview, primeReferencePreviewCache } from './referencePreviewClient'
-import type { PersonalNoteRevision, SpaceReferencePreview } from '../../../../../../panel-api-contracts'
+import { fetchDocumentPreview, getCachedReferencePreview, invalidateDocumentPreviews, primeReferencePreviewCache } from './referencePreviewClient'
+import type { PersonalNoteRevision, DocumentPreview } from '../../../../../../panel-api-contracts'
 import type { Assignment, BrainLink, BrainPage, Note, Theme } from './personalKnowledgeTypes'
+import { subscribeWorkbenchProjectionChanges } from '../../../../app-workbench-projection-changes'
 
 export type { Assignment, BrainLink, BrainPage, Note, PageKind, Theme } from './personalKnowledgeTypes'
 export type { PersonalNoteRevision } from '../../../../../../panel-api-contracts'
@@ -17,7 +18,7 @@ interface Snapshot {
 
 type PersonalKnowledgeResponse = {
   readonly snapshot: Snapshot
-  readonly materialPreviews?: readonly SpaceReferencePreview[]
+  readonly materialPreviews?: readonly DocumentPreview[]
 }
 
 export type PersonalKnowledgeLoadState =
@@ -43,6 +44,8 @@ let activeSpaceId = 'personal-unassigned'
 let loaded = false
 let loading: Promise<void> | undefined
 let refreshing: Promise<void> | undefined
+let requestedRefreshRevision = 0
+let appliedRefreshRevision = 0
 let persistenceEnabled = false
 let mutationQueue = Promise.resolve()
 let lastError: string | undefined
@@ -51,8 +54,10 @@ const pendingMutations: PendingMutation[] = []
 const pendingNotes = new Map<string, number>()
 const noteErrors = new Map<string, string>()
 const blockedNoteIds = new Set<string>()
+const committedLocalNoteRevisions = new Map<string, number>()
 const pendingKnowledgeRefs = new Map<string, number>()
 const listeners = new Set<() => void>()
+let projectionChangeUnsubscribe: (() => void) | undefined
 
 export function getPersonalKnowledgeSnapshot(): Snapshot { return snapshot }
 export function getPersonalKnowledgeError(): string | undefined { return lastError }
@@ -62,6 +67,9 @@ export function getPersonalNoteSaveState(noteId: string): string {
   const error = noteErrors.get(noteId)
   if (error !== undefined) return `error:${error}`
   return (pendingNotes.get(noteId) ?? 0) > 0 ? 'saving' : 'saved'
+}
+export function getCommittedLocalNoteRevision(noteId: string): number | undefined {
+  return committedLocalNoteRevisions.get(noteId)
 }
 export function isPersonalKnowledgeMutationPending(refId: string): boolean {
   return (pendingKnowledgeRefs.get(refId) ?? 0) > 0
@@ -77,8 +85,16 @@ export function subscribePersonalKnowledge(listener: () => void): () => void {
 }
 
 export function setPersonalKnowledgePersistenceEnabled(enabled: boolean): void {
-  if (persistenceEnabled === enabled) return
+  if (persistenceEnabled === enabled) {
+    if (enabled) ensureProjectionChangeSubscription()
+    return
+  }
   persistenceEnabled = enabled
+  if (enabled) ensureProjectionChangeSubscription()
+  else {
+    projectionChangeUnsubscribe?.()
+    projectionChangeUnsubscribe = undefined
+  }
   loadState = enabled ? (loaded ? { status: 'ready' } : { status: 'idle' }) : { status: 'ready' }
   emit()
 }
@@ -163,13 +179,18 @@ export function initializePersonalKnowledge(spaceId?: string): Promise<void> {
 }
 
 export function refreshPersonalKnowledge(): Promise<void> {
+  requestedRefreshRevision += 1
   if (refreshing !== undefined) return refreshing
   refreshing = (async () => {
-    await mutationQueue
-    authoritativeSnapshot = await fetchPersonalKnowledgeSnapshot()
-    replayPendingMutations()
-    lastError = undefined
-    emit()
+    while (appliedRefreshRevision < requestedRefreshRevision) {
+      const revision = requestedRefreshRevision
+      await mutationQueue
+      authoritativeSnapshot = await fetchPersonalKnowledgeSnapshot()
+      replayPendingMutations()
+      appliedRefreshRevision = revision
+      lastError = undefined
+      emit()
+    }
   })().finally(() => { refreshing = undefined })
   return refreshing
 }
@@ -192,6 +213,8 @@ export function resetPersonalKnowledgeForTesting(initial: Partial<Snapshot> = {}
   loaded = false
   loading = undefined
   refreshing = undefined
+  requestedRefreshRevision = 0
+  appliedRefreshRevision = 0
   persistenceEnabled = false
   mutationQueue = Promise.resolve()
   pendingMutations.length = 0
@@ -200,7 +223,10 @@ export function resetPersonalKnowledgeForTesting(initial: Partial<Snapshot> = {}
   pendingNotes.clear()
   noteErrors.clear()
   blockedNoteIds.clear()
+  committedLocalNoteRevisions.clear()
   pendingKnowledgeRefs.clear()
+  projectionChangeUnsubscribe?.()
+  projectionChangeUnsubscribe = undefined
 }
 
 export function mutatePersonalKnowledge(
@@ -358,7 +384,12 @@ async function executeMutation(mutation: PendingMutation): Promise<void> {
     await mutation.request(authoritativeSnapshot)
     authoritativeSnapshot = mutation.optimistic(authoritativeSnapshot)
     lastError = undefined
-    if (mutation.noteId !== undefined) noteErrors.delete(mutation.noteId)
+    if (mutation.noteId !== undefined) {
+      noteErrors.delete(mutation.noteId)
+      const note = authoritativeSnapshot.notes.find((candidate) => candidate.id === mutation.noteId)
+      if (note === undefined) committedLocalNoteRevisions.delete(mutation.noteId)
+      else committedLocalNoteRevisions.set(mutation.noteId, note.revision)
+    }
   } catch (error: unknown) {
     const message = messageOf(error)
     try { authoritativeSnapshot = await fetchPersonalKnowledgeSnapshot() } catch { /* keep the last known server state */ }
@@ -402,14 +433,14 @@ async function fetchPersonalKnowledgeSnapshot(): Promise<Snapshot> {
 }
 
 function warmWorkbenchAssetPreview(page: BrainPage): void {
-  void fetchSpaceReferencePreview(page.refId, '', undefined, '/api/workbench-assets')
+  void fetchDocumentPreview(page.refId, '', undefined, '/api/workbench-assets')
     .catch(() => undefined)
 }
 
 function warmManagedAssetPreview(page: BrainPage): void {
   // Preview data only enriches the card. The persisted asset must remain
   // immediately visible while a local file read is slow or unavailable.
-  void fetchSpaceReferencePreview(page.refId, '', undefined, '/api/personal-knowledge/assets')
+  void fetchDocumentPreview(page.refId, '', undefined, '/api/personal-knowledge/assets')
     .catch(() => undefined)
 }
 
@@ -430,4 +461,15 @@ function noteSnippet(body: string, query: string): string {
   const start = index < 0 ? 0 : Math.max(0, index - 30)
   const value = flat.slice(start, start + 120)
   return `${start > 0 ? '...' : ''}${value}${start + value.length < flat.length ? '...' : ''}`
+}
+
+function ensureProjectionChangeSubscription(): void {
+  if (projectionChangeUnsubscribe !== undefined) return
+  projectionChangeUnsubscribe = subscribeWorkbenchProjectionChanges((change) => {
+    if (!change.owners.includes('personal_knowledge')) return
+    if (change.referenceIds !== undefined) {
+      invalidateDocumentPreviews(change.referenceIds, '/api/personal-knowledge/assets')
+    }
+    if (persistenceEnabled) void refreshPersonalKnowledge().catch(() => undefined)
+  })
 }

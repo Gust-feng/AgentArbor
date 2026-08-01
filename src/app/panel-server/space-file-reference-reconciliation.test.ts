@@ -37,6 +37,33 @@ test("Ordinary terminal reconciliation unlinks a frozen local file only after it
   assert.equal(await feature.queries.getReference(item.id), undefined);
 });
 
+test("Ordinary terminal reconciliation treats a file below a non-directory parent as missing", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-file-enotdir-"));
+  t.after(() => removeTestDirectory(directory));
+  const parentFile = path.join(directory, "parent-file");
+  await fs.writeFile(parentFile, "content", "utf8");
+  const source = path.join(parentFile, "linked.md");
+  const feature = memorySpaceFeature();
+  const space = await feature.commands.createSpace({ title: "资料" });
+  const item = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "linked.md",
+    reference: { kind: "local_file", path: source },
+  });
+
+  const result = await reconcileMissingRunSpaceFiles(feature, {
+    contextRefs: [{
+      attachmentId: spaceReferenceAttachmentId(item.id),
+      ref: `local-file:${source}`,
+      kind: "file",
+    }],
+  });
+
+  assert.deepEqual(result.removedReferenceIds, [item.id]);
+  assert.deepEqual(result.inspectionFailures, []);
+  assert.equal(await feature.queries.getReference(item.id), undefined);
+});
+
 test("Ordinary terminal reconciliation preserves folders, unrelated links and inspection failures", async () => {
   const feature = memorySpaceFeature();
   const space = await feature.commands.createSpace({ title: "资料" });

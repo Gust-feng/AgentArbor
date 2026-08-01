@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 
-import { isNodeError } from "../../kernel/values/index.js";
+import { isFileNotFound, isNodeError } from "../../kernel/values/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
 import { SpaceFeatureError, type SpaceFeature } from "../spaces/index.js";
 import { spaceReferenceIdFromAttachmentId } from "../spaces/space-file-access.js";
@@ -63,8 +63,9 @@ async function inspectLocalPath(absolutePath: string): Promise<SpaceFileInspecti
     await fs.lstat(absolutePath);
     return { status: "present" };
   } catch (error) {
-    return isNodeError(error, "ENOENT")
-      ? { status: "missing" }
-      : { status: "failed", error };
+    if (isFileNotFound(error) || isNodeError(error, "ENOTDIR")) {
+      return { status: "missing" };
+    }
+    return { status: "failed", error };
   }
 }

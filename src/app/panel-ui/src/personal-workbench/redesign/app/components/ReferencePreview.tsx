@@ -4,6 +4,7 @@ import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Fold
 import { fetchSpaceReferencePreview, getCachedReferencePreview, refreshSpaceReferencePreview, saveSpaceReferenceText, type SpaceReferencePreview } from './referencePreviewClient'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
+import { VideoDocumentSurface } from './VideoDocumentSurface'
 import { isMarkdownDocument } from './documentProjection'
 import './reference-preview.css'
 
@@ -452,7 +453,7 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
   switch (content.mediaKind) {
     case 'image': return <div className="aa-reference-preview__media aa-reference-preview__media--described" data-document-scroll="content"><img src={content.url} alt={content.alt ?? preview.title} />{content.caption && <p>{content.caption}</p>}</div>
     case 'pdf': return <object className="aa-reference-preview__pdf" data={content.url} type={content.mimeType}><a href={content.url}>打开 PDF</a></object>
-    case 'video': return <div className="aa-reference-preview__media aa-reference-preview__media--described" data-document-scroll="content"><video controls src={content.url} poster={content.poster} />{content.duration && <p>{content.duration}</p>}</div>
+    case 'video': return <VideoDocumentSurface url={content.url} title={preview.title} poster={content.poster} duration={content.duration} />
     case 'audio': return <div className="aa-reference-preview__audio" data-document-scroll="content"><audio controls src={content.url} />{content.duration && <span>{content.duration}</span>}{content.transcript && <p>{content.transcript}</p>}</div>
   }
 }

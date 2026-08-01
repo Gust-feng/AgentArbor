@@ -10,14 +10,13 @@ import { createPersonalKnowledgeFeature } from "./personal-knowledge-feature.js"
 import { createPersonalKnowledgeTools } from "./personal-knowledge-tools.js";
 import { createSqlitePersonalKnowledgeRepository } from "./sqlite-repository.js";
 
-test("Personal Knowledge tools search, read, create, update and collect through the feature", async (t) => {
+test("Personal Knowledge tools search, read, create, update, delete and collect through the feature", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-tools-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   let captureCount = 0;
   const feature = createPersonalKnowledgeFeature({
     repository: createSqlitePersonalKnowledgeRepository(database),
     spaceExists: async (spaceId) => spaceId === "space-one",
-    spaceReferenceExists: async (itemId) => itemId === "reference-one",
     captureSpaceReference: async ({ relativePath }) => {
       captureCount += 1;
       return { status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "file", sourceReferenceId: "reference-one", sourceRelativePath: relativePath };
@@ -62,6 +61,10 @@ test("Personal Knowledge tools search, read, create, update and collect through 
     expectedRevision: 1,
     title: "过期更新",
   }) as { readonly status: string }).status, "personal_note_revision_conflict");
+  assert.equal((await execute(tools.get("KnowledgeDeleteNote")!, {
+    noteId: created.note.id,
+    expectedRevision: 1,
+  }) as { readonly status: string }).status, "personal_note_revision_conflict");
 
   assert.equal((await execute(tools.get("KnowledgeCollect")!, {
     refId: created.note.id,
@@ -70,16 +73,32 @@ test("Personal Knowledge tools search, read, create, update and collect through 
   assert.equal((await feature.queries.snapshot()).pages[0]?.refId, created.note.id);
   const collectedReference = await execute(tools.get("KnowledgeCollect")!, { refId: "reference-one", kind: "space_reference" }) as { page: { asset?: { status: string } } };
   assert.equal(collectedReference.page.asset?.status, "managed");
-  const collectedChild = await feature.commands.collectSpaceReference({ referenceId: "reference-one", relativePath: "docs\\guide.md" });
-  const duplicateChild = await feature.commands.collectSpaceReference({ referenceId: "reference-one", relativePath: "docs/guide.md" });
-  assert.equal(collectedChild.refId, duplicateChild.refId);
-  assert.equal(collectedChild.asset?.sourceRelativePath, "docs/guide.md");
+  const collectedChild = await execute(tools.get("KnowledgeCollect")!, {
+    refId: "reference-one",
+    kind: "space_reference",
+    relativePath: "docs\\guide.md",
+  }) as { page: { refId: string; asset?: { sourceRelativePath?: string } } };
+  const duplicateChild = await execute(tools.get("KnowledgeCollect")!, {
+    refId: "reference-one",
+    kind: "space_reference",
+    relativePath: "docs/guide.md",
+  }) as { page: { refId: string } };
+  assert.equal(collectedChild.page.refId, duplicateChild.page.refId);
+  assert.equal(collectedChild.page.asset?.sourceRelativePath, "docs/guide.md");
   assert.equal(captureCount, 2);
   const revisions = await feature.queries.noteRevisions(created.note.id);
   assert.equal(revisions[0]?.actor.kind, "agent");
   assert.equal(revisions[0]?.actor.actorId, "ordinary-agent");
   assert.equal(revisions[0]?.actor.traceId, "trace-one");
   assert.equal(revisions[0]?.actor.toolCallId, "tool-call-one");
+  assert.deepEqual(await execute(tools.get("KnowledgeDeleteNote")!, {
+    noteId: created.note.id,
+    expectedRevision: 2,
+  }), { status: "deleted", noteId: created.note.id });
+  assert.deepEqual(await execute(tools.get("KnowledgeRead")!, { noteId: created.note.id }), {
+    status: "personal_note_not_found",
+    noteId: created.note.id,
+  });
 });
 
 function execute(tool: ToolExecutor, input: unknown): Promise<unknown> {

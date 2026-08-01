@@ -68,6 +68,27 @@ test("personal knowledge search follows note create, update and delete", async (
   assert.equal(await feature.queries.note(note.id), undefined);
 });
 
+test("personal knowledge publishes committed note changes without letting observers fail commands", async (t) => {
+  const { feature } = await fixture(t);
+  const events: string[] = [];
+  feature.events.subscribe((event) => events.push(event.type));
+  feature.events.subscribe(() => { throw new Error("observer failed"); });
+
+  const note = await feature.commands.createNote({ spaceId: "space-one" });
+  await feature.commands.updateNote({ id: note.id, expectedRevision: 1, title: "更新" });
+  await assert.rejects(
+    feature.commands.updateNote({ id: note.id, expectedRevision: 1, title: "过期" }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_note_revision_conflict",
+  );
+  await feature.commands.deleteNote({ id: note.id, expectedRevision: 2 });
+
+  assert.deepEqual(events, [
+    "personal_knowledge.note_created",
+    "personal_knowledge.note_updated",
+    "personal_knowledge.note_deleted",
+  ]);
+});
+
 test("deleting a note removes its knowledge relations in one transaction", async (t) => {
   const { feature } = await fixture(t);
   const note = await feature.commands.createNote({ spaceId: "space-one", title: "待删除" });
@@ -165,7 +186,6 @@ async function fixture(t: import("node:test").TestContext) {
   const feature = createPersonalKnowledgeFeature({
     repository: createSqlitePersonalKnowledgeRepository(database),
     spaceExists: async (spaceId) => spaceId === "space-one",
-    spaceReferenceExists: async (itemId) => itemId === "reference-one",
     captureSpaceReference: async () => ({ status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "directory", sourceReferenceId: "reference-one", sourceRelativePath: "" }),
     removeManagedAsset: async () => undefined,
   });

@@ -27,7 +27,28 @@ export type PersonalNoteRevision = {
   readonly createdAt: number;
 };
 
-/* ─── Space Reference Preview ────────────────────────────────────── */
+/* --- Workbench projection changes --------------------------------------- */
+
+/** Identifies a Panel projection whose authoritative backend facts changed. */
+export type WorkbenchProjectionOwner =
+  | "spaces"
+  | "mounted_files"
+  | "personal_knowledge";
+
+/**
+ * Live invalidation fact. It deliberately carries no business snapshot: each
+ * consumer must re-read the feature that owns the changed data.
+ */
+export type WorkbenchProjectionChange = {
+  readonly revision: number;
+  readonly owners: readonly WorkbenchProjectionOwner[];
+  readonly reset: boolean;
+  readonly spaceIds?: readonly string[];
+  readonly referenceIds?: readonly string[];
+  readonly noteIds?: readonly string[];
+};
+
+/* ─── Document Preview ───────────────────────────────────────────── */
 
 export type DocumentPresentation = {
   readonly kind: "directory" | "markdown" | "code" | "text" | "image" | "pdf" | "video" | "audio" | "web" | "unavailable";
@@ -35,10 +56,27 @@ export type DocumentPresentation = {
   readonly sourceMode: boolean;
 };
 
-export type SpaceReferencePreview = {
+export type DocumentSourceKind =
+  | "local_file"
+  | "workspace_folder"
+  | "managed_folder"
+  | "knowledge_asset"
+  | "asset_folder"
+  | "workbench_asset"
+  | "web_page"
+  | "generated_artifact"
+  | "conversation";
+
+export type DocumentTextUpdateInput = {
+  readonly relativePath?: string;
+  readonly expectedFingerprint: string;
+  readonly text: string;
+};
+
+export type DocumentPreview = {
   readonly itemId: string;
   readonly title: string;
-  readonly sourceKind: "local_file" | "workspace_folder" | "managed_folder" | "asset_folder" | "workbench_asset" | "web_page" | "generated_artifact" | "conversation";
+  readonly sourceKind: DocumentSourceKind;
   readonly source: string;
   readonly status: "ready" | "missing" | "unsupported";
   readonly presentation: DocumentPresentation;
@@ -53,3 +91,6 @@ export type SpaceReferencePreview = {
     | { readonly kind: "web"; readonly url: string; readonly site?: string; readonly body?: string }
     | { readonly kind: "unavailable"; readonly message: string };
 };
+
+/** @deprecated Use DocumentPreview for all Workbench document sources. */
+export type SpaceReferencePreview = DocumentPreview;

@@ -1,4 +1,4 @@
-import type { DocumentPresentation, SpaceReferencePreview } from "../panel-api-contracts.js";
+import type { DocumentPresentation, DocumentPreview } from "../panel-api-contracts.js";
 
 const MARKDOWN_LANGUAGES = new Set(["md", "markdown"]);
 const CODE_LANGUAGES = new Set([
@@ -10,7 +10,7 @@ const CODE_LANGUAGES = new Set([
 ]);
 
 export function documentPresentation(
-  content: SpaceReferencePreview["content"],
+  content: DocumentPreview["content"],
 ): DocumentPresentation {
   const kind = presentationKind(content);
   const editable = content.kind === "text" && content.editable;
@@ -21,7 +21,7 @@ export function documentPresentation(
   };
 }
 
-function presentationKind(content: SpaceReferencePreview["content"]): DocumentPresentation["kind"] {
+function presentationKind(content: DocumentPreview["content"]): DocumentPresentation["kind"] {
   switch (content.kind) {
     case "directory": return "directory";
     case "web": return "web";

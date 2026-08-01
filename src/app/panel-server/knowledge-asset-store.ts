@@ -6,6 +6,7 @@ import type { KnowledgePage } from "../personal-knowledge/index.js";
 import type { SpaceReferenceItem } from "../spaces/index.js";
 import { PanelHttpError } from "./http-utils.js";
 import { resolveWithinRoot } from "../local-filesystem/index.js";
+import type { LocalDocumentMeta } from "./local-document-preview.js";
 
 const MAX_CAPTURE_BYTES = 256 * 1024 * 1024;
 const MAX_CAPTURE_ENTRIES = 5_000;
@@ -45,13 +46,6 @@ export async function captureKnowledgeAsset(
       },
     });
     else await fs.copyFile(source, content);
-    await fs.writeFile(path.join(temporaryDirectory, "manifest.json"), JSON.stringify({
-      version: 1,
-      title: relativePath.length === 0 ? item.title : path.basename(source),
-      sourceLabel: source,
-      contentKind: stat.isDirectory() ? "directory" : "file",
-      capturedAt: Date.now(),
-    }), "utf8");
     await fs.rename(temporaryDirectory, assetDirectory);
   } catch (error) {
     await fs.rm(temporaryDirectory, { recursive: true, force: true });
@@ -72,8 +66,25 @@ export async function reconcileKnowledgeAssets(root: string, activeAssetIds: Rea
   const activeDirectories = new Set([...activeAssetIds].map(safeAssetId));
   for (const entry of await fs.readdir(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    if (entry.name.includes(".pending-") || !activeDirectories.has(entry.name)) {
-      await fs.rm(path.join(root, entry.name), { recursive: true, force: true });
+    const entryPath = path.join(root, entry.name);
+    if (entry.name.includes(".pending-")) {
+      await fs.rm(entryPath, { recursive: true, force: true });
+      continue;
+    }
+    const deletingAt = entry.name.indexOf(".deleting-");
+    if (deletingAt > 0) {
+      const assetDirectoryName = entry.name.slice(0, deletingAt);
+      if (!activeDirectories.has(assetDirectoryName)) {
+        await fs.rm(entryPath, { recursive: true, force: true });
+        continue;
+      }
+      const assetDirectory = path.join(root, assetDirectoryName);
+      if (await exists(assetDirectory)) await fs.rm(entryPath, { recursive: true, force: true });
+      else await fs.rename(entryPath, assetDirectory);
+      continue;
+    }
+    if (!activeDirectories.has(entry.name)) {
+      await fs.rm(entryPath, { recursive: true, force: true });
     }
   }
 }
@@ -106,18 +117,54 @@ export async function removeKnowledgeAsset(root: string, refId: string): Promise
   await fs.rm(path.join(root, safeAssetId(refId)), { recursive: true, force: true });
 }
 
-export function managedKnowledgeReference(root: string, page: KnowledgePage): SpaceReferenceItem {
+export async function stageKnowledgeAssetRemoval(
+  root: string,
+  refId: string,
+): Promise<{ readonly commit: () => Promise<void>; readonly rollback: () => Promise<void> } | undefined> {
+  const assetDirectory = path.join(root, safeAssetId(refId));
+  const stat = await fs.lstat(assetDirectory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (stat === undefined) return undefined;
+  const stagedDirectory = `${assetDirectory}.deleting-${randomUUID()}`;
+  await fs.rename(assetDirectory, stagedDirectory);
+  return {
+    commit: async () => {
+      // The asset is already unreachable after the rename. Startup
+      // reconciliation removes this directory if cleanup is interrupted.
+      await fs.rm(stagedDirectory, { recursive: true, force: true }).catch(() => undefined);
+    },
+    rollback: async () => await fs.rename(stagedDirectory, assetDirectory),
+  };
+}
+
+export function managedKnowledgeDocumentTarget(root: string, page: KnowledgePage): {
+  readonly rootDir: string;
+  readonly meta: LocalDocumentMeta;
+  readonly mutationKey: string;
+  readonly contentTypeHintPath: (relativePath: string) => string;
+} {
   if (page.asset?.status !== "managed") throw new PanelHttpError(404, "knowledge_asset_not_found", "这条旧知识尚未生成托管副本。");
+  const asset = page.asset;
   const content = path.join(root, safeAssetId(page.refId), "content");
   return {
-    id: page.refId,
-    title: page.asset.title,
-    reference: page.asset.contentKind === "directory"
-      ? { kind: "workspace_folder", path: content }
-      : { kind: "local_file", path: content },
-  } as SpaceReferenceItem;
+    rootDir: content,
+    meta: { itemId: page.refId, title: asset.title, sourceKind: "knowledge_asset" },
+    mutationKey: content,
+    contentTypeHintPath: (relativePath) => asset.contentKind === "directory" && relativePath.length > 0
+      ? path.join(asset.sourceLabel, ...relativePath.split("/"))
+      : asset.sourceLabel,
+  };
 }
 
 function safeAssetId(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
+}
+
+async function exists(value: string): Promise<boolean> {
+  return await fs.lstat(value).then(() => true, (error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  });
 }

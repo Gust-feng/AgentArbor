@@ -1,12 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { z } from "zod";
-import type { SpaceFeatureError, SpaceReference, SpaceReferenceItem, SpaceTarget } from "../spaces/index.js";
+import type { DocumentTextUpdateInput } from "../panel-api-contracts.js";
+import type { SpaceFeatureError, SpaceReference, SpaceTarget } from "../spaces/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
-import { stageOwnedSpaceReferenceDeletion } from "./space-reference-deletion.js";
-import { createPanelSpaceReferencePreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { spaceReferenceMutationKey } from "./space-reference-deletion.js";
+import { createPanelDocumentPreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
 import { getWorkbenchAssetPreview, updateWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 import { createPanelSpaceReferenceEntry, deletePanelSpaceReferenceEntry, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
 
@@ -26,7 +27,7 @@ const moveSchema = z.object({
   target: z.object({ kind: z.literal("reference"), id: z.string().min(1) }).strict(),
   destinationSpaceId: z.string().min(1),
 }).strict();
-const updateTextSchema = z.object({
+const updateTextSchema: z.ZodType<DocumentTextUpdateInput> = z.object({
   relativePath: z.string().max(4_096).optional(),
   expectedFingerprint: z.string().min(1).max(512),
   text: z.string().max(512 * 1024),
@@ -75,20 +76,20 @@ export async function handlePanelSpaceRoute(
   const managedFolderMatch = /^\/api\/spaces\/([^/]+)\/managed-folders$/u.exec(url.pathname);
   if (managedFolderMatch !== null && request.method === "POST") {
     const input = parse(createFolderSchema, await readJsonBody(request), "空间文件夹信息无效。");
-    const folder = await createManagedSpaceFolder(runtime.managedSpaceFolderRoot);
-    try {
-      writeJson(response, 201, {
-        ok: true,
-        item: await feature.commands.addReference({
+    const item = await runtime.fileMutationCoordinator.run(runtime.managedSpaceFolderRoot, async () => {
+      const folder = await createManagedSpaceFolder(runtime.managedSpaceFolderRoot);
+      try {
+        return await feature.commands.addReference({
           ...input,
           spaceId: decode(managedFolderMatch[1]),
           reference: { kind: "managed_folder", path: folder },
-        }),
-      });
-    } catch (error) {
-      await deleteManagedSpaceFolder(runtime.managedSpaceFolderRoot, folder).catch(() => undefined);
-      throw error;
-    }
+        });
+      } catch (error) {
+        await deleteManagedSpaceFolder(runtime.managedSpaceFolderRoot, folder).catch(() => undefined);
+        throw error;
+      }
+    });
+    writeJson(response, 201, { ok: true, item });
     return true;
   }
 
@@ -136,18 +137,16 @@ export async function handlePanelSpaceRoute(
   const removeReference = /^\/api\/spaces\/references\/([^/]+)$/u.exec(url.pathname);
   if (removeReference !== null && request.method === "DELETE") {
     const itemId = decode(removeReference[1]);
-    const item = await feature.queries.getReference(itemId);
-    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
-    await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), async () => {
-      const staged = await stageOwnedSpaceReferenceDeletion(item, runtime.managedSpaceFolderRoot);
-      try {
-        await feature.commands.removeReference(itemId);
-      } catch (error) {
-        await staged?.rollback();
-        throw error;
-      }
-      await staged?.commit();
-    });
+    await feature.commands.removeReference(itemId);
+    await runtime.flushSpaceKnowledgeSync();
+    writeJson(response, 200, { ok: true });
+    return true;
+  }
+
+  const unlinkReference = /^\/api\/spaces\/references\/([^/]+)\/unlink$/u.exec(url.pathname);
+  if (unlinkReference !== null && request.method === "POST") {
+    const itemId = decode(unlinkReference[1]);
+    await feature.commands.unlinkReference(itemId);
     await runtime.flushSpaceKnowledgeSync();
     writeJson(response, 200, { ok: true });
     return true;
@@ -177,7 +176,7 @@ export async function handlePanelSpaceRoute(
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
     const preview = item.reference.kind === "workbench_asset"
       ? await getWorkbenchAssetPreview(runtime.workbenchAssets, item.reference.assetId, item.id)
-      : await createPanelSpaceReferencePreview(item, url.searchParams.get("path") ?? "");
+      : await createPanelDocumentPreview(item, url.searchParams.get("path") ?? "");
     writeJson(response, 200, { ok: true, preview });
     return true;
   }
@@ -202,7 +201,7 @@ export async function handlePanelSpaceRoute(
       return true;
     }
     await assertWorkspaceMountWritable(feature, item.id);
-    writeJson(response, 200, { ok: true, preview: await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => updatePanelSpaceReferenceText(item, input)) });
+    writeJson(response, 200, { ok: true, preview: await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => updatePanelSpaceReferenceText(item, input)) });
     return true;
   }
 
@@ -212,7 +211,7 @@ export async function handlePanelSpaceRoute(
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
     await assertWorkspaceMountWritable(feature, item.id);
     const input = parse(createReferenceEntrySchema, await readJsonBody(request), "新建文件信息无效。");
-    writeJson(response, 201, { ok: true, entry: await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => createPanelSpaceReferenceEntry(item, input)) });
+    writeJson(response, 201, { ok: true, entry: await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => createPanelSpaceReferenceEntry(item, input)) });
     return true;
   }
   if (referenceEntry !== null && request.method === "PATCH") {
@@ -220,7 +219,7 @@ export async function handlePanelSpaceRoute(
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
     await assertWorkspaceMountWritable(feature, item.id);
     const input = parse(renameReferenceEntrySchema, await readJsonBody(request), "文件重命名信息无效。");
-    writeJson(response, 200, { ok: true, entry: await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => renamePanelSpaceReferenceEntry(item, input)) });
+    writeJson(response, 200, { ok: true, entry: await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => renamePanelSpaceReferenceEntry(item, input)) });
     return true;
   }
   if (referenceEntry !== null && request.method === "DELETE") {
@@ -228,7 +227,7 @@ export async function handlePanelSpaceRoute(
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
     await assertWorkspaceMountWritable(feature, item.id);
     const input = parse(referenceEntrySchema, await readJsonBody(request), "文件删除信息无效。");
-    await runtime.fileMutationCoordinator.run(referenceMutationRoot(item), () => deletePanelSpaceReferenceEntry(item, input.relativePath));
+    await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => deletePanelSpaceReferenceEntry(item, input.relativePath));
     writeJson(response, 200, { ok: true });
     return true;
   }
@@ -240,12 +239,6 @@ async function assertWorkspaceMountWritable(feature: PanelRuntime["spaceFeature"
   if (await feature.queries.hasWorkspaceMountConflict(itemId)) {
     throw new PanelHttpError(409, "space_workspace_mount_conflict", "同一个工作区文件夹已链接到多个空间。为避免交叉修改，请先取消其中一个链接。");
   }
-}
-
-function referenceMutationRoot(item: SpaceReferenceItem): string {
-  return item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder"
-    ? item.reference.path
-    : item.id;
 }
 
 function absoluteLocalReference(reference: SpaceReference): SpaceReference {
@@ -276,6 +269,7 @@ export function spaceFeatureHttpError(error: SpaceFeatureError): PanelHttpError 
     case "space_invalid_move":
     case "space_id_collision":
     case "space_workspace_mount_conflict":
+    case "space_conversation_ownership_conflict":
       return new PanelHttpError(409, error.code, error.message);
     case "space_invalid_input":
       return new PanelHttpError(400, error.code, error.message);

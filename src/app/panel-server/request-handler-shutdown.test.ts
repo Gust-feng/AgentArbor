@@ -40,6 +40,12 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     experienceCandidateFeature: {
       async release() { disposalOrder.push("experience-candidate"); },
     },
+    releaseWorkbenchProjectionChanges() {
+      disposalOrder.push("projection-changes");
+    },
+    async flushSpaceFileReconciliation() {
+      disposalOrder.push("space-file-reconciliation");
+    },
     async flushSpaceKnowledgeSync() {
       disposalOrder.push("space-knowledge-sync");
     },
@@ -71,9 +77,11 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
   // Memory drains only after Ordinary produced its final stable terminal facts.
   assert.deepEqual(disposalOrder, [
     "ordinary",
+    "space-file-reconciliation",
     "path-memory-connector",
     "path-memory",
     "experience-candidate",
+    "projection-changes",
     "space-knowledge-sync",
     "personal-knowledge",
     "space",

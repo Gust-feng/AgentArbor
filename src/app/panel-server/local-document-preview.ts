@@ -7,13 +7,13 @@
  * 避免跨模块业务函数依赖。
  *
  * 路径安全由 local-filesystem 提供；本模块不包含 reference.kind 业务分派，
- * 只负责将文件系统事实转换为 SpaceReferencePreview API 契约。
+ * 只负责将文件系统事实转换为 DocumentPreview API 契约。
  */
 import { promises as fs, createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { SpaceReferencePreview } from "../panel-api-contracts.js";
+import type { DocumentPreview, DocumentSourceKind } from "../panel-api-contracts.js";
 import { PanelHttpError } from "./http-utils.js";
 import { documentPresentation } from "./document-preview-presentation.js";
 import {
@@ -29,11 +29,11 @@ import {
   writeText,
 } from "../local-filesystem/index.js";
 
-/** 本地引用的元数据，用于填充 SpaceReferencePreview 的标识字段。 */
-export interface LocalReferenceMeta {
+/** 本地引用的元数据，用于填充 DocumentPreview 的标识字段。 */
+export interface LocalDocumentMeta {
   readonly itemId: string;
   readonly title: string;
-  readonly sourceKind: SpaceReferencePreview["sourceKind"];
+  readonly sourceKind: DocumentSourceKind;
 }
 
 /**
@@ -45,12 +45,12 @@ export interface LocalReferenceMeta {
  * @param options.contentBaseUrl 媒体内容流式 URL 基础路径。
  * @param options.contentTypeHintPath MIME / 语言识别的类型提示路径（资产无扩展名时使用原始文件名）。
  */
-export async function buildLocalReferencePreview(
+export async function buildLocalDocumentPreview(
   rootDir: string,
   relativePath: string,
-  meta: LocalReferenceMeta,
+  meta: LocalDocumentMeta,
   options?: { readonly contentBaseUrl?: string; readonly contentTypeHintPath?: string },
-): Promise<SpaceReferencePreview> {
+): Promise<DocumentPreview> {
   const source = await resolveSource(rootDir, relativePath);
   const normalizedRelative = normalizeRelativePath(relativePath);
 
@@ -63,7 +63,7 @@ export async function buildLocalReferencePreview(
   }
 
   const statFingerprint = `${Math.trunc(stat.mtimeMs)}:${stat.size}`;
-  const metadata: Pick<SpaceReferencePreview, "fingerprint" | "byteLength" | "modifiedAt"> = {
+  const metadata: Pick<DocumentPreview, "fingerprint" | "byteLength" | "modifiedAt"> = {
     fingerprint: statFingerprint,
     byteLength: stat.isFile() ? stat.size : undefined,
     modifiedAt: Math.trunc(stat.mtimeMs),
@@ -150,7 +150,7 @@ export async function buildLocalReferencePreview(
  * @param relativePath 相对于根目录的子路径。
  * @param contentTypeHintPath MIME 识别的类型提示路径。
  */
-export async function streamLocalReferenceContent(
+export async function streamLocalDocumentContent(
   rootDir: string,
   relativePath: string,
   request: IncomingMessage,
@@ -183,13 +183,13 @@ export async function streamLocalReferenceContent(
  * 校验文件可编辑性（UTF-8 编码、大小限制）和指纹一致性后执行原子写入，
  * 成功后重新构建预览返回。
  */
-export async function updateLocalReferenceText(
+export async function updateLocalDocumentText(
   rootDir: string,
   relativePath: string,
   input: { readonly expectedFingerprint: string; readonly text: string },
-  meta: LocalReferenceMeta,
+  meta: LocalDocumentMeta,
   options?: { readonly contentBaseUrl?: string; readonly contentTypeHintPath?: string },
-): Promise<SpaceReferencePreview> {
+): Promise<DocumentPreview> {
   const source = await resolveSource(rootDir, relativePath);
   const stat = await fs.stat(source).catch(() => undefined);
   if (stat?.isFile() !== true) throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
@@ -215,17 +215,17 @@ export async function updateLocalReferenceText(
     throw new PanelHttpError(500, "space_reference_not_editable", "无法保存文件更改。");
   }
 
-  return buildLocalReferencePreview(rootDir, relativePath, meta, options);
+  return buildLocalDocumentPreview(rootDir, relativePath, meta, options);
 }
 
 // ─── helpers ──────────────────────────────────────────────────────
 
 function basePreview(
-  meta: LocalReferenceMeta,
+  meta: LocalDocumentMeta,
   source: string,
-  status: SpaceReferencePreview["status"],
-  content: SpaceReferencePreview["content"],
-): SpaceReferencePreview {
+  status: DocumentPreview["status"],
+  content: DocumentPreview["content"],
+): DocumentPreview {
   return {
     itemId: meta.itemId,
     title: meta.title,

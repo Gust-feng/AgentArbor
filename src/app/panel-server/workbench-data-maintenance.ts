@@ -2,6 +2,8 @@ import {
   existsSync,
   mkdirSync,
   renameSync,
+  rmSync,
+  statSync,
 } from "node:fs";
 import { copyFile, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -15,7 +17,7 @@ import {
 const DATABASE_FILE_NAME = "workbench.sqlite3";
 const PENDING_RESTORE_FILE_NAME = "workbench.restore-pending.sqlite3";
 const PENDING_RESTORE_ASSETS_NAME = "workbench.restore-pending.assets";
-const KNOWLEDGE_ASSETS_NAME = "knowledge-assets";
+const OWNED_STORAGE_NAMES = ["knowledge-assets", "space-folders"] as const;
 
 export type WorkbenchDataMaintenance = {
   health(): {
@@ -43,10 +45,13 @@ export class WorkbenchDataMaintenanceError extends Error {
   }
 }
 
+type WorkbenchBackupDatabase = Pick<SqliteRuntimeDatabase, "filePath" | "health" | "backupTo">;
+
 export function createWorkbenchDataMaintenance(input: {
-  readonly database: SqliteRuntimeDatabase;
+  readonly database: WorkbenchBackupDatabase;
   readonly runtimeHome: string;
   readonly restorePicker?: () => Promise<string | undefined>;
+  readonly runOwnedStorageSnapshot?: <T>(operation: () => Promise<T>) => Promise<T>;
 }): WorkbenchDataMaintenance {
   const pendingRestorePath = path.join(input.runtimeHome, PENDING_RESTORE_FILE_NAME);
   const pendingRestoreAssetsPath = path.join(input.runtimeHome, PENDING_RESTORE_ASSETS_NAME);
@@ -63,25 +68,53 @@ export function createWorkbenchDataMaintenance(input: {
       "backups",
       `workbench-${fileTimestamp(createdAt)}-${randomUUID().slice(0, 8)}.sqlite3`,
     );
+    const temporarySuffix = `.pending-${randomUUID()}`;
+    const temporaryFilePath = `${filePath}${temporarySuffix}`;
+    const assetsPath = backupAssetsPath(filePath);
+    const temporaryAssetsPath = `${assetsPath}${temporarySuffix}`;
+    const manifestPath = backupManifestPath(filePath);
+    const temporaryManifestPath = `${manifestPath}${temporarySuffix}`;
     try {
-      const databaseBackup = await input.database.backupTo(filePath);
-      const assetsPath = backupAssetsPath(filePath);
-      await rm(assetsPath, { recursive: true, force: true });
-      const knowledgeAssets = path.join(input.runtimeHome, KNOWLEDGE_ASSETS_NAME);
-      if (existsSync(knowledgeAssets)) await cp(knowledgeAssets, assetsPath, { recursive: true });
-      else await mkdir(assetsPath, { recursive: true });
-      await writeFile(backupManifestPath(filePath), JSON.stringify({ version: 1, database: path.basename(filePath), assets: path.basename(assetsPath), createdAt }), "utf8");
-      return { ...databaseBackup, createdAt };
+      const databaseBackup = await input.database.backupTo(temporaryFilePath);
+      await mkdir(temporaryAssetsPath, { recursive: true });
+      for (const storageName of OWNED_STORAGE_NAMES) {
+        const source = path.join(input.runtimeHome, storageName);
+        const destination = path.join(temporaryAssetsPath, storageName);
+        if (existsSync(source)) await cp(source, destination, { recursive: true });
+        else await mkdir(destination, { recursive: true });
+      }
+      await writeFile(temporaryManifestPath, JSON.stringify({
+        version: 2,
+        database: path.basename(filePath),
+        assets: path.basename(assetsPath),
+        roots: OWNED_STORAGE_NAMES,
+        createdAt,
+      }), "utf8");
+      await rename(temporaryFilePath, filePath);
+      await rename(temporaryAssetsPath, assetsPath);
+      await rename(temporaryManifestPath, manifestPath);
+      return { filePath, byteLength: databaseBackup.byteLength, createdAt };
     } catch (error) {
+      await Promise.allSettled([
+        rm(temporaryFilePath, { force: true }),
+        rm(temporaryAssetsPath, { recursive: true, force: true }),
+        rm(temporaryManifestPath, { force: true }),
+        rm(filePath, { force: true }),
+        rm(assetsPath, { recursive: true, force: true }),
+        rm(manifestPath, { force: true }),
+      ]);
       throw new WorkbenchDataMaintenanceError("data_maintenance_failed", "Workbench 数据备份失败。", { cause: error });
     }
   };
+  const createOwnedStorageSnapshot = async () => input.runOwnedStorageSnapshot === undefined
+    ? await createBackup()
+    : await input.runOwnedStorageSnapshot(createBackup);
   return {
     health() {
       return { ...input.database.health(), pendingRestore: existsSync(pendingRestorePath) };
     },
     createBackup() {
-      return run(createBackup);
+      return run(createOwnedStorageSnapshot);
     },
     selectAndStageRestore() {
       return run(async () => {
@@ -93,7 +126,7 @@ export function createWorkbenchDataMaintenance(input: {
         if (path.resolve(selectedPath) === path.resolve(input.database.filePath)) {
           throw new WorkbenchDataMaintenanceError("restore_source_invalid", "不能把当前正在使用的数据库作为恢复来源。");
         }
-        await validateBackupCompanions(selectedPath);
+        const backupVersion = await validateBackupCompanions(selectedPath);
         let selectedHealth: ReturnType<typeof checkSqliteDatabaseFile>;
         try {
           selectedHealth = checkSqliteDatabaseFile(selectedPath);
@@ -106,14 +139,24 @@ export function createWorkbenchDataMaintenance(input: {
         if (!isWorkbenchDatabase(selectedHealth.tables)) {
           throw new WorkbenchDataMaintenanceError("restore_source_invalid", "所选数据库不包含 Workbench 的 Space 与 Personal Knowledge 数据表。");
         }
-        const safetyBackup = await createBackup();
+        const safetyBackup = await createOwnedStorageSnapshot();
         const stagingPath = `${pendingRestorePath}.tmp`;
         const stagingAssetsPath = `${pendingRestoreAssetsPath}.tmp`;
         try {
           await rm(stagingPath, { force: true });
           await rm(stagingAssetsPath, { recursive: true, force: true });
           await copyFile(selectedPath, stagingPath);
-          await cp(backupAssetsPath(selectedPath), stagingAssetsPath, { recursive: true });
+          if (backupVersion === 1) {
+            await mkdir(stagingAssetsPath, { recursive: true });
+            await cp(
+              backupAssetsPath(selectedPath),
+              path.join(stagingAssetsPath, "knowledge-assets"),
+              { recursive: true },
+            );
+            await mkdir(path.join(stagingAssetsPath, "space-folders"), { recursive: true });
+          } else {
+            await cp(backupAssetsPath(selectedPath), stagingAssetsPath, { recursive: true });
+          }
           const stagedHealth = checkSqliteDatabaseFile(stagingPath);
           if (!stagedHealth.ok) throw new Error(stagedHealth.checks.join("; "));
           await rm(pendingRestorePath, { force: true });
@@ -143,6 +186,12 @@ export function applyPendingWorkbenchRestore(runtimeHome: string): void {
   const pendingAssetsPath = path.join(runtimeHome, PENDING_RESTORE_ASSETS_NAME);
   if (!existsSync(pendingPath)) return;
   if (!existsSync(pendingAssetsPath)) throw new WorkbenchDataMaintenanceError("restore_source_invalid", "待恢复备份缺少知识资产目录。");
+  for (const storageName of OWNED_STORAGE_NAMES) {
+    const storagePath = path.join(pendingAssetsPath, storageName);
+    if (!existsSync(storagePath) || !statSync(storagePath).isDirectory()) {
+      throw new WorkbenchDataMaintenanceError("restore_source_invalid", "待恢复备份缺少完整的软件自管文件目录。");
+    }
+  }
   const health = checkSqliteDatabaseFile(pendingPath);
   if (!health.ok) {
     throw new WorkbenchDataMaintenanceError("restore_source_invalid", `待恢复数据库未通过完整性检查：${health.checks.join("；")}`);
@@ -155,7 +204,7 @@ export function applyPendingWorkbenchRestore(runtimeHome: string): void {
   mkdirSync(path.dirname(replacedRoot), { recursive: true });
   const moved: Array<{ readonly from: string; readonly to: string }> = [];
   let installedDatabase = false;
-  let installedAssets = false;
+  const installedStorageNames: string[] = [];
   try {
     for (const suffix of ["", "-wal", "-shm"]) {
       const current = `${databasePath}${suffix}`;
@@ -164,19 +213,27 @@ export function applyPendingWorkbenchRestore(runtimeHome: string): void {
       renameSync(current, backup);
       moved.push({ from: current, to: backup });
     }
-    const currentAssets = path.join(runtimeHome, KNOWLEDGE_ASSETS_NAME);
-    if (existsSync(currentAssets)) {
-      const backupAssets = `${replacedRoot}.assets`;
-      renameSync(currentAssets, backupAssets);
-      moved.push({ from: currentAssets, to: backupAssets });
+    for (const storageName of OWNED_STORAGE_NAMES) {
+      const currentStorage = path.join(runtimeHome, storageName);
+      if (!existsSync(currentStorage)) continue;
+      const backupStorage = `${replacedRoot}.${storageName}`;
+      renameSync(currentStorage, backupStorage);
+      moved.push({ from: currentStorage, to: backupStorage });
     }
     renameSync(pendingPath, databasePath);
     installedDatabase = true;
-    renameSync(pendingAssetsPath, path.join(runtimeHome, KNOWLEDGE_ASSETS_NAME));
-    installedAssets = true;
+    for (const storageName of OWNED_STORAGE_NAMES) {
+      renameSync(path.join(pendingAssetsPath, storageName), path.join(runtimeHome, storageName));
+      installedStorageNames.push(storageName);
+    }
+    rmSync(pendingAssetsPath, { recursive: true, force: false });
   } catch (error) {
-    const currentAssets = path.join(runtimeHome, KNOWLEDGE_ASSETS_NAME);
-    if (installedAssets && existsSync(currentAssets) && !existsSync(pendingAssetsPath)) renameSync(currentAssets, pendingAssetsPath);
+    mkdirSync(pendingAssetsPath, { recursive: true });
+    for (const storageName of installedStorageNames.reverse()) {
+      const currentStorage = path.join(runtimeHome, storageName);
+      const pendingStorage = path.join(pendingAssetsPath, storageName);
+      if (existsSync(currentStorage) && !existsSync(pendingStorage)) renameSync(currentStorage, pendingStorage);
+    }
     if (installedDatabase && existsSync(databasePath) && !existsSync(pendingPath)) renameSync(databasePath, pendingPath);
     for (const entry of moved.reverse()) {
       if (existsSync(entry.to) && !existsSync(entry.from)) renameSync(entry.to, entry.from);
@@ -185,13 +242,34 @@ export function applyPendingWorkbenchRestore(runtimeHome: string): void {
   }
 }
 
-async function validateBackupCompanions(databasePath: string): Promise<void> {
+async function validateBackupCompanions(databasePath: string): Promise<1 | 2> {
   try {
-    const manifest = JSON.parse(await readFile(backupManifestPath(databasePath), "utf8")) as { version?: unknown; database?: unknown; assets?: unknown };
-    if (manifest.version !== 1 || manifest.database !== path.basename(databasePath) || manifest.assets !== path.basename(backupAssetsPath(databasePath))) throw new Error("manifest mismatch");
-    if (!existsSync(backupAssetsPath(databasePath))) throw new Error("assets missing");
+    const manifest = JSON.parse(await readFile(backupManifestPath(databasePath), "utf8")) as {
+      version?: unknown;
+      database?: unknown;
+      assets?: unknown;
+      roots?: unknown;
+    };
+    if (manifest.database !== path.basename(databasePath)
+      || manifest.assets !== path.basename(backupAssetsPath(databasePath))) {
+      throw new Error("manifest mismatch");
+    }
+    if (manifest.version === 1) {
+      if (!existsSync(backupAssetsPath(databasePath))) throw new Error("assets missing");
+      return 1;
+    }
+    if (manifest.version !== 2
+      || !Array.isArray(manifest.roots)
+      || manifest.roots.length !== OWNED_STORAGE_NAMES.length
+      || manifest.roots.some((value, index) => value !== OWNED_STORAGE_NAMES[index])) {
+      throw new Error("manifest mismatch");
+    }
+    for (const storageName of OWNED_STORAGE_NAMES) {
+      if (!existsSync(path.join(backupAssetsPath(databasePath), storageName))) throw new Error("assets missing");
+    }
+    return 2;
   } catch (error) {
-    throw new WorkbenchDataMaintenanceError("restore_source_invalid", "所选备份缺少匹配的知识资产或清单文件。", { cause: error });
+    throw new WorkbenchDataMaintenanceError("restore_source_invalid", "所选备份缺少匹配的软件自管文件或清单文件。", { cause: error });
   }
 }
 

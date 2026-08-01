@@ -4,19 +4,25 @@ import {
   PersonalKnowledgeError,
   type PersonalKnowledgeCommand,
   type PersonalKnowledgeFeature,
+  type PersonalKnowledgeEvent,
   type PersonalKnowledgeRepository,
 } from "./contracts.js";
 
 export function createPersonalKnowledgeFeature(options: {
   readonly repository: PersonalKnowledgeRepository;
   readonly spaceExists: (spaceId: string) => Promise<boolean>;
-  readonly spaceReferenceExists: (itemId: string) => Promise<boolean>;
-  readonly captureSpaceReference?: (input: { readonly assetId: string; readonly referenceId: string; readonly relativePath: string }) => Promise<NonNullable<import("./contracts.js").KnowledgePage["asset"]>>;
+  readonly captureSpaceReference?: (input: { readonly assetId: string; readonly referenceId: string; readonly relativePath: string }) => Promise<NonNullable<import("./contracts.js").KnowledgePage["asset"]> | undefined>;
   readonly removeManagedAsset?: (itemId: string) => Promise<void>;
+  readonly stageManagedAssetRemoval?: (itemId: string) => Promise<{
+    readonly commit: () => Promise<void>;
+    readonly rollback: () => Promise<void>;
+  } | undefined>;
+  readonly runManagedAssetMutation?: <T>(operation: () => Promise<T>) => Promise<T>;
 }): PersonalKnowledgeFeature {
   const repository = options.repository;
   let released = false;
   let queue = Promise.resolve();
+  const listeners = new Set<(event: PersonalKnowledgeEvent) => void>();
 
   const ensureActive = (): void => {
     if (released) throw new PersonalKnowledgeError("personal_knowledge_released", "Personal knowledge feature is released.");
@@ -26,6 +32,13 @@ export function createPersonalKnowledgeFeature(options: {
     const result = queue.then(operation, operation);
     queue = result.then(() => undefined, () => undefined);
     return await result;
+  };
+  const runManagedAssetMutation = async <T>(operation: () => Promise<T>): Promise<T> =>
+    options.runManagedAssetMutation === undefined ? await operation() : await options.runManagedAssetMutation(operation);
+  const publish = (event: PersonalKnowledgeEvent): void => {
+    for (const listener of [...listeners]) {
+      try { listener(event); } catch { /* Observers cannot change the committed knowledge command result. */ }
+    }
   };
 
   return {
@@ -48,41 +61,50 @@ export function createPersonalKnowledgeFeature(options: {
             revision: 1,
           };
           await repository.execute({ type: "note.create", note, actor: noteInput.actor ?? SYSTEM_ACTOR, changeSummary: noteInput.changeSummary });
+          publish({ type: "personal_knowledge.note_created", noteId: note.id, spaceId: note.spaceId });
           return note;
         });
       },
       async updateNote(input) {
-        await run(() => repository.execute({
-          type: "note.update",
-          id: required(input.id, "id"),
-          expectedRevision: input.expectedRevision,
-          ...(input.title === undefined ? {} : { title: input.title }),
-          ...(input.bodyMarkdown === undefined ? {} : { bodyMarkdown: input.bodyMarkdown }),
-          updatedAt: Date.now(),
-          actor: input.actor ?? SYSTEM_ACTOR,
-          changeSummary: input.changeSummary,
-        }));
+        await run(async () => {
+          const id = required(input.id, "id");
+          await repository.execute({
+            type: "note.update",
+            id,
+            expectedRevision: input.expectedRevision,
+            ...(input.title === undefined ? {} : { title: input.title }),
+            ...(input.bodyMarkdown === undefined ? {} : { bodyMarkdown: input.bodyMarkdown }),
+            updatedAt: Date.now(),
+            actor: input.actor ?? SYSTEM_ACTOR,
+            changeSummary: input.changeSummary,
+          });
+          publish({ type: "personal_knowledge.note_updated", noteId: id });
+        });
       },
       async deleteNote(input) {
-        await run(() => repository.execute({
-          type: "note.delete",
-          id: required(input.id, "id"),
-          expectedRevision: input.expectedRevision,
-          deletedAt: Date.now(),
-          actor: input.actor ?? SYSTEM_ACTOR,
-          changeSummary: input.changeSummary,
-        }));
+        await run(async () => {
+          const id = required(input.id, "id");
+          await repository.execute({
+            type: "note.delete",
+            id,
+            expectedRevision: input.expectedRevision,
+            deletedAt: Date.now(),
+            actor: input.actor ?? SYSTEM_ACTOR,
+            changeSummary: input.changeSummary,
+          });
+          publish({ type: "personal_knowledge.note_deleted", noteId: id });
+        });
       },
       async reorderNotes(orderedIds) {
-        await run(() => repository.execute({ type: "note.reorder", orderedIds }));
+        await run(async () => {
+          await repository.execute({ type: "note.reorder", orderedIds });
+          publish({ type: "personal_knowledge.changed" });
+        });
       },
       async collectSpaceReference(input) {
-        return await run(async () => {
+        return await run(() => runManagedAssetMutation(async () => {
           const referenceId = required(input.referenceId, "referenceId");
           const relativePath = normalizeSpaceReferenceRelativePath(input.relativePath);
-          if (!await options.spaceReferenceExists(referenceId)) {
-            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Space reference ${referenceId} does not exist.`);
-          }
           if (options.captureSpaceReference === undefined) {
             throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "Managed knowledge asset storage is unavailable.");
           }
@@ -92,6 +114,9 @@ export function createPersonalKnowledgeFeature(options: {
           if (existing !== undefined) return existing;
           const refId = randomUUID();
           const asset = await options.captureSpaceReference({ assetId: refId, referenceId, relativePath });
+          if (asset === undefined) {
+            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Space reference ${referenceId} does not exist.`);
+          }
           const page = { refId, kind: "space_reference" as const, collectedAt: Date.now(), asset };
           try {
             await repository.execute({ type: "knowledge.collect", page });
@@ -99,15 +124,23 @@ export function createPersonalKnowledgeFeature(options: {
             await options.removeManagedAsset?.(refId);
             throw error;
           }
+          publish({ type: "personal_knowledge.changed", refIds: [page.refId] });
           return page;
-        });
+        }));
       },
       async uncollect(refIdInput) {
-        await run(async () => {
+        await run(() => runManagedAssetMutation(async () => {
           const refId = required(refIdInput, "refId");
-          await repository.execute({ type: "knowledge.uncollect", refId });
-          await options.removeManagedAsset?.(refId);
-        });
+          const staged = await options.stageManagedAssetRemoval?.(refId);
+          try {
+            await repository.execute({ type: "knowledge.uncollect", refId });
+          } catch (error) {
+            await staged?.rollback();
+            throw error;
+          }
+          await staged?.commit();
+          publish({ type: "personal_knowledge.changed", refIds: [refId] });
+        }));
       },
       async execute(command) {
         await run(async () => {
@@ -116,9 +149,10 @@ export function createPersonalKnowledgeFeature(options: {
             throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "Space references must be collected through managed asset capture.");
           }
           await repository.execute(validated);
-          if (validated.type === "knowledge.uncollect") {
-            await options.removeManagedAsset?.(validated.refId);
-          }
+          publish({
+            type: "personal_knowledge.changed",
+            ...("refId" in validated && typeof validated.refId === "string" ? { refIds: [validated.refId] } : {}),
+          });
         });
       },
     },
@@ -153,10 +187,14 @@ export function createPersonalKnowledgeFeature(options: {
         return await repository.searchNotes({ query, spaceId, limit });
       },
     },
+    events: {
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    },
     async release() {
       if (released) return;
       released = true;
       await queue;
+      listeners.clear();
     },
   };
 }
@@ -175,7 +213,9 @@ function required(value: string, field: string): string {
   return normalized;
 }
 
-function validateCommand<T extends Exclude<PersonalKnowledgeCommand, { readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" }>>(command: T): T {
+function validateCommand<T extends Exclude<PersonalKnowledgeCommand,
+  { readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" | "knowledge.uncollect" }
+>>(command: T): T {
   if (command.type === "knowledge.link_add" && command.link.from === command.link.to) {
     throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "A knowledge page cannot link to itself.");
   }

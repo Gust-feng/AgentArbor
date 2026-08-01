@@ -7,6 +7,7 @@ import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort } from "../ordinar
 import { ordinaryAgentSessionRef, ordinaryRunBirth, ordinaryRunTurn } from "../ordinary-agent/test-support.js";
 import { releasePanelRuntimeResources } from "./request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
+import { spaceReferenceAttachmentId } from "../spaces/space-file-access.js";
 
 test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary capability discovery", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-capability-root-"));
@@ -56,7 +57,7 @@ test("Panel capability snapshots freeze Space tools so an Ordinary Agent can org
   try {
     runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const snapshot = await runtime.capabilityCenter.snapshot();
-    for (const name of ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceRemoveReference", "SpaceRename"]) {
+    for (const name of ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename", "SpaceWrite", "SpaceEdit"]) {
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
     }
   } finally {
@@ -116,6 +117,69 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
 
     const files = await fs.readdir(path.join(directory, "runtime", "path-memory", "records"));
     assert.equal(files.filter((name) => name.endsWith(".json")).length, 1);
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
+test("Panel composition removes a frozen Space file link after a failed Agent run deleted its source", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-file-terminal-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    const source = path.join(directory, "linked.md");
+    await fs.writeFile(source, "delete me", "utf8");
+    runtime = createPanelRuntime({
+      configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
+      ordinaryAgentExecution: {
+        async execute(input) {
+          await fs.rm(source);
+          return {
+            status: "failed",
+            error: { code: "provider_failed", message: `run ${input.runId} failed after deleting the file` },
+            toolCalls: [],
+            usage: {},
+          };
+        },
+      },
+    });
+    const space = await runtime.spaceFeature.commands.createSpace({ title: "资料" });
+    const reference = await runtime.spaceFeature.commands.addReference({
+      spaceId: space.id,
+      title: "linked.md",
+      reference: { kind: "local_file", path: source },
+    });
+    const cursor = runtime.workbenchProjectionChanges.replay().cursor;
+
+    await runtime.ordinaryAgentFeature.commands.start({
+      runId: "delete-space-file-run",
+      sessionRef: ordinaryAgentSessionRef(),
+      turn: ordinaryRunTurn("delete-space-file-run"),
+      input: {
+        userMessage: "删除文件",
+        taskSoil: {
+          contextRefs: [{
+            attachmentId: spaceReferenceAttachmentId(reference.id),
+            ref: `local-file:${source}`,
+            kind: "file",
+          }],
+        },
+      },
+      birth: ordinaryRunBirth(),
+    });
+    const deadline = Date.now() + 5_000;
+    while ((await runtime.ordinaryAgentFeature.queries.getRun("delete-space-file-run"))?.status.kind !== "failed" &&
+        Date.now() < deadline) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    while (await runtime.spaceFeature.queries.getReference(reference.id) !== undefined && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    assert.equal(await runtime.spaceFeature.queries.getReference(reference.id), undefined);
+    assert.equal(runtime.workbenchProjectionChanges.replay(cursor).changes.some((change) =>
+      change.owners.includes("spaces") && change.referenceIds?.includes(reference.id)
+    ), true);
   } finally {
     await cleanupRuntime(runtime, directory);
   }

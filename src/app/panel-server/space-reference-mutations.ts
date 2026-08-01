@@ -6,16 +6,16 @@
  *
  * 路径安全由 local-filesystem 提供；文件写入操作委托给该模块的
  * 中性函数（renameEntry / createFile / createDirectory / deleteEntry），
- * 文本编辑委托给 local-reference-preview.ts 的 updateLocalReferenceText。
+ * 文本编辑委托给 local-document-preview.ts 的 updateLocalDocumentText。
  * 业务错误映射在本模块完成。
  */
 import path from "node:path";
 
-import type { SpaceReferencePreview } from "../panel-api-contracts.js";
+import type { DocumentPreview } from "../panel-api-contracts.js";
 import type { SpaceReferenceItem } from "../spaces/index.js";
 import { PanelHttpError } from "./http-utils.js";
-import type { LocalReferenceMeta } from "./local-reference-preview.js";
-import { updateLocalReferenceText } from "./local-reference-preview.js";
+import type { LocalDocumentMeta } from "./local-document-preview.js";
+import { updateLocalDocumentText } from "./local-document-preview.js";
 import {
   normalizeRelativePath,
   joinRelativePath,
@@ -31,17 +31,17 @@ export async function updatePanelSpaceReferenceText(
   item: SpaceReferenceItem,
   input: { readonly relativePath?: string; readonly expectedFingerprint: string; readonly text: string },
   previewOptions?: { readonly contentBaseUrl?: string; readonly contentTypeHintPath?: string },
-): Promise<SpaceReferencePreview> {
+): Promise<DocumentPreview> {
   if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
     throw new PanelHttpError(409, "space_reference_content_unavailable", "这个引用没有可读取的文件内容。");
   }
   const relativePath = input.relativePath ?? "";
-  const meta: LocalReferenceMeta = { itemId: item.id, title: item.title, sourceKind: item.reference.kind };
+  const meta: LocalDocumentMeta = { itemId: item.id, title: item.title, sourceKind: item.reference.kind };
   const normalized = safeNormalize(relativePath);
   if (item.reference.kind === "local_file" && normalized.length > 0) {
     throw new PanelHttpError(400, "invalid_space_reference_path", "文件引用不接受子路径。");
   }
-  return updateLocalReferenceText(
+  return updateLocalDocumentText(
     item.reference.path,
     normalized,
     { expectedFingerprint: input.expectedFingerprint, text: input.text },

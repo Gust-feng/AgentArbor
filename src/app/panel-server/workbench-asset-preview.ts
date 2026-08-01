@@ -1,8 +1,8 @@
-import type { SpaceReferencePreview } from "../panel-api-contracts.js";
+import type { DocumentPreview } from "../panel-api-contracts.js";
 import type { WorkbenchAsset } from "../workbench-assets/index.js";
 import { documentPresentation } from "./document-preview-presentation.js";
 
-export function createWorkbenchAssetPreviewFromAsset(asset: WorkbenchAsset, itemId = asset.id): SpaceReferencePreview {
+export function createWorkbenchAssetPreviewFromAsset(asset: WorkbenchAsset, itemId = asset.id): DocumentPreview {
   const content = contentOf(asset);
   return {
     itemId,
@@ -16,7 +16,7 @@ export function createWorkbenchAssetPreviewFromAsset(asset: WorkbenchAsset, item
   };
 }
 
-function contentOf(asset: WorkbenchAsset): SpaceReferencePreview["content"] {
+function contentOf(asset: WorkbenchAsset): DocumentPreview["content"] {
   switch (asset.kind) {
     case "markdown": return { kind: "text", text: asset.markdown ?? "", truncated: false, editable: false, language: "md", encoding: "UTF-8" };
     case "code": return { kind: "text", text: asset.code?.source ?? "", truncated: false, editable: false, language: asset.code?.language, encoding: "UTF-8" };

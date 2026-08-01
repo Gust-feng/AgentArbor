@@ -13,6 +13,7 @@ export function createPersonalKnowledgeTools(options: PersonalKnowledgeToolOptio
     createKnowledgeReadTool(options),
     createKnowledgeCreateNoteTool(options),
     createKnowledgeUpdateNoteTool(options),
+    createKnowledgeDeleteNoteTool(options),
     createKnowledgeCollectTool(options),
   ];
 }
@@ -125,6 +126,30 @@ export function createKnowledgeUpdateNoteTool(options: PersonalKnowledgeToolOpti
   });
 }
 
+export function createKnowledgeDeleteNoteTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeDeleteNote",
+    description: "Delete a persisted personal Markdown note using the revision returned by KnowledgeRead or KnowledgeSearch. A stale revision is rejected and never deletes newer content.",
+    metadata: writeMetadata,
+    inputSchema: schema({
+      noteId: { type: "string" },
+      expectedRevision: { type: "number" },
+    }, ["noteId", "expectedRevision"]),
+    execute: async (input, context) => {
+      const record = asRecord(input);
+      const noteId = stringOrUndefined(record.noteId);
+      const expectedRevision = integer(record.expectedRevision);
+      if (noteId === undefined || expectedRevision === undefined) {
+        return invalid("noteId and expectedRevision are required.");
+      }
+      return resultFor(
+        () => options.knowledge.commands.deleteNote({ id: noteId, expectedRevision, actor: agentActor(context) }),
+        () => ({ status: "deleted", noteId }),
+      );
+    },
+  });
+}
+
 export function createKnowledgeCollectTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
   return tool({
     name: "KnowledgeCollect",
@@ -133,16 +158,20 @@ export function createKnowledgeCollectTool(options: PersonalKnowledgeToolOptions
     inputSchema: schema({
       refId: { type: "string" },
       kind: { type: "string", enum: ["note", "space_reference"] },
+      relativePath: { type: "string", description: "Optional child file or folder path inside a Space folder reference." },
     }, ["refId", "kind"]),
     execute: async (input) => {
       const record = asRecord(input);
       const refId = stringOrUndefined(record.refId);
       const kind = knowledgePageKind(record.kind);
-      if (refId === undefined || kind === undefined) return invalid("refId and a supported kind are required.");
+      const relativePath = record.relativePath === undefined ? undefined : stringOrUndefined(record.relativePath);
+      if (refId === undefined || kind === undefined || (record.relativePath !== undefined && relativePath === undefined)) {
+        return invalid("refId and a supported kind are required; relativePath must be a non-empty string when provided.");
+      }
       const page: KnowledgePage = { refId, kind, collectedAt: Date.now() };
       return resultFor(
         () => kind === "space_reference"
-          ? options.knowledge.commands.collectSpaceReference({ referenceId: refId })
+          ? options.knowledge.commands.collectSpaceReference({ referenceId: refId, ...(relativePath === undefined ? {} : { relativePath }) })
           : options.knowledge.commands.execute({ type: "knowledge.collect", page }).then(() => page),
         (collected) => ({ status: "collected", page: collected }),
       );

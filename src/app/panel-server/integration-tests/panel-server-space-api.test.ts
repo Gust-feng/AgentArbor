@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { closePanelServer, createPanelRequestHandler } from "../request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "../runtime.js";
-import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
+import { readSseUntil, removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
 async function startSpaceTestServer(directory: string): Promise<{
   readonly baseUrl: string;
@@ -26,6 +26,40 @@ async function startSpaceTestServer(directory: string): Promise<{
   if (address === null || typeof address === "string") throw new Error("Panel test server did not expose a TCP port");
   return { baseUrl: `http://127.0.0.1:${address.port}`, runtime, httpServer };
 }
+
+test("Panel streams feature and filesystem invalidations for Agent-side mutations", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-projection-change-stream-"));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const cursor = runtime.workbenchProjectionChanges.replay().cursor;
+    const space = await runtime.spaceFeature.commands.createSpace({ title: "Agent 空间" });
+    const reference = await runtime.spaceFeature.commands.addReference({
+      spaceId: space.id,
+      title: "Agent 资料",
+      reference: { kind: "web_page", url: "https://example.com/agent" },
+    });
+    const note = await runtime.personalKnowledgeFeature.commands.createNote({
+      spaceId: space.id,
+      title: "Agent 笔记",
+    });
+    await runtime.personalKnowledgeFeature.commands.deleteNote({ id: note.id, expectedRevision: 1 });
+    await runtime.fileMutationCoordinator.run(path.join(directory, "mounted", "created.md"), async () => undefined);
+
+    const streamed = await readSseUntil(
+      baseUrl,
+      `/api/workbench/projection-changes?cursor=${cursor}`,
+      (events) => events.length >= 5,
+    );
+    assert.equal(streamed.status, 200);
+    assert.match(String(streamed.headers["content-type"]), /^text\/event-stream/u);
+    assert.equal(streamed.events.some((event) => event.owners?.includes("spaces") && event.referenceIds?.includes(reference.id)), true);
+    assert.equal(streamed.events.some((event) => event.owners?.includes("personal_knowledge") && event.noteIds?.includes(note.id)), true);
+    assert.equal(streamed.events.some((event) => event.owners?.includes("mounted_files")), true);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
 
 test("Space API organizes reference metadata without altering the referenced conversation", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-"));
@@ -130,7 +164,7 @@ test("Space API creates and physically deletes app-owned folders and files", asy
   }
 });
 
-test("Space API deletes a linked file but only unlinks a linked folder", async () => {
+test("Space API lets a linked file be unlinked or physically deleted and only unlinks linked folders", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-delete-reference-"));
   const linkedFile = path.join(directory, "linked.md");
   const linkedFolder = path.join(directory, "linked-folder");
@@ -144,16 +178,45 @@ test("Space API deletes a linked file but only unlinks a linked folder", async (
       method: "POST",
       body: { title: "linked.md", reference: { kind: "local_file", path: linkedFile } },
     });
+
+    const unlinkedFile = await requestJson(
+      baseUrl,
+      `/api/spaces/references/${encodeURIComponent(fileReference.body.item.id as string)}/unlink`,
+      { method: "POST", body: {} },
+    );
+    assert.equal(unlinkedFile.status, 200);
+    assert.equal(await fs.readFile(linkedFile, "utf8"), "delete me");
+
+    const deletableFileReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "linked.md", reference: { kind: "local_file", path: linkedFile } },
+    });
     const folderReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       method: "POST",
       body: { title: "linked-folder", reference: { kind: "workspace_folder", path: linkedFolder } },
     });
 
-    const deletedFile = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(fileReference.body.item.id as string)}`, { method: "DELETE" });
+    const deletedFile = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(deletableFileReference.body.item.id as string)}`, { method: "DELETE" });
     assert.equal(deletedFile.status, 200);
     assert.equal(await fs.stat(linkedFile).then(() => true, () => false), false);
 
-    const unlinkedFolder = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(folderReference.body.item.id as string)}`, { method: "DELETE" });
+    const staleFileReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "already-missing.md", reference: { kind: "local_file", path: path.join(directory, "already-missing.md") } },
+    });
+    const removedStaleFile = await requestJson(
+      baseUrl,
+      `/api/spaces/references/${encodeURIComponent(staleFileReference.body.item.id as string)}`,
+      { method: "DELETE" },
+    );
+    assert.equal(removedStaleFile.status, 200);
+    assert.equal(await runtime.spaceFeature.queries.getReference(staleFileReference.body.item.id as string), undefined);
+
+    const unlinkedFolder = await requestJson(
+      baseUrl,
+      `/api/spaces/references/${encodeURIComponent(folderReference.body.item.id as string)}/unlink`,
+      { method: "POST", body: {} },
+    );
     assert.equal(unlinkedFolder.status, 200);
     assert.equal(await fs.stat(linkedFolder).then((stat) => stat.isDirectory(), () => false), true);
   } finally {
@@ -290,6 +353,8 @@ test("Space API browses and edits text inside a referenced folder without escapi
     const root = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/preview`);
     assert.deepEqual(root.body.preview.content.entries, [{ name: "notes", relativePath: "notes", kind: "directory" }]);
     await fs.writeFile(path.join(sourceRoot, ".gitignore"), "dist/\n.env\n", "utf8");
+    await fs.writeFile(path.join(sourceRoot, "fetch_page.py"), "import requests\n", "utf8");
+    await fs.writeFile(path.join(sourceRoot, "diagram.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     await fs.writeFile(path.join(sourceRoot, "NOTICE"), "无扩展名 UTF-8 文本", "utf8");
     await fs.writeFile(path.join(sourceRoot, "legacy.ini"), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("标题=配置", "utf16le")]));
     await fs.writeFile(path.join(sourceRoot, "archive.zip"), Buffer.from("PK\x03\x04binary", "latin1"));
@@ -308,6 +373,10 @@ test("Space API browses and edits text inside a referenced folder without escapi
     assert.deepEqual(gitignore.body.preview.presentation, { kind: "code", editable: true, sourceMode: false });
     assert.equal(gitignore.body.preview.content.encoding, "UTF-8");
     assert.equal(gitignore.body.preview.content.editable, true);
+
+    const python = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/preview?path=${encodeURIComponent("fetch_page.py")}`);
+    assert.equal(python.body.preview.content.language, "python");
+    assert.deepEqual(python.body.preview.presentation, { kind: "code", editable: true, sourceMode: false });
 
     const notice = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/preview?path=${encodeURIComponent("NOTICE")}`);
     assert.equal(notice.body.preview.content.text, "无扩展名 UTF-8 文本");
@@ -421,6 +490,15 @@ test("Space API browses and edits text inside a referenced folder without escapi
     assert.equal(knowledgePage?.asset?.status, "managed");
     const managedPreview = await requestJson(baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview?path=${encodeURIComponent(".gitignore")}`);
     assert.equal(managedPreview.body.preview.content.text, "dist/\n.env\n");
+    assert.equal(managedPreview.body.preview.content.language, "gitignore");
+    assert.deepEqual(managedPreview.body.preview.presentation, { kind: "code", editable: true, sourceMode: false });
+    assert.equal(managedPreview.body.preview.sourceKind, "knowledge_asset");
+    const managedPython = await requestJson(baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview?path=${encodeURIComponent("fetch_page.py")}`);
+    assert.equal(managedPython.body.preview.content.language, "python");
+    assert.deepEqual(managedPython.body.preview.presentation, { kind: "code", editable: true, sourceMode: false });
+    const managedImage = await requestJson(baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview?path=${encodeURIComponent("diagram.png")}`);
+    assert.equal(managedImage.body.preview.content.mediaKind, "image");
+    assert.equal(managedImage.body.preview.presentation.kind, "image");
 
     await requestJson(baseUrl, "/api/personal-knowledge/commands", {
       method: "POST",
@@ -483,7 +561,11 @@ test("Space API blocks every disk mutation when historical Spaces share one work
     assert.equal(await fs.stat(path.join(sourceRoot, "new.md")).then(() => true, () => false), false);
     assert.equal(await fs.stat(path.join(sourceRoot, "renamed.md")).then(() => true, () => false), false);
 
-    const unlinked = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(secondReferenceId)}`, { method: "DELETE" });
+    const unlinked = await requestJson(
+      baseUrl,
+      `/api/spaces/references/${encodeURIComponent(secondReferenceId)}/unlink`,
+      { method: "POST", body: {} },
+    );
     assert.equal(unlinked.status, 200);
     assert.equal(await fs.readFile(path.join(sourceRoot, "note.md"), "utf8"), "original");
   } finally {

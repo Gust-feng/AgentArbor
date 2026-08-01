@@ -45,6 +45,7 @@ import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 import { handlePanelWorkbenchDataRoute, workbenchDataHttpError } from "./workbench-data-routes.js";
 import { WorkbenchDataMaintenanceError } from "./workbench-data-maintenance.js";
 import { handlePanelWorkbenchAssetRoute } from "./workbench-asset-routes.js";
+import { handleWorkbenchProjectionRoute } from "./workbench-projection-routes.js";
 import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
 import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
 import { acquirePanelRuntimeDirectoryLease } from "./runtime-directory-lease.js";
@@ -265,6 +266,10 @@ async function handlePanelRequest(
     return;
   }
 
+  if (await handleWorkbenchProjectionRoute(runtime, request, response, url)) {
+    return;
+  }
+
   if (await handlePanelOrdinaryRoute(runtime, request, response, url)) {
     return;
   }
@@ -433,10 +438,12 @@ export async function releasePanelRuntimeResources(
   runtime.isQuiescing = true;
   const errors: unknown[] = [];
   await captureCleanupError(errors, () => ordinaryDisposal);
+  await captureCleanupError(errors, () => runtime.flushSpaceFileReconciliation());
   // Keep the connector subscribed until Ordinary has produced its final stable facts.
   await captureCleanupError(errors, () => runtime.ordinaryPathMemoryConnector.release());
   await captureCleanupError(errors, () => runtime.pathMemoryFeature.release());
   await captureCleanupError(errors, () => runtime.experienceCandidateFeature.release());
+  await captureCleanupError(errors, async () => runtime.releaseWorkbenchProjectionChanges());
   await captureCleanupError(errors, () => releaseWorkbenchStorage(runtime));
   await captureCleanupError(errors, () => runtime.releaseAgentSessionStorage());
   await captureCleanupError(errors, () => runtime.toolOutputStore.close?.() ?? runtime.toolOutputStore.clear());

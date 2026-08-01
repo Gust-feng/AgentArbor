@@ -6,7 +6,7 @@ import test from "node:test";
 
 import type { SpaceReferenceItem } from "../spaces/index.js";
 import { PanelHttpError } from "./http-utils.js";
-import { captureKnowledgeAsset, reconcileKnowledgeAssets } from "./knowledge-asset-store.js";
+import { captureKnowledgeAsset, reconcileKnowledgeAssets, stageKnowledgeAssetRemoval } from "./knowledge-asset-store.js";
 
 test("knowledge asset capture copies only the selected child file", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-child-"));
@@ -40,19 +40,40 @@ test("knowledge asset capture rejects oversized content and removes temporary di
   assert.deepEqual(await fs.readdir(assets).catch(() => []), []);
 });
 
-test("knowledge asset reconciliation removes pending and orphan directories only", async (t) => {
+test("knowledge asset reconciliation restores interrupted active deletions and removes completed ones", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-reconcile-"));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const active = encoded("active");
+  const interrupted = encoded("interrupted");
   await Promise.all([
     fs.mkdir(path.join(directory, active), { recursive: true }),
     fs.mkdir(path.join(directory, `${active}.pending-interrupted`), { recursive: true }),
+    fs.mkdir(path.join(directory, `${interrupted}.deleting-staged`), { recursive: true }),
+    fs.mkdir(path.join(directory, `${encoded("deleted")}.deleting-staged`), { recursive: true }),
     fs.mkdir(path.join(directory, encoded("orphan")), { recursive: true }),
   ]);
 
-  await reconcileKnowledgeAssets(directory, new Set(["active"]));
+  await reconcileKnowledgeAssets(directory, new Set(["active", "interrupted"]));
 
-  assert.deepEqual(await fs.readdir(directory), [active]);
+  assert.deepEqual((await fs.readdir(directory)).sort(), [active, interrupted].sort());
+});
+
+test("knowledge asset removal can commit or roll back before metadata changes", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-remove-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const assetDirectory = path.join(directory, encoded("asset-one"));
+  await fs.mkdir(assetDirectory, { recursive: true });
+  await fs.writeFile(path.join(assetDirectory, "content"), "keep", "utf8");
+
+  const rollback = await stageKnowledgeAssetRemoval(directory, "asset-one");
+  assert.equal(await fs.stat(assetDirectory).then(() => true, () => false), false);
+  await rollback?.rollback();
+  assert.equal(await fs.readFile(path.join(assetDirectory, "content"), "utf8"), "keep");
+
+  const commit = await stageKnowledgeAssetRemoval(directory, "asset-one");
+  await commit?.commit();
+  assert.equal(await fs.stat(assetDirectory).then(() => true, () => false), false);
+  assert.deepEqual(await fs.readdir(directory), []);
 });
 
 function workspaceReference(source: string): SpaceReferenceItem {

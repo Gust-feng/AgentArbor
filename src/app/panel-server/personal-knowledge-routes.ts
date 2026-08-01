@@ -1,18 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
-import type { PersonalNoteRevision } from "../panel-api-contracts.js";
+import type { DocumentTextUpdateInput, PersonalNoteRevision } from "../panel-api-contracts.js";
 import { PersonalKnowledgeError, type PersonalKnowledgeCommand } from "../personal-knowledge/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
-import { managedKnowledgeReference } from "./knowledge-asset-store.js";
-import type { SpaceReferenceItem } from "../spaces/index.js";
+import { managedKnowledgeDocumentTarget } from "./knowledge-asset-store.js";
 import {
-  buildLocalReferencePreview,
-  streamLocalReferenceContent,
-  updateLocalReferenceText,
-  type LocalReferenceMeta,
-} from "./local-reference-preview.js";
+  buildLocalDocumentPreview,
+  streamLocalDocumentContent,
+  updateLocalDocumentText,
+} from "./local-document-preview.js";
 import { createWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 
 const id = z.string().trim().min(1).max(512);
@@ -35,7 +33,7 @@ const updateNoteSchema = z.object({
   bodyMarkdown: z.string().max(10_000_000).optional(),
 }).strict().refine((value) => value.title !== undefined || value.bodyMarkdown !== undefined, "No note fields were provided.");
 
-const updateAssetTextSchema = z.object({
+const updateAssetTextSchema: z.ZodType<DocumentTextUpdateInput> = z.object({
   relativePath: z.string().max(4_096).optional(),
   expectedFingerprint: z.string().min(1).max(512),
   text: z.string().max(512 * 1024),
@@ -101,14 +99,15 @@ export async function handlePanelPersonalKnowledgeRoute(
     const refId = decode(assetPreview[1]);
     const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
     if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
-    const { rootDir, meta } = localReferenceInfo(managedKnowledgeReference(requireAssetRoot(runtime), page));
-    writeJson(response, 200, { ok: true, preview: await buildLocalReferencePreview(
-      rootDir,
-      url.searchParams.get("path") ?? "",
-      meta,
+    const relativePath = url.searchParams.get("path") ?? "";
+    const target = managedKnowledgeDocumentTarget(requireAssetRoot(runtime), page);
+    writeJson(response, 200, { ok: true, preview: await buildLocalDocumentPreview(
+      target.rootDir,
+      relativePath,
+      target.meta,
       {
         contentBaseUrl: `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`,
-        contentTypeHintPath: page.asset?.sourceLabel,
+        contentTypeHintPath: target.contentTypeHintPath(relativePath),
       },
     ) });
     return true;
@@ -119,13 +118,14 @@ export async function handlePanelPersonalKnowledgeRoute(
     const refId = decode(assetContent[1]);
     const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
     if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
-    const { rootDir } = localReferenceInfo(managedKnowledgeReference(requireAssetRoot(runtime), page));
-    await streamLocalReferenceContent(
-      rootDir,
-      url.searchParams.get("path") ?? "",
+    const relativePath = url.searchParams.get("path") ?? "";
+    const target = managedKnowledgeDocumentTarget(requireAssetRoot(runtime), page);
+    await streamLocalDocumentContent(
+      target.rootDir,
+      relativePath,
       request,
       response,
-      page.asset?.sourceLabel,
+      target.contentTypeHintPath(relativePath),
     );
     return true;
   }
@@ -134,18 +134,19 @@ export async function handlePanelPersonalKnowledgeRoute(
     const refId = decode(assetContent[1]);
     const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
     if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
-    const { rootDir, meta, mutationKey } = localReferenceInfo(managedKnowledgeReference(requireAssetRoot(runtime), page));
+    const target = managedKnowledgeDocumentTarget(requireAssetRoot(runtime), page);
     const input = parse(updateAssetTextSchema, await readJsonBody(request));
+    const relativePath = input.relativePath ?? "";
     const contentBaseUrl = `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`;
     writeJson(response, 200, {
       ok: true,
-      preview: await runtime.fileMutationCoordinator.run(mutationKey, async () =>
-        await updateLocalReferenceText(
-          rootDir,
-          input.relativePath ?? "",
+      preview: await runtime.fileMutationCoordinator.run(target.mutationKey, async () =>
+        await updateLocalDocumentText(
+          target.rootDir,
+          relativePath,
           { expectedFingerprint: input.expectedFingerprint, text: input.text },
-          meta,
-          { contentBaseUrl, contentTypeHintPath: page.asset?.sourceLabel },
+          target.meta,
+          { contentBaseUrl, contentTypeHintPath: target.contentTypeHintPath(relativePath) },
         )),
     });
     return true;
@@ -192,7 +193,9 @@ export async function handlePanelPersonalKnowledgeRoute(
   if (url.pathname === "/api/personal-knowledge/commands" && request.method === "POST") {
     const command = parse(commandSchema, await readJsonBody(request)) as PersonalKnowledgeCommand;
     if (command.type === "knowledge.uncollect") await feature.commands.uncollect(command.refId);
-    else await feature.commands.execute(command as Exclude<PersonalKnowledgeCommand, { readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" }>);
+    else await feature.commands.execute(command as Exclude<PersonalKnowledgeCommand, {
+      readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" | "knowledge.uncollect";
+    }>);
     writeJson(response, 200, { ok: true });
     return true;
   }
@@ -202,22 +205,6 @@ export async function handlePanelPersonalKnowledgeRoute(
 function requireAssetRoot(runtime: PanelRuntime): string {
   if (runtime.knowledgeAssetRoot === undefined) throw new PanelHttpError(503, "knowledge_asset_storage_unavailable", "知识资产存储不可用。");
   return runtime.knowledgeAssetRoot;
-}
-
-/** 从托管知识引用中提取 rootDir、元数据和变更协调键。 */
-function localReferenceInfo(item: SpaceReferenceItem): {
-  rootDir: string;
-  meta: LocalReferenceMeta;
-  mutationKey: string;
-} {
-  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder") {
-    throw new PanelHttpError(404, "knowledge_asset_not_found", "知识资产类型不支持预览。");
-  }
-  return {
-    rootDir: item.reference.path,
-    meta: { itemId: item.id, title: item.title, sourceKind: item.reference.kind },
-    mutationKey: item.reference.path,
-  };
 }
 
 const USER_ACTOR = { kind: "user" } as const;

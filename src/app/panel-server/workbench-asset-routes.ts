@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
-import type { SpaceReferencePreview } from "../panel-api-contracts.js";
+import type { DocumentPreview } from "../panel-api-contracts.js";
 import {
   editableWorkbenchAssetText,
   MAX_WORKBENCH_ASSET_TEXT_BYTES,
@@ -61,7 +61,7 @@ export async function updateWorkbenchAssetTextPreview(
   repository: WorkbenchAssetRepository,
   input: { readonly assetId: string; readonly expectedFingerprint: string; readonly text: string },
   itemId = input.assetId,
-): Promise<SpaceReferencePreview> {
+): Promise<DocumentPreview> {
   if (Buffer.byteLength(input.text, "utf8") > MAX_WORKBENCH_ASSET_TEXT_BYTES) {
     throw new PanelHttpError(413, "workbench_asset_text_too_large", "工作台文本资产超过可编辑大小上限。");
   }
@@ -83,7 +83,7 @@ export async function getWorkbenchAssetPreview(
   repository: WorkbenchAssetRepository,
   assetId: string,
   itemId = assetId,
-): Promise<SpaceReferencePreview> {
+): Promise<DocumentPreview> {
   const asset = await repository.get(assetId);
   if (asset === undefined) throw new PanelHttpError(404, "workbench_asset_not_found", "工作台资产已不存在。");
   return createWorkbenchAssetTextPreview(asset, itemId);
@@ -92,11 +92,11 @@ export async function getWorkbenchAssetPreview(
 export function createWorkbenchAssetTextPreview(
   asset: WorkbenchAsset,
   itemId = asset.id,
-): SpaceReferencePreview {
+): DocumentPreview {
   const preview = createWorkbenchAssetPreviewFromAsset(asset, itemId);
   const editable = editableWorkbenchAssetText(asset);
   if (editable === undefined || preview.content.kind !== "text") return preview;
-  const content: Extract<SpaceReferencePreview["content"], { readonly kind: "text" }> = {
+  const content: Extract<DocumentPreview["content"], { readonly kind: "text" }> = {
     ...preview.content,
     text: editable.text,
     truncated: false,

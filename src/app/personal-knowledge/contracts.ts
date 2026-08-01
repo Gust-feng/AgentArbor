@@ -73,6 +73,12 @@ export type PersonalKnowledgeSearchResult = {
   readonly snippet: string;
 };
 
+export type PersonalKnowledgeEvent =
+  | { readonly type: "personal_knowledge.note_created"; readonly noteId: string; readonly spaceId: string }
+  | { readonly type: "personal_knowledge.note_updated"; readonly noteId: string }
+  | { readonly type: "personal_knowledge.note_deleted"; readonly noteId: string }
+  | { readonly type: "personal_knowledge.changed"; readonly refIds?: readonly string[] };
+
 export type PersonalKnowledgeCommand =
   | { readonly type: "note.create"; readonly note: PersonalNote; readonly actor: PersonalKnowledgeActor; readonly changeSummary?: string }
   | { readonly type: "note.update"; readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string; readonly updatedAt: number; readonly actor: PersonalKnowledgeActor; readonly changeSummary?: string }
@@ -107,7 +113,9 @@ export type PersonalKnowledgeFeature = {
     reorderNotes(orderedIds: readonly string[]): Promise<void>;
     collectSpaceReference(input: { readonly referenceId: string; readonly relativePath?: string }): Promise<KnowledgePage>;
     uncollect(refId: string): Promise<void>;
-    execute(command: Exclude<PersonalKnowledgeCommand, { readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" }>): Promise<void>;
+    execute(command: Exclude<PersonalKnowledgeCommand, {
+      readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" | "knowledge.uncollect";
+    }>): Promise<void>;
   };
   readonly queries: {
     snapshot(): Promise<PersonalKnowledgeSnapshot>;
@@ -115,6 +123,7 @@ export type PersonalKnowledgeFeature = {
     noteRevisions(id: string, limit?: number): Promise<readonly PersonalNoteRevision[]>;
     search(input: { readonly query: string; readonly spaceId?: string; readonly limit?: number }): Promise<readonly PersonalKnowledgeSearchResult[]>;
   };
+  readonly events: { subscribe(listener: (event: PersonalKnowledgeEvent) => void): () => void };
   release(): Promise<void>;
 };
 

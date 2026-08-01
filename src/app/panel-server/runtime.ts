@@ -27,7 +27,12 @@ import {
   type AppUpdateServiceLike,
 } from "../app-update/app-update-service.js";
 import { CapabilityCenter } from "../capability/capability-center.js";
-import { captureKnowledgeAsset, reconcileKnowledgeAssets, removeKnowledgeAsset } from "./knowledge-asset-store.js";
+import {
+  captureKnowledgeAsset,
+  reconcileKnowledgeAssets,
+  removeKnowledgeAsset,
+  stageKnowledgeAssetRemoval,
+} from "./knowledge-asset-store.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center/index.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import {
@@ -64,12 +69,13 @@ import {
 import {
   createSqliteSpaceRepository,
   createSpaceFeature,
+  type SpaceEvent,
   type SpaceFeature,
-  type SpaceTreeEntry,
 } from "../spaces/index.js";
 import {
   createPersonalKnowledgeFeature,
   createSqlitePersonalKnowledgeRepository,
+  type PersonalKnowledgeEvent,
   type PersonalKnowledgeFeature,
 } from "../personal-knowledge/index.js";
 import {
@@ -77,6 +83,8 @@ import {
   createWorkbenchDataMaintenance,
   type WorkbenchDataMaintenance,
 } from "./workbench-data-maintenance.js";
+import { runSpaceReferenceRemoval } from "./space-reference-deletion.js";
+import { reconcileMissingRunSpaceFiles } from "./space-file-reference-reconciliation.js";
 import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
@@ -109,6 +117,10 @@ import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapte
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import { createInitialWorkbenchDataInitializer, initializeInitialWorkbenchData } from "./initial-workbench-data.js";
 import { createSqliteWorkbenchAssetRepository, type WorkbenchAssetRepository } from "../workbench-assets/index.js";
+import {
+  createWorkbenchProjectionChangeFeed,
+  type WorkbenchProjectionChangeFeed,
+} from "./workbench-projection-change-feed.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -146,12 +158,15 @@ export type PanelRuntime = {
   readonly workbenchDatabase: SqliteRuntimeDatabase;
   readonly workbenchAssets: WorkbenchAssetRepository;
   readonly fileMutationCoordinator: LocalWorkspaceMutationCoordinator;
+  readonly workbenchProjectionChanges: WorkbenchProjectionChangeFeed;
+  readonly releaseWorkbenchProjectionChanges: () => void;
   readonly knowledgeAssetRoot?: string;
   /** Host-owned root for physical directories created from Space. */
   readonly managedSpaceFolderRoot: string;
   readonly knowledgeAssetsReady: Promise<void>;
   readonly ensureInitialWorkbenchData: () => Promise<void>;
   readonly flushSpaceKnowledgeSync: () => Promise<void>;
+  readonly flushSpaceFileReconciliation: () => Promise<void>;
   readonly releaseAgentSessionStorage: () => Promise<void>;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
@@ -259,9 +274,14 @@ function assemblePanelRuntime(input: {
   const agentDefinitionOverrides = new Map<string, AgentDefinition>();
   const processRegistry = new InMemoryProcessRegistry();
   const fileMutationCoordinator = new InMemoryLocalWorkspaceMutationCoordinator();
+  const workbenchProjectionChanges = createWorkbenchProjectionChangeFeed();
   const toolOutputStore = new FileSystemToolOutputStore(resolveToolEvidenceRoot(input));
   const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
   const runtimeHome = resolveRuntimeHome(input);
+  const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
+  const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
+  let knowledgeAssetsReady = Promise.resolve();
+  let spaceFileReconciliation = Promise.resolve();
   applyPendingWorkbenchRestore(runtimeHome);
   const workbenchDatabase = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
   const workbenchAssets = createSqliteWorkbenchAssetRepository(workbenchDatabase);
@@ -269,6 +289,10 @@ function assemblePanelRuntime(input: {
     database: workbenchDatabase,
     runtimeHome,
     restorePicker: input.workbenchRestorePicker,
+    runOwnedStorageSnapshot: async (operation) => {
+      await knowledgeAssetsReady;
+      return await fileMutationCoordinator.runExclusive(runtimeHome, operation);
+    },
   });
   const spaceRepository = createSqliteSpaceRepository(workbenchDatabase);
   const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
@@ -278,28 +302,28 @@ function assemblePanelRuntime(input: {
   const spaceFeature = createSpaceFeature({
     repository: spaceRepository,
     workspaceMountIdentity: canonicalWorkspaceMountIdentity,
+    runReferenceRemoval: async (items, removeMetadata) => await runSpaceReferenceRemoval(
+      items,
+      managedSpaceFolderRoot,
+      fileMutationCoordinator,
+      removeMetadata,
+    ),
   });
-  let knowledgeAssetsReady = Promise.resolve();
   const personalKnowledgeFeature = createPersonalKnowledgeFeature({
     repository: createSqlitePersonalKnowledgeRepository(workbenchDatabase),
     spaceExists: async (spaceId) => await spaceFeature.queries.getTree(spaceId) !== undefined,
-    spaceReferenceExists: async (itemId) => {
-      for (const space of await spaceFeature.queries.list()) {
-        const tree = await spaceFeature.queries.getTree(space.id);
-        if (tree !== undefined && tree.entries.some((entry) => spaceTreeEntryContainsReference(entry, itemId))) return true;
-      }
-      return false;
+    runManagedAssetMutation: async (operation) => {
+      await knowledgeAssetsReady;
+      return await fileMutationCoordinator.run(knowledgeAssetRoot, operation);
     },
     captureSpaceReference: async ({ assetId, referenceId, relativePath }) => {
-      await knowledgeAssetsReady;
       const item = await spaceFeature.queries.getReference(referenceId);
-      if (item === undefined) throw new Error(`Space reference ${referenceId} does not exist.`);
-      return await captureKnowledgeAsset(path.join(runtimeHome, "knowledge-assets"), assetId, item, relativePath);
+      if (item === undefined) return undefined;
+      return await captureKnowledgeAsset(knowledgeAssetRoot, assetId, item, relativePath);
     },
-    removeManagedAsset: async (itemId) => await removeKnowledgeAsset(path.join(runtimeHome, "knowledge-assets"), itemId),
+    removeManagedAsset: async (itemId) => await removeKnowledgeAsset(knowledgeAssetRoot, itemId),
+    stageManagedAssetRemoval: async (itemId) => await stageKnowledgeAssetRemoval(knowledgeAssetRoot, itemId),
   });
-  const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
-  const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
   const initialWorkbenchData = createInitialWorkbenchDataInitializer(
     input.testOnlySkipInitialWorkbenchData
       ? async () => undefined
@@ -310,16 +334,20 @@ function assemblePanelRuntime(input: {
           workbenchAssets,
       }),
   );
-  // Warm the formal initial dataset without making a transient failure fatal to the Panel process.
-  void initialWorkbenchData.ensure().catch(() => undefined);
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
-    await reconcileKnowledgeAssets(knowledgeAssetRoot, new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)));
+    await fileMutationCoordinator.run(knowledgeAssetRoot, async () => await reconcileKnowledgeAssets(
+      knowledgeAssetRoot,
+      new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)),
+    ));
   });
+  // Warm the formal initial dataset after owned storage reconciliation has started.
+  void initialWorkbenchData.ensure().catch(() => undefined);
   const spaceKnowledgeSync = Promise.resolve();
   const resolveFeatureToolContributions = createHostFeatureAgentToolContributionResolver({
     agentNotes: agentNotesFeature,
     spaces: spaceFeature,
     personalKnowledge: personalKnowledgeFeature,
+    fileMutationCoordinator,
   });
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
@@ -391,6 +419,35 @@ function assemblePanelRuntime(input: {
     }),
     ...(input.ordinaryAgentExecution === undefined ? {} : { testOnlyAllowSessionlessExecution: true }),
   });
+  const projectionChangeUnsubscribers = [
+    spaceFeature.events.subscribe((event) => {
+      workbenchProjectionChanges.publish(projectionChangeFromSpace(event));
+    }),
+    personalKnowledgeFeature.events.subscribe((event) => {
+      workbenchProjectionChanges.publish(projectionChangeFromPersonalKnowledge(event));
+    }),
+    fileMutationCoordinator.events.subscribe(() => {
+      workbenchProjectionChanges.publish({ owners: ["mounted_files"] });
+    }),
+    ordinaryAgentFeature.events.subscribeStableTerminalRuns((runId) => {
+      // Shell commands bypass the file mutation coordinator. Reconcile only
+      // local files explicitly frozen into this run before refreshing views.
+      spaceFileReconciliation = spaceFileReconciliation.then(async () => {
+        const run = await ordinaryAgentFeature.queries.getRun(runId);
+        if (run !== undefined) {
+          const result = await reconcileMissingRunSpaceFiles(spaceFeature, run.input.taskSoil);
+          for (const failure of result.inspectionFailures) {
+            console.error(`[panel-server] Space file reference ${failure.referenceId} could not be reconciled`, failure.error);
+          }
+        }
+        workbenchProjectionChanges.publish({
+          owners: ["spaces", "mounted_files", "personal_knowledge"],
+        });
+      }).catch((error) => {
+        console.error(`[panel-server] Ordinary run ${runId} Space file reconciliation failed`, error);
+      });
+    }),
+  ];
   const pathMemoryFeature = createPathMemoryFeature({
     repository: createFileSystemPathMemoryRepository(resolvePathMemoryRoot(input)),
   });
@@ -447,14 +504,73 @@ function assemblePanelRuntime(input: {
     workbenchDatabase,
     workbenchAssets,
     fileMutationCoordinator,
+    workbenchProjectionChanges,
+    releaseWorkbenchProjectionChanges: () => {
+      for (const unsubscribe of projectionChangeUnsubscribers.splice(0)) unsubscribe();
+      workbenchProjectionChanges.release();
+    },
     knowledgeAssetRoot,
     managedSpaceFolderRoot,
     knowledgeAssetsReady,
     ensureInitialWorkbenchData: () => initialWorkbenchData.ensure(),
     flushSpaceKnowledgeSync: () => spaceKnowledgeSync,
+    flushSpaceFileReconciliation: () => spaceFileReconciliation,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
   return runtime;
+}
+
+function projectionChangeFromSpace(event: SpaceEvent) {
+  switch (event.type) {
+    case "space.created":
+      return { owners: ["spaces"] as const, spaceIds: [event.space.id] };
+    case "space.reference_added":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.item.spaceId],
+        referenceIds: [event.item.id],
+      };
+    case "space.renamed":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.spaceId],
+        ...(event.target.kind === "reference" ? { referenceIds: [event.target.id] } : {}),
+      };
+    case "space.moved":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.sourceSpaceId, event.destinationSpaceId],
+        referenceIds: [event.target.id],
+      };
+    case "space.reference_removed":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.spaceId],
+        referenceIds: event.removedItemIds,
+      };
+  }
+}
+
+function projectionChangeFromPersonalKnowledge(event: PersonalKnowledgeEvent) {
+  switch (event.type) {
+    case "personal_knowledge.note_created":
+      return {
+        owners: ["personal_knowledge"] as const,
+        spaceIds: [event.spaceId],
+        noteIds: [event.noteId],
+      };
+    case "personal_knowledge.note_updated":
+    case "personal_knowledge.note_deleted":
+      return {
+        owners: ["personal_knowledge"] as const,
+        noteIds: [event.noteId],
+      };
+    case "personal_knowledge.changed":
+      return {
+        owners: ["personal_knowledge"] as const,
+        ...(event.refIds === undefined ? {} : { referenceIds: event.refIds }),
+      };
+  }
 }
 
 async function canonicalWorkspaceMountIdentity(value: string): Promise<string> {
@@ -767,8 +883,4 @@ function resolveSkillStateStore(configDirectory: string | undefined): SkillState
 
 function resolvePanelRuntimePaths(configDirectory: string | undefined): AgentArborRuntimePaths | undefined {
   return configDirectory === undefined ? undefined : resolveAgentArborRuntimePaths(configDirectory);
-}
-
-function spaceTreeEntryContainsReference(entry: SpaceTreeEntry, itemId: string): boolean {
-  return entry.item.id === itemId;
 }

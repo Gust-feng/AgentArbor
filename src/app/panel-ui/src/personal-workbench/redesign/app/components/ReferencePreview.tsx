@@ -1,4 +1,4 @@
-import { Fragment, forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef, type ReactNode, type UIEvent } from 'react'
+import { Fragment, Suspense, forwardRef, lazy, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef, type ReactNode, type UIEvent } from 'react'
 import { diffLines, type Change } from 'diff'
 import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Folder, RefreshCw } from 'lucide-react'
 import { fetchDocumentPreview, getCachedReferencePreview, refreshDocumentPreview, saveDocumentText, subscribeReferencePreviewCache, type DocumentPreview } from './referencePreviewClient'
@@ -7,10 +7,13 @@ import { CodeDocumentSurface } from './CodeDocumentSurface'
 import { PdfDocumentSurface } from './PdfDocumentSurface'
 import { VideoDocumentSurface } from './VideoDocumentSurface'
 import { isMarkdownDocument } from './documentProjection'
+import { loadDocxDocumentSurface, loadSpreadsheetDocumentSurface } from './officePreviewSurfaceLoader'
 import './reference-preview.css'
 
 const AUTOSAVE_MS = 500
 const MAX_DOCUMENT_VIEW_MEMORY = 128
+const DocxDocumentSurface = lazy(loadDocxDocumentSurface)
+const SpreadsheetDocumentSurface = lazy(loadSpreadsheetDocumentSurface)
 type DocumentScrollSurface = 'content' | 'source' | 'diff'
 type DocumentViewMemory = {
   sourceMode: boolean
@@ -466,6 +469,14 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
         return <div className="aa-reference-preview__reader" data-document-scroll="content"><PdfDocumentSurface source={{ kind: 'url', url: content.url }} /></div>
       }
       return <InvalidPresentationState preview={preview} onReload={onReload} />
+    case 'docx':
+      return content.kind === 'office' && content.officeKind === 'docx'
+        ? <Suspense fallback={<OfficeSurfaceLoading label="正在准备 Word 预览..." />}><DocxDocumentSurface url={content.url} byteLength={preview.byteLength} sourceVersion={preview.fingerprint} /></Suspense>
+        : <InvalidPresentationState preview={preview} onReload={onReload} />
+    case 'xlsx':
+      return content.kind === 'office' && content.officeKind === 'xlsx'
+        ? <Suspense fallback={<OfficeSurfaceLoading label="正在准备 Excel 预览..." />}><SpreadsheetDocumentSurface url={content.url} byteLength={preview.byteLength} sourceVersion={preview.fingerprint} /></Suspense>
+        : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'image':
       return content.kind === 'media' && content.mediaKind === 'image'
         ? <div className={`aa-reference-preview__media${content.caption ? ' aa-reference-preview__media--described' : ''}`} data-document-scroll="content"><img src={content.url} alt={content.alt ?? preview.title} />{content.caption && <p>{content.caption}</p>}</div>
@@ -479,6 +490,10 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
         ? <div className="aa-reference-preview__audio" data-document-scroll="content"><audio aria-label={preview.title} controls preload="metadata" src={content.url} />{content.duration && <span>{content.duration}</span>}{content.transcript && <p>{content.transcript}</p>}</div>
         : <InvalidPresentationState preview={preview} onReload={onReload} />
   }
+}
+
+function OfficeSurfaceLoading({ label }: { label: string }) {
+  return <div className="aa-reference-preview__state" role="status"><FileText size={22} /><span>{label}</span></div>
 }
 
 function InvalidPresentationState({ preview, onReload }: { preview: DocumentPreview; onReload: () => void }) {

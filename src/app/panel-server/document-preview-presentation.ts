@@ -28,6 +28,7 @@ function presentationKind(content: DocumentPreview["content"]): DocumentPresenta
     case "pages": return "pdf";
     case "unavailable": return "unavailable";
     case "media": return content.mediaKind;
+    case "office": return content.officeKind;
     case "text": {
       const language = content.language?.toLowerCase();
       if (language !== undefined && MARKDOWN_LANGUAGES.has(language)) return "markdown";

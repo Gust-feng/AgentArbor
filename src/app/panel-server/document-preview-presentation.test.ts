@@ -45,6 +45,18 @@ test("document presentation preserves non-text content kinds", () => {
     url: "/image.png",
   }), { kind: "image", editable: false, sourceMode: false });
   assert.deepEqual(documentPresentation({ kind: "pages", pages: ["page"] }), { kind: "pdf", editable: false, sourceMode: false });
+  assert.deepEqual(documentPresentation({
+    kind: "office",
+    officeKind: "docx",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    url: "/document.docx",
+  }), { kind: "docx", editable: false, sourceMode: false });
+  assert.deepEqual(documentPresentation({
+    kind: "office",
+    officeKind: "xlsx",
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    url: "/workbook.xlsx",
+  }), { kind: "xlsx", editable: false, sourceMode: false });
   assert.deepEqual(documentPresentation({ kind: "directory", relativePath: "", entries: [], truncated: false }), { kind: "directory", editable: false, sourceMode: false });
   assert.deepEqual(documentPresentation({ kind: "unavailable", message: "missing" }), { kind: "unavailable", editable: false, sourceMode: false });
 });

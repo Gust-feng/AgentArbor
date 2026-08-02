@@ -13,7 +13,10 @@ import {
   joinRelativePath,
   languageForPath,
   listDirectory,
+  mimeTypeForPath,
   normalizeRelativePath,
+  officeKindForPath,
+  isKnownBinaryPath,
   renameEntry,
   resolveDestinationWithinRoot,
   resolveWithinRoot,
@@ -25,6 +28,19 @@ test("local filesystem normalizes language aliases used by document presentation
   assert.deepEqual(languageForPath(".gitmodules"), { language: "gitmodules" });
   assert.deepEqual(languageForPath(".editorconfig"), { language: "editorconfig" });
   assert.deepEqual(languageForPath("LICENSE"), { language: "license" });
+});
+
+test("local filesystem recognizes supported Office Open XML formats without enabling legacy binaries", () => {
+  assert.equal(mimeTypeForPath("proposal.docx"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  assert.equal(mimeTypeForPath("budget.xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  assert.equal(officeKindForPath("proposal.DOCX"), "docx");
+  assert.equal(officeKindForPath("budget.XLSX"), "xlsx");
+  assert.equal(officeKindForPath("slides.pptx"), undefined);
+  assert.equal(isKnownBinaryPath("proposal.docx"), false);
+  assert.equal(isKnownBinaryPath("budget.xlsx"), false);
+  for (const legacy of ["legacy.doc", "legacy.xls", "slides.ppt", "slides.pptx"]) {
+    assert.equal(isKnownBinaryPath(legacy), true);
+  }
 });
 
 test("local filesystem resolves only normalized paths inside an authorized root", async (t) => {

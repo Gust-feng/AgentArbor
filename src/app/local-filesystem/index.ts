@@ -31,6 +31,7 @@ export {
   MAX_DIRECTORY_ENTRIES,
   mimeTypeForPath,
   mediaKindForMimeType,
+  officeKindForPath,
   languageForPath,
   isKnownTextPath,
   isKnownBinaryPath,

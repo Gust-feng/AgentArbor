@@ -12,6 +12,12 @@ vi.mock('unpdf/pdfjs', () => ({
   getDocument: getPdfDocumentMock,
   PDFWorker: { create: createPdfWorkerMock },
 }))
+vi.mock('./DocxDocumentSurface', () => ({
+  DocxDocumentSurface: ({ url }: { url: string }) => <div data-testid="docx-document-surface">{url}</div>,
+}))
+vi.mock('./SpreadsheetDocumentSurface', () => ({
+  SpreadsheetDocumentSurface: ({ url }: { url: string }) => <div data-testid="xlsx-document-surface">{url}</div>,
+}))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -76,6 +82,35 @@ test('renders structured and file PDFs through the same application surface', as
   await waitFor(() => expect(rendered.container.querySelector('.aa-pdf-document[data-pdf-source="file"]')).not.toBeNull())
   expect(rendered.container.querySelector('object')).toBeNull()
   expect(getPdfDocumentMock).toHaveBeenCalledWith(expect.objectContaining({ url: '/api/files/file/content' }))
+})
+
+test('routes DOCX and XLSX presentations to their application-owned surfaces', async () => {
+  const previews: Record<string, DocumentPreview> = {
+    docx: previewWithPresentation('docx', 'docx', {
+      kind: 'office',
+      officeKind: 'docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      url: '/api/files/docx/content',
+    }),
+    xlsx: previewWithPresentation('xlsx', 'xlsx', {
+      kind: 'office',
+      officeKind: 'xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      url: '/api/files/xlsx/content',
+    }),
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const id = String(input).includes('/xlsx/') ? 'xlsx' : 'docx'
+    return new Response(JSON.stringify({ preview: previews[id] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  const rendered = render(<ReferencePreview itemId="docx" fallbackTitle="document.docx" canOpen={false} onOpen={() => undefined} />)
+  expect((await screen.findByTestId('docx-document-surface')).textContent).toContain('/api/files/docx/content')
+  expect(screen.queryByTestId('xlsx-document-surface')).toBeNull()
+
+  rendered.rerender(<ReferencePreview itemId="xlsx" fallbackTitle="workbook.xlsx" canOpen={false} onOpen={() => undefined} />)
+  expect((await screen.findByTestId('xlsx-document-surface')).textContent).toContain('/api/files/xlsx/content')
+  expect(screen.queryByTestId('docx-document-surface')).toBeNull()
 })
 
 test('uses the backend presentation as the renderer authority for text surfaces', async () => {

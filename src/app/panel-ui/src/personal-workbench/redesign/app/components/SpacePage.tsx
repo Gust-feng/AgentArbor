@@ -31,6 +31,7 @@ import type {
 import { ReferencePreview, type ReferencePreviewHandle } from './ReferencePreview'
 import { NoteEditor } from './NoteEditor'
 import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchDocumentPreview, getCachedReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
+import { prefetchOfficePreview } from './officePreviewRuntime'
 import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
 import {
   useMountedTree,
@@ -354,8 +355,12 @@ export function SpacePage({
     }
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
-    if (getCachedReferencePreview(referenceId, relativePath) !== undefined) return
-    void fetchDocumentPreview(referenceId, relativePath).catch(() => undefined)
+    const cached = getCachedReferencePreview(referenceId, relativePath)
+    if (cached !== undefined) {
+      prefetchOfficePreview(cached)
+      return
+    }
+    void fetchDocumentPreview(referenceId, relativePath).then(prefetchOfficePreview, () => undefined)
   }
 
   function selectTreeItem(id: string) {
@@ -366,8 +371,11 @@ export function SpacePage({
     }
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
-    if (getCachedReferencePreview(referenceId, relativePath) === undefined) {
-      void fetchDocumentPreview(referenceId, relativePath).catch((error: unknown) => setActionError(actionErrorMessage(error)))
+    const cached = getCachedReferencePreview(referenceId, relativePath)
+    if (cached === undefined) {
+      void fetchDocumentPreview(referenceId, relativePath).then(prefetchOfficePreview, (error: unknown) => setActionError(actionErrorMessage(error)))
+    } else {
+      prefetchOfficePreview(cached)
     }
     selectItem(id)
   }

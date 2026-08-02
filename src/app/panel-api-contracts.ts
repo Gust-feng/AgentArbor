@@ -51,7 +51,7 @@ export type WorkbenchProjectionChange = {
 /* ─── Document Preview ───────────────────────────────────────────── */
 
 export type DocumentPresentation = {
-  readonly kind: "directory" | "markdown" | "code" | "text" | "image" | "pdf" | "video" | "audio" | "web" | "unavailable";
+  readonly kind: "directory" | "markdown" | "code" | "text" | "image" | "pdf" | "docx" | "xlsx" | "video" | "audio" | "web" | "unavailable";
   readonly editable: boolean;
   readonly sourceMode: boolean;
 };
@@ -87,6 +87,7 @@ export type DocumentPreview = {
     | { readonly kind: "text"; readonly text: string; readonly truncated: boolean; readonly editable: boolean; readonly language?: string; readonly encoding?: string }
     | { readonly kind: "directory"; readonly relativePath: string; readonly entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: "file" | "directory" | "other" }[]; readonly truncated: boolean }
     | { readonly kind: "media"; readonly mediaKind: "image" | "pdf" | "video" | "audio"; readonly mimeType: string; readonly url: string; readonly alt?: string; readonly caption?: string; readonly poster?: string; readonly duration?: string; readonly transcript?: string }
+    | { readonly kind: "office"; readonly officeKind: "docx" | "xlsx"; readonly mimeType: string; readonly url: string }
     | { readonly kind: "pages"; readonly pages: readonly string[] }
     | { readonly kind: "web"; readonly url: string; readonly site?: string; readonly body?: string }
     | { readonly kind: "unavailable"; readonly message: string };

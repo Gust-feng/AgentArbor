@@ -20,6 +20,8 @@ describe('document projection', () => {
   test('preserves backend media and document kinds', () => {
     expect(classifyReferencePreview(previewWithContent({ kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image' }, presentation('image')))).toBe('image')
     expect(classifyReferencePreview(previewWithContent({ kind: 'pages', pages: ['page'] }, presentation('pdf')))).toBe('pdf')
+    expect(classifyReferencePreview(previewWithContent({ kind: 'office', officeKind: 'docx', mimeType: 'application/docx', url: '/document' }, presentation('docx')))).toBe('docx')
+    expect(classifyReferencePreview(previewWithContent({ kind: 'office', officeKind: 'xlsx', mimeType: 'application/xlsx', url: '/workbook' }, presentation('xlsx')))).toBe('xlsx')
     expect(classifyReferencePreview(previewWithContent({ kind: 'web', url: 'https://example.com' }, presentation('web')))).toBe('web')
   })
 })

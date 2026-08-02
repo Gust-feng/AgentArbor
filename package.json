@@ -68,6 +68,7 @@
     "@tiptap/starter-kit": "^3.29.1",
     "chardet": "^2.2.0",
     "diff": "9.0.0",
+    "docx-preview": "0.4.0",
     "electron-updater": "^6.6.2",
     "iconv-lite": "^0.7.3",
     "js-tiktoken": "^1.0.21",

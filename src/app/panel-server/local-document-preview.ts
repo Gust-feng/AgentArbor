@@ -23,6 +23,7 @@ import {
   joinRelativePath,
   mimeTypeForPath,
   mediaKindForMimeType,
+  officeKindForPath,
   isKnownBinaryPath,
   listDirectory,
   readFileText,
@@ -101,16 +102,24 @@ export async function buildLocalDocumentPreview(
   // hint; ordinary local references continue to classify their physical path.
   const typePath = options?.contentTypeHintPath ?? source;
   const mimeType = mimeTypeForPath(typePath);
+  const contentUrl = options?.contentBaseUrl ?? `/api/spaces/references/${encodeURIComponent(meta.itemId)}/content`;
+  const url = `${contentUrl}${normalizedRelative.length === 0 ? "" : `?path=${encodeURIComponent(normalizedRelative)}`}`;
   const mediaKind = mediaKindForMimeType(mimeType);
   if (mediaKind !== undefined) {
-    const contentUrl = options?.contentBaseUrl ?? `/api/spaces/references/${encodeURIComponent(meta.itemId)}/content`;
     return {
       ...basePreview(meta, source, "ready", {
         kind: "media",
         mediaKind,
         mimeType,
-        url: `${contentUrl}${normalizedRelative.length === 0 ? "" : `?path=${encodeURIComponent(normalizedRelative)}`}`,
+        url,
       }),
+      ...metadata,
+    };
+  }
+  const officeKind = officeKindForPath(typePath);
+  if (officeKind !== undefined) {
+    return {
+      ...basePreview(meta, source, "ready", { kind: "office", officeKind, mimeType, url }),
       ...metadata,
     };
   }

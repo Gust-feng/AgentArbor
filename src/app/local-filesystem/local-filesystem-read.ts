@@ -28,6 +28,8 @@ export function mimeTypeForPath(value: string): string {
     case ".css": return "text/css; charset=utf-8";
     case ".html": return "text/html; charset=utf-8";
     case ".pdf": return "application/pdf";
+    case ".docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case ".xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     case ".png": return "image/png";
     case ".jpg":
     case ".jpeg": return "image/jpeg";
@@ -50,6 +52,15 @@ export function mediaKindForMimeType(mimeType: string): "image" | "pdf" | "video
   if (mimeType.startsWith("video/")) return "video";
   if (mimeType.startsWith("audio/")) return "audio";
   return undefined;
+}
+
+/** 根据文件路径判断是否为工作台支持的现代 Office 文档。 */
+export function officeKindForPath(value: string): "docx" | "xlsx" | undefined {
+  switch (path.extname(value).toLowerCase()) {
+    case ".docx": return "docx";
+    case ".xlsx": return "xlsx";
+    default: return undefined;
+  }
 }
 
 /** 根据文件路径推断代码语言。 */
@@ -90,7 +101,7 @@ export function isKnownBinaryPath(value: string): boolean {
   return [
     ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".jar",
     ".exe", ".dll", ".so", ".dylib", ".bin", ".iso",
-    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".doc", ".xls", ".ppt", ".pptx",
     ".sqlite", ".db", ".woff", ".woff2", ".ttf", ".otf",
   ].includes(path.extname(value).toLowerCase());
 }

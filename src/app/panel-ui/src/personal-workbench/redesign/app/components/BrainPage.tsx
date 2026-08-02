@@ -15,6 +15,8 @@ import {
   Search,
   Music,
   Code2,
+  FileType2,
+  FileSpreadsheet,
   Sparkles,
   Tag,
   Lock,
@@ -30,6 +32,8 @@ import { useBrain, type ResolvedPage } from './brainStore'
 import { useThemes, type Theme } from './themesStore'
 import { ImageWithFallback } from './ImageWithFallback'
 import { ReferencePreview } from './ReferencePreview'
+import { getCachedReferencePreview } from './referencePreviewClient'
+import { prefetchOfficePreview } from './officePreviewRuntime'
 
 /**
  * 知识库 —— 顶层场所(见 docs/概念与设计.md §5)。
@@ -42,7 +46,7 @@ import { ReferencePreview } from './ReferencePreview'
  * 链接 / 反向链接(第二大脑的核心机制)才作为右栏透镜出现。
  */
 
-type Kind = 'all' | 'note' | 'file' | 'pdf' | 'web' | 'image' | 'video' | 'audio' | 'code'
+type Kind = 'all' | 'note' | 'file' | 'pdf' | 'docx' | 'xlsx' | 'web' | 'image' | 'video' | 'audio' | 'code'
 type KnowledgeView = 'browse' | 'stack'
 
 const KNOWLEDGE_VIEW_STORAGE_KEY = 'agentarbor:knowledge-view'
@@ -52,6 +56,8 @@ const FILTERS: { key: Kind; label: string }[] = [
   { key: 'note', label: '笔记' },
   { key: 'file', label: '文件' },
   { key: 'pdf', label: 'PDF' },
+  { key: 'docx', label: '文档' },
+  { key: 'xlsx', label: '表格' },
   { key: 'web', label: '网页' },
   { key: 'image', label: '图片' },
   { key: 'video', label: '视频' },
@@ -84,6 +90,10 @@ function pageIcon(p: ResolvedPage, size = 13) {
       return <Music size={size} style={{ color: '#b0885a' }} />
     case 'code':
       return <Code2 size={size} style={{ color: '#5f8a86' }} />
+    case 'docx':
+      return <FileType2 size={size} style={{ color: '#6686a2' }} />
+    case 'xlsx':
+      return <FileSpreadsheet size={size} style={{ color: '#6f8778' }} />
     default:
       return <FileText size={size} style={{ color: '#c07a55' }} />
   }
@@ -92,7 +102,7 @@ function pageIcon(p: ResolvedPage, size = 13) {
 const kindLabel = (p: ResolvedPage) =>
   p.kind === 'note'
     ? '笔记'
-    : { file: '文件', pdf: 'PDF', web: '网页', image: '图片', video: '视频', markdown: 'Markdown', audio: '音频', code: '代码' }[
+    : { file: '文件', pdf: 'PDF', docx: 'Word 文档', xlsx: 'Excel 表格', web: '网页', image: '图片', video: '视频', markdown: 'Markdown', audio: '音频', code: '代码' }[
         p.materialKind ?? 'pdf'
       ]
 
@@ -1740,7 +1750,10 @@ function Card({
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
+      onMouseEnter={() => {
+        setHovered(true)
+        prefetchPageOfficePreview(page)
+      }}
       onMouseLeave={() => {
         setHovered(false)
         setTagOpen(false)
@@ -1835,6 +1848,13 @@ function Card({
       </div>
     </div>
   )
+}
+
+function prefetchPageOfficePreview(page: ResolvedPage): void {
+  const target = page.documentTarget
+  if (target === undefined) return
+  const preview = getCachedReferencePreview(target.itemId, '', target.apiBase)
+  if (preview !== undefined) prefetchOfficePreview(preview)
 }
 
 function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) {

@@ -10,13 +10,13 @@ import {
   X,
 } from "lucide-react";
 import { compact } from "../text";
-import type { AgentMode, ComposerToolConfirmationPolicy } from "../app-config-projection";
-import type { ContextAttachment } from "../contracts/context";
-import type { ModelCapabilities } from "../contracts/config";
 import { modelCapabilitySummary } from "../model-capability-display";
-import type { ModelProviderIdentity } from "../model-provider-logos";
+import type { ComposerToolConfirmationPolicy } from "../app-config-projection";
+import type { ContextAttachment } from "../contracts/context";
 import type { ContextWindowUsage } from "../context-window-usage";
 import { DevelopmentDataNotice } from "./development-data-notice";
+import type { ChatInputProps, ChatModelOption, QueuedChatMessage } from "../contracts/composer";
+export type { ChatInputProps, ChatModelOption, QueuedChatMessage } from "../contracts/composer";
 
 type ComposerChipFeedback = "model" | "reasoning" | "access";
 
@@ -26,61 +26,6 @@ const MULTI_AGENT_EMPTY_HEADING = "Agent 集群";
 const MULTI_AGENT_EMPTY_HINT = "适合方向不明确、需要比较多个可能方案的任务。";
 const MULTI_AGENT_PLACEHOLDER = "输入需要比较或判断的目标...";
 
-export type ChatModelOption = {
-  readonly id: string;
-  readonly name: string;
-  readonly label: string;
-  readonly providerLabel: string;
-  readonly providerIdentity: ModelProviderIdentity;
-  readonly profileId: string;
-  readonly modelId: string;
-  readonly capabilities?: ModelCapabilities;
-  readonly iconSvg?: string;
-};
-
-export type QueuedChatMessage = {
-  readonly id: string;
-  readonly content: string;
-};
-
-type AttachmentInputProps = {
-  readonly attachments: readonly ContextAttachment[];
-  readonly selectedWorkspaceDirectory?: string;
-  readonly onSelectWorkspaceDirectory?: () => void;
-  readonly onSelectAttachment: () => void;
-  readonly onUploadAttachmentFiles?: (files: readonly File[]) => void | Promise<void>;
-  readonly onRemoveAttachment: (attachmentId: string) => void;
-  readonly contextBusy?: boolean;
-};
-
-export type ChatInputProps = AttachmentInputProps & {
-  readonly value: string;
-  readonly onChange: (value: string) => void;
-  readonly busy: boolean;
-  readonly allowInputWhileBusy?: boolean;
-  readonly models: readonly ChatModelOption[];
-  readonly selectedModelId: string;
-  readonly contextUsage?: ContextWindowUsage;
-  readonly reasoningEffort: "" | "low" | "medium" | "high";
-  readonly reasoningEffortEnabled: boolean;
-  readonly onReasoningEffortChange: (value: "" | "low" | "medium" | "high") => void;
-  readonly toolConfirmationPolicy: ComposerToolConfirmationPolicy;
-  readonly onToolConfirmationPolicyChange: (value: ComposerToolConfirmationPolicy) => void;
-  readonly onModelSelect: (modelId: string) => void | Promise<void>;
-  readonly onOpenSettings: () => void;
-  readonly onSubmit: () => void;
-  readonly onCancel?: () => void;
-  readonly cancelLabel?: string;
-  readonly autoFocus?: boolean;
-  readonly running?: boolean;
-  readonly agentMode?: AgentMode;
-  readonly placeholder?: string;
-  readonly variant?: "embedded" | "floating";
-  readonly queuedMessages?: readonly QueuedChatMessage[];
-  readonly onRemoveQueuedMessage?: (id: string) => void;
-  readonly onUpdateQueuedMessage?: (id: string, content: string) => void;
-  readonly closeSignal?: number;
-};
 
 export function ChatEmpty(props: ChatInputProps & {
   readonly error?: string;

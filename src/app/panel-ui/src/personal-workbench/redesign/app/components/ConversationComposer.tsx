@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, FileText, Send, X } from 'lucide-react'
-import type { ChatInputProps } from '../../../../components/chat-empty'
+import type { ChatInputProps } from '../../../../contracts/composer'
 import { ModelOptionPicker } from '../../../../components/model-option-picker'
 import { RADII, composerSurface } from './tokens'
 

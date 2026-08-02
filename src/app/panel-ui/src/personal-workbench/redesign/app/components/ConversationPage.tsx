@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
 import { Maximize2, X } from 'lucide-react'
-import type { ChatInputProps } from '../../../../components/chat-empty'
+import type { ChatInputProps } from '../../../../contracts/composer'
 import { ConversationComposer } from './ConversationComposer'
 import { ConversationScrollArea } from './ConversationScrollArea'
 import { GUTTER, HEADER_H } from './tokens'

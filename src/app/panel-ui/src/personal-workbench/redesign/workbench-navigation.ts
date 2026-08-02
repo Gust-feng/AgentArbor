@@ -1,0 +1,120 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CurrentRunProjection } from "../../app-run-projection";
+import type { ChatInputProps } from "../../contracts/composer";
+import type { Conversation } from "../../contracts/conversation";
+import type { PendingConfirmation } from "../../contracts/run";
+import type { View } from "./app/components/Sidebar";
+
+export type WorkbenchNavigationInput = {
+  readonly currentRun: Pick<CurrentRunProjection, "run">;
+  readonly pendingConfirmation?: PendingConfirmation | NonNullable<CurrentRunProjection["workView"]>["pendingConfirmation"];
+  readonly conversation?: Conversation;
+  readonly inputProps: ChatInputProps;
+  readonly onStartNewConversation: () => Promise<boolean>;
+};
+
+export type WorkbenchNavigation = {
+  readonly view: View;
+  readonly brainSelectedId: string | null;
+  readonly spaceTargetId: string | null;
+  readonly activeSpaceId: string | null;
+  readonly homeFocusRequest: number;
+  readonly homeInput: ChatInputProps;
+  readonly conversationInput: ChatInputProps;
+  readonly navigate: (target: View) => void;
+  readonly onBrainSelect: (id: string | null) => void;
+  readonly onActiveSpaceChange: (spaceId: string | null) => void;
+  readonly onOpenInSpace: (spaceId: string, id: string) => void;
+};
+
+/**
+ * Owns only workbench navigation and selection. Runtime state remains owned by
+ * the existing workbench controllers and is passed in as a narrow input.
+ */
+export function useWorkbenchNavigation(input: WorkbenchNavigationInput): WorkbenchNavigation {
+  const [view, setView] = useState<View>(() => initialView(input));
+  const [previousView, setPreviousView] = useState<View>("home");
+  const [brainSelectedId, setBrainSelectedId] = useState<string | null>(null);
+  const [spaceTargetId, setSpaceTargetId] = useState<string | null>(null);
+  const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
+  const [homeFocusRequest, setHomeFocusRequest] = useState(0);
+  const observedViewRef = useRef(view);
+
+  const hasAttention = requiresImmediateConversationView(input);
+  useEffect(() => {
+    if (hasAttention) setView("conv-active");
+  }, [hasAttention]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPreviousView(view);
+        setView("search");
+      }
+      if (event.key === "Escape" && view === "search") setView(previousView);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previousView, view]);
+
+  const navigate = (target: View): void => {
+    if (target === "search") setPreviousView(view);
+    // Only search navigation sets a target explicitly. Normal navigation must
+    // clear it, otherwise a later Space switch can reuse an id from another Space.
+    setSpaceTargetId(null);
+    if (target !== "brain") setBrainSelectedId(null);
+    setView(target);
+  };
+
+  const homeInput = useMemo<ChatInputProps>(() => ({
+    ...input.inputProps,
+    autoFocus: true,
+    placeholder: "想从哪里开始？",
+    onSubmit: () => {
+      if (input.inputProps.value.trim().length === 0) return;
+      void input.onStartNewConversation().then((started) => {
+        if (observedViewRef.current !== "home") return;
+        if (started) {
+          setView("conv-active");
+        } else {
+          setHomeFocusRequest((current) => current + 1);
+        }
+      });
+    },
+  }), [input.inputProps, input.onStartNewConversation]);
+
+  const conversationInput = useMemo<ChatInputProps>(() => ({
+    ...input.inputProps,
+    autoFocus: true,
+    placeholder: input.conversation === undefined ? "从一个想法开始" : "继续对话...",
+  }), [input.conversation, input.inputProps]);
+
+  return {
+    view,
+    brainSelectedId,
+    spaceTargetId,
+    activeSpaceId,
+    homeFocusRequest,
+    homeInput,
+    conversationInput,
+    navigate,
+    onBrainSelect: setBrainSelectedId,
+    onActiveSpaceChange: setActiveSpaceId,
+    onOpenInSpace: (spaceId, id) => {
+      setActiveSpaceId(spaceId);
+      setSpaceTargetId(id);
+      setView("space");
+    },
+  };
+}
+
+export function initialView(input: Pick<WorkbenchNavigationInput, "currentRun" | "pendingConfirmation">): View {
+  return requiresImmediateConversationView(input) ? "conv-active" : "home";
+}
+
+export function requiresImmediateConversationView(
+  input: Pick<WorkbenchNavigationInput, "currentRun" | "pendingConfirmation">,
+): boolean {
+  return input.pendingConfirmation !== undefined || input.currentRun.run?.status === "running";
+}

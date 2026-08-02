@@ -6,7 +6,7 @@ import type {
   VisibleAiMode,
 } from "./app-config-projection";
 import type { AppState } from "./app-state";
-import type { ChatModelOption } from "./components/chat-empty";
+import type { ChatModelOption } from "./contracts/composer";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";

@@ -1,6 +1,6 @@
 import React from "react";
 import { ChevronDown, Search } from "lucide-react";
-import type { ChatModelOption } from "./chat-empty";
+import type { ChatModelOption } from "../contracts/composer";
 import { modelCapabilitySummary } from "../model-capability-display";
 import "../styles/model-option-picker.css";
 

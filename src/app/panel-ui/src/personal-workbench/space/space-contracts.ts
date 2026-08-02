@@ -1,5 +1,5 @@
 /**
- * Redesign Space 只消费这些领域投影和动作契约。
+ * Workbench Space surface 只消费这些领域投影和动作契约。
  *
  * 文件树的事实仍由 SpaceFeature 提供；这里仅定义 Panel 需要的显示投影，
  * 不复制文件系统状态，也不区分另一套“旧空间”语义。

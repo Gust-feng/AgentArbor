@@ -1,2 +1,2 @@
-export { RedesignWorkbench as default } from "../agentarbor-workbench";
-export type { RedesignWorkbenchProps } from "../agentarbor-workbench";
+export { PersonalWorkbench as default } from "../agentarbor-workbench";
+export type { PersonalWorkbenchProps } from "../agentarbor-workbench";

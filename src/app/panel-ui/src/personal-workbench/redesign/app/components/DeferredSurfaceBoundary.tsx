@@ -12,7 +12,7 @@ interface DeferredSurfaceBoundaryState {
   readonly error?: Error
 }
 
-/** Keeps a failed deferred capability inside the Redesign surface that owns it. */
+/** Keeps a failed deferred capability inside the workbench surface that owns it. */
 export class DeferredSurfaceBoundary extends Component<DeferredSurfaceBoundaryProps, DeferredSurfaceBoundaryState> {
   override state: DeferredSurfaceBoundaryState = {}
 

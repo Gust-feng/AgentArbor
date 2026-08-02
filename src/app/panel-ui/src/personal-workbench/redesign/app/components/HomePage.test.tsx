@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import type { ChatInputProps } from '../../../../components/chat-empty'
+import type { ChatInputProps } from '../../../../contracts/composer'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { HomePage } from './HomePage'
 import { selectHomeAmbientCopy } from './home-ambient-copy'

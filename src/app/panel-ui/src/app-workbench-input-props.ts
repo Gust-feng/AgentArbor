@@ -1,5 +1,5 @@
 import type { AgentMode, ComposerToolConfirmationPolicy } from "./app-config-projection";
-import type { ChatInputProps, ChatModelOption } from "./components/chat-empty";
+import type { ChatInputProps, ChatModelOption } from "./contracts/composer";
 import type { ContextAttachment } from "./contracts/context";
 import type { ContextWindowUsage } from "./context-window-usage";
 

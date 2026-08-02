@@ -1,8 +1,8 @@
 import { AlertCircle, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
-import type { ChatInputProps } from "../../components/chat-empty";
+import type { ChatInputProps } from "../../contracts/composer";
 import { WorkbenchSettingsDialog, type WorkbenchSettingsDialogProps } from "../../components/workbench-settings-dialog";
 import { WorkbenchBootstrapLoading } from "../../components/workbench-bootstrap-loading";
 import type { AppUpdateInfo } from "../../contracts/app-update";
@@ -22,6 +22,7 @@ import { type View, Sidebar } from "./app/components/Sidebar";
 import { SpacePage } from "./app/components/SpacePage";
 import { TopBar } from "./app/components/TopBar";
 import { resolveById } from "./app/components/brainStore";
+import { useWorkbenchNavigation } from "./workbench-navigation";
 import { applyPrefs, loadPrefs } from "../../reading-preferences";
 import {
   initializePersonalKnowledge,
@@ -33,7 +34,7 @@ import {
   setPersonalKnowledgePersistenceEnabled,
 } from "./app/components/personalKnowledgeClient";
 
-export type RedesignWorkbenchProps = {
+export type PersonalWorkbenchProps = {
   readonly personalKnowledgePersistenceEnabled?: boolean;
   readonly bootstrapState: {
     readonly status: "loading" | "ready" | "retrying" | "error";
@@ -76,17 +77,31 @@ export type RedesignWorkbenchProps = {
 };
 
 /**
- * The visual composition root for the redesign. It deliberately holds only
+ * The visual composition root for the personal workbench. It deliberately holds only
  * navigation and selection: conversations, runs, confirmations, and Spaces
  * remain owned by their existing feature facades.
  */
-export function RedesignWorkbench(props: RedesignWorkbenchProps) {
-  const [view, setView] = useState<View>(() => initialView(props));
-  const [previousView, setPreviousView] = useState<View>("home");
-  const [brainSelectedId, setBrainSelectedId] = useState<string | null>(null);
-  const [spaceTargetId, setSpaceTargetId] = useState<string | null>(null);
-  const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
-  const [homeFocusRequest, setHomeFocusRequest] = useState(0);
+export function PersonalWorkbench(props: PersonalWorkbenchProps) {
+  const navigation = useWorkbenchNavigation({
+    currentRun: props.currentRun,
+    pendingConfirmation: props.pendingConfirmation,
+    conversation: props.conversation,
+    inputProps: props.inputProps,
+    onStartNewConversation: props.onStartNewConversation,
+  });
+  const {
+    view,
+    brainSelectedId,
+    spaceTargetId,
+    activeSpaceId,
+    homeFocusRequest,
+    homeInput,
+    conversationInput,
+    navigate,
+    onBrainSelect,
+    onActiveSpaceChange,
+    onOpenInSpace,
+  } = navigation;
   const observedViewRef = useRef(view);
   const knowledgeLoadState = useSyncExternalStore(
     subscribePersonalKnowledge,
@@ -100,7 +115,6 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   );
 
   const activeConversation = props.conversation;
-  const hasAttention = requiresImmediateConversationView(props);
   const surfaceTitle = view === "space"
     ? props.spaces?.find((space) => space.spaceId === activeSpaceId)?.title ?? "空间"
     : isConversationView(view)
@@ -114,9 +128,14 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   useEffect(() => {
     const spaces = props.spaces ?? [];
     const firstSpaceId = spaces[0]?.spaceId;
-    setActiveSpaceId((current) => current !== null && spaces.some((space) => space.spaceId === current)
-      ? current
-      : firstSpaceId ?? null);
+    const nextSpaceId = activeSpaceId !== null && spaces.some((space) => space.spaceId === activeSpaceId)
+      ? activeSpaceId
+      : firstSpaceId ?? null;
+    if (nextSpaceId !== activeSpaceId) onActiveSpaceChange(nextSpaceId);
+  }, [activeSpaceId, onActiveSpaceChange, props.spaces]);
+
+  useEffect(() => {
+    const firstSpaceId = props.spaces?.[0]?.spaceId;
     if (props.personalKnowledgePersistenceEnabled && props.spaceLoadState?.loading !== true) {
       void initializePersonalKnowledge(firstSpaceId).catch(() => undefined);
     }
@@ -139,57 +158,8 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   }, [knowledgeLoadState.status, props.personalKnowledgePersistenceEnabled, view]);
 
   useEffect(() => {
-    if (hasAttention) setView("conv-active");
-  }, [hasAttention]);
-
-  useEffect(() => {
     applyPrefs(loadPrefs());
   }, []);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setPreviousView(view);
-        setView("search");
-      }
-      if (event.key === "Escape" && view === "search") setView(previousView);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [previousView, view]);
-
-  const navigate = (target: View): void => {
-    if (target === "search") setPreviousView(view);
-    // Only search navigation sets a target explicitly. Normal navigation must
-    // clear it, otherwise a later Space switch can reuse an id from another Space.
-    setSpaceTargetId(null);
-    if (target !== "brain") setBrainSelectedId(null);
-    setView(target);
-  };
-
-  const homeInput = useMemo<ChatInputProps>(() => ({
-    ...props.inputProps,
-    autoFocus: true,
-    placeholder: "想从哪里开始？",
-    onSubmit: () => {
-      if (props.inputProps.value.trim().length === 0) return;
-      void props.onStartNewConversation().then((started) => {
-        if (observedViewRef.current !== "home") return;
-        if (started) {
-          setView("conv-active");
-        } else {
-          setHomeFocusRequest((current) => current + 1);
-        }
-      });
-    },
-  }), [props.inputProps, props.onStartNewConversation]);
-
-  const conversationInput = useMemo<ChatInputProps>(() => ({
-    ...props.inputProps,
-    autoFocus: true,
-    placeholder: activeConversation === undefined ? "从一个想法开始" : "继续对话...",
-  }), [activeConversation, props.inputProps]);
   return (
     <div
       className="aa-redesign-root flex h-screen min-h-0 w-full overflow-hidden"
@@ -221,7 +191,7 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
         onToggleConversationPinned={props.onToggleConversationPinned}
         onDeleteConversation={props.onDeleteConversation}
         onOpenSpace={props.onOpenSpace}
-        onActiveSpaceChange={setActiveSpaceId}
+        onActiveSpaceChange={onActiveSpaceChange}
         onCreateSpace={props.onCreateSpace}
         onRenameSpace={props.spaceActions?.rename === undefined
           ? undefined
@@ -238,7 +208,7 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
           onToggleSidebar={props.onToggleSidebar}
           surfaceTitle={surfaceTitle}
           brainFileTitle={brainSelectedId === null ? null : resolveById(brainSelectedId)?.title ?? null}
-          onBrainRoot={() => setBrainSelectedId(null)}
+          onBrainRoot={() => onBrainSelect(null)}
         />
 
         <main
@@ -260,13 +230,9 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
                     brainSelectedId,
                     spaceTargetId,
                     activeSpaceId,
-                    onBrainSelect: setBrainSelectedId,
+                    onBrainSelect,
                     navigate,
-                    onOpenInSpace: (spaceId, id) => {
-                      setActiveSpaceId(spaceId);
-                      setSpaceTargetId(id);
-                      setView("space");
-                    },
+                    onOpenInSpace,
                   })}
               </DeferredSurfaceBoundary>
             )}
@@ -323,7 +289,7 @@ function viewLabel(view: View): string {
 
 function renderView(input: {
   readonly view: View;
-  readonly props: RedesignWorkbenchProps;
+  readonly props: PersonalWorkbenchProps;
   readonly activeConversation?: Conversation;
   readonly homeInput: ChatInputProps;
   readonly homeFocusRequest: number;
@@ -384,7 +350,7 @@ function renderView(input: {
 const EMPTY_ID_SET: ReadonlySet<string> = new Set();
 
 function ConversationSurface(props: {
-  readonly props: RedesignWorkbenchProps;
+  readonly props: PersonalWorkbenchProps;
   readonly conversation?: Conversation;
   readonly input: ChatInputProps;
   readonly focus?: boolean;
@@ -509,7 +475,7 @@ function confirmationGuidanceInput(
   input: ChatInputProps,
   pending: ConfirmationProjection | undefined,
   confirmationBusy: boolean,
-  onDecision: RedesignWorkbenchProps["onDecision"],
+  onDecision: PersonalWorkbenchProps["onDecision"],
 ): ChatInputProps {
   if (pending === undefined || pending.resumeAvailability === "lost_after_restart") return input;
   return {
@@ -524,15 +490,11 @@ function confirmationGuidanceInput(
   };
 }
 
-function initialView(props: Pick<RedesignWorkbenchProps, "currentRun" | "pendingConfirmation">): View {
-  return requiresImmediateConversationView(props) ? "conv-active" : "home";
-}
-
-function requiresImmediateConversationView(props: Pick<RedesignWorkbenchProps, "currentRun" | "pendingConfirmation">): boolean {
-  return props.pendingConfirmation !== undefined
-    || props.currentRun.run?.status === "running";
-}
-
 function isFailedRun(status: string | undefined): boolean {
   return status === "failed" || status === "blocked" || status === "cancelled";
 }
+
+/** @deprecated Use PersonalWorkbench. Kept while the prototype import path is retired. */
+export const RedesignWorkbench = PersonalWorkbench;
+/** @deprecated Use PersonalWorkbenchProps. */
+export type RedesignWorkbenchProps = PersonalWorkbenchProps;

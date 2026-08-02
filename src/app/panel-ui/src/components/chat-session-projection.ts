@@ -1,7 +1,7 @@
 import { resolveModelIconSvgForModel } from "../model-icons";
 import { resolveModelProviderIdentity, type ModelProviderIdentity } from "../model-provider-logos";
 import type { ConversationTurn } from "../contracts/conversation";
-import type { ChatModelOption } from "./chat-empty";
+import type { ChatModelOption } from "../contracts/composer";
 
 export type AssistantModelBadge = {
   readonly modelName: string;

@@ -1,4 +1,4 @@
-import type { ChatModelOption } from "./components/chat-empty";
+import type { ChatModelOption } from "./contracts/composer";
 import { resolveModelIconSvgForModel } from "./model-icons";
 import { modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
 import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";

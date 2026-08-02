@@ -1,65 +1,75 @@
 import React from 'react'
-import { act, fireEvent, render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { ChatInputProps } from '../../../../components/chat-empty'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { HomePage } from './HomePage'
+import { selectHomeAmbientCopy } from './home-ambient-copy'
 
 afterEach(() => {
-  vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
-test('carries wheel input through a decelerating trail and lets reverse input take over', () => {
-  const animationFrames: FrameRequestCallback[] = []
-  vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
-    animationFrames.push(callback)
-    return animationFrames.length
-  }))
-  vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })))
-
-  const conversations: ConversationSummary[] = Array.from({ length: 6 }, (_, index) => ({
-    conversationId: `conversation-${index}`,
-    title: `会话 ${index}`,
-    updatedAt: new Date(2026, 6, index + 1).toISOString(),
-  }))
-  const { container } = render(
+test('presents one stable ambient line with the quiet task entry', () => {
+  const now = new Date(2026, 7, 3, 1, 30)
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
+  const onSelectWorkspaceDirectory = vi.fn()
+  render(
     <HomePage
-      onNavigate={() => undefined}
+      onNavigate={vi.fn()}
       onOpenConversation={() => true}
+      conversations={[]}
+      input={inputProps({
+        selectedWorkspaceDirectory: 'Z:\\AgentArbor',
+        onSelectWorkspaceDirectory,
+      })}
+      focusRequest={0}
+    />,
+  )
+
+  expect(screen.getByRole('region', { name: '开始任务' })).toBeTruthy()
+  expect(screen.getByText(selectHomeAmbientCopy(now))).toBeTruthy()
+  expect(screen.getByPlaceholderText('想从哪里开始？')).toBeTruthy()
+  expect(screen.getByRole('button', { name: '切换工作区：Z:\\AgentArbor' }).textContent).toContain('AgentArbor')
+  expect(screen.queryByRole('heading')).toBeNull()
+  expect(screen.queryByLabelText('AgentArbor Agent')).toBeNull()
+})
+
+test('does not repeat conversation history on the task entry surface', () => {
+  const conversations: ConversationSummary[] = [
+    {
+      conversationId: 'running',
+      title: '重构工具边界',
+      currentAction: '正在运行相关测试',
+      activeRunId: 'run-1',
+      updatedAt: '2026-07-30T12:00:00.000Z',
+    },
+    {
+      conversationId: 'attention',
+      title: '更新模型配置',
+      nextStep: '确认配置写入',
+      requiresUserAction: true,
+      updatedAt: '2026-07-29T12:00:00.000Z',
+    },
+  ]
+
+  render(
+    <HomePage
+      onNavigate={vi.fn()}
+      onOpenConversation={vi.fn()}
       conversations={conversations}
       input={inputProps()}
       focusRequest={0}
     />,
   )
-  const trail = container.querySelector<HTMLElement>('[data-home-activity-trail]')!
-  Object.defineProperties(trail, {
-    clientWidth: { configurable: true, value: 720 },
-    scrollWidth: { configurable: true, value: 1_700 },
-    scrollLeft: { configurable: true, writable: true, value: 0 },
-  })
-  animationFrames.length = 0
 
-  fireEvent.wheel(trail, { deltaY: 100, deltaMode: 0 })
-  expect(trail.scrollLeft).toBe(0)
-  expect(animationFrames).toHaveLength(1)
-
-  act(() => animationFrames.shift()!(0))
-  const firstDistance = trail.scrollLeft
-  act(() => animationFrames.shift()!(1000 / 60))
-  const secondDistance = trail.scrollLeft - firstDistance
-
-  expect(firstDistance).toBeGreaterThan(0)
-  expect(secondDistance).toBeGreaterThan(0)
-  expect(secondDistance).toBeLessThan(firstDistance)
-
-  fireEvent.wheel(trail, { deltaY: -100, deltaMode: 0 })
-  const positionBeforeReverseFrame = trail.scrollLeft
-  act(() => animationFrames.shift()!(2000 / 60))
-  expect(trail.scrollLeft).toBeLessThan(positionBeforeReverseFrame)
+  expect(screen.queryByText('继续工作')).toBeNull()
+  expect(screen.queryByText('重构工具边界')).toBeNull()
+  expect(screen.queryByText('更新模型配置')).toBeNull()
 })
 
-function inputProps(): ChatInputProps {
+function inputProps(overrides: Partial<ChatInputProps> = {}): ChatInputProps {
   return {
     value: '',
     onChange: vi.fn(),
@@ -74,8 +84,10 @@ function inputProps(): ChatInputProps {
     onModelSelect: vi.fn(),
     onOpenSettings: vi.fn(),
     onSubmit: vi.fn(),
+    placeholder: '想从哪里开始？',
     attachments: [],
     onSelectAttachment: vi.fn(),
     onRemoveAttachment: vi.fn(),
+    ...overrides,
   }
 }

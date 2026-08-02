@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Home,
   Settings2,
   Layers,
   Library,
-  MoreHorizontal,
   Pencil,
   Trash2,
   Pin,
@@ -13,10 +12,14 @@ import {
   Plus,
   AlertCircle,
   RotateCcw,
-  LoaderCircle,
 } from 'lucide-react'
 import { SidebarAnimation } from './SidebarAnimation'
-import { SidebarInlineRenameField } from './SidebarInlineRenameField'
+import {
+  SidebarConversationScrollArea,
+  SidebarListRow,
+  SidebarNavRow,
+  SidebarSectionLabel,
+} from './SidebarRows'
 import { SpaceManagerDialog } from './SpaceManagerDialog'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
@@ -54,318 +57,6 @@ const SIDEBAR_COLLAPSED_W = 0
 
 const CONVERSATION_DOT_PALETTE = ['#6865a7', '#6f9279', '#c18a42', '#6f84a5', '#a66f66'] as const
 const SPACE_DOT_FALLBACK = '#a8c4b4'
-
-// ── NavRow ──────────────────────────────────────────────────────────────────
-// icon:  always rendered in a fixed-width 20px slot → icon NEVER moves
-// label: opacity/translateX transition → no layout shift
-// meta:  right-side content (chevron, time, …) — only when labelsVisible
-interface NavRowProps {
-  active:        boolean
-  onClick:       () => void
-  labelsVisible: boolean
-  collapsed:     boolean
-  tooltip?:      string
-  icon:          React.ReactNode
-  label:         string
-  meta?:         React.ReactNode
-}
-
-function NavRow({ active, onClick, labelsVisible, collapsed, tooltip, icon, label, meta }: NavRowProps) {
-  const [hovered, setHovered] = useState(false)
-
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      title={!labelsVisible ? tooltip : undefined}
-      className="relative w-full text-sm"
-      style={{
-        // The icon is ABSOLUTELY positioned (see below), so the button itself
-        // has no internal layout that the width animation can perturb. Nothing
-        // here transitions geometry → the icon can never drift while the rail
-        // collapses. Only the label (also absolute) fades away.
-        display: 'block',
-        height: 32,
-        transition: 'color 120ms ease',
-        color:   active   ? 'var(--aa-accent)'
-               : hovered  ? 'var(--aa-text-1)'
-               :            'var(--aa-text-2)',
-      }}
-    >
-      {/* Row background — its own layer so it can be a full-width row when
-          expanded and contract into a compact pill that HUGS the icon when
-          collapsed (instead of a full-width block clipped by the rail edge). */}
-      <span
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          top: 0,
-          bottom: 0,
-          left: 0,
-          width: collapsed ? 40 : '100%',
-          borderRadius: 8,
-          background: active   ? 'var(--aa-accent-bg)'
-                    : hovered  ? 'rgba(45,40,34,0.04)'
-                    :            'transparent',
-          transition: 'background 120ms ease, width 240ms cubic-bezier(0.4,0,0.2,1)',
-        }}
-      />
-
-      {/* Active bar — always left-edge, never moves */}
-      {active && (
-        <span aria-hidden="true" style={{
-          position: 'absolute',
-          left: 3,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          width: 3,
-          height: 14,
-          borderRadius: 2,
-          background: 'var(--aa-accent)',
-          zIndex: 1,
-        }}/>
-      )}
-
-      {/* Icon — absolutely pinned at a fixed left offset. Its centre sits at
-          x=20 from the button edge (= 28px from the rail edge, the shared axis
-          with the brand mark and toggle). Fully decoupled from the width
-          animation, so it is pixel-locked in both states and while animating. */}
-      <span style={{
-        position: 'absolute',
-        left: 10,
-        top: '50%',
-        transform: 'translateY(-50%)',
-        width: 20,
-        height: 20,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        {icon}
-      </span>
-
-      {/* Label + meta — absolutely positioned to the right of the icon slot so
-          it never participates in layout. Fades / clipped as the rail narrows. */}
-      <span style={{
-        position: 'absolute',
-        left: 38,
-        right: 10,
-        top: '50%',
-        transform: labelsVisible ? 'translateY(-50%)' : 'translateY(-50%) translateX(-6px)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        opacity:   labelsVisible ? 1 : 0,
-        transition: 'opacity 160ms ease, transform 160ms ease',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
-        minWidth: 0,
-        pointerEvents: labelsVisible ? 'auto' : 'none',
-      }}>
-        <span className="flex-1 text-left truncate">{label}</span>
-        {meta && (
-          <span style={{ flexShrink: 0 }}>{meta}</span>
-        )}
-      </span>
-    </button>
-  )
-}
-
-// ── ListRow ──────────────────────────────────────────────────────────────────
-// 空间 / 最近对话的行:小圆点 + 标签 + 右侧信息,悬停浮现「⋯」菜单。
-// 用 div(非 button)承载,好在内部嵌套菜单按钮而不违反 HTML 嵌套规则。
-interface ListRowProps {
-  active: boolean
-  onClick: () => void
-  dot: string
-  label: string
-  meta?: ReactNode
-  editing: boolean
-  editSelectAll?: boolean
-  onRename: (v: string) => void
-  onCancelRename: () => void
-  actions: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }[]
-  pending?: boolean
-}
-
-function ListRow({ active, onClick, dot, label, meta, editing, editSelectAll, onRename, onCancelRename, actions, pending = false }: ListRowProps) {
-  const [hovered, setHovered] = useState(false)
-  return (
-    <div
-      role="button"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onClick={() => { if (!editing && !pending) onClick() }}
-      className="group/row relative flex items-center gap-2 rounded-lg cursor-pointer text-sm"
-      style={{
-        height: 32,
-        paddingLeft: 12,
-        paddingRight: 8,
-        color: active ? 'var(--aa-accent)' : 'var(--aa-text-2)',
-        background: active ? 'var(--aa-accent-bg)' : hovered ? 'rgba(45,40,34,0.04)' : 'transparent',
-        transition: 'background 120ms ease, color 120ms ease',
-      }}
-    >
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flexShrink: 0 }}/>
-      {editing ? (
-        <SidebarInlineRenameField value={label} onCommit={onRename} onCancel={onCancelRename} selectAll={editSelectAll}/>
-      ) : (
-        <span className="flex-1 text-left truncate">{label}</span>
-      )}
-      {!editing && pending && (
-        <LoaderCircle aria-label="处理中" size={13} className="animate-spin shrink-0" />
-      )}
-      {!editing && !pending && (
-        <>
-          {meta && (
-            <span style={{ flexShrink: 0, opacity: hovered && actions.length > 0 ? 0 : 1 }}>
-              {meta}
-            </span>
-          )}
-          {actions.length > 0 && (
-            <RowMenu actions={actions} visible={hovered}/>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-// 行尾「⋯」菜单:点开一个小下拉,点外部关闭。
-function RowMenu({
-  actions,
-  visible,
-}: {
-  actions: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }[]
-  visible: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const shown = visible || open
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
-  return (
-    <div
-      ref={ref}
-      className="absolute right-2 shrink-0"
-      style={{ opacity: shown ? 1 : 0, pointerEvents: shown ? 'auto' : 'none' }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label="更多操作"
-        aria-hidden={!shown}
-        tabIndex={shown ? 0 : -1}
-        className="flex items-center justify-center rounded transition-colors hover:bg-black/10"
-        style={{ width: 20, height: 20, color: 'var(--aa-text-3)' }}
-      >
-        <MoreHorizontal size={14}/>
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg"
-          style={{
-            minWidth: 128,
-            background: 'var(--aa-surface)',
-            border: '1px solid var(--aa-border)',
-            boxShadow: '0 6px 20px rgba(45,40,34,0.14)',
-          }}
-        >
-          {actions.map((a) => (
-            <button
-              key={a.label}
-              onClick={() => { setOpen(false); a.onClick() }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors hover:bg-black/5"
-              style={{ color: a.danger ? '#b3543f' : 'var(--aa-text-1)' }}
-            >
-              {a.icon}
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── SectionLabel ─────────────────────────────────────────────────────────────
-function SectionLabel({ label, labelsVisible, action }: { label: string; labelsVisible: boolean; action?: ReactNode }) {
-  return (
-    <div
-      className="flex items-center justify-between pl-3 pr-2 pt-4 pb-1"
-      style={{
-        opacity: labelsVisible ? 1 : 0,
-        transition: 'opacity 140ms ease',
-        // Keep height so nav layout stays stable; only opacity changes
-        pointerEvents: labelsVisible ? 'auto' : 'none',
-      }}
-    >
-      <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: 'var(--aa-text-3)' }}>
-        {label}
-      </span>
-      {action}
-    </div>
-  )
-}
-
-const CONVERSATION_FADE_TOP = 20
-const CONVERSATION_FADE_BOTTOM = 24
-
-function ConversationScrollArea({ maxHeight, children }: { maxHeight: number; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [fadeTop, setFadeTop] = useState(0)
-  const [fadeBottom, setFadeBottom] = useState(0)
-
-  const measureMask = useCallback(() => {
-    const element = ref.current
-    if (element === null) return
-    const distanceFromTop = element.scrollTop
-    const distanceFromBottom = element.scrollHeight - element.clientHeight - element.scrollTop
-    const easeOut = (value: number): number => 1 - Math.pow(1 - value, 2)
-    setFadeTop((previous) => {
-      const next = Math.round(CONVERSATION_FADE_TOP * easeOut(Math.min(distanceFromTop / CONVERSATION_FADE_TOP, 1)))
-      return next === previous ? previous : next
-    })
-    setFadeBottom((previous) => {
-      const next = Math.round(CONVERSATION_FADE_BOTTOM * easeOut(
-        Math.min(Math.max(distanceFromBottom, 0) / CONVERSATION_FADE_BOTTOM, 1),
-      ))
-      return next === previous ? previous : next
-    })
-  }, [])
-
-  const rafRef = useRef<number | null>(null)
-  const handleScroll = useCallback(() => {
-    if (rafRef.current !== null) return
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null
-      measureMask()
-    })
-  }, [measureMask])
-  useEffect(() => () => {
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-  }, [])
-
-  useLayoutEffect(measureMask, [children, measureMask])
-
-  const mask = `linear-gradient(to bottom, transparent 0px, #000 ${fadeTop}px, #000 calc(100% - ${fadeBottom}px), transparent 100%)`
-  return (
-    <div
-      ref={ref}
-      onScroll={handleScroll}
-      className="aa-conversation-scroll space-y-0.5 overflow-y-auto"
-      style={{ maxHeight, WebkitMaskImage: mask, maskImage: mask }}
-      data-conversation-scroll
-    >
-      {children}
-    </div>
-  )
-}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 export function Sidebar({
@@ -509,7 +200,7 @@ export function Sidebar({
       >
         {/* Home */}
         <div className="space-y-0.5">
-          <NavRow
+          <SidebarNavRow
             active={view === 'home'}
             onClick={() => onNavigate('home')}
             labelsVisible={labelsVisible}
@@ -522,7 +213,7 @@ export function Sidebar({
 
         {/* Spaces */}
         <div className="group/spaces">
-        <SectionLabel
+        <SidebarSectionLabel
           label="空间"
           labelsVisible={labelsVisible}
           action={
@@ -540,7 +231,7 @@ export function Sidebar({
         <div className="space-y-0.5">
           {spaceLoadState?.loading === true && projectedSpaces.length === 0 && <SpaceLoadingRows />}
           {projectedSpaces.map((s) => (
-            <ListRow
+            <SidebarListRow
               key={s.id}
               active={view === 'space' && activeSpaceId === s.id}
               onClick={() => selectSpace(s.id)}
@@ -579,13 +270,13 @@ export function Sidebar({
 
         {/* Recent conversations */}
         <div className="group/convs">
-        <SectionLabel
+        <SidebarSectionLabel
           label="最近对话"
           labelsVisible={labelsVisible}
         />
-        <ConversationScrollArea maxHeight={170}>
+        <SidebarConversationScrollArea maxHeight={170}>
           {orderedConversations.map((conversation, index) => (
-            <ListRow
+            <SidebarListRow
               key={conversation.conversationId}
               active={view === 'conv-active' && activeConversationId === conversation.conversationId}
               onClick={() => void openConversation(conversation.conversationId)}
@@ -621,12 +312,12 @@ export function Sidebar({
               pending={openingConversationId === conversation.conversationId || pendingConversationIds.has(conversation.conversationId)}
             />
           ))}
-        </ConversationScrollArea>
+        </SidebarConversationScrollArea>
         </div>
 
         {/* 知识库 */}
         <div className="space-y-0.5 mt-4">
-          <NavRow
+          <SidebarNavRow
             active={view === 'brain'}
             onClick={() => onNavigate('brain')}
             labelsVisible={labelsVisible}

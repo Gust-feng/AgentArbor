@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
-import type { ChatInputProps } from "../components/chat-empty";
+import type { ChatInputProps } from "../contracts/composer";
 import { PersonalWorkbench, type PersonalWorkbenchProps } from "./personal-workbench";
 import { BrainPage } from "./workbench/app/components/BrainPage";
 import {

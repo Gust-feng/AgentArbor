@@ -3,7 +3,7 @@ import { Cpu, Globe, Link2, MessageSquareText, Plus, RotateCcw, Save, SlidersHor
 import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { modelOptionsFromConfig } from "../model-options";
-import type { ChatModelOption } from "./chat-empty";
+import type { ChatModelOption } from "../contracts/composer";
 import { ModelOptionPicker } from "./model-option-picker";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import "./capability-settings.css";

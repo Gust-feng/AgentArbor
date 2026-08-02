@@ -36,7 +36,7 @@ import {
   transcriptNodesCacheForConversation,
   transcriptToolResultsCacheForConversation,
 } from "../../../../panel-ui-transcript-store";
-import type { ChatModelOption } from "../../../../components/chat-empty";
+import type { ChatModelOption } from "../../../../contracts/composer";
 import { RichText, StreamingRichText } from "../../../../components/rich-text";
 import { CopyActionButton } from "../../../../components/copy-action-button";
 import { ActivityEvidencePanel } from "./ActivityEvidence";

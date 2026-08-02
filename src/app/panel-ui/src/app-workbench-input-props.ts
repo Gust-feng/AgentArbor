@@ -43,7 +43,7 @@ export type WorkbenchInputPropsViewModel = {
   readonly inputProps: ChatInputProps;
 };
 
-export function buildWorkbenchInputProps(
+export function workbenchInputPropsFrom(
   options: WorkbenchInputPropsOptions,
 ): WorkbenchInputPropsViewModel {
   const activeInputAgentMode: AgentMode = options.agentClusterActive ? "deep" : "normal";

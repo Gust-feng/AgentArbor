@@ -13,7 +13,7 @@ test("settings commands remain outside the personal workbench view", async () =>
     readPanelUiSource(path.join("components", "workbench-settings-dialog.tsx")),
   ]);
 
-  assert.match(app, /buildWorkbenchSettingsDialogProps\(\{/u);
+  assert.match(app, /workbenchSettingsDialogPropsFrom\(\{/u);
   assert.match(app, /settingsDialogProps=\{settingsDialogProps\}/u);
   assert.match(runtime, /createAppSettingsController\(\{/u);
   assert.match(settingsController, /saveModelProviderConfig/u);

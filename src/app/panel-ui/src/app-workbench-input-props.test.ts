@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildWorkbenchInputProps, type WorkbenchInputPropsOptions } from "./app-workbench-input-props";
+import { workbenchInputPropsFrom, type WorkbenchInputPropsOptions } from "./app-workbench-input-props";
 
 describe("ordinary workbench input", () => {
   it("preserves queued messages and follows the shell running state while cancellation is pending", () => {
     let cancelCalls = 0;
-    const view = buildWorkbenchInputProps(options({
+    const view = workbenchInputPropsFrom(options({
       modelResponding: false,
       cancelRun: () => { cancelCalls += 1; },
     }));
@@ -18,7 +18,7 @@ describe("ordinary workbench input", () => {
     let queued = "";
     let goal = "next instruction";
     let startCalls = 0;
-    const view = buildWorkbenchInputProps(options({
+    const view = workbenchInputPropsFrom(options({
       busy: true,
       goal,
       enqueueMessage: (content) => { queued = content; },
@@ -35,7 +35,7 @@ describe("ordinary workbench input", () => {
 
   it("starts a task when no response is active", () => {
     let startCalls = 0;
-    const view = buildWorkbenchInputProps(options({
+    const view = workbenchInputPropsFrom(options({
       modelResponding: false,
       startTask: () => { startCalls += 1; },
     }));

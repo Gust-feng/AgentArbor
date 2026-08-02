@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { FolderOpen } from 'lucide-react'
-import type { ChatInputProps } from '../../../../components/chat-empty'
+import type { ChatInputProps } from '../../../../contracts/composer'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { type View } from './Sidebar'
 import { ConversationComposer } from './ConversationComposer'

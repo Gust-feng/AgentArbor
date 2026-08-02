@@ -5,9 +5,9 @@ import { persistSidebarCollapsedPreference, useAppShellState } from "./app-shell
 import { useAppQueuedMessages } from "./app-queued-message-state";
 import { useAppWorkbenchConfigState } from "./app-workbench-config-state";
 import { useAppWorkbenchRuntime } from "./app-workbench-runtime";
-import { buildWorkbenchSettingsDialogProps } from "./app-settings-dialog-props";
+import { workbenchSettingsDialogPropsFrom } from "./app-settings-dialog-props";
 import { useAppWorkbenchTaskState } from "./app-workbench-task-state";
-import { buildWorkbenchInputProps } from "./app-workbench-input-props";
+import { workbenchInputPropsFrom } from "./app-workbench-input-props";
 import { createInitialAppState } from "./app-state";
 import { useSpaceProjection } from "./app-space-state";
 
@@ -168,7 +168,7 @@ export function App(): React.ReactElement {
     setGoal,
     startTask,
   });
-  const { inputProps: baseInputProps } = buildWorkbenchInputProps({
+  const { inputProps: baseInputProps } = workbenchInputPropsFrom({
     agentClusterActive,
     goal,
     setGoal,
@@ -209,7 +209,7 @@ export function App(): React.ReactElement {
     onUpdateQueuedMessage: updateQueuedMessage,
   };
 
-  const settingsDialogProps = buildWorkbenchSettingsDialogProps({
+  const settingsDialogProps = workbenchSettingsDialogPropsFrom({
     settingsOpen,
     closeSettings,
     settingsGroup,

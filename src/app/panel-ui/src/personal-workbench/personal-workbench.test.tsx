@@ -1052,14 +1052,11 @@ test("keeps a recovered running Ordinary run visible after startup", async () =>
   expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
 });
 
-test("resets a failed conversation and focuses the single home entry", async () => {
-  const user = userEvent.setup();
+test("keeps a failed conversation outside the complete Home empty state", async () => {
   render(<FailedConversationWorkbench />);
 
-  await user.click(screen.getByRole("button", { name: "新对话" }));
-
   const composer = await screen.findByPlaceholderText("想从哪里开始？");
-  expect(document.activeElement).toBe(composer);
+  expect(composer).toBeTruthy();
   expect(screen.getByRole("main", { name: "个人首页" })).toBeTruthy();
   expect(screen.queryByText("失败的对话")).toBeNull();
 });
@@ -1100,19 +1097,18 @@ test("starts from a clean home after a completed conversation was loaded", async
   expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
 });
 
-test("runs the new-conversation command from a persistent primary sidebar action", async () => {
+test("uses Home as the only non-destructive empty-state entry in the primary sidebar", async () => {
   const user = userEvent.setup();
-  const onNewConversation = vi.fn();
-  renderWorkbench({ onNewConversation });
+  renderWorkbench({
+    inputProps: inputProps({ value: "尚未提交的想法" }),
+  });
 
-  const newConversation = screen.getByRole("button", { name: "新对话" });
-  expect(newConversation).toBeTruthy();
-  expect(newConversation.closest("[class*='group/convs']")).toBeNull();
+  expect(screen.queryByRole("button", { name: "新对话" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "知识库" }));
+  await user.click(screen.getByRole("button", { name: "首页" }));
 
-  await user.click(newConversation);
-
-  expect(onNewConversation).toHaveBeenCalledOnce();
-  expect(await screen.findByPlaceholderText("想从哪里开始？")).toBeTruthy();
+  expect(screen.getByRole("main", { name: "个人首页" })).toBeTruthy();
+  expect((screen.getByPlaceholderText("想从哪里开始？") as HTMLTextAreaElement).value).toBe("尚未提交的想法");
 });
 
 test("renders and opens backend conversation projections in pinned and updated order", async () => {
@@ -1196,7 +1192,6 @@ test("exposes model, context usage, and reasoning controls in the redesign compo
     }),
   });
 
-  await user.click(screen.getByRole("button", { name: "新对话" }));
   expect(await screen.findByRole("progressbar", { name: "上下文已用 85%" })).toBeTruthy();
   await user.click(screen.getByRole("button", { name: "选择模型" }));
   await user.click(screen.getByRole("option", { name: /Model 2/u }));
@@ -1251,13 +1246,10 @@ function ControlledActiveConversationWorkbench(props: {
 }
 
 function FailedConversationWorkbench() {
-  const [showFailedConversation, setShowFailedConversation] = useState(true);
   const now = new Date().toISOString();
   return <PersonalWorkbench {...baseProps({
-    conversation: showFailedConversation
-      ? { conversationId: "conversation-failed", title: "失败的对话", turns: [] }
-      : undefined,
-    currentRun: showFailedConversation ? {
+    conversation: { conversationId: "conversation-failed", title: "失败的对话", turns: [] },
+    currentRun: {
       events: [],
       transcriptNodes: [],
       run: {
@@ -1272,8 +1264,7 @@ function FailedConversationWorkbench() {
         requiresUserAction: false,
         eventCursor: { lastSequence: 0, eventCount: 0 },
       },
-    } : { events: [], transcriptNodes: [] },
-    onNewConversation: () => setShowFailedConversation(false),
+    },
   })} />;
 }
 
@@ -1295,7 +1286,6 @@ function baseProps(overrides: Partial<PersonalWorkbenchProps> = {}): PersonalWor
     developerModeEnabled: false,
     confirmationBusy: false,
     onDecision: vi.fn(),
-    onNewConversation: vi.fn(),
     onStartNewConversation: vi.fn(async () => true),
     onOpenConversation: vi.fn(),
     onRenameConversation: vi.fn(),

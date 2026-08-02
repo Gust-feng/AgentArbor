@@ -263,7 +263,6 @@ export function App(): React.ReactElement {
       pendingConfirmation={pendingConfirmation}
       confirmationBusy={confirmationBusy}
       onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
-      onNewConversation={runActions.resetChat}
       onStartNewConversation={runActions.startNewConversation}
       onOpenConversation={openNormalConversation}
       pendingConversationIds={pendingConversationIds}

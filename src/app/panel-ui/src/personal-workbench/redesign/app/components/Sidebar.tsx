@@ -26,7 +26,6 @@ export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | '
 interface SidebarProps {
   view: View
   onNavigate: (v: View) => void
-  onNewConversation: () => void
   onOpenSettings: () => void
   collapsed: boolean
   conversations: readonly ConversationSummary[]
@@ -418,7 +417,6 @@ function ConversationScrollArea({ maxHeight, children }: { maxHeight: number; ch
 export function Sidebar({
   view,
   onNavigate,
-  onNewConversation,
   onOpenSettings,
   collapsed,
   conversations,
@@ -565,15 +563,6 @@ export function Sidebar({
             tooltip="首页"
             icon={<Home size={14}/>}
             label="首页"
-          />
-          <NavRow
-            active={false}
-            onClick={onNewConversation}
-            labelsVisible={labelsVisible}
-            collapsed={collapsed}
-            tooltip="新对话"
-            icon={<Plus size={14}/>}
-            label="新对话"
           />
         </div>
 

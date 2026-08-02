@@ -1,5 +1,5 @@
 import { AlertCircle, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
 import type { ChatInputProps } from "../../components/chat-empty";
@@ -52,7 +52,6 @@ export type RedesignWorkbenchProps = {
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<CurrentRunProjection["workView"]>["pendingConfirmation"];
   readonly confirmationBusy: boolean;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
-  readonly onNewConversation: () => void;
   readonly onStartNewConversation: () => Promise<boolean>;
   readonly onOpenConversation: (conversationId: string) => boolean | Promise<boolean>;
   readonly pendingConversationIds?: ReadonlySet<string>;
@@ -147,15 +146,6 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
     applyPrefs(loadPrefs());
   }, []);
 
-  const startNewConversation = useCallback((): void => {
-    props.onNewConversation();
-    props.inputProps.onChange("");
-    setSpaceTargetId(null);
-    setBrainSelectedId(null);
-    setView("home");
-    setHomeFocusRequest((current) => current + 1);
-  }, [props.inputProps.onChange, props.onNewConversation]);
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -225,7 +215,6 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
         activeSpaceId={activeSpaceId}
         activeConversationId={props.conversation?.conversationId}
         onNavigate={navigate}
-        onNewConversation={startNewConversation}
         onOpenConversation={props.onOpenConversation}
         pendingConversationIds={props.pendingConversationIds ?? EMPTY_ID_SET}
         onRenameConversation={props.onRenameConversation}

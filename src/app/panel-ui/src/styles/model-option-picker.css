@@ -256,8 +256,8 @@
 
 .model-picker-search input:focus,
 .model-picker-search input:focus-visible,
-.aa-redesign-root .settings-content .model-picker-search input:focus,
-.aa-redesign-root .settings-content .model-picker-search input:focus-visible {
+.aa-workbench-root .settings-content .model-picker-search input:focus,
+.aa-workbench-root .settings-content .model-picker-search input:focus-visible {
   border-color: transparent;
   box-shadow: none;
   outline: none;

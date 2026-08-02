@@ -49,7 +49,7 @@ export function FocusMode(props: FocusModeProps) {
 
       <ConversationScrollArea
         scrollKey={props.scrollKey}
-        contentClassName="aa-redesign-transcript reading-prose mx-auto px-6 py-10"
+        contentClassName="aa-conversation-transcript reading-prose mx-auto px-6 py-10"
       >
         {props.content}
       </ConversationScrollArea>

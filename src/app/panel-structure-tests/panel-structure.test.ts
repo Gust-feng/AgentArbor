@@ -16,7 +16,7 @@ test("panel HTML serves the React workbench shell without first-screen internals
   assert.match(staticHtml, /<link rel="stylesheet"[^>]+href="\/assets\/[^"]+\.css"/);
   assert.equal(staticHtml.includes('<div id="root">'), true);
   assert.equal(firstScreenHtml.includes("新任务"), false);
-  assert.equal(firstScreenHtml.includes("redesign-bootstrap"), true);
+  assert.equal(firstScreenHtml.includes("workbench-bootstrap"), true);
   assert.equal(firstScreenHtml.includes("正在加载 AgentArbor"), true);
   assert.equal(firstScreenHtml.includes("有什么可以帮到你？"), false);
   assert.equal(firstScreenHtml.includes("直接输入问题"), false);
@@ -34,7 +34,7 @@ test("panel HTML serves the React workbench shell without first-screen internals
   assertFirstScreenHasNoInternalTerms(firstScreenHtml);
 });
 
-test("active Panel entry reaches the Redesign workbench without the legacy shell", () => {
+test("active Panel entry reaches the personal workbench without the legacy shell", () => {
   const appSource = readFileSync(resolve("src/app/panel-ui/src/App.tsx"), "utf8");
   const workbenchEntry = readFileSync(
     resolve("src/app/panel-ui/src/personal-workbench/personal-workbench.tsx"),
@@ -44,5 +44,5 @@ test("active Panel entry reaches the Redesign workbench without the legacy shell
   assert.equal(appSource.includes("./personal-workbench/personal-workbench"), true);
   assert.equal(appSource.includes("app-workbench-shell-props"), false);
   assert.equal(appSource.includes("./components/sidebar"), false);
-  assert.equal(workbenchEntry.includes("./redesign/app/App"), true);
+  assert.equal(workbenchEntry.includes("./workbench/app/App"), true);
 });

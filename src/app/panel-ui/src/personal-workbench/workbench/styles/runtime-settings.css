@@ -1,10 +1,10 @@
 /*
  * Scoped settings bridge for the Personal Workspace shell.
  * The production settings components still use the shared panel class names,
- * so this layer maps those tokens to the redesign paper palette and keeps
- * layout refinements local to .aa-redesign-root.
+ * so this layer maps those tokens to the workbench paper palette and keeps
+ * layout refinements local to .aa-workbench-root.
  */
-.aa-redesign-root .settings-overlay {
+.aa-workbench-root .settings-overlay {
   --fg: var(--aa-text-1);
   --muted: var(--aa-text-2);
   --placeholder: var(--aa-text-3);
@@ -142,75 +142,75 @@
   z-index: 50;
 }
 
-.aa-redesign-root .settings-backdrop {
+.aa-workbench-root .settings-backdrop {
   border: 0;
 }
 
-.aa-redesign-root .settings-dialog {
+.aa-workbench-root .settings-dialog {
   z-index: 1;
   color: var(--fg);
 }
 
-.aa-redesign-root .settings-sidebar {
+.aa-workbench-root .settings-sidebar {
   min-width: 0;
   padding: 14px 8px;
 }
 
-.aa-redesign-root .settings-close-button {
+.aa-workbench-root .settings-close-button {
   width: 28px;
   height: 28px;
   margin: 0 4px 12px auto;
   border-radius: 6px;
 }
 
-.aa-redesign-root .settings-sidebar nav {
+.aa-workbench-root .settings-sidebar nav {
   gap: 2px;
   overflow-y: auto;
   padding: 0 2px;
 }
 
-.aa-redesign-root .settings-sidebar nav button {
+.aa-workbench-root .settings-sidebar nav button {
   min-width: 0;
   height: 36px;
   padding: 0 10px;
   font-size: 13px;
 }
 
-.aa-redesign-root .settings-main > header {
+.aa-workbench-root .settings-main > header {
   height: 52px;
   min-height: 52px;
   background: color-mix(in oklch, var(--aa-surface) 80%, var(--aa-canvas));
   padding: 0 24px;
 }
 
-.aa-redesign-root .settings-main h2 {
+.aa-workbench-root .settings-main h2 {
   font-size: 14px;
   font-weight: 600;
 }
 
-.aa-redesign-root .settings-content {
+.aa-workbench-root .settings-content {
   padding: 20px 24px 28px;
 }
 
-.aa-redesign-root .settings-content.model-settings-content {
+.aa-workbench-root .settings-content.model-settings-content {
   padding: 0;
 }
 
-.aa-redesign-root .settings-content > * {
+.aa-workbench-root .settings-content > * {
   min-width: 0;
 }
 
-.aa-redesign-root :is(.settings-card, .service-settings-card, .mcp-service-card, .provider-row, .model-catalog-panel, .settings-runtime-card) {
+.aa-workbench-root :is(.settings-card, .service-settings-card, .mcp-service-card, .provider-row, .model-catalog-panel, .settings-runtime-card) {
   border-radius: 8px;
 }
 
-.aa-redesign-root .settings-content a {
+.aa-workbench-root .settings-content a {
   color: var(--aa-accent);
 }
 
-.aa-redesign-root .settings-content :is(input, select, textarea, button):focus-visible,
-.aa-redesign-root .settings-close-button:focus-visible,
-.aa-redesign-root .settings-sidebar nav button:focus-visible {
+.aa-workbench-root .settings-content :is(input, select, textarea, button):focus-visible,
+.aa-workbench-root .settings-close-button:focus-visible,
+.aa-workbench-root .settings-sidebar nav button:focus-visible {
   outline: 2px solid color-mix(in oklch, var(--aa-accent) 58%, transparent);
   outline-offset: 2px;
 }
@@ -228,45 +228,45 @@
 }
 
 @media (max-width: 620px) {
-  .aa-redesign-root .settings-overlay {
+  .aa-workbench-root .settings-overlay {
     padding: 10px;
   }
 
-  .aa-redesign-root .settings-dialog {
+  .aa-workbench-root .settings-dialog {
     width: calc(100vw - 20px);
     height: calc(100vh - 20px);
     grid-template-columns: minmax(148px, 38vw) minmax(0, 1fr);
   }
 
-  .aa-redesign-root .settings-sidebar {
+  .aa-workbench-root .settings-sidebar {
     padding: 10px 6px;
   }
 
-  .aa-redesign-root .settings-sidebar nav button {
+  .aa-workbench-root .settings-sidebar nav button {
     grid-template-columns: auto minmax(0, 1fr);
     justify-items: stretch;
     padding: 0 10px;
   }
 
-  .aa-redesign-root .settings-sidebar nav button span {
+  .aa-workbench-root .settings-sidebar nav button span {
     display: inline;
   }
 
-  .aa-redesign-root .settings-content {
+  .aa-workbench-root .settings-content {
     padding: 16px;
   }
 
-  .aa-redesign-root .settings-content.model-settings-content {
+  .aa-workbench-root .settings-content.model-settings-content {
     padding: 0;
   }
 }
 
 @media (max-width: 420px) {
-  .aa-redesign-root .settings-overlay {
+  .aa-workbench-root .settings-overlay {
     padding: 0;
   }
 
-  .aa-redesign-root .settings-dialog {
+  .aa-workbench-root .settings-dialog {
     width: 100vw;
     height: 100vh;
     grid-template-columns: 54px minmax(0, 1fr);
@@ -274,17 +274,17 @@
     border-left: 0;
   }
 
-  .aa-redesign-root .settings-sidebar {
+  .aa-workbench-root .settings-sidebar {
     padding: 8px 0;
   }
 
-  .aa-redesign-root .settings-sidebar nav button {
+  .aa-workbench-root .settings-sidebar nav button {
     grid-template-columns: 1fr;
     justify-items: center;
     padding: 0;
   }
 
-  .aa-redesign-root .settings-sidebar nav button span {
+  .aa-workbench-root .settings-sidebar nav button span {
     display: none;
   }
 }

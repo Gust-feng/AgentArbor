@@ -66,14 +66,14 @@
           font-family: "Noto Sans SC", Inter, system-ui, -apple-system, sans-serif;
         }
 
-        .redesign-bootstrap {
+        .workbench-bootstrap {
           display: flex;
           height: 100%;
           overflow: hidden;
           background: #f4f2ef;
         }
 
-        .redesign-bootstrap__sidebar {
+        .workbench-bootstrap__sidebar {
           width: 236px;
           flex: 0 0 236px;
           box-sizing: border-box;
@@ -82,78 +82,78 @@
           padding: 138px 20px 16px;
         }
 
-        .redesign-bootstrap__content {
+        .workbench-bootstrap__content {
           display: flex;
           min-width: 0;
           flex: 1;
           flex-direction: column;
         }
 
-        .redesign-bootstrap__topbar {
+        .workbench-bootstrap__topbar {
           height: 44px;
           flex: 0 0 44px;
           border-bottom: 1px solid rgba(45, 40, 34, 0.09);
           background: #faf9f7;
         }
 
-        .redesign-bootstrap__canvas {
+        .workbench-bootstrap__canvas {
           display: grid;
           min-height: 0;
           flex: 1;
           place-items: center;
         }
 
-        .redesign-bootstrap__line,
-        .redesign-bootstrap__pulse {
+        .workbench-bootstrap__line,
+        .workbench-bootstrap__pulse {
           display: block;
           border-radius: 999px;
           background: #eeebe6;
         }
 
-        .redesign-bootstrap__line {
+        .workbench-bootstrap__line {
           width: 118px;
           height: 10px;
           margin-bottom: 18px;
         }
 
-        .redesign-bootstrap__line--short {
+        .workbench-bootstrap__line--short {
           width: 76px;
         }
 
-        .redesign-bootstrap__pulse {
+        .workbench-bootstrap__pulse {
           width: 64px;
           height: 6px;
           overflow: hidden;
         }
 
-        .redesign-bootstrap__pulse::after {
+        .workbench-bootstrap__pulse::after {
           display: block;
           width: 50%;
           height: 100%;
           border-radius: inherit;
           background: #6865a7;
           content: "";
-          animation: redesign-bootstrap-pulse 1.2s ease-in-out infinite alternate;
+          animation: workbench-bootstrap-pulse 1.2s ease-in-out infinite alternate;
         }
 
-        @keyframes redesign-bootstrap-pulse {
+        @keyframes workbench-bootstrap-pulse {
           from { opacity: 0.35; transform: translateX(0); }
           to { opacity: 0.8; transform: translateX(100%); }
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .redesign-bootstrap__pulse::after { animation: none; }
+          .workbench-bootstrap__pulse::after { animation: none; }
         }
       </style>
-      <div class="redesign-bootstrap" aria-label="正在加载 AgentArbor">
-        <aside class="redesign-bootstrap__sidebar" aria-hidden="true">
-          <span class="redesign-bootstrap__line"></span>
-          <span class="redesign-bootstrap__line redesign-bootstrap__line--short"></span>
+      <div class="workbench-bootstrap" aria-label="正在加载 AgentArbor">
+        <aside class="workbench-bootstrap__sidebar" aria-hidden="true">
+          <span class="workbench-bootstrap__line"></span>
+          <span class="workbench-bootstrap__line workbench-bootstrap__line--short"></span>
         </aside>
-        <main class="redesign-bootstrap__content">
-          <div class="redesign-bootstrap__topbar" aria-hidden="true"></div>
-          <div class="redesign-bootstrap__canvas">
-            <span class="redesign-bootstrap__pulse" aria-hidden="true"></span>
+        <main class="workbench-bootstrap__content">
+          <div class="workbench-bootstrap__topbar" aria-hidden="true"></div>
+          <div class="workbench-bootstrap__canvas">
+            <span class="workbench-bootstrap__pulse" aria-hidden="true"></span>
           </div>
         </main>
       </div>

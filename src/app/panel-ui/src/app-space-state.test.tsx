@@ -13,7 +13,7 @@ import {
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
   updatePersonalNote,
-} from "./personal-workbench/redesign/app/components/personalKnowledgeClient";
+} from "./personal-workbench/workbench/app/components/personalKnowledgeClient";
 
 afterEach(() => {
   vi.unstubAllGlobals();

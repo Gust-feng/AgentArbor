@@ -153,7 +153,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   }, []);
   return (
     <div
-      className="aa-redesign-root flex h-screen min-h-0 w-full overflow-hidden"
+      className="aa-workbench-root flex h-screen min-h-0 w-full overflow-hidden"
       style={{
         background: "var(--aa-canvas)",
         color: "var(--aa-text-1)",
@@ -165,7 +165,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
           from { opacity: 0; transform: translateY(3px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        .aa-redesign-root .view-enter { animation: viewFadeIn 140ms ease; }
+        .aa-workbench-root .view-enter { animation: viewFadeIn 140ms ease; }
       `}</style>
       <Sidebar
         view={view}

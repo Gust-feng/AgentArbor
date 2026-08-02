@@ -9,7 +9,7 @@ import { ConversationComposer } from "./ConversationComposer";
 import { ConversationPage, type LiveConversationState } from "./ConversationPage";
 import { DeferredSurfaceBoundary } from "./DeferredSurfaceBoundary";
 import { FocusMode } from "./FocusMode";
-import { RedesignTranscript } from "./RedesignTranscript";
+import { ConversationTranscript } from "./ConversationTranscript";
 
 export function ConversationSurface(props: {
   readonly props: PersonalWorkbenchProps;
@@ -46,7 +46,7 @@ export function ConversationSurface(props: {
           : "initial";
   const content = active.hasVisibleContent ? (
     <DeferredSurfaceBoundary resetKey={props.props.currentRun.run?.runId ?? props.conversation?.conversationId ?? "transcript"} label="对话内容暂时无法显示">
-      <RedesignTranscript
+      <ConversationTranscript
         conversationId={props.conversation?.conversationId}
         projectedTurns={active.workline.turns}
         turns={props.conversation?.turns ?? []}

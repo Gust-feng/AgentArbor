@@ -6,11 +6,11 @@ import type { ConversationTurn } from "../../../../contracts/conversation";
 import type { TranscriptNode } from "../../../../contracts/run";
 import { resetTranscriptCache } from "../../../../panel-ui-transcript-store";
 import { ConfirmationCard } from "./ConfirmationCard";
-import { RedesignTranscript } from "./RedesignTranscript";
+import { ConversationTranscript } from "./ConversationTranscript";
 
 beforeEach(() => resetTranscriptCache());
 
-test("redesign transcript expands structured activity into its canonical tool result", () => {
+test("conversation transcript expands structured activity into its canonical tool result", () => {
   const turns: readonly ConversationTurn[] = [{
     turnId: "user-1",
     role: "user",
@@ -23,7 +23,7 @@ test("redesign transcript expands structured activity into its canonical tool re
   }];
   const nodes = [toolNode()];
 
-  render(<RedesignTranscript
+  render(<ConversationTranscript
     conversationId="conversation-1"
     projectedTurns={projectedTurns}
     turns={turns}
@@ -59,7 +59,7 @@ test("redesign transcript expands structured activity into its canonical tool re
   expect(screen.getByText("tool-fact-1")).toBeTruthy();
 });
 
-test("redesign transcript keeps normal tool evidence while hiding the canonical result", () => {
+test("conversation transcript keeps normal tool evidence while hiding the canonical result", () => {
   const turns: readonly ConversationTurn[] = [{
     turnId: "user-1",
     role: "user",
@@ -72,7 +72,7 @@ test("redesign transcript keeps normal tool evidence while hiding the canonical 
   }];
   const nodes = [toolNode()];
 
-  render(<RedesignTranscript
+  render(<ConversationTranscript
     conversationId="conversation-normal"
     projectedTurns={projectedTurns}
     turns={turns}
@@ -111,7 +111,7 @@ test("redesign transcript keeps normal tool evidence while hiding the canonical 
   expect(screen.queryByText("tool-fact-1")).toBeNull();
 });
 
-test("redesign transcript uses the shared markdown renderer without hover layout shifts", () => {
+test("conversation transcript uses the shared markdown renderer without hover layout shifts", () => {
   const turns: readonly ConversationTurn[] = [
     { turnId: "user-1", role: "user", content: "整理工具", status: "completed" },
     {
@@ -126,7 +126,7 @@ test("redesign transcript uses the shared markdown renderer without hover layout
     claimedCurrentRun: false,
   }));
 
-  render(<RedesignTranscript
+  render(<ConversationTranscript
     conversationId="conversation-markdown"
     projectedTurns={projectedTurns}
     turns={turns}
@@ -149,7 +149,7 @@ test("redesign transcript uses the shared markdown renderer without hover layout
   expect(answer?.querySelectorAll(".aa-answer-copy").length).toBe(before);
 });
 
-test("redesign confirmation keeps approval and denial behavior without legacy transcript styling", () => {
+test("confirmation keeps approval and denial behavior without legacy transcript styling", () => {
   const onDecision = vi.fn();
   render(<ConfirmationCard
     confirmation={{

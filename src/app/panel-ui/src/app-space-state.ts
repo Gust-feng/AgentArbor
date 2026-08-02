@@ -5,7 +5,7 @@ import { selectTaskWorkspaceDirectory } from "./app-workspace-selection";
 import type { SpaceReference, SpaceSummary, SpaceTree, SpaceTreeEntry } from "../../spaces";
 import type { PersonalSpaceItemProjection, PersonalSpaceProjection } from "./personal-workbench/space";
 import { subscribeWorkbenchProjectionChanges } from "./app-workbench-projection-changes";
-import { invalidateDocumentPreviews } from "./personal-workbench/redesign/app/components/referencePreviewClient";
+import { invalidateDocumentPreviews } from "./personal-workbench/workbench/app/components/referencePreviewClient";
 
 type SpaceSummaryResponse = {
   readonly spaces: readonly SpaceSummary[];

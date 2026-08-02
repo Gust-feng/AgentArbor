@@ -1,8 +1,8 @@
 /**
- * Redesign 风格对话转录渲染器。
+ * Conversation workbench 的对话转录渲染器。
  *
  * 消费 ConversationDisplayItem[] 与 canonical tool result 数据，使用
- * Redesign 的 --aa-* token 渲染，不依赖旧 Transcript 组件和主题。
+ * 使用工作台的 --aa-* token 渲染，不依赖旧 Transcript 组件和主题。
  *
  * 数据权威不变：projectConversationDisplayList 产出什么，这里就渲染什么。
  * 全量可见性不变：工具活动、确认流、失败归因、Sub-Agent 嵌套全部保留。
@@ -61,7 +61,7 @@ import {
 
 /* ─── 主入口 ─── */
 
-export type RedesignTranscriptProps = {
+export type ConversationTranscriptProps = {
   readonly conversationId?: string;
   readonly projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[];
   readonly turns: readonly ConversationTurn[];
@@ -88,7 +88,7 @@ export type RedesignTranscriptProps = {
   readonly confirmationBusy: boolean;
 };
 
-export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactElement | null {
+export function ConversationTranscript(props: ConversationTranscriptProps): React.ReactElement | null {
   const cachedHistoricalSnapshot = useSyncExternalStore(
     useCallback(
       (listener: () => void) => subscribeTranscriptCache(props.conversationId, listener),
@@ -139,11 +139,11 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
     <div className="aa-conversation-stream">
       {items.map((item) => {
         if (item.kind === "user") {
-          return <RedesignUserMessage key={item.key} content={item.turn.content} attachments={item.turn.attachments} />;
+          return <ConversationUserMessage key={item.key} content={item.turn.content} attachments={item.turn.attachments} />;
         }
         if (item.failure !== undefined) {
           return (
-            <RedesignFailureMessage
+            <ConversationFailureMessage
               key={item.key}
               failure={item.failure}
               terminalStatus={item.terminalStatus}
@@ -156,7 +156,7 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
           );
         }
         return (
-          <RedesignAssistantMessage
+          <ConversationAssistantMessage
             key={item.key}
             live={item.live}
             workflow={item.workflow}
@@ -173,7 +173,7 @@ export function RedesignTranscript(props: RedesignTranscriptProps): React.ReactE
 
 /* ─── 用户消息 ─── */
 
-const RedesignUserMessage = React.memo(function RedesignUserMessage(props: {
+const ConversationUserMessage = React.memo(function ConversationUserMessage(props: {
   readonly content: string;
   readonly attachments?: readonly ConversationTurnAttachment[];
 }) {
@@ -210,7 +210,7 @@ const RedesignUserMessage = React.memo(function RedesignUserMessage(props: {
 
 /* ─── 助手消息 ─── */
 
-function RedesignAssistantMessage(props: {
+function ConversationAssistantMessage(props: {
   readonly live?: boolean;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
@@ -220,14 +220,14 @@ function RedesignAssistantMessage(props: {
 }) {
   const workflow = props.workflow;
   if (workflow === undefined) {
-    return <RedesignPendingDots />;
+    return <ConversationPendingDots />;
   }
   return (
     <div className="aa-conversation-turn aa-conversation-turn--assistant space-y-3">
       {workflow.segments.map((segment, index) => {
         if (segment.kind === "activity") {
           return (
-            <RedesignActivityTimeline
+            <ConversationActivityTimeline
               key={segment.segmentKey}
               timeline={segment.timeline}
               collapsed={segment.collapsed}
@@ -240,10 +240,10 @@ function RedesignAssistantMessage(props: {
           );
         }
         if (segment.kind === "awaiting") {
-          return <RedesignPendingDots key={`awaiting-${index}`} />;
+          return <ConversationPendingDots key={`awaiting-${index}`} />;
         }
         return (
-          <RedesignAnswerBlock
+          <ConversationAnswerBlock
             key={segment.segmentKey}
             text={segment.text}
             live={props.live === true && index === workflow.segments.length - 1}
@@ -256,7 +256,7 @@ function RedesignAssistantMessage(props: {
 
 /* ─── 失败消息 ─── */
 
-function RedesignFailureMessage(props: {
+function ConversationFailureMessage(props: {
   readonly failure: AssistantFailureParts;
   readonly terminalStatus?: AssistantTerminalStatus;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
@@ -271,8 +271,8 @@ function RedesignFailureMessage(props: {
   return (
     <div className="aa-conversation-turn aa-conversation-turn--assistant space-y-3">
       {bodySegments.map((segment, index) => {
-        if (segment.kind === "awaiting") return <RedesignPendingDots key={`a-${index}`} />;
-        return <RedesignAnswerBlock key={segment.segmentKey} text={segment.text} live={false} />;
+        if (segment.kind === "awaiting") return <ConversationPendingDots key={`a-${index}`} />;
+        return <ConversationAnswerBlock key={segment.segmentKey} text={segment.text} live={false} />;
       })}
       {/* 失败通知 */}
       <div
@@ -291,7 +291,7 @@ function RedesignFailureMessage(props: {
       </div>
       {activitySegments.map((segment) => (
         segment.kind === "activity" ? (
-          <RedesignActivityTimeline
+          <ConversationActivityTimeline
             key={segment.segmentKey}
             timeline={segment.timeline}
             collapsed={segment.collapsed}
@@ -309,7 +309,7 @@ function RedesignFailureMessage(props: {
 
 /* ─── 回答文本块 ─── */
 
-const RedesignAnswerBlock = React.memo(function RedesignAnswerBlock(props: {
+const ConversationAnswerBlock = React.memo(function ConversationAnswerBlock(props: {
   readonly text: string;
   readonly live: boolean;
 }) {
@@ -327,7 +327,7 @@ const RedesignAnswerBlock = React.memo(function RedesignAnswerBlock(props: {
 
 /* ─── 等待指示器 ─── */
 
-function RedesignPendingDots() {
+function ConversationPendingDots() {
   return (
     <div className="flex items-center gap-1.5 py-2" role="status" aria-label="正在处理">
       {[0, 1, 2].map((i) => (
@@ -344,7 +344,7 @@ function RedesignPendingDots() {
 
 /* ─── 工具活动时间线 ─── */
 
-function RedesignActivityTimeline(props: {
+function ConversationActivityTimeline(props: {
   readonly timeline: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
   readonly collapsed?: boolean;
   readonly lifecycle?: "open" | "settled" | "attention";
@@ -418,7 +418,7 @@ function RedesignActivityTimeline(props: {
         <div className="aa-activity-details space-y-1">
           <div className="space-y-2">
             {visibleItems.map((item) => (
-              <RedesignActivityItem
+              <ConversationActivityItem
                 key={item.key}
                 item={item}
                 toolResult={toolResultForActivity(item, props.timeline.nodes, props.toolResultsByRunId)}
@@ -456,7 +456,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   sub_agent: <Bot size={11} />,
 };
 
-function RedesignActivityItem(props: {
+function ConversationActivityItem(props: {
   readonly item: ActivityItem;
   readonly toolResult?: ToolCallResult;
   readonly resolveChildResult: (item: ActivityItem) => ToolCallResult | undefined;
@@ -520,7 +520,7 @@ function RedesignActivityItem(props: {
       {item.children !== undefined && item.children.length > 0 && (
         <div className="ml-3 mt-1 space-y-1 border-l pl-3" style={{ borderColor: "var(--aa-border)" }}>
           {item.children.map((child) => (
-            <RedesignActivityItem
+            <ConversationActivityItem
               key={child.key}
               item={child}
               toolResult={props.resolveChildResult(child)}

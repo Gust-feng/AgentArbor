@@ -56,7 +56,7 @@ export function ConversationPage(props: ConversationPageProps) {
 
         <ConversationScrollArea
           scrollKey={props.scrollKey}
-          contentClassName="aa-redesign-transcript reading-prose mx-auto px-6 pb-24 pt-5"
+          contentClassName="aa-conversation-transcript reading-prose mx-auto px-6 pb-24 pt-5"
         >
           {props.content}
         </ConversationScrollArea>

@@ -4,7 +4,7 @@ import {
   saveModelUsageDisplayEnabled,
 } from "./app-model-usage-display";
 import { type SettingsGroup } from "./components/settings-types";
-import type { Screen } from "./app-screen";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { AgentMode } from "./app-config-projection";
 import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
 import { isMultiAgentEntryEnabled } from "./app-multi-agent-availability";
@@ -16,8 +16,8 @@ export type AppShellStateOptions = {
 };
 
 export type AppShellState = {
-  readonly screen: Screen;
-  readonly setScreen: Dispatch<SetStateAction<Screen>>;
+  readonly legacyConversationScreen: LegacyConversationScreen;
+  readonly setLegacyConversationScreen: Dispatch<SetStateAction<LegacyConversationScreen>>;
   readonly settingsOpen: boolean;
   readonly setSettingsOpen: Dispatch<SetStateAction<boolean>>;
   readonly settingsGroup: SettingsGroup;
@@ -39,7 +39,7 @@ export type AppShellState = {
 };
 
 export function useAppShellState(options: AppShellStateOptions): AppShellState {
-  const [screen, setScreen] = useState<Screen>("chat-empty");
+  const [legacyConversationScreen, setLegacyConversationScreen] = useState<LegacyConversationScreen>("chat-empty");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("models");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsedPreference);
@@ -81,8 +81,8 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
   }
 
   return {
-    screen,
-    setScreen,
+    legacyConversationScreen,
+    setLegacyConversationScreen,
     settingsOpen,
     setSettingsOpen,
     settingsGroup,

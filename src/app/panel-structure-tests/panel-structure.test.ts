@@ -44,5 +44,7 @@ test("active Panel entry reaches the personal workbench without the legacy shell
   assert.equal(appSource.includes("./personal-workbench/personal-workbench"), true);
   assert.equal(appSource.includes("app-workbench-shell-props"), false);
   assert.equal(appSource.includes("./components/sidebar"), false);
+  assert.equal(appSource.includes("setScreen"), false);
+  assert.equal(appSource.includes("setLegacyConversationScreen"), true);
   assert.equal(workbenchEntry.includes("./workbench/app/App"), true);
 });

@@ -12,6 +12,7 @@ import { loadConversationSession, resetConversationSession } from "./app-convers
 import { submitPanelTask } from "./app-task-submission";
 import { invalidateUsageStatistics } from "./usage-statistics-query";
 import type { AppState } from "./app-state";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";
 import type { BasicAgentRun } from "./contracts/run";
@@ -32,7 +33,7 @@ export type AppRunController = {
 export type AppRunControllerOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly setGoal: (goal: string) => void;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;

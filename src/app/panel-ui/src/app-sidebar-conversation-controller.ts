@@ -8,6 +8,7 @@ import {
   upsertConversationSummary,
 } from "./app-conversation-management";
 import type { AppState } from "./app-state";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { ContextAttachment } from "./contracts/context";
 
 export type AppSidebarConversationController = {
@@ -28,7 +29,7 @@ export type AppSidebarConversationControllerOptions = {
   readonly setInputCloseSignal: React.Dispatch<React.SetStateAction<number>>;
   readonly setGoal: React.Dispatch<React.SetStateAction<string>>;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
-  readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
 };
 
 export function createAppSidebarConversationController(

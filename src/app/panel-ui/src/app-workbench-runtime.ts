@@ -26,7 +26,7 @@ import type {
   ComposerToolConfirmationPolicy,
   VisibleAiMode,
 } from "./app-config-projection";
-import type { Screen } from "./app-screen";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
@@ -36,7 +36,7 @@ import type { McpServerCatalogItem } from "./contracts/tools";
 export type AppWorkbenchRuntimeOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: React.Dispatch<React.SetStateAction<Screen>>;
+  readonly setLegacyConversationScreen: React.Dispatch<React.SetStateAction<LegacyConversationScreen>>;
   readonly setGoal: React.Dispatch<React.SetStateAction<string>>;
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
@@ -232,7 +232,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const runController = useMemo(() => createAppRunController({
     app: options.app,
     setApp: options.setApp,
-    setScreen: options.setScreen,
+    setLegacyConversationScreen: options.setLegacyConversationScreen,
     setGoal: options.setGoal,
     attachments: options.attachments,
     setAttachments: options.setAttachments,
@@ -265,14 +265,14 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setApp,
     options.setAttachments,
     options.setGoal,
-    options.setScreen,
+    options.setLegacyConversationScreen,
     options.toolConfirmationPolicy,
   ]);
 
   // Deep/Multi-Agent 已从运行时剥离（后端返回 410），保留空操作桩维持接口稳定。
   const noop = () => undefined;
   const deepEntryActions = {
-    openNormalAgentEntry: () => { runController.resetChat(); options.setScreen("chat-empty"); },
+    openNormalAgentEntry: () => { runController.resetChat(); options.setLegacyConversationScreen("chat-empty"); },
     openNormalTaskEntry: noop,
     openNormalConversation: runController.loadConversation,
     openAgentClusterRun: noop,
@@ -300,14 +300,14 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     setInputCloseSignal: options.setInputCloseSignal,
     setGoal: options.setGoal,
     setAttachments: options.setAttachments,
-    setScreen: options.setScreen,
+    setLegacyConversationScreen: options.setLegacyConversationScreen,
   }), [
     options.app,
     options.setApp,
     options.setAttachments,
     options.setGoal,
     options.setInputCloseSignal,
-    options.setScreen,
+    options.setLegacyConversationScreen,
     options.setSelectedWorkspaceDirectory,
     runController.resetChat,
   ]);

@@ -56,7 +56,7 @@ export function App(): React.ReactElement {
     },
   });
   const {
-    setScreen,
+    setLegacyConversationScreen,
     settingsOpen,
     settingsGroup,
     sidebarCollapsed,
@@ -79,7 +79,7 @@ export function App(): React.ReactElement {
   const runtime = useAppWorkbenchRuntime({
     app,
     setApp,
-    setScreen,
+    setLegacyConversationScreen,
     setGoal,
     goal,
     aiMode,

@@ -17,5 +17,5 @@
     "jsx": "react-jsx"
   },
   "include": ["src/app/panel-ui/src/**/*.ts", "src/app/panel-ui/src/**/*.tsx", "src/app/panel-api-contracts.ts", "vite.panel.config.ts", "vite.panel-prototype.config.ts"],
-  "exclude": ["src/app/panel-ui/src/_archive/**", "src/app/panel-ui/src/personal-workbench/redesign/app/components/ui/**"]
+  "exclude": ["src/app/panel-ui/src/_archive/**"]
 }

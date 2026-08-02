@@ -5,7 +5,7 @@
   align-items: center;
   overflow-y: auto;
   background: var(--aa-canvas, #f4f2ef);
-  padding: 48px 24px 88px;
+  padding: 48px 24px 144px;
 }
 
 .aa-agent-home__stage {
@@ -15,6 +15,17 @@
 
 .aa-agent-home__field {
   width: 100%;
+}
+
+.aa-agent-home__ambient {
+  max-width: 700px;
+  margin: 0 18px 22px;
+  color: var(--aa-text-1, #2d2b29);
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.5;
+  text-wrap: balance;
 }
 
 .aa-agent-home__composer .aa-conversation-composer__input {
@@ -59,7 +70,13 @@
 @media (max-width: 720px) {
   .aa-agent-home {
     align-items: start;
-    padding: 72px 16px max(24px, env(safe-area-inset-bottom));
+    padding: 56px 16px max(24px, env(safe-area-inset-bottom));
+  }
+
+  .aa-agent-home__ambient {
+    margin: 0 14px 18px;
+    font-size: 20px;
+    line-height: 1.55;
   }
 
   .aa-agent-home__composer .aa-conversation-composer__input {

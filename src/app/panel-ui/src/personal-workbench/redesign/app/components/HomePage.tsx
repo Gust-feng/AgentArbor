@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import type { ChatInputProps } from '../../../../components/chat-empty'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { type View } from './Sidebar'
 import { ConversationComposer } from './ConversationComposer'
+import { selectHomeAmbientCopy } from './home-ambient-copy'
 import './home-page.css'
 
 interface HomePageProps {
@@ -14,10 +16,14 @@ interface HomePageProps {
 }
 
 export function HomePage({ input, focusRequest }: HomePageProps) {
+  const [ambientCopy] = useState(() => selectHomeAmbientCopy())
+
   return (
     <div className="aa-agent-home">
       <section className="aa-agent-home__stage" aria-label="开始任务">
         <div className="aa-agent-home__field">
+          <p className="aa-agent-home__ambient">{ambientCopy}</p>
+
           <div className="aa-agent-home__composer">
             <ConversationComposer key={focusRequest} input={input} />
           </div>

@@ -1,11 +1,19 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
-import { expect, test, vi } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import type { ChatInputProps } from '../../../../components/chat-empty'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { HomePage } from './HomePage'
+import { selectHomeAmbientCopy } from './home-ambient-copy'
 
-test('presents a quiet task entry without fixed identity or headline copy', () => {
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+test('presents one stable ambient line with the quiet task entry', () => {
+  const now = new Date(2026, 7, 3, 1, 30)
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
   const onSelectWorkspaceDirectory = vi.fn()
   render(
     <HomePage
@@ -21,6 +29,7 @@ test('presents a quiet task entry without fixed identity or headline copy', () =
   )
 
   expect(screen.getByRole('region', { name: '开始任务' })).toBeTruthy()
+  expect(screen.getByText(selectHomeAmbientCopy(now))).toBeTruthy()
   expect(screen.getByPlaceholderText('想从哪里开始？')).toBeTruthy()
   expect(screen.getByRole('button', { name: '切换工作区：Z:\\AgentArbor' }).textContent).toContain('AgentArbor')
   expect(screen.queryByRole('heading')).toBeNull()

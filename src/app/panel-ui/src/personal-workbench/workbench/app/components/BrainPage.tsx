@@ -1,10 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject, type SetStateAction } from 'react'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import {
-  NotebookPen,
-  FileText,
-  Globe,
-  Image as ImageIcon,
   Film,
   Link2,
   CornerUpLeft,
@@ -13,10 +9,6 @@ import {
   Trash2,
   ChevronDown,
   Search,
-  Music,
-  Code2,
-  FileType2,
-  FileSpreadsheet,
   Sparkles,
   Tag,
   Lock,
@@ -25,10 +17,20 @@ import {
   LayoutGrid,
   Columns3,
 } from 'lucide-react'
-import { getNote } from './notesStore'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
+import { getNote } from './notesStore'
 import { useBrain, type ResolvedPage } from './brainStore'
+import {
+  getKnowledgePreviewText,
+  KNOWLEDGE_FILTERS,
+  knowledgeKindLabel,
+  knowledgePageIcon,
+  matchesKnowledgeFilter,
+  formatKnowledgeTimeAgo,
+  cleanKnowledgeText,
+  type KnowledgeKind,
+} from './knowledge-view-projection'
 import { useThemes, type Theme } from './themesStore'
 import { ImageWithFallback } from './ImageWithFallback'
 import { ReferencePreview } from './ReferencePreview'
@@ -46,87 +48,9 @@ import { prefetchOfficePreview } from './officePreviewRuntime'
  * 链接 / 反向链接(第二大脑的核心机制)才作为右栏透镜出现。
  */
 
-type Kind = 'all' | 'note' | 'file' | 'pdf' | 'docx' | 'xlsx' | 'web' | 'image' | 'video' | 'audio' | 'code'
 type KnowledgeView = 'browse' | 'stack'
 
 const KNOWLEDGE_VIEW_STORAGE_KEY = 'agentarbor:knowledge-view'
-
-const FILTERS: { key: Kind; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'note', label: '笔记' },
-  { key: 'file', label: '文件' },
-  { key: 'pdf', label: 'PDF' },
-  { key: 'docx', label: '文档' },
-  { key: 'xlsx', label: '表格' },
-  { key: 'web', label: '网页' },
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'audio', label: '音频' },
-  { key: 'code', label: '代码' },
-]
-
-function timeAgo(ts: number): string {
-  const s = (Date.now() - ts) / 1000
-  if (s < 60) return '刚刚'
-  const m = s / 60
-  if (m < 60) return `${Math.floor(m)} 分钟前`
-  const h = m / 60
-  if (h < 24) return `${Math.floor(h)} 小时前`
-  const d = h / 24
-  if (d < 7) return `${Math.floor(d)} 天前`
-  return `${Math.floor(d / 7)} 周前`
-}
-
-function pageIcon(p: ResolvedPage, size = 13) {
-  if (p.kind === 'note') return <NotebookPen size={size} style={{ color: '#6f8778' }} />
-  switch (p.materialKind) {
-    case 'web':
-      return <Globe size={size} style={{ color: '#6686a2' }} />
-    case 'image':
-      return <ImageIcon size={size} style={{ color: '#7d8a63' }} />
-    case 'video':
-      return <Film size={size} style={{ color: '#8a6aa0' }} />
-    case 'audio':
-      return <Music size={size} style={{ color: '#b0885a' }} />
-    case 'code':
-      return <Code2 size={size} style={{ color: '#5f8a86' }} />
-    case 'docx':
-      return <FileType2 size={size} style={{ color: '#6686a2' }} />
-    case 'xlsx':
-      return <FileSpreadsheet size={size} style={{ color: '#6f8778' }} />
-    default:
-      return <FileText size={size} style={{ color: '#c07a55' }} />
-  }
-}
-
-const kindLabel = (p: ResolvedPage) =>
-  p.kind === 'note'
-    ? '笔记'
-    : { file: '文件', pdf: 'PDF', docx: 'Word 文档', xlsx: 'Excel 表格', web: '网页', image: '图片', video: '视频', markdown: 'Markdown', audio: '音频', code: '代码' }[
-        p.materialKind ?? 'pdf'
-      ]
-
-function matchesFilter(p: ResolvedPage, f: Kind): boolean {
-  if (f === 'all') return true
-  if (f === 'note') return p.kind === 'note'
-  return p.kind !== 'note' && p.materialKind === f
-}
-
-function clean(src: string | undefined): string {
-  if (!src) return ''
-  return src
-    .replace(/\\n/g, ' ')
-    .replace(/^#+\s*/gm, '')
-    .replace(/[*_`>#-]/g, '')
-    .replace(/\n+/g, ' ')
-    .trim()
-}
-
-/** 一段如实的文字摘要:笔记 / Markdown / 网页 / PDF 都取各自真实正文。 */
-function previewText(p: ResolvedPage): string {
-  if (p.kind === 'note') return clean(getNote(p.refId)?.bodyMarkdown).slice(0, 280)
-  return clean(p.previewText).slice(0, 280)
-}
 
 export function BrainPage({
   selectedId,
@@ -139,7 +63,7 @@ export function BrainPage({
   const brain = useBrain()
   const themeApi = useThemes()
   const reducedMotion = useReducedMotion()
-  const [filter, setFilter] = useState<Kind>('all')
+  const [filter, setFilter] = useState<KnowledgeKind>('all')
   const [query, setQuery] = useState('')
   // 左栏导航当前落点:'recent'(最近)/'all'(全部)/'unclassified'(未归类)/ 或某个 themeId。
   const [nav, setNav] = useState<string>('recent')
@@ -164,14 +88,14 @@ export function BrainPage({
     const q = query.trim().toLowerCase()
     if (!q) return []
     return resolved
-      .filter((p) => matchesFilter(p, filter))
-      .filter((p) => p.title.toLowerCase().includes(q) || previewText(p).toLowerCase().includes(q))
+      .filter((p) => matchesKnowledgeFilter(p, filter))
+      .filter((p) => p.title.toLowerCase().includes(q) || getKnowledgePreviewText(p).toLowerCase().includes(q))
       .sort((a, b) => b.collectedAt - a.collectedAt)
   }, [resolved, filter, query])
 
   // 主题透镜里用的全量卡片(不受搜索影响,只受类型筛选)。
   const cards = useMemo(
-    () => [...resolved].filter((p) => matchesFilter(p, filter)).sort((a, b) => b.collectedAt - a.collectedAt),
+    () => [...resolved].filter((p) => matchesKnowledgeFilter(p, filter)).sort((a, b) => b.collectedAt - a.collectedAt),
     [resolved, filter]
   )
 
@@ -827,7 +751,7 @@ function StackPathNav({
         {pages.map((page, index) => (
           <NavItem
             key={page.refId}
-            icon={pageIcon(page, 14)}
+            icon={knowledgePageIcon(page, 14)}
             label={page.title}
             active={activeIndex === index}
             onClick={() => onReveal(index)}
@@ -1012,8 +936,8 @@ function SearchResults({
   onOpen,
 }: {
   results: ResolvedPage[]
-  filter: Kind
-  setFilter: (k: Kind) => void
+  filter: KnowledgeKind
+  setFilter: (k: KnowledgeKind) => void
   degreeOf: (refId: string) => number
   themeApi: ReturnType<typeof useThemes>
   onOpen: (refId: string) => void
@@ -1026,7 +950,7 @@ function SearchResults({
         </span>
         <div className="flex-1" />
         <div className="flex items-center gap-1.5 flex-wrap">
-          {FILTERS.map((f) => (
+          {KNOWLEDGE_FILTERS.map((f) => (
             <FilterChip key={f.key} active={filter === f.key} label={f.label} onClick={() => setFilter(f.key)} />
           ))}
         </div>
@@ -1153,7 +1077,7 @@ function ReadingView({
                       className="w-full flex items-center gap-2 px-1.5 py-1.5 rounded text-left text-xs transition-colors hover:bg-black/5"
                       style={{ color: 'var(--aa-text-1, #292722)' }}
                     >
-                      {pageIcon(p, 12)}
+                      {knowledgePageIcon(p, 12)}
                       <span className="flex-1 truncate">{p.title}</span>
                     </button>
                   ))
@@ -1232,13 +1156,13 @@ function StartPicker({
         className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-black/[0.035]"
         style={{ color: '#292722' }}
       >
-        <span className="shrink-0">{pageIcon(p, 15)}</span>
+        <span className="shrink-0">{knowledgePageIcon(p, 15)}</span>
         <span className="flex-1 min-w-0 truncate text-sm">{p.title}</span>
         <span
           className="shrink-0 text-xs"
           style={{ color: 'var(--aa-text-3, #aba39b)' }}
         >
-          {kindLabel(p)}
+          {knowledgeKindLabel(p)}
           {degree > 0 ? ` · ${degree} 链` : ''}
         </span>
       </button>
@@ -1500,7 +1424,7 @@ function Pane({
           borderRight: '1px solid var(--aa-border, rgba(45,40,34,0.08))',
         }}
       >
-        <span className="shrink-0">{pageIcon(page, 15)}</span>
+        <span className="shrink-0">{knowledgePageIcon(page, 15)}</span>
         <span
           className="text-xs overflow-hidden"
           style={{
@@ -1534,7 +1458,7 @@ function Pane({
             className="text-xs px-2 py-0.5 rounded shrink-0"
             style={{ background: 'var(--aa-surface-hover, #eeebe6)', color: 'var(--aa-text-2, #87827c)' }}
           >
-            {kindLabel(page)}
+            {knowledgeKindLabel(page)}
           </span>
           <div className="flex-1" />
           {onClose && (
@@ -1642,7 +1566,7 @@ function RelRow({
       className="group flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-black/[0.035] focus-visible:bg-black/[0.035]"
       style={{ borderColor: 'var(--aa-border, rgba(45,40,34,0.08))' }}
     >
-      <span className="shrink-0">{pageIcon(page, 14)}</span>
+      <span className="shrink-0">{knowledgePageIcon(page, 14)}</span>
       <span className="flex-1 min-w-0 text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>
         {page.title}
       </span>
@@ -1743,7 +1667,7 @@ function Card({
   const [tagOpen, setTagOpen] = useState(false)
   const cover = pageHasCover(page)
   const isWeb = page.kind !== 'note' && page.materialKind === 'web'
-  const preview = cover ? '' : previewText(page)
+  const preview = cover ? '' : getKnowledgePreviewText(page)
 
   const myThemeIds = themeApi.themesOf(page.refId)
   const myThemes = themeApi.themes.filter((t) => myThemeIds.includes(t.id))
@@ -1796,9 +1720,9 @@ function Card({
         <div className="flex items-center gap-2 mb-3">
           {isWeb && page.thumbnail ? (
             <ImageWithFallback src={page.thumbnail} alt="" className="rounded-sm" style={{ width: 14, height: 14, objectFit: 'contain' }} />
-          ) : pageIcon(page)}
+          ) : knowledgePageIcon(page)}
           <span className="text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-            {kindLabel(page)}
+            {knowledgeKindLabel(page)}
           </span>
         </div>
         <h3
@@ -1834,7 +1758,7 @@ function Card({
         )}
 
         <div className="flex items-center gap-2 mt-4 text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-          <span>{timeAgo(page.collectedAt)}</span>
+          <span>{formatKnowledgeTimeAgo(page.collectedAt)}</span>
           {degree > 0 && (
             <>
               <span>·</span>
@@ -1875,7 +1799,7 @@ function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) 
   if (kind === 'pdf' && page.previewText) {
     return <div className="w-full overflow-hidden px-4 pt-4" style={{ height: 132, background: 'var(--aa-surface-hover, #eeebe6)' }}>
       <div className="w-full h-full rounded-t-md overflow-hidden" style={{ background: '#fff', border: '1px solid rgba(45,40,34,0.08)', padding: '14px 16px' }}>
-        <p className="m-0 whitespace-pre-wrap" style={{ color: 'var(--aa-text-2, #6b655e)', fontSize: 8.5, lineHeight: 1.5, fontFamily: 'var(--reading-font)' }}>{clean(page.previewText).slice(0, 240)}</p>
+        <p className="m-0 whitespace-pre-wrap" style={{ color: 'var(--aa-text-2, #6b655e)', fontSize: 8.5, lineHeight: 1.5, fontFamily: 'var(--reading-font)' }}>{cleanKnowledgeText(page.previewText).slice(0, 240)}</p>
       </div>
     </div>
   }
@@ -2060,7 +1984,7 @@ function LinkChip({ page, onClick, onRemove }: { page: ResolvedPage; onClick: ()
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
     >
-      {pageIcon(page, 12)}
+      {knowledgePageIcon(page, 12)}
       <span className="flex-1 text-xs truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>
         {page.title}
       </span>

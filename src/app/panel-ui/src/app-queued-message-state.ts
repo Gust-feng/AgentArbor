@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { TaskStatus } from "./contracts/common.js";
-import type { QueuedChatMessage } from "./contracts/composer";
-export type { QueuedChatMessage } from "./contracts/composer";
+
+export type QueuedChatMessage = {
+  readonly id: string;
+  readonly content: string;
+};
 
 export type AppQueuedMessageState = {
   readonly queuedMessages: readonly QueuedChatMessage[];

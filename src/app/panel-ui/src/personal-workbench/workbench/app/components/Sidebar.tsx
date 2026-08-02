@@ -14,12 +14,12 @@ import {
   AlertCircle,
   RotateCcw,
   LoaderCircle,
-  X,
 } from 'lucide-react'
 import { SidebarAnimation } from './SidebarAnimation'
+import { SidebarInlineRenameField } from './SidebarInlineRenameField'
+import { SpaceManagerDialog } from './SpaceManagerDialog'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
-import { useModalA11y } from './useModalA11y'
 
 export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'focus' | 'brain'
 
@@ -51,12 +51,6 @@ interface SidebarProps {
 
 const SIDEBAR_W           = 236
 const SIDEBAR_COLLAPSED_W = 0
-
-interface SpaceItem {
-  id: string
-  label: string
-  dot: string
-}
 
 const CONVERSATION_DOT_PALETTE = ['#6865a7', '#6f9279', '#c18a42', '#6f84a5', '#a66f66'] as const
 const SPACE_DOT_FALLBACK = '#a8c4b4'
@@ -215,7 +209,7 @@ function ListRow({ active, onClick, dot, label, meta, editing, editSelectAll, on
     >
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flexShrink: 0 }}/>
       {editing ? (
-        <InlineName value={label} onCommit={onRename} onCancel={onCancelRename} selectAll={editSelectAll}/>
+        <SidebarInlineRenameField value={label} onCommit={onRename} onCancel={onCancelRename} selectAll={editSelectAll}/>
       ) : (
         <span className="flex-1 text-left truncate">{label}</span>
       )}
@@ -235,46 +229,6 @@ function ListRow({ active, onClick, dot, label, meta, editing, editSelectAll, on
         </>
       )}
     </div>
-  )
-}
-
-// 行内重命名输入:回车/失焦提交,Esc 取消。淡下划线示意,不套原生蓝框。
-function InlineName({ value, onCommit, onCancel, selectAll }: { value: string; onCommit: (v: string) => void; onCancel: () => void; selectAll?: boolean }) {
-  const [draft, setDraft] = useState(value)
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.focus()
-    if (selectAll) el.select()
-    else {
-      const len = el.value.length
-      el.setSelectionRange(len, len)
-    }
-  }, [selectAll])
-  function commit() {
-    const t = draft.trim()
-    if (t) onCommit(t)
-    else onCancel()
-  }
-  return (
-    <input
-      ref={ref}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') commit()
-        if (e.key === 'Escape') onCancel()
-      }}
-      onBlur={commit}
-      className="flex-1 min-w-0 text-sm bg-transparent outline-none"
-      style={{
-        color: 'var(--aa-text-1)',
-        borderBottom: '1px solid rgba(45,40,34,0.25)',
-        paddingBottom: 1,
-      }}
-    />
   )
 }
 
@@ -731,7 +685,7 @@ export function Sidebar({
       </div>
 
       {showManager && (
-        <SpaceManagerModal
+        <SpaceManagerDialog
           spaces={projectedSpaces}
           onClose={() => setShowManager(false)}
           onRename={renameSpace}
@@ -773,103 +727,8 @@ function SpaceLoadFailure(props: {
   )
 }
 
-// ── SpaceManagerModal ────────────────────────────────────────────────────────
+// ── SpaceManagerDialog ───────────────────────────────────────────────────────
 // 「管理空间」入口打开的面板:集中查看 / 重命名 / 删除 / 新建所有空间。
-function SpaceManagerModal({
-  spaces,
-  onClose,
-  onRename,
-  onAdd,
-}: {
-  spaces: SpaceItem[]
-  onClose: () => void
-  onRename: (id: string, label: string) => void
-  onAdd: () => void
-}) {
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const modalRef = useModalA11y(onClose)
-
-  return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-6"
-      style={{ background: 'rgba(45,40,34,0.28)' }}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="管理空间"
-    >
-      <div
-        ref={modalRef}
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        className="w-full rounded-xl overflow-hidden outline-none"
-        style={{
-          maxWidth: 440,
-          background: 'var(--aa-surface)',
-          border: '1px solid var(--aa-border)',
-          boxShadow: '0 20px 60px rgba(45,40,34,0.24)',
-        }}
-      >
-        <header className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid var(--aa-border)' }}>
-          <div className="flex items-center gap-2">
-            <Layers size={15} style={{ color: 'var(--aa-accent)' }}/>
-            <h2 className="text-sm font-semibold m-0" style={{ color: 'var(--aa-text-1)' }}>管理空间</h2>
-          </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-black/5" style={{ color: 'var(--aa-text-3)' }}>
-            <X size={15}/>
-          </button>
-        </header>
-
-        <div className="px-3 py-2 max-h-[52vh] overflow-y-auto">
-          {spaces.length === 0 && (
-            <p className="text-xs text-center py-6" style={{ color: 'var(--aa-text-3)' }}>还没有空间,点下方「新建空间」开始。</p>
-          )}
-          {spaces.map((s) => (
-            <div
-              key={s.id}
-              className="group/mrow flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-black/5"
-            >
-              <span style={{ width: 9, height: 9, borderRadius: '50%', background: s.dot, flexShrink: 0 }}/>
-              {editingId === s.id ? (
-                <InlineName
-                  value={s.label}
-                  onCommit={(t) => { onRename(s.id, t); setEditingId(null) }}
-                  onCancel={() => setEditingId(null)}
-                />
-              ) : (
-                <span className="flex-1 text-sm truncate" style={{ color: 'var(--aa-text-1)' }}>{s.label}</span>
-              )}
-              {editingId !== s.id && (
-                <div className="flex items-center gap-0.5 opacity-0 group-hover/mrow:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => setEditingId(s.id)}
-                    title="重命名"
-                    className="p-1.5 rounded-md hover:bg-black/10"
-                    style={{ color: 'var(--aa-text-3)' }}
-                  >
-                    <Pencil size={13}/>
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <footer className="px-3 py-3" style={{ borderTop: '1px solid var(--aa-border)' }}>
-          <button
-            onClick={onAdd}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors hover:bg-black/5"
-            style={{ color: 'var(--aa-accent)', border: '1px dashed var(--aa-border)' }}
-          >
-            <Plus size={14}/>
-            新建空间
-          </button>
-        </footer>
-      </div>
-    </div>
-  )
-}
-
 function compareConversations(left: ConversationSummary, right: ConversationSummary): number {
   const leftPinned = left.pinnedAt !== undefined
   const rightPinned = right.pinnedAt !== undefined

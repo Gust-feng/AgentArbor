@@ -8,14 +8,10 @@ import type { AppUpdateInfo } from "../../contracts/app-update";
 import type { Conversation, ConversationSummary } from "../../contracts/conversation";
 import type { PendingConfirmation } from "../../contracts/run";
 import type { PersonalSpaceActions, PersonalSpaceProjection } from "../space";
-import { BrainPage } from "./app/components/BrainPage";
-import { ConversationSurface } from "./app/components/ConversationSurface";
 import { DeferredSurfaceBoundary } from "./app/components/DeferredSurfaceBoundary";
-import { HomePage } from "./app/components/HomePage";
-import { SearchPage } from "./app/components/SearchPage";
 import { type View, Sidebar } from "./app/components/Sidebar";
-import { SpacePage } from "./app/components/SpacePage";
 import { TopBar } from "./app/components/TopBar";
+import { WorkbenchViewRouter } from "./app/components/WorkbenchViewRouter";
 import { resolveById } from "./app/components/brainStore";
 import { useWorkbenchNavigation } from "./workbench-navigation";
 import { applyPrefs, loadPrefs } from "../../reading-preferences";
@@ -215,20 +211,20 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
               isKnowledgeView(view) && (knowledgeLoadState.status === "loading" || knowledgeLoadState.status === "retrying")
             ) ? <WorkbenchBootstrapLoading /> : (
               <DeferredSurfaceBoundary resetKey={view} label="这个视图暂时无法打开">
-                  {renderView({
-                    view,
-                    props,
-                    activeConversation,
-                    homeInput,
-                    homeFocusRequest,
-                    conversationInput,
-                    brainSelectedId,
-                    spaceTargetId,
-                    activeSpaceId,
-                    onBrainSelect,
-                    navigate,
-                    onOpenInSpace,
-                  })}
+                  <WorkbenchViewRouter
+                    view={view}
+                    props={props}
+                    activeConversation={activeConversation}
+                    homeInput={homeInput}
+                    homeFocusRequest={homeFocusRequest}
+                    conversationInput={conversationInput}
+                    brainSelectedId={brainSelectedId}
+                    spaceTargetId={spaceTargetId}
+                    activeSpaceId={activeSpaceId}
+                    onBrainSelect={onBrainSelect}
+                    navigate={navigate}
+                    onOpenInSpace={onOpenInSpace}
+                  />
               </DeferredSurfaceBoundary>
             )}
           </div>
@@ -280,66 +276,6 @@ function viewLabel(view: View): string {
     case "conv-active":
     case "conv-done": return "对话工作台";
   }
-}
-
-function renderView(input: {
-  readonly view: View;
-  readonly props: PersonalWorkbenchProps;
-  readonly activeConversation?: Conversation;
-  readonly homeInput: ChatInputProps;
-  readonly homeFocusRequest: number;
-  readonly conversationInput: ChatInputProps;
-  readonly brainSelectedId: string | null;
-  readonly spaceTargetId: string | null;
-  readonly activeSpaceId: string | null;
-  readonly onBrainSelect: (id: string | null) => void;
-  readonly navigate: (view: View) => void;
-  readonly onOpenInSpace: (spaceId: string, id: string) => void;
-}) {
-  if (input.view === "home") {
-    return <HomePage
-      onNavigate={input.navigate}
-      onOpenConversation={input.props.onOpenConversation}
-      conversations={input.props.conversations}
-      input={input.homeInput}
-      focusRequest={input.homeFocusRequest}
-    />;
-  }
-  if (input.view === "space") {
-    const activeSpace = input.props.spaces?.find((space) => space.spaceId === input.activeSpaceId);
-    return <SpacePage
-      key={activeSpace?.spaceId ?? "space-empty"}
-      onNavigate={input.navigate}
-      targetId={input.spaceTargetId}
-      space={activeSpace}
-      actions={input.props.spaceActions}
-      currentConversation={input.activeConversation === undefined ? undefined : {
-        conversationId: input.activeConversation.conversationId,
-        title: input.activeConversation.title,
-      }}
-      onOpenItem={input.props.onOpenSpaceItem}
-      onOpenConversation={input.props.onOpenConversation}
-    />;
-  }
-  if (input.view === "brain") {
-    return <BrainPage
-      selectedId={input.brainSelectedId}
-      onSelect={input.onBrainSelect}
-    />;
-  }
-  if (input.view === "search") {
-    return <SearchPage
-      onNavigate={input.navigate}
-      onOpenInSpace={input.onOpenInSpace}
-      onOpenConversation={input.props.onOpenConversation}
-      spaces={input.props.spaces ?? []}
-      conversations={input.props.conversations}
-    />;
-  }
-  if (input.view === "focus") {
-    return <ConversationSurface props={input.props} conversation={input.activeConversation} input={input.conversationInput} focus onExitFocus={() => input.navigate("conv-active")} />;
-  }
-  return <ConversationSurface props={input.props} conversation={input.activeConversation} input={input.conversationInput} onEnterFocus={() => input.navigate("focus")} />;
 }
 
 function isConversationView(view: View): boolean {

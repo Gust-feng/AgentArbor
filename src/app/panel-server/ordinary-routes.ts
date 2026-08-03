@@ -174,9 +174,7 @@ async function submitTurn(
     input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
     birth: await runtime.prepareOrdinaryRunBirth(effectiveRunInput),
   });
-  if (runtime.remoteDesktopStore.listSharedConversationIds().includes(submitted.conversation.conversationId)) {
-    await runtime.remoteCollaborationFeature.commands.publishRun(submitted.run.runId);
-  }
+  await runtime.remoteCollaborationFeature.commands.publishRun(submitted.run.runId);
   const run = await projectCommandRun(runtime, submitted.run);
   writeJson(response, 202, {
     ok: true,

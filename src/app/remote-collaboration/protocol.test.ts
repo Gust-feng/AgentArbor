@@ -96,3 +96,27 @@ test("durable synchronization rejects conversation and command bodies", () => {
     spaces: [],
   }));
 });
+
+test("paged content snapshots require valid page metadata and UTF-8 byte limits", () => {
+  const base = {
+    kind: "asset.snapshot",
+    eventId: "asset-event",
+    snapshotId: "asset-snapshot",
+    pageIndex: 0,
+    pageCount: 1,
+    assets: [],
+  };
+  assert.doesNotThrow(() => parseRemoteSyncSnapshot(base));
+  assert.throws(() => parseRemoteSyncSnapshot({ ...base, pageIndex: 1 }));
+
+  assert.throws(() => parseRemoteMessageContent({
+    type: "command",
+    command: {
+      kind: "asset.replace_text",
+      commandId: "asset-command",
+      assetId: "asset-1",
+      expectedFingerprint: `sha256:${"a".repeat(64)}`,
+      text: "中".repeat(200_000),
+    },
+  }));
+});

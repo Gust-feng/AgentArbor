@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import type { RemoteCommand, RemoteEvent } from "./protocol.js";
 
-type ConversationSnapshot = Extract<RemoteEvent, { readonly kind: "conversation.snapshot" }>;
+type ConversationIndex = Extract<RemoteEvent, { readonly kind: "conversation.index" }>;
+type ConversationPage = Extract<RemoteEvent, { readonly kind: "conversation.page" }>;
 type RunSnapshot = Extract<RemoteEvent, { readonly kind: "run.snapshot" }>;
 type SpaceSnapshot = Extract<RemoteEvent, { readonly kind: "space.snapshot" }>;
 type NotebookSnapshot = Extract<RemoteEvent, { readonly kind: "notebook.snapshot" }>;
+type AssetSnapshot = Extract<RemoteEvent, { readonly kind: "asset.snapshot" }>;
+type ManagedFolderSnapshot = Extract<RemoteEvent, { readonly kind: "managed_folder.snapshot" }>;
 type RemoteOrdinaryActivity =
   | { readonly kind: "text_delta"; readonly sequence: number; readonly delta: string }
   | { readonly kind: "state_changed"; readonly sequence: number };
@@ -25,9 +28,13 @@ export type RemoteCommandHandlerPorts = {
       readonly decision: "approve_once" | "deny" | "guidance";
       readonly guidance?: string;
     }): Promise<void>;
-    conversationSnapshot(conversationId: string): Promise<ConversationSnapshot>;
+    conversationIndex(): Promise<ConversationIndex>;
+    conversationPage(input: {
+      readonly conversationId: string;
+      readonly beforeTurnId?: string;
+      readonly limit: number;
+    }): Promise<ConversationPage>;
     runSnapshot(runId: string): Promise<RunSnapshot>;
-    allConversationSnapshots(): Promise<readonly ConversationSnapshot[]>;
     subscribe(runId: string, listener: (activity: RemoteOrdinaryActivity) => void): () => void;
   };
   readonly spaces: {
@@ -41,12 +48,12 @@ export type RemoteCommandHandlerPorts = {
   };
   readonly assets: {
     replaceText(input: Extract<RemoteCommand, { readonly kind: "asset.replace_text" }>): Promise<void>;
-    snapshot(): Promise<Extract<RemoteEvent, { readonly kind: "asset.snapshot" }>>;
+    snapshot(): Promise<readonly AssetSnapshot[]>;
   };
   readonly managedFiles: {
     replaceText(input: Extract<RemoteCommand, { readonly kind: "managed_file.replace_text" }>): Promise<void>;
     createText(input: Extract<RemoteCommand, { readonly kind: "managed_file.create_text" }>): Promise<void>;
-    snapshot(): Promise<Extract<RemoteEvent, { readonly kind: "managed_folder.snapshot" }>>;
+    snapshot(): Promise<readonly ManagedFolderSnapshot[]>;
   };
 };
 
@@ -126,13 +133,21 @@ export function createRemoteCommandHandler(input: {
             listener([run]);
             return;
           }
-          listener([run, await input.ports.ordinary.conversationSnapshot(run.conversationId)]);
+          listener([
+            run,
+            await input.ports.ordinary.conversationIndex(),
+            await input.ports.ordinary.conversationPage({ conversationId: run.conversationId, limit: 50 }),
+          ]);
         }).catch((error: unknown) => onError?.(error));
       });
     },
     async snapshotsForRun(runId: string): Promise<readonly RemoteEvent[]> {
       const run = await input.ports.ordinary.runSnapshot(runId);
-      return [await input.ports.ordinary.conversationSnapshot(run.conversationId), run];
+      return [
+        await input.ports.ordinary.conversationIndex(),
+        await input.ports.ordinary.conversationPage({ conversationId: run.conversationId, limit: 50 }),
+        run,
+      ];
     },
   };
 }
@@ -150,10 +165,17 @@ async function applyCommand(
         ...(command.spaceId === undefined ? {} : { spaceId: command.spaceId }),
       });
       return Promise.all([
-        ports.ordinary.conversationSnapshot(submitted.conversationId),
+        ports.ordinary.conversationIndex(),
+        ports.ordinary.conversationPage({ conversationId: submitted.conversationId, limit: 50 }),
         ports.ordinary.runSnapshot(submitted.runId),
       ]);
     }
+    case "conversation.page.request":
+      return [await ports.ordinary.conversationPage({
+        conversationId: command.conversationId,
+        ...(command.beforeTurnId === undefined ? {} : { beforeTurnId: command.beforeTurnId }),
+        limit: command.limit ?? 50,
+      })];
     case "run.cancel":
       await ports.ordinary.cancel(command.runId);
       return [await ports.ordinary.runSnapshot(command.runId)];
@@ -176,21 +198,29 @@ async function applyCommand(
       return [await ports.notebooks.snapshot()];
     case "asset.replace_text":
       await ports.assets.replaceText(command);
-      return [await ports.assets.snapshot()];
+      return ports.assets.snapshot();
     case "managed_file.replace_text":
       await ports.managedFiles.replaceText(command);
-      return [await ports.managedFiles.snapshot()];
+      return ports.managedFiles.snapshot();
     case "managed_file.create_text":
       await ports.managedFiles.createText(command);
-      return [await ports.managedFiles.snapshot()];
-    case "sync.snapshot.request":
+      return ports.managedFiles.snapshot();
+    case "sync.snapshot.request": {
+      const [conversationIndex, spaces, notebooks, assets, managedFolders] = await Promise.all([
+        ports.ordinary.conversationIndex(),
+        ports.spaces.snapshot(),
+        ports.notebooks.snapshot(),
+        ports.assets.snapshot(),
+        ports.managedFiles.snapshot(),
+      ]);
       return [
-        ...(await ports.ordinary.allConversationSnapshots()),
-        await ports.spaces.snapshot(),
-        await ports.notebooks.snapshot(),
-        await ports.assets.snapshot(),
-        await ports.managedFiles.snapshot(),
+        conversationIndex,
+        spaces,
+        notebooks,
+        ...assets,
+        ...managedFolders,
       ];
+    }
   }
 }
 

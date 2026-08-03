@@ -1,34 +1,61 @@
+import { z } from "zod";
+
 import {
   REMOTE_COLLABORATION_PROTOCOL_VERSION,
-  parseRemoteSyncSnapshot,
   remoteServerFrameSchema,
   type RemoteCommand,
   type RemoteEvent,
   type RemoteMessageContent,
 } from "../../remote-collaboration/protocol";
-import type {
-  MobileBinding,
-  MobilePairingClaim,
-  MobileRemoteStorage,
-} from "./storage";
+import { createMobileCredentialStore, type MobileCredentialStore } from "./credential-storage";
+import type { MobileBinding, MobilePairingClaim, MobileRemoteStorage } from "./storage";
 
-type ConversationSnapshot = Extract<RemoteEvent, { readonly kind: "conversation.snapshot" }>;
+type ConversationIndex = Extract<RemoteEvent, { readonly kind: "conversation.index" }>;
+type ConversationPage = Extract<RemoteEvent, { readonly kind: "conversation.page" }>;
 type RunSnapshot = Extract<RemoteEvent, { readonly kind: "run.snapshot" }>;
 type SpaceSnapshot = Extract<RemoteEvent, { readonly kind: "space.snapshot" }>;
 type NotebookSnapshot = Extract<RemoteEvent, { readonly kind: "notebook.snapshot" }>;
 type AssetSnapshot = Extract<RemoteEvent, { readonly kind: "asset.snapshot" }>;
 type ManagedFolderSnapshot = Extract<RemoteEvent, { readonly kind: "managed_folder.snapshot" }>;
 
+const accountSchema = z.object({
+  accountId: z.string().min(1),
+  handle: z.string().min(3),
+  displayName: z.string().min(1),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+}).strict();
+const pairingClaimSchema = z.object({
+  pairingId: z.string().min(1),
+  pairingCode: z.string().regex(/^\d{6}$/u),
+  deviceId: z.string().min(1),
+  deviceName: z.string().min(1),
+  role: z.literal("mobile"),
+  claimSecret: z.string().min(32),
+  accessToken: z.string().min(32),
+  expiresAt: z.string().min(1),
+  account: accountSchema,
+}).strict();
+const pairingStatusSchema = z.object({
+  pairingId: z.string().min(1),
+  pairingCode: z.string().regex(/^\d{6}$/u),
+  status: z.enum(["waiting_for_mobile", "waiting_for_approval", "paired", "expired", "rejected"]),
+  expiresAt: z.string().min(1),
+  mobile: z.object({ deviceId: z.string().min(1), deviceName: z.string().min(1) }).strict().optional(),
+  desktop: z.object({ deviceId: z.string().min(1), deviceName: z.string().min(1) }).strict(),
+  account: accountSchema,
+}).strict();
+
 export type MobileRemoteState = {
   readonly connection: "loading" | "unpaired" | "pairing" | "connecting" | "connected" | "offline";
   readonly pairing?: MobilePairingClaim & {
+    readonly status?: "waiting_for_approval" | "paired" | "expired" | "rejected";
     readonly peerDeviceName?: string;
-    readonly localConfirmed?: boolean;
-    readonly peerConfirmed?: boolean;
   };
   readonly binding?: MobileBinding;
   readonly peerOnline: boolean;
-  readonly conversations: readonly ConversationSnapshot[];
+  readonly conversations: ConversationIndex["conversations"];
+  readonly conversationPages: Readonly<Record<string, ConversationPage>>;
   readonly runs: readonly RunSnapshot[];
   readonly spaces: SpaceSnapshot["spaces"];
   readonly notebooks: NotebookSnapshot["notebooks"];
@@ -55,6 +82,7 @@ export class RemoteMobileClient {
     readonly storage: MobileRemoteStorage,
     readonly fetch: typeof globalThis.fetch = globalThis.fetch,
     readonly createWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
+    readonly credentials: MobileCredentialStore = createMobileCredentialStore(),
   ) {}
 
   snapshot = (): MobileRemoteState => this.#state;
@@ -66,23 +94,26 @@ export class RemoteMobileClient {
 
   async start(): Promise<void> {
     this.#released = false;
-    const [pairing, binding, events, outbox] = await Promise.all([
+    const [pairing, binding, events, outbox, token] = await Promise.all([
       this.storage.getPairing(),
       this.storage.getBinding(),
       this.storage.listEvents(),
       this.storage.listOutbox(),
+      this.credentials.readDeviceToken(),
     ]);
     let state = events.reduce(applyRemoteEvent, emptyState());
+    const usableBinding = token === undefined ? undefined : binding;
     state = {
       ...state,
-      connection: binding !== undefined ? "offline" : pairing !== undefined ? "pairing" : "unpaired",
+      connection: usableBinding !== undefined ? "offline" : pairing !== undefined && token !== undefined ? "pairing" : "unpaired",
       peerOnline: false,
-      ...(pairing === undefined ? {} : { pairing }),
-      ...(binding === undefined ? {} : { binding }),
+      ...(pairing === undefined || token === undefined ? {} : { pairing }),
+      ...(usableBinding === undefined ? {} : { binding: usableBinding }),
       pendingCommandIds: outbox.flatMap((entry) => entry.content.type === "command" ? [entry.content.command.commandId] : []),
     };
     this.#setState(state);
-    if (binding !== undefined && !this.#released) await this.connect().catch(() => undefined);
+    if (pairing !== undefined && token !== undefined) await this.inspectPairing().catch(() => undefined);
+    if (usableBinding !== undefined && !this.#released) await this.connect().catch(() => undefined);
   }
 
   async joinPairing(relayUrl: string, pairingCode: string, deviceName: string): Promise<void> {
@@ -91,66 +122,68 @@ export class RemoteMobileClient {
       method: "POST",
       body: JSON.stringify({ pairingCode: pairingCode.replace(/\D/gu, ""), deviceName }),
     });
-    const remote = response.pairing as Omit<MobilePairingClaim, "relayUrl">;
-    const pairing = { ...remote, relayUrl: normalizedRelayUrl };
-    await this.storage.savePairing(pairing);
-    this.#setState({ ...this.#state, connection: "pairing", pairing, error: undefined });
+    const remote = pairingClaimSchema.parse(response.pairing);
+    const pairing: MobilePairingClaim = {
+      relayUrl: normalizedRelayUrl,
+      pairingId: remote.pairingId,
+      pairingCode: remote.pairingCode,
+      deviceId: remote.deviceId,
+      deviceName: remote.deviceName,
+      claimSecret: remote.claimSecret,
+      expiresAt: remote.expiresAt,
+      account: {
+        accountId: remote.account.accountId,
+        handle: remote.account.handle,
+        displayName: remote.account.displayName,
+      },
+    };
+    await this.credentials.writeDeviceToken(remote.accessToken);
+    try {
+      await this.storage.savePairing(pairing);
+    } catch (error) {
+      await this.credentials.deleteDeviceToken().catch(() => undefined);
+      throw error;
+    }
+    this.#setState({
+      ...this.#state,
+      connection: "pairing",
+      pairing: { ...pairing, status: "waiting_for_approval" },
+      error: undefined,
+    });
   }
 
   async inspectPairing(): Promise<void> {
-    const pairing = this.#state.pairing;
+    const pairing = this.#state.pairing ?? await this.storage.getPairing();
     if (pairing === undefined) return;
     const response = await fetchJson(this.fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}/status`, {
       method: "POST",
       body: JSON.stringify({ claimSecret: pairing.claimSecret }),
     });
-    await this.#applyPairingStatus(response.pairing as PairingStatus);
-  }
-
-  async confirmPairing(): Promise<void> {
-    const pairing = this.#state.pairing;
-    if (pairing === undefined) return;
-    const response = await fetchJson(this.fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}/confirm`, {
-      method: "POST",
-      body: JSON.stringify({ claimSecret: pairing.claimSecret, pairingCode: pairing.pairingCode }),
-    });
-    await this.#applyPairingStatus(response.pairing as PairingStatus);
-  }
-
-  async #applyPairingStatus(status: PairingStatus): Promise<void> {
-    const pairing = this.#state.pairing;
-    if (pairing === undefined) return;
+    const status = pairingStatusSchema.parse(response.pairing);
     this.#setState({
       ...this.#state,
-      pairing: {
-        ...pairing,
-        ...(status.peer === undefined ? {} : { peerDeviceName: status.peer.deviceName }),
-        localConfirmed: status.localConfirmed,
-        peerConfirmed: status.peerConfirmed,
-      },
+      connection: "pairing",
+      pairing: { ...pairing, status: status.status === "waiting_for_mobile" ? "waiting_for_approval" : status.status, peerDeviceName: status.desktop.deviceName },
     });
-    if (status.status !== "paired" || status.peer === undefined) return;
-    const response = await fetchJson(this.fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}/token`, {
-      method: "POST",
-      body: JSON.stringify({ claimSecret: pairing.claimSecret }),
-    });
-    const token = response.device as { deviceId: string; accessToken: string };
+    if (status.status !== "paired") return;
     const binding: MobileBinding = {
       relayUrl: pairing.relayUrl,
-      deviceId: token.deviceId,
-      accessToken: token.accessToken,
-      peerDeviceId: status.peer.deviceId,
-      peerDeviceName: status.peer.deviceName,
+      accountId: status.account.accountId,
+      accountHandle: status.account.handle,
+      displayName: status.account.displayName,
+      deviceId: pairing.deviceId,
+      peerDeviceId: status.desktop.deviceId,
+      peerDeviceName: status.desktop.deviceName,
     };
     await this.storage.saveBinding(binding);
     await this.storage.clearPairing();
-    this.#setState({ ...this.#state, connection: "offline", pairing: undefined, binding });
+    this.#setState({ ...this.#state, connection: "offline", pairing: undefined, binding, error: undefined });
     await this.connect();
   }
 
   async connect(): Promise<void> {
-    const binding = await this.storage.getBinding();
-    if (binding === undefined || this.#released || this.#socket?.readyState === WebSocket.OPEN) return;
+    const [binding, token] = await Promise.all([this.storage.getBinding(), this.credentials.readDeviceToken()]);
+    if (binding === undefined || token === undefined || this.#released || this.#socket?.readyState === WebSocket.OPEN) return;
     if (this.#reconnectTimer !== undefined) window.clearTimeout(this.#reconnectTimer);
     this.#reconnectTimer = undefined;
     this.#setState({ ...this.#state, connection: "connecting", binding, error: undefined });
@@ -162,7 +195,7 @@ export class RemoteMobileClient {
       socket.onopen = () => socket.send(JSON.stringify({
         protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
         type: "client.hello",
-        token: binding.accessToken,
+        token,
       }));
       socket.onmessage = (message) => {
         void (async () => {
@@ -175,8 +208,8 @@ export class RemoteMobileClient {
             if (current === undefined) return;
             const next = {
               ...current,
-              peerDeviceId: frame.peerDeviceId,
-              peerDeviceName: frame.peerDeviceName,
+              ...(frame.peerDeviceId === undefined ? {} : { peerDeviceId: frame.peerDeviceId }),
+              ...(frame.peerDeviceName === undefined ? {} : { peerDeviceName: frame.peerDeviceName }),
             };
             await this.storage.saveBinding(next);
             this.#setState({
@@ -187,7 +220,7 @@ export class RemoteMobileClient {
               error: undefined,
             });
             await this.#flushOutbox();
-            await this.#pullSnapshots();
+            if (frame.peerOnline) await this.#ensureSnapshotRequest();
             resolve();
             return;
           }
@@ -207,20 +240,15 @@ export class RemoteMobileClient {
             this.#setState({ ...this.#state, peerOnline: frame.online, error: undefined });
             if (frame.online) {
               await this.#flushOutbox();
+              await this.#ensureSnapshotRequest();
             }
             return;
           }
           if (frame.type === "message.deliver") {
-            await this.#receiveMessage(
-              frame.message.messageId,
-              frame.message.clientMessageId,
-              frame.message.content,
-            );
+            await this.#receiveMessage(frame.message.messageId, frame.message.clientMessageId, frame.message.content);
             return;
           }
-          if (frame.type === "server.error") {
-            this.#setState({ ...this.#state, error: frame.message });
-          }
+          if (frame.type === "server.error") this.#setState({ ...this.#state, error: frame.message });
         })().catch((error: unknown) => this.#setState({
           ...this.#state,
           error: error instanceof Error ? error.message : "无法处理同步消息",
@@ -268,32 +296,29 @@ export class RemoteMobileClient {
     return commandId;
   }
 
+  async requestConversationPage(conversationId: string, beforeTurnId?: string): Promise<string> {
+    return this.sendCommand({
+      kind: "conversation.page.request",
+      conversationId,
+      ...(beforeTurnId === undefined ? {} : { beforeTurnId }),
+      limit: 50,
+    });
+  }
+
   async forgetDevice(): Promise<void> {
     this.#released = true;
     if (this.#reconnectTimer !== undefined) window.clearTimeout(this.#reconnectTimer);
     this.#reconnectTimer = undefined;
-    const binding = await this.storage.getBinding();
-    try {
-      if (binding !== undefined) {
-        await fetchJson(this.fetch, `${binding.relayUrl}/v1/devices/${encodeURIComponent(binding.deviceId)}/revoke`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${binding.accessToken}` },
-        });
-      }
-    } catch (error) {
-      this.#socket?.close(1000, "mobile_revoke_failed");
-      this.#socket = undefined;
-      this.#released = false;
-      this.#setState({
-        ...this.#state,
-        connection: binding === undefined ? "pairing" : "offline",
-        error: error instanceof Error ? error.message : "无法撤销远程设备",
+    const [binding, token] = await Promise.all([this.storage.getBinding(), this.credentials.readDeviceToken()]);
+    if (binding !== undefined && token !== undefined) {
+      await fetchJson(this.fetch, `${binding.relayUrl}/v1/devices/${encodeURIComponent(binding.deviceId)}/revoke`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
       });
-      throw error;
     }
     this.#socket?.close(1000, "mobile_forgot_device");
     this.#socket = undefined;
-    await this.storage.clearDeviceData();
+    await Promise.all([this.storage.clearDeviceData(), this.credentials.deleteDeviceToken()]);
     this.#released = false;
     this.#setState(emptyState("unpaired"));
   }
@@ -306,22 +331,17 @@ export class RemoteMobileClient {
     this.#listeners.clear();
   }
 
-  async #receiveMessage(
-    messageId: string,
-    clientMessageId: string,
-    content: RemoteMessageContent,
-  ): Promise<void> {
+  async #receiveMessage(messageId: string, clientMessageId: string, content: RemoteMessageContent): Promise<void> {
     if (await this.storage.hasReceived(clientMessageId)) {
       this.#acknowledge(messageId);
       return;
     }
     if (content.type === "event") {
-      if (content.event.kind === "sync.changed") {
-        await this.#pullSnapshots();
-      } else {
-        if (content.event.kind !== "run.delta") await this.storage.saveEvent(content.event);
-        this.#setState(applyRemoteEvent(this.#state, content.event));
+      const next = applyRemoteEvent(this.#state, content.event);
+      if (content.event.kind !== "run.delta") {
+        await this.storage.saveEvent(materializeCachedEvent(next, content.event));
       }
+      this.#setState(next);
     }
     await this.storage.markReceived(clientMessageId, new Date().toISOString());
     this.#acknowledge(messageId);
@@ -336,7 +356,7 @@ export class RemoteMobileClient {
   }
 
   async #flushOutbox(): Promise<void> {
-    if (this.#socket?.readyState !== WebSocket.OPEN || this.#state.connection !== "connected") return;
+    if (this.#socket?.readyState !== WebSocket.OPEN || this.#state.connection !== "connected" || !this.#state.peerOnline) return;
     for (const entry of await this.storage.listOutbox()) this.#socket.send(JSON.stringify({
       protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
       type: "message.submit",
@@ -345,20 +365,10 @@ export class RemoteMobileClient {
     }));
   }
 
-  async #pullSnapshots(): Promise<void> {
-    const binding = await this.storage.getBinding();
-    if (binding === undefined) return;
-    const body = await fetchJson(this.fetch, `${binding.relayUrl}/v1/sync/snapshots`, {
-      method: "GET",
-      headers: { authorization: `Bearer ${binding.accessToken}` },
-    });
-    const documents = Array.isArray(body.documents) ? body.documents : [];
-    for (const document of documents) {
-      if (typeof document !== "object" || document === null || !("snapshot" in document)) continue;
-      const snapshot = parseRemoteSyncSnapshot((document as { snapshot: unknown }).snapshot);
-      await this.storage.saveEvent(snapshot);
-      this.#setState(applyRemoteEvent(this.#state, snapshot));
-    }
+  async #ensureSnapshotRequest(): Promise<void> {
+    const pending = await this.storage.listOutbox();
+    if (pending.some((entry) => entry.content.type === "command" && entry.content.command.kind === "sync.snapshot.request")) return;
+    await this.sendCommand({ kind: "sync.snapshot.request" });
   }
 
   #scheduleReconnect(): void {
@@ -378,10 +388,18 @@ export class RemoteMobileClient {
 
 export function applyRemoteEvent(state: MobileRemoteState, event: RemoteEvent): MobileRemoteState {
   switch (event.kind) {
-    case "conversation.snapshot":
-      return { ...state, conversations: replaceBy(state.conversations, event, "conversationId") };
-    case "run.snapshot":
-      return { ...state, runs: replaceBy(state.runs, event, "runId") };
+    case "conversation.index": return { ...state, conversations: event.conversations };
+    case "conversation.page": {
+      const current = state.conversationPages[event.conversationId];
+      const merged = event.beforeTurnId === undefined || current === undefined
+        ? event
+        : {
+            ...event,
+            turns: uniqueTurns([...event.turns, ...current.turns]),
+          };
+      return { ...state, conversationPages: { ...state.conversationPages, [event.conversationId]: merged } };
+    }
+    case "run.snapshot": return { ...state, runs: replaceBy(state.runs, event, "runId") };
     case "run.delta": {
       const current = state.runs.find((run) => run.runId === event.runId);
       if (current === undefined) return state;
@@ -393,11 +411,28 @@ export function applyRemoteEvent(state: MobileRemoteState, event: RemoteEvent): 
         }, "runId"),
       };
     }
-    case "sync.changed": return state;
     case "space.snapshot": return { ...state, spaces: event.spaces };
     case "notebook.snapshot": return { ...state, notebooks: event.notebooks };
-    case "asset.snapshot": return { ...state, assets: event.assets };
-    case "managed_folder.snapshot": return { ...state, managedFolders: event.folders };
+    case "asset.snapshot": {
+      const base = event.pageIndex === 0 ? [] : state.assets;
+      let assets: MobileRemoteState["assets"] = [...base];
+      for (const asset of event.assets) assets = replaceBy(assets, asset, "assetId");
+      return { ...state, assets };
+    }
+    case "managed_folder.snapshot": {
+      const base = event.pageIndex === 0 ? [] : state.managedFolders;
+      let managedFolders: MobileRemoteState["managedFolders"] = [...base];
+      for (const pageFolder of event.folders) {
+        const current = managedFolders.find((folder) => folder.referenceId === pageFolder.referenceId);
+        let files = [...(current?.files ?? [])];
+        for (const file of pageFolder.files) files = replaceBy(files, file, "relativePath");
+        const folder = current === undefined
+          ? pageFolder
+          : { ...pageFolder, files };
+        managedFolders = replaceBy(managedFolders, folder, "referenceId");
+      }
+      return { ...state, managedFolders };
+    }
     case "command.result": return {
       ...state,
       pendingCommandIds: state.pendingCommandIds.filter((id) => id !== event.commandId),
@@ -406,8 +441,23 @@ export function applyRemoteEvent(state: MobileRemoteState, event: RemoteEvent): 
   }
 }
 
-function replaceBy<T, K extends keyof T>(items: readonly T[], item: T, key: K): readonly T[] {
+function materializeCachedEvent(state: MobileRemoteState, event: RemoteEvent): RemoteEvent {
+  if (event.kind === "asset.snapshot") {
+    return { ...event, pageIndex: 0, pageCount: 1, assets: state.assets };
+  }
+  if (event.kind === "managed_folder.snapshot") {
+    return { ...event, pageIndex: 0, pageCount: 1, folders: state.managedFolders };
+  }
+  return event;
+}
+
+function replaceBy<T, K extends keyof T>(items: readonly T[], item: T, key: K): T[] {
   return [item, ...items.filter((candidate) => candidate[key] !== item[key])];
+}
+
+function uniqueTurns(turns: ConversationPage["turns"]): ConversationPage["turns"] {
+  const seen = new Set<string>();
+  return turns.filter((turn) => !seen.has(turn.turnId) && seen.add(turn.turnId));
 }
 
 function emptyState(connection: MobileRemoteState["connection"] = "loading"): MobileRemoteState {
@@ -415,6 +465,7 @@ function emptyState(connection: MobileRemoteState["connection"] = "loading"): Mo
     connection,
     peerOnline: false,
     conversations: [],
+    conversationPages: {},
     runs: [],
     spaces: [],
     notebooks: [],
@@ -424,13 +475,6 @@ function emptyState(connection: MobileRemoteState["connection"] = "loading"): Mo
     commandResults: [],
   };
 }
-
-type PairingStatus = {
-  readonly status: "waiting_for_peer" | "waiting_for_confirmation" | "paired" | "expired";
-  readonly localConfirmed: boolean;
-  readonly peerConfirmed: boolean;
-  readonly peer?: { readonly deviceId: string; readonly deviceName: string };
-};
 
 async function fetchJson(fetch: typeof globalThis.fetch, url: string, init: RequestInit): Promise<Record<string, unknown>> {
   const response = await fetch(url, { ...init, headers: { "content-type": "application/json", ...init.headers } });

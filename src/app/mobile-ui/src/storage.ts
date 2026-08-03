@@ -1,7 +1,7 @@
 import type { RemoteEvent, RemoteMessageContent } from "../../remote-collaboration/protocol";
 
 const DATABASE_NAME = "agentarbor-remote-v1";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 
 export type MobilePairingClaim = {
   readonly relayUrl: string;
@@ -11,12 +11,19 @@ export type MobilePairingClaim = {
   readonly deviceName: string;
   readonly claimSecret: string;
   readonly expiresAt: string;
+  readonly account: {
+    readonly accountId: string;
+    readonly handle: string;
+    readonly displayName: string;
+  };
 };
 
 export type MobileBinding = {
   readonly relayUrl: string;
+  readonly accountId: string;
+  readonly accountHandle: string;
+  readonly displayName: string;
   readonly deviceId: string;
-  readonly accessToken: string;
   readonly peerDeviceId: string;
   readonly peerDeviceName: string;
 };
@@ -91,10 +98,10 @@ function openDatabase(): Promise<IDBDatabase> {
 
 function eventCacheKey(event: RemoteEvent): string {
   switch (event.kind) {
-    case "conversation.snapshot": return `conversation:${event.conversationId}`;
+    case "conversation.index": return "conversation-index";
+    case "conversation.page": return `conversation-page:${event.conversationId}:${event.beforeTurnId ?? "latest"}`;
     case "run.snapshot": return `run:${event.runId}`;
     case "run.delta": return `run-delta:${event.eventId}`;
-    case "sync.changed": return `sync-change:${event.documentKind}`;
     case "space.snapshot": return "spaces";
     case "notebook.snapshot": return "notebooks";
     case "asset.snapshot": return "assets";

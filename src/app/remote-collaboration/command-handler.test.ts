@@ -21,7 +21,7 @@ test("remote command handler reuses command id as Ordinary submission id", async
   });
   assert.equal(submitted?.submissionId, "mobile-command-1");
   assert.equal(application.result.status, "applied");
-  assert.deepEqual(application.snapshots.map((snapshot) => snapshot.kind), ["conversation.snapshot", "run.snapshot"]);
+  assert.deepEqual(application.snapshots.map((snapshot) => snapshot.kind), ["conversation.index", "conversation.page", "run.snapshot"]);
 });
 
 test("remote command handler exposes CAS conflicts without applying a guessed merge", async () => {
@@ -61,13 +61,23 @@ test("remote command handler projects Ordinary live deltas and durable state sna
 });
 
 function fakePorts(): RemoteCommandHandlerPorts {
-  const conversationSnapshot = {
-    kind: "conversation.snapshot" as const,
-    eventId: "conversation-event",
+  const conversationIndex = {
+    kind: "conversation.index" as const,
+    eventId: "conversation-index-event",
+    conversations: [{
+      conversationId: "conversation-1",
+      title: "Conversation",
+      updatedAt: "2026-08-03T00:00:00.000Z",
+      status: "running" as const,
+      activeRunId: "run-1",
+    }],
+  };
+  const conversationPage = {
+    kind: "conversation.page" as const,
+    eventId: "conversation-page-event",
     conversationId: "conversation-1",
-    title: "Conversation",
-    updatedAt: "2026-08-03T00:00:00.000Z",
     turns: [],
+    hasMore: false,
   };
   const runSnapshot = {
     kind: "run.snapshot" as const,
@@ -85,9 +95,9 @@ function fakePorts(): RemoteCommandHandlerPorts {
       async submit() { return { conversationId: "conversation-1", runId: "run-1" }; },
       async cancel() {},
       async decide() {},
-      async conversationSnapshot() { return conversationSnapshot; },
+      async conversationIndex() { return conversationIndex; },
+      async conversationPage() { return conversationPage; },
       async runSnapshot() { return runSnapshot; },
-      async allConversationSnapshots() { return [conversationSnapshot]; },
       subscribe() { return () => undefined; },
     },
     spaces: {
@@ -101,12 +111,30 @@ function fakePorts(): RemoteCommandHandlerPorts {
     },
     assets: {
       async replaceText() {},
-      async snapshot() { return { kind: "asset.snapshot", eventId: "asset-event", assets: [] }; },
+      async snapshot() {
+        return [{
+          kind: "asset.snapshot",
+          eventId: "asset-event",
+          snapshotId: "asset-snapshot",
+          pageIndex: 0,
+          pageCount: 1,
+          assets: [],
+        }];
+      },
     },
     managedFiles: {
       async replaceText() {},
       async createText() {},
-      async snapshot() { return { kind: "managed_folder.snapshot", eventId: "folder-event", folders: [] }; },
+      async snapshot() {
+        return [{
+          kind: "managed_folder.snapshot",
+          eventId: "folder-event",
+          snapshotId: "folder-snapshot",
+          pageIndex: 0,
+          pageCount: 1,
+          folders: [],
+        }];
+      },
     },
   };
 }

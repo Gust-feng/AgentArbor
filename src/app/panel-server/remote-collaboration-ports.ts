@@ -25,7 +25,8 @@ import { createPanelSpaceReferenceEntry, updatePanelSpaceReferenceText } from ".
 import { createPanelDocumentPreview } from "./space-reference-preview.js";
 import { listDirectory, readFileText } from "../local-filesystem/index.js";
 
-type ConversationSnapshot = Extract<RemoteEvent, { readonly kind: "conversation.snapshot" }>;
+type ConversationIndex = Extract<RemoteEvent, { readonly kind: "conversation.index" }>;
+type ConversationPage = Extract<RemoteEvent, { readonly kind: "conversation.page" }>;
 type RunSnapshot = Extract<RemoteEvent, { readonly kind: "run.snapshot" }>;
 
 export function createPanelRemoteCollaborationPorts(input: {
@@ -47,10 +48,35 @@ export function createPanelRemoteCollaborationPorts(input: {
   const now = input.now ?? (() => new Date().toISOString());
   const idFactory = input.idFactory ?? randomUUID;
 
-  async function conversationSnapshot(conversationId: string): Promise<ConversationSnapshot> {
-    const conversation = await input.ordinary.queries.getConversation(conversationId);
-    if (conversation === undefined) throw new Error(`Conversation ${conversationId} was not found`);
-    return projectConversation(conversation, idFactory());
+  async function conversationIndex(): Promise<ConversationIndex> {
+    const conversations = await input.ordinary.queries.listConversations(5_000);
+    return {
+      kind: "conversation.index",
+      eventId: idFactory(),
+      conversations: await Promise.all(conversations.map(async (conversation) => {
+        const activeRun = conversation.activeRunId === undefined
+          ? undefined
+          : await input.ordinary.queries.getRun(conversation.activeRunId);
+        const latestTurn = conversation.turns.at(-1);
+        return {
+          conversationId: conversation.conversationId,
+          title: conversation.title,
+          updatedAt: conversation.updatedAt,
+          status: activeRun?.status.kind ?? (latestTurn?.status === "pending" ? "queued" : latestTurn?.status) ?? "idle",
+          ...(conversation.activeRunId === undefined ? {} : { activeRunId: conversation.activeRunId }),
+        };
+      })),
+    };
+  }
+
+  async function conversationPage(page: {
+    readonly conversationId: string;
+    readonly beforeTurnId?: string;
+    readonly limit: number;
+  }): Promise<ConversationPage> {
+    const conversation = await input.ordinary.queries.getConversation(page.conversationId);
+    if (conversation === undefined) throw new Error(`Conversation ${page.conversationId} was not found`);
+    return projectConversationPage(conversation, page, idFactory());
   }
 
   async function runSnapshot(runId: string): Promise<RunSnapshot> {
@@ -98,7 +124,6 @@ export function createPanelRemoteCollaborationPorts(input: {
             ...(taskSoilInput === undefined ? {} : { taskSoilInput }),
           }),
         });
-        input.store.shareConversation(submitted.conversation.conversationId, now());
         if (command.spaceId !== undefined && command.conversationId === undefined) {
           const owner = await input.spaces.queries.findConversationOwner(submitted.conversation.conversationId);
           if (owner === undefined) {
@@ -138,16 +163,9 @@ export function createPanelRemoteCollaborationPorts(input: {
           decidedAt: now(),
         });
       },
-      conversationSnapshot,
+      conversationIndex,
+      conversationPage,
       runSnapshot,
-      async allConversationSnapshots() {
-        const snapshots: ConversationSnapshot[] = [];
-        for (const conversationId of input.store.listSharedConversationIds()) {
-          const conversation = await input.ordinary.queries.getConversation(conversationId);
-          if (conversation !== undefined) snapshots.push(projectConversation(conversation, idFactory()));
-        }
-        return snapshots;
-      },
       subscribe(runId, listener) {
         return input.ordinary.events.subscribe(runId, (activity) => {
           if (activity.type === "model.output.delta") {
@@ -290,7 +308,16 @@ export function createPanelRemoteCollaborationPorts(input: {
             fingerprint: workbenchAssetTextFingerprint(editable.text),
           }];
         });
-        return { kind: "asset.snapshot", eventId: idFactory(), assets };
+        const snapshotId = idFactory();
+        const pages = assets.length === 0 ? [[]] : assets.map((asset) => [asset]);
+        return pages.map((page, pageIndex) => ({
+          kind: "asset.snapshot" as const,
+          eventId: idFactory(),
+          snapshotId,
+          pageIndex,
+          pageCount: pages.length,
+          assets: page,
+        }));
       },
     },
     managedFiles: {
@@ -365,7 +392,29 @@ export function createPanelRemoteCollaborationPorts(input: {
             });
           }
         }
-        return { kind: "managed_folder.snapshot", eventId: idFactory(), folders };
+        const snapshotId = idFactory();
+        const pages = folders.flatMap((folder) => folder.files.length === 0
+          ? [{ ...folder, files: [] }]
+          : folder.files.map((file) => ({ ...folder, files: [file] })));
+        const normalizedPages = pages.length === 0 ? [] : pages;
+        if (normalizedPages.length === 0) {
+          return [{
+            kind: "managed_folder.snapshot" as const,
+            eventId: idFactory(),
+            snapshotId,
+            pageIndex: 0,
+            pageCount: 1,
+            folders: [],
+          }];
+        }
+        return normalizedPages.map((folder, pageIndex) => ({
+          kind: "managed_folder.snapshot" as const,
+          eventId: idFactory(),
+          snapshotId,
+          pageIndex,
+          pageCount: normalizedPages.length,
+          folders: [folder],
+        }));
       },
     },
   };
@@ -400,15 +449,23 @@ async function readManagedFolderFiles(root: string): Promise<Array<{
   return files;
 }
 
-function projectConversation(conversation: OrdinaryConversationReadModel, eventId: string): ConversationSnapshot {
+function projectConversationPage(
+  conversation: OrdinaryConversationReadModel,
+  page: { readonly beforeTurnId?: string; readonly limit: number },
+  eventId: string,
+): ConversationPage {
+  const requestedEnd = page.beforeTurnId === undefined
+    ? conversation.turns.length
+    : conversation.turns.findIndex((turn) => turn.turnId === page.beforeTurnId);
+  if (requestedEnd < 0) throw new RemoteCommandConflict("conversation_cursor_invalid", "The conversation page cursor is no longer available");
+  const start = Math.max(0, requestedEnd - page.limit);
+  const turns = conversation.turns.slice(start, requestedEnd);
   return {
-    kind: "conversation.snapshot",
+    kind: "conversation.page",
     eventId,
     conversationId: conversation.conversationId,
-    title: conversation.title,
-    updatedAt: conversation.updatedAt,
-    ...(conversation.activeRunId === undefined ? {} : { activeRunId: conversation.activeRunId }),
-    turns: conversation.turns.map((turn) => ({
+    ...(page.beforeTurnId === undefined ? {} : { beforeTurnId: page.beforeTurnId }),
+    turns: turns.map((turn) => ({
       turnId: turn.turnId,
       runId: turn.runId,
       role: turn.role,
@@ -417,6 +474,8 @@ function projectConversation(conversation: OrdinaryConversationReadModel, eventI
       createdAt: turn.createdAt,
       updatedAt: turn.updatedAt,
     })),
+    hasMore: start > 0,
+    ...(start > 0 && turns[0] !== undefined ? { nextBeforeTurnId: turns[0].turnId } : {}),
   };
 }
 

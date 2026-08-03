@@ -1,198 +1,120 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import { createRemoteRelayStore, RemoteRelayError } from "./relay-store.js";
 
-test("relay pairing requires both confirmations and supports revocation", async (t) => {
-  const fixture = await relayFixture(t);
-  const desktop = fixture.store.createPairing("Desktop");
-  const mobile = fixture.store.joinPairing(desktop.pairingCode, "Phone");
-
-  const oneSided = fixture.store.confirmPairing(desktop.pairingId, desktop.claimSecret, desktop.pairingCode);
-  assert.equal(oneSided.status, "waiting_for_confirmation");
+test("an invitation activates one account and the unique handle can be renamed", async (t) => {
+  const fixture = await relayFixture(t, { invitationCodes: ["invite-example-0001", "invite-example-0002"] });
   assert.throws(
-    () => fixture.store.issueDeviceToken(desktop.pairingId, desktop.claimSecret),
-    (error: unknown) => error instanceof RemoteRelayError && error.code === "pairing_not_confirmed",
-  );
-
-  const completed = fixture.store.confirmPairing(mobile.pairingId, mobile.claimSecret, mobile.pairingCode);
-  assert.equal(completed.status, "paired");
-  const desktopToken = fixture.store.issueDeviceToken(desktop.pairingId, desktop.claimSecret).accessToken;
-  const mobileToken = fixture.store.issueDeviceToken(mobile.pairingId, mobile.claimSecret).accessToken;
-  assert.equal(fixture.store.authenticate(desktopToken).peerDeviceId, mobile.deviceId);
-
-  fixture.store.revokeDevice(desktopToken, mobile.deviceId);
-  assert.throws(
-    () => fixture.store.authenticate(mobileToken),
-    (error: unknown) => error instanceof RemoteRelayError && error.code === "invalid_device_token",
-  );
-  assert.throws(
-    () => fixture.store.authenticate(desktopToken),
-    (error: unknown) => error instanceof RemoteRelayError && error.code === "peer_unavailable",
-  );
-});
-
-test("relay consumes each configured invitation exactly once", async (t) => {
-  const fixture = await relayFixture(t, {
-    allowOpenSignup: false,
-    invitationCodes: ["invite-example-0001"],
-    codeFactory: sequentialCodeFactory(),
-  });
-  assert.throws(
-    () => fixture.store.createPairing("Desktop"),
+    () => fixture.store.activateAccount("Desktop"),
     (error: unknown) => error instanceof RemoteRelayError && error.code === "invitation_required",
   );
+
+  const first = fixture.store.activateAccount("Desktop", "invite-example-0001");
+  assert.equal(first.role, "desktop");
+  assert.match(first.account.handle, /^user-/u);
+  assert.equal(fixture.store.authenticate(first.accessToken).account.accountId, first.account.accountId);
   assert.throws(
-    () => fixture.store.createPairing("Desktop", "invite-example-wrong"),
+    () => fixture.store.activateAccount("Other desktop", "invite-example-0001"),
     (error: unknown) => error instanceof RemoteRelayError && error.code === "invitation_invalid_or_claimed",
   );
-  assert.equal(fixture.store.createPairing("Desktop", "invite-example-0001").role, "desktop");
+
+  const renamed = fixture.store.updateAccountHandle(first.accessToken, "gust-feng");
+  assert.equal(renamed.handle, "gust-feng");
+  const second = fixture.store.activateAccount("Second desktop", "invite-example-0002");
   assert.throws(
-    () => fixture.store.createPairing("Another desktop", "invite-example-0001"),
-    (error: unknown) => error instanceof RemoteRelayError && error.code === "invitation_invalid_or_claimed",
+    () => fixture.store.updateAccountHandle(second.accessToken, "GUST-FENG"),
+    (error: unknown) => error instanceof RemoteRelayError && error.code === "account_handle_taken",
   );
 });
 
-test("relay persists only whitelisted synchronized snapshots", async (t) => {
-  const fixture = await pairedFixture(t);
-  const desktopAuth = fixture.store.authenticate(fixture.desktopToken);
-  const first = fixture.store.saveSyncSnapshot(desktopAuth, spaceSnapshot("Space one"));
-  const second = fixture.store.saveSyncSnapshot(desktopAuth, spaceSnapshot("Space renamed"));
-  const sync = fixture.store.listSyncSnapshots(fixture.mobileToken);
+test("a phone token stays unusable until the desktop approves the pairing code", async (t) => {
+  const fixture = await relayFixture(t);
+  const desktop = fixture.store.activateAccount("Desktop");
+  const pairing = fixture.store.createPairingSession(desktop.accessToken);
+  const mobile = fixture.store.joinPairing(pairing.pairingCode, "Phone");
 
-  assert.equal(first.version, 1);
-  assert.equal(second.version, 2);
-  assert.equal(sync.documents.length, 1);
-  assert.equal(sync.documents[0]?.snapshot.kind, "space.snapshot");
-  assert.equal(sync.usageBytes, sync.documents[0]?.bytes);
+  assert.equal(fixture.store.pairingStatusForDesktop(desktop.accessToken, pairing.pairingId).status, "waiting_for_approval");
   assert.throws(
-    () => fixture.store.saveSyncSnapshot(fixture.store.authenticate(fixture.mobileToken), spaceSnapshot("Mobile")),
-    (error: unknown) => error instanceof RemoteRelayError && error.code === "sync_write_forbidden",
+    () => fixture.store.authenticate(mobile.accessToken),
+    (error: unknown) => error instanceof RemoteRelayError && error.code === "pairing_not_approved",
+  );
+  assert.throws(
+    () => fixture.store.approvePairing(desktop.accessToken, pairing.pairingId, "000000"),
+    (error: unknown) => error instanceof RemoteRelayError && error.code === "pairing_code_mismatch",
   );
 
-  const tables = fixture.database.connection.prepare(`
-    SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name
-  `).all().map((row) => String((row as { name: string }).name));
-  assert.equal(tables.includes("remote_messages"), false);
+  const approved = fixture.store.approvePairing(desktop.accessToken, pairing.pairingId, pairing.pairingCode);
+  assert.equal(approved.status, "paired");
+  assert.equal(fixture.store.authenticate(mobile.accessToken).peerDeviceId, desktop.deviceId);
+  assert.equal(fixture.store.authenticate(desktop.accessToken).peerDeviceId, mobile.deviceId);
+  assert.throws(
+    () => fixture.store.createPairingSession(desktop.accessToken),
+    (error: unknown) => error instanceof RemoteRelayError && error.code === "device_limit_reached",
+  );
+
+  fixture.store.revokeDevice(desktop.accessToken, mobile.deviceId);
+  assert.throws(
+    () => fixture.store.authenticate(mobile.accessToken),
+    (error: unknown) => error instanceof RemoteRelayError && error.code === "invalid_device_token",
+  );
+  assert.equal(fixture.store.authenticate(desktop.accessToken).peerDeviceId, undefined);
 });
 
-test("relay enforces document and account quotas without replacing the previous snapshot", async (t) => {
-  const fixture = await relayFixture(t, { accountQuotaBytes: 900, documentQuotaBytes: 850 });
-  const paired = pair(fixture.store);
-  const desktopAuth = fixture.store.authenticate(paired.desktopToken);
-  fixture.store.saveSyncSnapshot(desktopAuth, spaceSnapshot("small"));
-  assert.throws(
-    () => fixture.store.saveSyncSnapshot(desktopAuth, {
-      kind: "notebook.snapshot",
-      eventId: "notes-large",
-      notebooks: [{
-        notebookId: "global",
-        label: "Global",
-        scope: "global",
-        content: "x".repeat(550),
-        version: `sha256:${"a".repeat(64)}`,
-      }],
-    }),
-    (error: unknown) => error instanceof RemoteRelayError && error.code === "sync_account_quota_exceeded",
-  );
-  assert.throws(
-    () => fixture.store.saveSyncSnapshot(desktopAuth, {
-      kind: "notebook.snapshot",
-      eventId: "notes-too-large",
-      notebooks: [{
-        notebookId: "global",
-        label: "Global",
-        scope: "global",
-        content: "x".repeat(800),
-        version: `sha256:${"b".repeat(64)}`,
-      }],
-    }),
-    (error: unknown) => error instanceof RemoteRelayError && error.code === "sync_document_too_large",
-  );
-  assert.equal(fixture.store.listSyncSnapshots(paired.mobileToken).documents.length, 1);
-});
-
-test("relay survives restart with pairing and synchronized snapshots but no message bodies", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-relay-restart-"));
+test("relay restart preserves only account and device control facts", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-relay-restart-"));
   const filePath = path.join(root, "relay.sqlite");
   let database = new SqliteRuntimeDatabase(filePath);
   t.after(async () => {
     database.close();
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
   });
-  let store = createRemoteRelayStore({ database, codeFactory: () => "654321", allowOpenSignup: true });
-  const paired = pair(store);
-  store.saveSyncSnapshot(store.authenticate(paired.desktopToken), spaceSnapshot("Persisted"));
-  database.close();
+  let store = createRemoteRelayStore({ database, allowOpenSignup: true, codeFactory: () => "654321" });
+  const desktop = store.activateAccount("Desktop");
+  const pairing = store.createPairingSession(desktop.accessToken);
+  const mobile = store.joinPairing(pairing.pairingCode, "Phone");
+  store.approvePairing(desktop.accessToken, pairing.pairingId, pairing.pairingCode);
 
+  database.close();
   database = new SqliteRuntimeDatabase(filePath);
   store = createRemoteRelayStore({ database });
-  assert.equal(store.listSyncSnapshots(paired.mobileToken).documents.length, 1);
-  const messageTable = database.connection.prepare(`
-    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'remote_messages'
-  `).get();
-  assert.equal(messageTable, undefined);
+  assert.equal(store.authenticate(desktop.accessToken).peerDeviceId, mobile.deviceId);
+
+  const tables = database.connection.prepare(`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'remote_%' ORDER BY name
+  `).all().map((row) => String((row as { name: string }).name));
+  assert.deepEqual(tables, [
+    "remote_accounts",
+    "remote_devices",
+    "remote_invitations",
+    "remote_pairing_sessions",
+  ]);
+  for (const forbidden of ["message", "conversation", "command", "sync", "snapshot", "content"]) {
+    assert.equal(tables.some((table) => table.includes(forbidden)), false);
+  }
 });
 
 async function relayFixture(
   t: test.TestContext,
-  options: {
-    readonly accountQuotaBytes?: number;
-    readonly documentQuotaBytes?: number;
-    readonly invitationCodes?: readonly string[];
-    readonly allowOpenSignup?: boolean;
-    readonly codeFactory?: () => string;
-  } = {},
+  options: { readonly invitationCodes?: readonly string[] } = {},
 ) {
-  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-relay-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-relay-store-"));
   const database = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));
-  t.after(() => {
+  t.after(async () => {
     database.close();
-    return rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
   });
   return {
     database,
-    store: createRemoteRelayStore({ database, codeFactory: () => "123456", allowOpenSignup: true, ...options }),
-  };
-}
-
-function sequentialCodeFactory(): () => string {
-  let value = 100_000;
-  return () => String(value++);
-}
-
-async function pairedFixture(t: test.TestContext) {
-  const fixture = await relayFixture(t);
-  return { ...fixture, ...pair(fixture.store) };
-}
-
-function pair(store: ReturnType<typeof createRemoteRelayStore>) {
-  const desktop = store.createPairing("Desktop");
-  const mobile = store.joinPairing(desktop.pairingCode, "Phone");
-  store.confirmPairing(desktop.pairingId, desktop.claimSecret, desktop.pairingCode);
-  store.confirmPairing(mobile.pairingId, mobile.claimSecret, mobile.pairingCode);
-  return {
-    desktop,
-    mobile,
-    desktopToken: store.issueDeviceToken(desktop.pairingId, desktop.claimSecret).accessToken,
-    mobileToken: store.issueDeviceToken(mobile.pairingId, mobile.claimSecret).accessToken,
-  };
-}
-
-function spaceSnapshot(title: string) {
-  return {
-    kind: "space.snapshot" as const,
-    eventId: `space-${title}`,
-    spaces: [{
-      id: "space-1",
-      title,
-      createdAt: "2026-08-03T00:00:00.000Z",
-      updatedAt: "2026-08-03T00:00:00.000Z",
-      references: [],
-    }],
+    store: createRemoteRelayStore({
+      database,
+      codeFactory: () => "123456",
+      allowOpenSignup: options.invitationCodes === undefined,
+      ...options,
+    }),
   };
 }

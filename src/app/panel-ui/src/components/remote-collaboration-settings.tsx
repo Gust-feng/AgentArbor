@@ -1,73 +1,83 @@
-import React, { useEffect, useState } from "react";
-import { Check, Copy, Link2, LoaderCircle, RefreshCw, Smartphone, Unplug } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Check, Copy, Link2, LoaderCircle, RefreshCw, Smartphone, Unplug, UserRound } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 
 type RemoteStatus = {
-  readonly state: "unpaired" | "pairing" | "connecting" | "connected" | "offline";
+  readonly state: "unregistered" | "pairing" | "connecting" | "connected" | "offline";
   readonly relayUrl?: string;
+  readonly accountId?: string;
+  readonly accountHandle?: string;
+  readonly displayName?: string;
   readonly deviceId?: string;
+  readonly deviceName?: string;
   readonly peerDeviceId?: string;
   readonly peerDeviceName?: string;
   readonly peerOnline: boolean;
   readonly suggestedRelayUrl?: string;
   readonly pairingCode?: string;
   readonly pairingExpiresAt?: string;
+  readonly pairingStatus?: "waiting_for_mobile" | "waiting_for_approval" | "paired" | "expired" | "rejected";
   readonly error?: { readonly code: string; readonly message: string };
 };
-
-type ConversationSummary = { readonly conversationId: string; readonly title: string };
 
 export function RemoteCollaborationSettings(): React.ReactElement {
   const [remote, setRemote] = useState<RemoteStatus>();
   const [relayUrl, setRelayUrl] = useState("");
   const [deviceName, setDeviceName] = useState("我的电脑");
   const [invitationCode, setInvitationCode] = useState("");
+  const [accountHandle, setAccountHandle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [conversations, setConversations] = useState<readonly ConversationSummary[]>([]);
 
   const refresh = async (): Promise<void> => {
-    const [statusResponse, conversationsResponse] = await Promise.all([
-      fetch("/api/remote-collaboration/status"),
-      fetch("/api/conversations"),
-    ]);
-    const statusBody = await statusResponse.json() as { remote?: RemoteStatus };
-    const conversationsBody = await conversationsResponse.json() as { conversations?: readonly ConversationSummary[] };
-    if (statusResponse.ok && statusBody.remote !== undefined) {
-      setRemote(statusBody.remote);
-      if (statusBody.remote.relayUrl) setRelayUrl(statusBody.remote.relayUrl);
-      else if (statusBody.remote.suggestedRelayUrl) setRelayUrl(statusBody.remote.suggestedRelayUrl);
-    }
-    if (conversationsResponse.ok) setConversations(conversationsBody.conversations ?? []);
+    const response = await fetch("/api/remote-collaboration/status");
+    const body = await response.json() as { remote?: RemoteStatus };
+    if (!response.ok || body.remote === undefined) return;
+    setRemote(body.remote);
+    setAccountHandle(body.remote.accountHandle ?? "");
+    if (body.remote.relayUrl) setRelayUrl(body.remote.relayUrl);
+    else if (body.remote.suggestedRelayUrl) setRelayUrl(body.remote.suggestedRelayUrl);
   };
 
   useEffect(() => { void refresh(); }, []);
   useEffect(() => {
     if (remote?.state !== "pairing") return;
-    const timer = window.setInterval(() => void action("/api/remote-collaboration/pairings/inspect", false), 2_000);
+    const timer = window.setInterval(() => void action("/api/remote-collaboration/pairings/inspect", { busy: false }), 2_000);
     return () => window.clearInterval(timer);
   }, [remote?.state]);
 
-  const action = async (url: string, showBusy = true, body?: unknown): Promise<void> => {
-    if (showBusy) setBusy(true);
+  const pairingPayload = useMemo(() => {
+    if (!remote?.relayUrl || !remote.pairingCode) return undefined;
+    const url = new URL("agentarbor://pair");
+    url.searchParams.set("relay", remote.relayUrl);
+    url.searchParams.set("code", remote.pairingCode);
+    return url.toString();
+  }, [remote?.relayUrl, remote?.pairingCode]);
+
+  const action = async (url: string, options: { readonly method?: "POST" | "PATCH"; readonly body?: unknown; readonly busy?: boolean } = {}): Promise<void> => {
+    if (options.busy !== false) setBusy(true);
     setError(undefined);
     try {
       const response = await fetch(url, {
-        method: "POST",
+        method: options.method ?? "POST",
         headers: { "content-type": "application/json" },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
       });
       const result = await response.json() as { remote?: RemoteStatus; error?: { message?: string } };
       if (!response.ok) throw new Error(result.error?.message ?? "移动协同操作失败");
-      if (result.remote !== undefined) setRemote(result.remote);
+      if (result.remote !== undefined) {
+        setRemote(result.remote);
+        setAccountHandle(result.remote.accountHandle ?? "");
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "移动协同操作失败");
     } finally {
-      if (showBusy) setBusy(false);
+      if (options.busy !== false) setBusy(false);
     }
   };
 
   if (remote === undefined) {
-    return <div className="remote-settings-loading"><LoaderCircle className="spin" size={18} />正在读取设备状态…</div>;
+    return <div className="remote-settings-loading"><LoaderCircle className="spin" size={18} />正在读取设备状态...</div>;
   }
 
   return (
@@ -75,62 +85,67 @@ export function RemoteCollaborationSettings(): React.ReactElement {
       <section className="settings-card remote-settings-card">
         <div className="remote-settings-title">
           <span className="remote-settings-icon"><Smartphone size={19} /></span>
-          <div><h3>手机与电脑</h3><p>配对后作为同一个用户互相信任，直到撤销设备。</p></div>
+          <div><h3>手机与电脑</h3><p>{remote.state === "unregistered" ? "使用邀请码建立此电脑的账户" : `账户 @${remote.accountHandle}`}</p></div>
           <span className={`remote-connection-badge ${remote.state}`}>{statusLabel(remote)}</span>
         </div>
 
-        {remote.state === "unpaired" && (
+        {remote.state === "unregistered" && (
           <div className="remote-pairing-form">
             <label>Relay 地址<input value={relayUrl} placeholder="https://relay.example.com" onChange={(event) => setRelayUrl(event.target.value)} /></label>
             <label>电脑名称<input value={deviceName} maxLength={160} onChange={(event) => setDeviceName(event.target.value)} /></label>
             <label>邀请码<input value={invitationCode} maxLength={128} autoComplete="off" onChange={(event) => setInvitationCode(event.target.value)} /></label>
-            <button className="settings-primary-action" disabled={busy || relayUrl.trim().length === 0} onClick={() => void action("/api/remote-collaboration/pairings", true, {
-              relayUrl,
-              deviceName,
-              ...(invitationCode.trim().length === 0 ? {} : { invitationCode: invitationCode.trim() }),
+            <button className="settings-primary-action" disabled={busy || relayUrl.trim().length === 0 || invitationCode.trim().length === 0} onClick={() => void action("/api/remote-collaboration/account/activate", {
+              body: { relayUrl, deviceName, invitationCode: invitationCode.trim() },
             })}>
-              {busy ? <LoaderCircle className="spin" size={15} /> : <Link2 size={15} />}创建配对
+              {busy ? <LoaderCircle className="spin" size={15} /> : <Link2 size={15} />}激活账户
             </button>
+          </div>
+        )}
+
+        {remote.state !== "unregistered" && remote.state !== "pairing" && (
+          <div className="remote-device-row">
+            <div><strong>{remote.deviceName ?? "本机"}</strong><span>{remote.peerDeviceName ? `${remote.peerDeviceName} · ${remote.peerOnline ? "在线" : "离线"}` : "尚未添加手机"}</span></div>
+            <div>
+              {remote.state === "connected"
+                ? <button onClick={() => void action("/api/remote-collaboration/disconnect")}><Unplug size={14} />停止连接</button>
+                : <button onClick={() => void action("/api/remote-collaboration/connect")}><RefreshCw size={14} />运行连接</button>}
+              {remote.peerDeviceId === undefined
+                ? <button className="settings-primary-action" disabled={busy} onClick={() => void action("/api/remote-collaboration/pairings/start")}><Smartphone size={14} />添加手机</button>
+                : <button className="danger" disabled={busy} onClick={() => {
+                    if (window.confirm(`撤销 ${remote.peerDeviceName ?? "这台手机"} 的访问权限？`)) void action("/api/remote-collaboration/revoke-phone");
+                  }}>撤销手机</button>}
+            </div>
           </div>
         )}
 
         {remote.state === "pairing" && remote.pairingCode && (
           <div className="remote-code-panel">
-            <span>在手机上输入并核对</span>
+            {pairingPayload && <div className="remote-pairing-qr"><QRCodeSVG value={pairingPayload} size={148} level="M" /></div>}
+            <span>{remote.peerDeviceName ? `${remote.peerDeviceName} 正在等待允许` : "使用手机扫描或输入"}</span>
             <strong>{remote.pairingCode.slice(0, 3)} {remote.pairingCode.slice(3)}</strong>
             <div>
               <button onClick={() => void navigator.clipboard.writeText(remote.pairingCode!)}><Copy size={14} />复制</button>
-              <button className="confirm" disabled={busy} onClick={() => void action("/api/remote-collaboration/pairings/confirm")}><Check size={14} />号码一致，确认</button>
+              {remote.pairingStatus === "waiting_for_approval" && <button className="confirm" disabled={busy} onClick={() => void action("/api/remote-collaboration/pairings/approve")}><Check size={14} />允许连接</button>}
             </div>
           </div>
         )}
 
-        {(remote.state === "connected" || remote.state === "offline" || remote.state === "connecting") && (
-          <div className="remote-device-row">
-            <div><strong>{remote.peerDeviceName ?? "已配对手机"}</strong><span>{remote.peerOnline ? "手机在线" : "手机离线"} · {remote.relayUrl}</span></div>
-            <div>
-              {remote.state === "connected"
-                ? <button onClick={() => void action("/api/remote-collaboration/disconnect")}><Unplug size={14} />断开</button>
-                : <button onClick={() => void action("/api/remote-collaboration/connect")}><RefreshCw size={14} />连接</button>}
-              <button className="danger" onClick={() => {
-                if (window.confirm("忘记这台手机并清除本地连接凭据？")) void action("/api/remote-collaboration/forget");
-              }}>忘记设备</button>
-            </div>
-          </div>
-        )}
         {remote.error && <p className="remote-settings-error">{remote.error.message}</p>}
         {error && <p className="remote-settings-error">{error}</p>}
-        <p className="remote-security-note">对话和命令只在两端在线时转发，不保存在 Relay；同步正文暂不使用端到端加密，公网部署必须使用 HTTPS/WSS。</p>
       </section>
 
-      <section className="settings-card remote-settings-card">
-        <div className="remote-settings-title compact"><div><h3>共享对话</h3><p>手机创建的对话自动共享；电脑已有对话需在这里明确加入。</p></div></div>
-        <div className="remote-conversation-list">
-          {conversations.length === 0 ? <p>暂无可共享对话</p> : conversations.slice(0, 20).map((conversation) => (
-            <div key={conversation.conversationId}><span>{conversation.title}</span><button onClick={() => void action(`/api/remote-collaboration/conversations/${encodeURIComponent(conversation.conversationId)}/share`)}>共享</button></div>
-          ))}
-        </div>
-      </section>
+      {remote.state !== "unregistered" && (
+        <section className="settings-card remote-settings-card">
+          <div className="remote-settings-title compact"><span className="remote-settings-icon"><UserRound size={18} /></span><div><h3>账户</h3><p>内部 ID 保持不变，用户名可修改</p></div></div>
+          <div className="remote-pairing-form compact">
+            <label>用户名<input value={accountHandle} maxLength={32} onChange={(event) => setAccountHandle(event.target.value.toLowerCase())} /></label>
+            <button disabled={busy || accountHandle === remote.accountHandle} onClick={() => void action("/api/remote-collaboration/account/handle", { method: "PATCH", body: { handle: accountHandle } })}>保存</button>
+          </div>
+          <button className="danger-button" onClick={() => {
+            if (window.confirm("退出后此电脑需要新的邀请码才能重新建立账户。")) void action("/api/remote-collaboration/forget");
+          }}>退出此电脑</button>
+        </section>
+      )}
     </div>
   );
 }
@@ -141,6 +156,6 @@ function statusLabel(remote: RemoteStatus): string {
     : remote.state === "connecting"
       ? "连接中"
       : remote.state === "offline"
-        ? "已配对 · 离线"
-        : remote.state === "pairing" ? "配对中" : "未配对";
+        ? "未运行"
+        : remote.state === "pairing" ? "等待手机" : "未激活";
 }

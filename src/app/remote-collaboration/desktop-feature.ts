@@ -5,42 +5,42 @@ import { z } from "zod";
 
 import {
   REMOTE_COLLABORATION_PROTOCOL_VERSION,
-  isRemoteSyncSnapshot,
   remoteServerFrameSchema,
   type RemoteEvent,
   type RemoteRelayMessage,
-  type RemoteSyncSnapshot,
 } from "./protocol.js";
 import type { RemoteCommandApplication } from "./command-handler.js";
 import type { RemoteDesktopStore } from "./desktop-store.js";
 
 const REMOTE_DEVICE_TOKEN_REF = "secret://local-dev/remote-collaboration/device-token";
-const pairingClaimSchema = z.object({
-  pairingId: z.string().min(1),
-  pairingCode: z.string().regex(/^\d{6}$/u),
+const accountSchema = z.object({
+  accountId: z.string().min(1),
+  handle: z.string().min(3),
+  displayName: z.string().min(1),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+}).strict();
+const activationSchema = z.object({
+  account: accountSchema,
   deviceId: z.string().min(1),
   deviceName: z.string().min(1),
   role: z.literal("desktop"),
-  claimSecret: z.string().min(32),
+  accessToken: z.string().min(32),
+}).strict();
+const pairingClaimSchema = z.object({
+  pairingId: z.string().min(1),
+  pairingCode: z.string().regex(/^\d{6}$/u),
   expiresAt: z.string().min(1),
 }).strict();
 const pairingStatusSchema = z.object({
   pairingId: z.string().min(1),
   pairingCode: z.string().regex(/^\d{6}$/u),
-  deviceId: z.string().min(1),
-  deviceName: z.string().min(1),
-  role: z.literal("desktop"),
-  peer: z.object({ deviceId: z.string().min(1), deviceName: z.string().min(1), role: z.literal("mobile") }).strict().optional(),
-  status: z.enum(["waiting_for_peer", "waiting_for_confirmation", "paired", "expired"]),
-  localConfirmed: z.boolean(),
-  peerConfirmed: z.boolean(),
+  status: z.enum(["waiting_for_mobile", "waiting_for_approval", "paired", "expired", "rejected"]),
   expiresAt: z.string().min(1),
+  mobile: z.object({ deviceId: z.string().min(1), deviceName: z.string().min(1) }).strict().optional(),
+  desktop: z.object({ deviceId: z.string().min(1), deviceName: z.string().min(1) }).strict(),
+  account: accountSchema,
 }).strict();
-const syncDocumentReceiptSchema = z.object({
-  kind: z.enum(["space.snapshot", "notebook.snapshot", "asset.snapshot", "managed_folder.snapshot"]),
-  version: z.number().int().positive(),
-  updatedAt: z.string().min(1),
-}).passthrough();
 
 export type RemoteCredentialStore = {
   readSecret(secretRef: string): Promise<string | undefined>;
@@ -49,15 +49,20 @@ export type RemoteCredentialStore = {
 };
 
 export type RemoteDesktopConnectionStatus = {
-  readonly state: "unpaired" | "pairing" | "connecting" | "connected" | "offline";
+  readonly state: "unregistered" | "pairing" | "connecting" | "connected" | "offline";
   readonly relayUrl?: string;
+  readonly accountId?: string;
+  readonly accountHandle?: string;
+  readonly displayName?: string;
   readonly deviceId?: string;
+  readonly deviceName?: string;
   readonly peerDeviceId?: string;
   readonly peerDeviceName?: string;
   readonly peerOnline: boolean;
   readonly suggestedRelayUrl?: string;
   readonly pairingCode?: string;
   readonly pairingExpiresAt?: string;
+  readonly pairingStatus?: z.infer<typeof pairingStatusSchema>["status"];
   readonly error?: { readonly code: string; readonly message: string };
 };
 
@@ -82,15 +87,13 @@ export function createRemoteCollaborationFeature(input: {
   const idFactory = input.idFactory ?? randomUUID;
   const now = input.now ?? (() => new Date().toISOString());
   const listeners = new Set<(status: RemoteDesktopConnectionStatus) => void>();
+  const runSubscriptions = new Map<string, () => void>();
   let socket: WebSocket | undefined;
   let released = false;
   let manualDisconnect = false;
   let reconnectAttempts = 0;
   let reconnectTimer: NodeJS.Timeout | undefined;
   let connectPromise: Promise<void> | undefined;
-  const runSubscriptions = new Map<string, () => void>();
-  const syncUploads = new Set<string>();
-  const syncUploadTasks = new Set<Promise<void>>();
   let status = initialStatus(input.store, input.defaultRelayUrl);
 
   function publish(patch: Partial<RemoteDesktopConnectionStatus>): void {
@@ -100,21 +103,57 @@ export function createRemoteCollaborationFeature(input: {
     }
   }
 
-  async function beginPairing(relayUrl: string, deviceName: string, invitationCode?: string) {
+  async function activateAccount(relayUrl: string, deviceName: string, invitationCode?: string) {
+    if (input.store.getBinding() !== undefined) throw new Error("This desktop already has a remote account");
     const normalizedRelayUrl = normalizeRelayUrl(relayUrl);
-    const response = await fetchJson(fetch, `${normalizedRelayUrl}/v1/pairings`, {
+    const response = await fetchJson(fetch, `${normalizedRelayUrl}/v1/accounts/activate`, {
       method: "POST",
       body: JSON.stringify({ deviceName, ...(invitationCode === undefined ? {} : { invitationCode }) }),
     });
+    const credential = activationSchema.parse(response.credential);
+    await input.credentials.writeSecret(REMOTE_DEVICE_TOKEN_REF, credential.accessToken);
+    try {
+      input.store.saveBinding({
+        relayUrl: normalizedRelayUrl,
+        accountId: credential.account.accountId,
+        accountHandle: credential.account.handle,
+        displayName: credential.account.displayName,
+        deviceId: credential.deviceId,
+        deviceName: credential.deviceName,
+        updatedAt: now(),
+      });
+    } catch (error) {
+      await input.credentials.deleteSecret(REMOTE_DEVICE_TOKEN_REF).catch(() => undefined);
+      throw error;
+    }
+    publish({
+      state: "offline",
+      relayUrl: normalizedRelayUrl,
+      accountId: credential.account.accountId,
+      accountHandle: credential.account.handle,
+      displayName: credential.account.displayName,
+      deviceId: credential.deviceId,
+      deviceName: credential.deviceName,
+      peerOnline: false,
+      error: undefined,
+    });
+    return credential;
+  }
+
+  async function beginPairing() {
+    const { binding, token } = await requireCredential(input.store, input.credentials);
+    const response = await fetchJson(fetch, `${binding.relayUrl}/v1/pairings`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+    });
     const pairing = pairingClaimSchema.parse(response.pairing);
-    const saved = { ...pairing, relayUrl: normalizedRelayUrl, updatedAt: now() };
+    const saved = { ...pairing, relayUrl: binding.relayUrl, updatedAt: now() };
     input.store.savePairing(saved);
     publish({
       state: "pairing",
-      relayUrl: normalizedRelayUrl,
-      deviceId: pairing.deviceId,
       pairingCode: pairing.pairingCode,
       pairingExpiresAt: pairing.expiresAt,
+      pairingStatus: "waiting_for_mobile",
       error: undefined,
     });
     return saved;
@@ -122,58 +161,70 @@ export function createRemoteCollaborationFeature(input: {
 
   async function inspectPairing() {
     const pairing = input.store.getPairing();
-    if (pairing === undefined) throw new Error("No desktop pairing is in progress");
-    const response = await fetchJson(fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}/status`, {
-      method: "POST",
-      body: JSON.stringify({ claimSecret: pairing.claimSecret }),
+    if (pairing === undefined) throw new Error("No phone pairing is in progress");
+    const token = await requireToken(input.credentials);
+    const response = await fetchJson(fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
     });
     const remoteStatus = pairingStatusSchema.parse(response.pairing);
-    await finishPairingIfReady(pairing, remoteStatus);
+    publish({
+      pairingStatus: remoteStatus.status,
+      ...(remoteStatus.mobile === undefined ? {} : {
+        peerDeviceId: remoteStatus.mobile.deviceId,
+        peerDeviceName: remoteStatus.mobile.deviceName,
+      }),
+    });
     return remoteStatus;
   }
 
-  async function confirmPairing() {
+  async function approvePairing() {
     const pairing = input.store.getPairing();
-    if (pairing === undefined) throw new Error("No desktop pairing is in progress");
-    const response = await fetchJson(fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}/confirm`, {
+    if (pairing === undefined) throw new Error("No phone pairing is in progress");
+    const token = await requireToken(input.credentials);
+    const response = await fetchJson(fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}/approve`, {
       method: "POST",
-      body: JSON.stringify({ claimSecret: pairing.claimSecret, pairingCode: pairing.pairingCode }),
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ pairingCode: pairing.pairingCode }),
     });
     const remoteStatus = pairingStatusSchema.parse(response.pairing);
-    await finishPairingIfReady(pairing, remoteStatus);
-    return remoteStatus;
-  }
-
-  async function finishPairingIfReady(
-    pairing: NonNullable<ReturnType<RemoteDesktopStore["getPairing"]>>,
-    remoteStatus: z.infer<typeof pairingStatusSchema>,
-  ): Promise<void> {
-    if (remoteStatus.status !== "paired" || remoteStatus.peer === undefined) return;
-    const response = await fetchJson(fetch, `${pairing.relayUrl}/v1/pairings/${encodeURIComponent(pairing.pairingId)}/token`, {
-      method: "POST",
-      body: JSON.stringify({ claimSecret: pairing.claimSecret }),
-    });
-    const device = z.object({ deviceId: z.string().min(1), accessToken: z.string().min(32) }).strict().parse(response.device);
-    await input.credentials.writeSecret(REMOTE_DEVICE_TOKEN_REF, device.accessToken);
+    if (remoteStatus.status !== "paired" || remoteStatus.mobile === undefined) return remoteStatus;
+    const binding = input.store.getBinding();
+    if (binding === undefined) throw new Error("The desktop account binding is unavailable");
     input.store.saveBinding({
-      relayUrl: pairing.relayUrl,
-      deviceId: device.deviceId,
-      peerDeviceId: remoteStatus.peer.deviceId,
-      peerDeviceName: remoteStatus.peer.deviceName,
+      ...binding,
+      accountHandle: remoteStatus.account.handle,
+      displayName: remoteStatus.account.displayName,
+      peerDeviceId: remoteStatus.mobile.deviceId,
+      peerDeviceName: remoteStatus.mobile.deviceName,
       updatedAt: now(),
     });
     input.store.clearPairing();
     publish({
-      state: "offline",
-      relayUrl: pairing.relayUrl,
-      deviceId: device.deviceId,
-      peerDeviceId: remoteStatus.peer.deviceId,
-      peerDeviceName: remoteStatus.peer.deviceName,
-      peerOnline: false,
+      state: socket?.readyState === WebSocket.OPEN ? "connected" : "offline",
+      accountHandle: remoteStatus.account.handle,
+      displayName: remoteStatus.account.displayName,
+      peerDeviceId: remoteStatus.mobile.deviceId,
+      peerDeviceName: remoteStatus.mobile.deviceName,
       pairingCode: undefined,
       pairingExpiresAt: undefined,
+      pairingStatus: undefined,
       error: undefined,
     });
+    return remoteStatus;
+  }
+
+  async function updateAccountHandle(handle: string) {
+    const { binding, token } = await requireCredential(input.store, input.credentials);
+    const response = await fetchJson(fetch, `${binding.relayUrl}/v1/account/handle`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ handle }),
+    });
+    const account = accountSchema.parse(response.account);
+    input.store.saveBinding({ ...binding, accountHandle: account.handle, displayName: account.displayName, updatedAt: now() });
+    publish({ accountHandle: account.handle, displayName: account.displayName, error: undefined });
+    return account;
   }
 
   async function connect(): Promise<void> {
@@ -183,7 +234,7 @@ export function createRemoteCollaborationFeature(input: {
     const binding = input.store.getBinding();
     const token = await input.credentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
     if (binding === undefined || token === undefined) {
-      publish({ state: input.store.getPairing() === undefined ? "unpaired" : "pairing" });
+      publish({ state: "unregistered" });
       return;
     }
     manualDisconnect = false;
@@ -195,13 +246,11 @@ export function createRemoteCollaborationFeature(input: {
       const timeout = setTimeout(() => reject(new Error("Timed out waiting for Relay server.ready")), 10_000);
       timeout.unref?.();
       let ready = false;
-      next.on("open", () => {
-        next.send(JSON.stringify({
-          protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
-          type: "client.hello",
-          token,
-        }));
-      });
+      next.on("open", () => next.send(JSON.stringify({
+        protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+        type: "client.hello",
+        token,
+      })));
       next.on("message", (raw) => {
         void (async () => {
           const frame = remoteServerFrameSchema.parse(JSON.parse(raw.toString()) as unknown);
@@ -211,8 +260,8 @@ export function createRemoteCollaborationFeature(input: {
             reconnectAttempts = 0;
             input.store.saveBinding({
               ...binding,
-              peerDeviceId: frame.peerDeviceId,
-              peerDeviceName: frame.peerDeviceName,
+              ...(frame.peerDeviceId === undefined ? {} : { peerDeviceId: frame.peerDeviceId }),
+              ...(frame.peerDeviceName === undefined ? {} : { peerDeviceName: frame.peerDeviceName }),
               updatedAt: now(),
             });
             publish({
@@ -223,9 +272,7 @@ export function createRemoteCollaborationFeature(input: {
               error: undefined,
             });
             flushOutbox();
-            void publishSnapshots(frame.peerOnline).catch((error: unknown) => publish({
-              error: { code: "remote_snapshot_failed", message: error instanceof Error ? error.message : "Remote snapshot failed" },
-            }));
+            if (frame.peerOnline) void publishSnapshots().catch(publishSnapshotError);
             resolve();
             return;
           }
@@ -245,9 +292,7 @@ export function createRemoteCollaborationFeature(input: {
             publish({ peerOnline: frame.online, error: undefined });
             if (frame.online) {
               flushOutbox();
-              void publishSnapshots(true).catch((error: unknown) => publish({
-                error: { code: "remote_snapshot_failed", message: error instanceof Error ? error.message : "Remote snapshot failed" },
-              }));
+              void publishSnapshots().catch(publishSnapshotError);
             }
             return;
           }
@@ -255,9 +300,7 @@ export function createRemoteCollaborationFeature(input: {
             await receiveMessage(frame.message);
             return;
           }
-          if (frame.type === "server.error") {
-            publish({ error: { code: frame.code, message: frame.message } });
-          }
+          if (frame.type === "server.error") publish({ error: { code: frame.code, message: frame.message } });
         })().catch((error: unknown) => publish({
           error: { code: "remote_frame_failed", message: error instanceof Error ? error.message : "Remote frame failed" },
         }));
@@ -300,13 +343,10 @@ export function createRemoteCollaborationFeature(input: {
       commandId: message.content.command.commandId,
       receivedAt: now(),
     });
-    let application: RemoteCommandApplication;
-    if (inbox.state === "applied" && inbox.result !== undefined) {
-      application = inbox.result as RemoteCommandApplication;
-    } else {
-      application = await input.commandHandler.apply(message.content.command);
-      input.store.completeInbox(inbox.messageId, application, now());
-    }
+    const application = inbox.state === "applied" && inbox.result !== undefined
+      ? inbox.result as RemoteCommandApplication
+      : await input.commandHandler.apply(message.content.command);
+    if (inbox.state !== "applied") input.store.completeInbox(inbox.messageId, application, now());
     queueApplication(application);
     if (application.watchRunId !== undefined) subscribeRun(application.watchRunId);
     flushOutbox();
@@ -314,8 +354,7 @@ export function createRemoteCollaborationFeature(input: {
   }
 
   function queueApplication(application: RemoteCommandApplication): void {
-    const events: readonly RemoteEvent[] = [application.result, ...application.snapshots];
-    for (const event of events) {
+    for (const event of [application.result, ...application.snapshots]) {
       input.store.enqueueOutbox(`${application.result.commandId}:event:${event.eventId}`, { type: "event", event }, now());
     }
   }
@@ -339,74 +378,21 @@ export function createRemoteCollaborationFeature(input: {
   }
 
   function flushOutbox(): void {
-    if (socket?.readyState !== WebSocket.OPEN || status.state !== "connected") return;
-    for (const item of input.store.pendingOutbox()) {
-      if (item.content.type === "event" && isRemoteSyncSnapshot(item.content.event)) {
-        const task = uploadSyncSnapshot(item.clientMessageId, item.content.event);
-        syncUploadTasks.add(task);
-        void task.finally(() => syncUploadTasks.delete(task));
-        continue;
-      }
-      socket.send(JSON.stringify({
-        protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
-        type: "message.submit",
-        clientMessageId: item.clientMessageId,
-        content: item.content,
-      }));
-    }
-  }
-
-  async function uploadSyncSnapshot(
-    clientMessageId: string,
-    snapshot: RemoteSyncSnapshot,
-  ): Promise<void> {
-    if (syncUploads.has(clientMessageId)) return;
-    syncUploads.add(clientMessageId);
-    let uploaded = false;
-    try {
-      const binding = input.store.getBinding();
-      const token = await input.credentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
-      if (binding === undefined || token === undefined) throw new Error("Remote device binding is unavailable");
-      const response = await fetchJson(
-        fetch,
-        `${binding.relayUrl}/v1/sync/snapshots/${encodeURIComponent(snapshot.kind)}`,
-        {
-          method: "PUT",
-          headers: { authorization: `Bearer ${token}` },
-          body: JSON.stringify(snapshot),
-        },
-      );
-      const document = syncDocumentReceiptSchema.parse(response.document);
-      input.store.acceptOutbox(clientMessageId, now());
-      uploaded = true;
-      if (status.peerOnline) {
-        const changed: RemoteEvent = {
-          kind: "sync.changed",
-          eventId: idFactory(),
-          documentKind: document.kind,
-          version: document.version,
-          updatedAt: document.updatedAt,
-        };
-        input.store.enqueueOutbox(changed.eventId, { type: "event", event: changed }, now());
-      }
-    } catch (error) {
-      publish({
-        error: { code: "remote_sync_upload_failed", message: error instanceof Error ? error.message : "Remote sync upload failed" },
-      });
-    } finally {
-      syncUploads.delete(clientMessageId);
-      if (uploaded) flushOutbox();
-    }
+    if (socket?.readyState !== WebSocket.OPEN || status.state !== "connected" || !status.peerOnline) return;
+    for (const item of input.store.pendingOutbox()) socket.send(JSON.stringify({
+      protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+      type: "message.submit",
+      clientMessageId: item.clientMessageId,
+      content: item.content,
+    }));
   }
 
   function markReceived(messageId: string): void {
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({
-        protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
-        type: "message.received",
-        messageId,
-      }));
-    }
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({
+      protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+      type: "message.received",
+      messageId,
+    }));
   }
 
   function scheduleReconnect(): void {
@@ -424,60 +410,90 @@ export function createRemoteCollaborationFeature(input: {
     reconnectTimer = undefined;
   }
 
+  function publishSnapshotError(error: unknown): void {
+    publish({ error: { code: "remote_snapshot_failed", message: error instanceof Error ? error.message : "Remote snapshot failed" } });
+  }
+
+  async function publishSnapshots(): Promise<void> {
+    if (!status.peerOnline) return;
+    const application = await input.commandHandler.apply({ kind: "sync.snapshot.request", commandId: idFactory() });
+    for (const snapshot of application.snapshots) {
+      input.store.enqueueOutbox(snapshot.eventId, { type: "event", event: snapshot }, now());
+    }
+    flushOutbox();
+  }
+
   return {
     commands: {
+      activateAccount,
       beginPairing,
       inspectPairing,
-      confirmPairing,
+      approvePairing,
+      updateAccountHandle,
       connect,
       disconnect(): void {
         manualDisconnect = true;
         clearReconnectTimer();
         socket?.close(1000, "desktop_disconnect");
         socket = undefined;
-        publish({ state: input.store.getBinding() === undefined ? "unpaired" : "offline", peerOnline: false });
+        publish({ state: input.store.getBinding() === undefined ? "unregistered" : "offline", peerOnline: false });
       },
-      async forgetDevice(): Promise<void> {
+      async revokePeerDevice(): Promise<void> {
+        const { binding, token } = await requireCredential(input.store, input.credentials);
+        if (binding.peerDeviceId === undefined) return;
+        await fetchJson(fetch, `${binding.relayUrl}/v1/devices/${encodeURIComponent(binding.peerDeviceId)}/revoke`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}` },
+        });
+        input.store.saveBinding({
+          ...binding,
+          peerDeviceId: undefined,
+          peerDeviceName: undefined,
+          updatedAt: now(),
+        });
+        input.store.clearPairing();
+        publish({ peerDeviceId: undefined, peerDeviceName: undefined, peerOnline: false, error: undefined });
+      },
+      async forgetAccount(): Promise<void> {
         manualDisconnect = true;
         clearReconnectTimer();
         const binding = input.store.getBinding();
         const token = await input.credentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
-        try {
-          if (binding !== undefined && token !== undefined) {
-            await fetchJson(fetch, `${binding.relayUrl}/v1/devices/${encodeURIComponent(binding.deviceId)}/revoke`, {
-              method: "POST",
-              headers: { authorization: `Bearer ${token}` },
-            });
-          }
-        } catch (error) {
-          manualDisconnect = false;
-          publish({ error: { code: "remote_revoke_failed", message: error instanceof Error ? error.message : "Remote device revocation failed" } });
-          throw error;
+        if (binding !== undefined && token !== undefined) {
+          await fetchJson(fetch, `${binding.relayUrl}/v1/devices/${encodeURIComponent(binding.deviceId)}/revoke`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}` },
+          });
         }
-        socket?.close(1000, "desktop_forgot_device");
+        socket?.close(1000, "desktop_account_removed");
         socket = undefined;
         input.store.clearBinding();
         await input.credentials.deleteSecret(REMOTE_DEVICE_TOKEN_REF);
         publish({
-          state: "unpaired",
+          state: "unregistered",
           relayUrl: undefined,
+          accountId: undefined,
+          accountHandle: undefined,
+          displayName: undefined,
           deviceId: undefined,
+          deviceName: undefined,
           peerDeviceId: undefined,
           peerDeviceName: undefined,
           pairingCode: undefined,
           pairingExpiresAt: undefined,
+          pairingStatus: undefined,
           peerOnline: false,
           error: undefined,
         });
       },
       queueEvent(event: RemoteEvent): void {
+        if (!status.peerOnline) return;
         input.store.enqueueOutbox(idFactory(), { type: "event", event }, now());
         flushOutbox();
       },
-      async publishSnapshots(): Promise<void> {
-        await publishSnapshots(status.peerOnline);
-      },
+      publishSnapshots,
       async publishRun(runId: string): Promise<void> {
+        if (!status.peerOnline) return;
         for (const event of await input.commandHandler.snapshotsForRun(runId)) {
           input.store.enqueueOutbox(event.eventId, { type: "event", event }, now());
         }
@@ -485,9 +501,7 @@ export function createRemoteCollaborationFeature(input: {
         flushOutbox();
       },
     },
-    queries: {
-      status: () => structuredClone(status),
-    },
+    queries: { status: () => structuredClone(status) },
     events: {
       subscribe(listener: (next: RemoteDesktopConnectionStatus) => void) {
         listeners.add(listener);
@@ -495,7 +509,7 @@ export function createRemoteCollaborationFeature(input: {
       },
     },
     async start(): Promise<void> {
-      if (input.store.getBinding() !== undefined) await connect().catch(() => undefined);
+      // Desktop activation persists, but each application start requires an explicit user connection action.
     },
     async release(): Promise<void> {
       released = true;
@@ -503,56 +517,53 @@ export function createRemoteCollaborationFeature(input: {
       clearReconnectTimer();
       for (const unsubscribe of runSubscriptions.values()) unsubscribe();
       runSubscriptions.clear();
-      await Promise.allSettled([...syncUploadTasks]);
-      syncUploadTasks.clear();
-      syncUploads.clear();
       socket?.close(1001, "feature_release");
       socket = undefined;
       listeners.clear();
     },
   };
-
-  async function publishSnapshots(includeTransient: boolean): Promise<void> {
-        const application = await input.commandHandler.apply({
-          kind: "sync.snapshot.request",
-          commandId: idFactory(),
-        });
-        for (const snapshot of application.snapshots) {
-          if (!includeTransient && !isRemoteSyncSnapshot(snapshot)) continue;
-          input.store.enqueueOutbox(idFactory(), { type: "event", event: snapshot }, now());
-        }
-        flushOutbox();
-  }
 }
 
 export type RemoteCollaborationFeature = ReturnType<typeof createRemoteCollaborationFeature>;
 
 function initialStatus(store: RemoteDesktopStore, defaultRelayUrl?: string): RemoteDesktopConnectionStatus {
   const binding = store.getBinding();
-  if (binding !== undefined) return {
-    state: "offline",
-    relayUrl: binding.relayUrl,
-    deviceId: binding.deviceId,
-    peerDeviceId: binding.peerDeviceId,
-    peerDeviceName: binding.peerDeviceName,
+  if (binding === undefined) return {
+    state: "unregistered",
     peerOnline: false,
     ...(defaultRelayUrl === undefined ? {} : { suggestedRelayUrl: defaultRelayUrl }),
   };
   const pairing = store.getPairing();
-  if (pairing !== undefined) return {
-    state: "pairing",
-    relayUrl: pairing.relayUrl,
-    deviceId: pairing.deviceId,
-    pairingCode: pairing.pairingCode,
-    pairingExpiresAt: pairing.expiresAt,
-    peerOnline: false,
-    ...(defaultRelayUrl === undefined ? {} : { suggestedRelayUrl: defaultRelayUrl }),
-  };
   return {
-    state: "unpaired",
+    state: pairing === undefined ? "offline" : "pairing",
+    relayUrl: binding.relayUrl,
+    accountId: binding.accountId,
+    accountHandle: binding.accountHandle,
+    displayName: binding.displayName,
+    deviceId: binding.deviceId,
+    deviceName: binding.deviceName,
+    peerDeviceId: binding.peerDeviceId,
+    peerDeviceName: binding.peerDeviceName,
     peerOnline: false,
+    ...(pairing === undefined ? {} : {
+      pairingCode: pairing.pairingCode,
+      pairingExpiresAt: pairing.expiresAt,
+      pairingStatus: "waiting_for_mobile" as const,
+    }),
     ...(defaultRelayUrl === undefined ? {} : { suggestedRelayUrl: defaultRelayUrl }),
   };
+}
+
+async function requireCredential(store: RemoteDesktopStore, credentials: RemoteCredentialStore) {
+  const binding = store.getBinding();
+  if (binding === undefined) throw new Error("The desktop remote account is not activated");
+  return { binding, token: await requireToken(credentials) };
+}
+
+async function requireToken(credentials: RemoteCredentialStore): Promise<string> {
+  const token = await credentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
+  if (token === undefined) throw new Error("The desktop remote credential is missing; a new invitation is required");
+  return token;
 }
 
 async function fetchJson(

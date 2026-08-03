@@ -8,6 +8,28 @@ export type RemoteDeviceRole = z.infer<typeof remoteDeviceRoleSchema>;
 const stableIdSchema = z.string().trim().min(1).max(160);
 const isoDateSchema = z.iso.datetime({ offset: true });
 const fingerprintSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
+const MAX_SYNC_TEXT_BYTES = 512 * 1_024;
+
+const syncTextSchema = z.string().max(MAX_SYNC_TEXT_BYTES).superRefine((value, context) => {
+  if (new TextEncoder().encode(value).byteLength > MAX_SYNC_TEXT_BYTES) {
+    context.addIssue({ code: "custom", message: "synchronized text must not exceed 512 KiB" });
+  }
+});
+
+const snapshotPageShape = {
+  snapshotId: stableIdSchema,
+  pageIndex: z.number().int().nonnegative(),
+  pageCount: z.number().int().positive(),
+};
+
+function validateSnapshotPage(
+  value: { readonly pageIndex: number; readonly pageCount: number },
+  context: z.RefinementCtx,
+): void {
+  if (value.pageIndex >= value.pageCount) {
+    context.addIssue({ code: "custom", path: ["pageIndex"], message: "pageIndex must be less than pageCount" });
+  }
+}
 
 const relativeManagedPathSchema = z.string().trim().min(1).max(512).superRefine((value, context) => {
   const normalized = value.replace(/\\/gu, "/");
@@ -44,6 +66,13 @@ export const remoteCommandSchema = z.discriminatedUnion("kind", [
     conversationId: stableIdSchema.optional(),
     message: z.string().trim().min(1).max(64_000),
     spaceId: stableIdSchema.optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("conversation.page.request"),
+    commandId: stableIdSchema,
+    conversationId: stableIdSchema,
+    beforeTurnId: stableIdSchema.optional(),
+    limit: z.number().int().min(1).max(50).optional(),
   }).strict(),
   z.object({
     kind: z.literal("run.cancel"),
@@ -86,7 +115,7 @@ export const remoteCommandSchema = z.discriminatedUnion("kind", [
     commandId: stableIdSchema,
     assetId: stableIdSchema,
     expectedFingerprint: fingerprintSchema,
-    text: z.string().max(524_288),
+    text: syncTextSchema,
   }).strict(),
   z.object({
     kind: z.literal("managed_file.replace_text"),
@@ -94,14 +123,14 @@ export const remoteCommandSchema = z.discriminatedUnion("kind", [
     referenceId: stableIdSchema,
     relativePath: relativeManagedPathSchema,
     expectedFingerprint: fingerprintSchema,
-    text: z.string().max(524_288),
+    text: syncTextSchema,
   }).strict(),
   z.object({
     kind: z.literal("managed_file.create_text"),
     commandId: stableIdSchema,
     referenceId: stableIdSchema,
     relativePath: relativeManagedPathSchema,
-    text: z.string().max(524_288),
+    text: syncTextSchema,
   }).strict(),
   z.object({
     kind: z.literal("sync.snapshot.request"),
@@ -131,13 +160,27 @@ const remoteConfirmationSchema = z.object({
   expiresAt: isoDateSchema.optional(),
 }).strict();
 
-const remoteConversationSnapshotSchema = z.object({
-  kind: z.literal("conversation.snapshot"),
+const conversationStatusSchema = z.enum([
+  "idle", "queued", "running", "awaiting_approval", "completed", "failed", "cancelled", "blocked",
+]);
+
+const remoteConversationIndexSchema = z.object({
+  kind: z.literal("conversation.index"),
+  eventId: stableIdSchema,
+  conversations: z.array(z.object({
+    conversationId: stableIdSchema,
+    title: z.string().max(500),
+    updatedAt: isoDateSchema,
+    status: conversationStatusSchema,
+    activeRunId: stableIdSchema.optional(),
+  }).strict()).max(5_000),
+}).strict();
+
+const remoteConversationPageSchema = z.object({
+  kind: z.literal("conversation.page"),
   eventId: stableIdSchema,
   conversationId: stableIdSchema,
-  title: z.string().max(500),
-  updatedAt: isoDateSchema,
-  activeRunId: stableIdSchema.optional(),
+  beforeTurnId: stableIdSchema.optional(),
   turns: z.array(z.object({
     turnId: stableIdSchema,
     runId: stableIdSchema,
@@ -146,7 +189,9 @@ const remoteConversationSnapshotSchema = z.object({
     status: z.enum(["pending", "queued", "running", "awaiting_approval", "completed", "failed", "cancelled", "blocked"]),
     createdAt: isoDateSchema,
     updatedAt: isoDateSchema,
-  }).strict()).max(2_000),
+  }).strict()).max(50),
+  hasMore: z.boolean(),
+  nextBeforeTurnId: stableIdSchema.optional(),
 }).strict();
 
 const remoteRunSnapshotSchema = z.object({
@@ -166,14 +211,6 @@ const remoteRunDeltaSchema = z.object({
   runId: stableIdSchema,
   activitySequence: z.number().int().positive(),
   delta: z.string().min(1).max(262_144),
-}).strict();
-
-const remoteSyncChangedSchema = z.object({
-  kind: z.literal("sync.changed"),
-  eventId: stableIdSchema,
-  documentKind: z.enum(["space.snapshot", "notebook.snapshot", "asset.snapshot", "managed_folder.snapshot"]),
-  version: z.number().int().positive(),
-  updatedAt: isoDateSchema,
 }).strict();
 
 const remoteSpaceSnapshotSchema = z.object({
@@ -211,30 +248,32 @@ const remoteNotebookSnapshotSchema = z.object({
 const remoteAssetSnapshotSchema = z.object({
   kind: z.literal("asset.snapshot"),
   eventId: stableIdSchema,
+  ...snapshotPageShape,
   assets: z.array(z.object({
     assetId: stableIdSchema,
     title: z.string().min(1).max(500),
     kind: z.enum(["markdown", "code"]),
-    text: z.string().max(524_288),
+    text: syncTextSchema,
     language: z.string().max(80),
     fingerprint: fingerprintSchema,
-  }).strict()).max(5_000),
-}).strict();
+  }).strict()).max(1),
+}).strict().superRefine(validateSnapshotPage);
 
 const remoteManagedFolderSnapshotSchema = z.object({
   kind: z.literal("managed_folder.snapshot"),
   eventId: stableIdSchema,
+  ...snapshotPageShape,
   folders: z.array(z.object({
     referenceId: stableIdSchema,
     spaceId: stableIdSchema,
     title: z.string().min(1).max(160),
     files: z.array(z.object({
       relativePath: relativeManagedPathSchema,
-      text: z.string().max(524_288),
+      text: syncTextSchema,
       fingerprint: fingerprintSchema,
-    }).strict()).max(1_000),
-  }).strict()).max(1_000),
-}).strict();
+    }).strict()).max(1),
+  }).strict()).max(1),
+}).strict().superRefine(validateSnapshotPage);
 
 export const remoteSyncSnapshotSchema = z.discriminatedUnion("kind", [
   remoteSpaceSnapshotSchema,
@@ -246,10 +285,10 @@ export type RemoteSyncSnapshot = z.infer<typeof remoteSyncSnapshotSchema>;
 
 export const remoteEventSchema = z.discriminatedUnion("kind", [
   commandResultSchema,
-  remoteConversationSnapshotSchema,
+  remoteConversationIndexSchema,
+  remoteConversationPageSchema,
   remoteRunSnapshotSchema,
   remoteRunDeltaSchema,
-  remoteSyncChangedSchema,
   remoteSpaceSnapshotSchema,
   remoteNotebookSnapshotSchema,
   remoteAssetSnapshotSchema,
@@ -304,8 +343,8 @@ export const remoteServerFrameSchema = z.discriminatedUnion("type", [
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
     type: z.literal("server.ready"),
     deviceId: stableIdSchema,
-    peerDeviceId: stableIdSchema,
-    peerDeviceName: z.string().min(1).max(160),
+    peerDeviceId: stableIdSchema.optional(),
+    peerDeviceName: z.string().min(1).max(160).optional(),
     peerOnline: z.boolean(),
   }).strict(),
   z.object({
@@ -325,7 +364,7 @@ export const remoteServerFrameSchema = z.discriminatedUnion("type", [
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
     type: z.literal("message.rejected"),
     clientMessageId: stableIdSchema,
-    code: z.enum(["peer_offline", "sync_requires_http"]),
+    code: z.literal("peer_offline"),
     message: z.string().min(1).max(4_000),
   }).strict(),
   z.object({

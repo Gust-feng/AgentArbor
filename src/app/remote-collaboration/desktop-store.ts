@@ -74,22 +74,52 @@ const MIGRATIONS = [{
       applied_at TEXT
     ) STRICT;
   `,
+}, {
+  version: 4,
+  sql: `
+    DROP TABLE remote_desktop_pairing;
+    DROP TABLE remote_desktop_binding;
+    DROP TABLE remote_shared_conversations;
+
+    CREATE TABLE remote_desktop_pairing (
+      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+      relay_url TEXT NOT NULL,
+      pairing_id TEXT NOT NULL,
+      pairing_code TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE remote_desktop_binding (
+      singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+      relay_url TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      account_handle TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      device_name TEXT NOT NULL,
+      peer_device_id TEXT,
+      peer_device_name TEXT,
+      updated_at TEXT NOT NULL
+    ) STRICT;
+  `,
 }] as const;
 
 export type RemoteDesktopPairing = {
   readonly relayUrl: string;
   readonly pairingId: string;
   readonly pairingCode: string;
-  readonly deviceId: string;
-  readonly deviceName: string;
-  readonly claimSecret: string;
   readonly expiresAt: string;
   readonly updatedAt: string;
 };
 
 export type RemoteDesktopBinding = {
   readonly relayUrl: string;
+  readonly accountId: string;
+  readonly accountHandle: string;
+  readonly displayName: string;
   readonly deviceId: string;
+  readonly deviceName: string;
   readonly peerDeviceId?: string;
   readonly peerDeviceName?: string;
   readonly updatedAt: string;
@@ -117,25 +147,18 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
     savePairing(pairing: RemoteDesktopPairing): void {
       database.connection.prepare(`
         INSERT INTO remote_desktop_pairing(
-          singleton, relay_url, pairing_id, pairing_code, device_id,
-          device_name, claim_secret, expires_at, updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+          singleton, relay_url, pairing_id, pairing_code, expires_at, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?)
         ON CONFLICT(singleton) DO UPDATE SET
           relay_url = excluded.relay_url,
           pairing_id = excluded.pairing_id,
           pairing_code = excluded.pairing_code,
-          device_id = excluded.device_id,
-          device_name = excluded.device_name,
-          claim_secret = excluded.claim_secret,
           expires_at = excluded.expires_at,
           updated_at = excluded.updated_at
       `).run(
         pairing.relayUrl,
         pairing.pairingId,
         pairing.pairingCode,
-        pairing.deviceId,
-        pairing.deviceName,
-        pairing.claimSecret,
         pairing.expiresAt,
         pairing.updatedAt,
       );
@@ -143,7 +166,6 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
     getPairing(): RemoteDesktopPairing | undefined {
       const row = database.connection.prepare(`
         SELECT relay_url AS relayUrl, pairing_id AS pairingId, pairing_code AS pairingCode,
-               device_id AS deviceId, device_name AS deviceName, claim_secret AS claimSecret,
                expires_at AS expiresAt, updated_at AS updatedAt
         FROM remote_desktop_pairing WHERE singleton = 1
       `).get() as RemoteDesktopPairing | undefined;
@@ -155,18 +177,26 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
     saveBinding(binding: RemoteDesktopBinding): void {
       database.connection.prepare(`
         INSERT INTO remote_desktop_binding(
-          singleton, relay_url, device_id, peer_device_id, peer_device_name,
-          updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?)
+          singleton, relay_url, account_id, account_handle, display_name,
+          device_id, device_name, peer_device_id, peer_device_name, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(singleton) DO UPDATE SET
           relay_url = excluded.relay_url,
+          account_id = excluded.account_id,
+          account_handle = excluded.account_handle,
+          display_name = excluded.display_name,
           device_id = excluded.device_id,
+          device_name = excluded.device_name,
           peer_device_id = excluded.peer_device_id,
           peer_device_name = excluded.peer_device_name,
           updated_at = excluded.updated_at
       `).run(
         binding.relayUrl,
+        binding.accountId,
+        binding.accountHandle,
+        binding.displayName,
         binding.deviceId,
+        binding.deviceName,
         binding.peerDeviceId ?? null,
         binding.peerDeviceName ?? null,
         binding.updatedAt,
@@ -174,19 +204,28 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
     },
     getBinding(): RemoteDesktopBinding | undefined {
       const row = database.connection.prepare(`
-        SELECT relay_url AS relayUrl, device_id AS deviceId, peer_device_id AS peerDeviceId,
-               peer_device_name AS peerDeviceName, updated_at AS updatedAt
+        SELECT relay_url AS relayUrl, account_id AS accountId, account_handle AS accountHandle,
+               display_name AS displayName, device_id AS deviceId, device_name AS deviceName,
+               peer_device_id AS peerDeviceId, peer_device_name AS peerDeviceName, updated_at AS updatedAt
         FROM remote_desktop_binding WHERE singleton = 1
       `).get() as {
         relayUrl: string;
+        accountId: string;
+        accountHandle: string;
+        displayName: string;
         deviceId: string;
+        deviceName: string;
         peerDeviceId: string | null;
         peerDeviceName: string | null;
         updatedAt: string;
       } | undefined;
       return row === undefined ? undefined : {
         relayUrl: row.relayUrl,
+        accountId: row.accountId,
+        accountHandle: row.accountHandle,
+        displayName: row.displayName,
         deviceId: row.deviceId,
+        deviceName: row.deviceName,
         ...(row.peerDeviceId === null ? {} : { peerDeviceId: row.peerDeviceId }),
         ...(row.peerDeviceName === null ? {} : { peerDeviceName: row.peerDeviceName }),
         updatedAt: row.updatedAt,
@@ -288,19 +327,6 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
     },
     getNotebook(notebookId: string): RemoteNotebookMapping | undefined {
       return this.listNotebooks().find((item) => item.notebookId === notebookId);
-    },
-    shareConversation(conversationId: string, sharedAt: string): void {
-      database.connection.prepare(`
-        INSERT OR IGNORE INTO remote_shared_conversations(conversation_id, shared_at) VALUES (?, ?)
-      `).run(conversationId, sharedAt);
-    },
-    unshareConversation(conversationId: string): void {
-      database.connection.prepare("DELETE FROM remote_shared_conversations WHERE conversation_id = ?").run(conversationId);
-    },
-    listSharedConversationIds(): readonly string[] {
-      return database.connection.prepare(`
-        SELECT conversation_id AS conversationId FROM remote_shared_conversations ORDER BY shared_at
-      `).all().map((row) => String((row as { conversationId: string }).conversationId));
     },
   };
 }

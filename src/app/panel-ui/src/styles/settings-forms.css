@@ -20,7 +20,7 @@
 }
 
 .remote-settings-title.compact {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .remote-settings-title h3 {
@@ -67,6 +67,10 @@
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   align-items: end;
   gap: 10px;
+}
+
+.remote-pairing-form.compact {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .remote-pairing-form label {
@@ -129,6 +133,15 @@
 .remote-device-row > div:last-child {
   display: flex;
   gap: 8px;
+}
+
+.remote-code-panel > .remote-pairing-qr {
+  display: grid;
+  width: 164px;
+  height: 164px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: #fff;
 }
 
 .remote-device-row {

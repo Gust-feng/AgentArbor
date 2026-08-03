@@ -38,7 +38,7 @@ test("panel server serves Vite React frontend assets", async () => {
     assert.match(String(css.headers["content-type"]), /text\/css/);
     assert.match(String(js.headers["content-type"]), /text\/javascript/);
     assert.equal(html.text.includes("ordinary-screen-start"), true);
-    assert.equal(css.text.includes(".aa-redesign-root"), true);
+    assert.equal(css.text.includes(".aa-workbench-root"), true);
     assert.equal(js.text.includes("/api/basic-agent/runs/"), true);
     assert.equal((await requestText(server.url, "/assets/%2e%2e/index.html")).status, 404);
   } finally {

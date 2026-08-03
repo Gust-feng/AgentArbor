@@ -12,6 +12,7 @@ import { loadConversationSession, resetConversationSession } from "./app-convers
 import { submitPanelTask } from "./app-task-submission";
 import { invalidateUsageStatistics } from "./usage-statistics-query";
 import type { AppState } from "./app-state";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";
 import type { BasicAgentRun } from "./contracts/run";
@@ -21,7 +22,7 @@ export type AppRunController = {
   readonly viewEpochRef: React.MutableRefObject<number>;
   readonly submissionAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly loadConversation: (conversationId: string) => Promise<boolean>;
-  readonly startTask: (explicitGoal?: string) => Promise<void>;
+  readonly startTask: (explicitGoal?: string) => Promise<boolean>;
   readonly startNewConversation: (explicitGoal?: string) => Promise<boolean>;
   readonly refreshConversations: () => Promise<void>;
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
@@ -33,7 +34,7 @@ export type AppRunController = {
 export type AppRunControllerOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly setGoal: (goal: string) => void;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
@@ -89,8 +90,8 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     }
   }
 
-  async function startTask(explicitGoal?: string): Promise<void> {
-    await submitTask("continue", explicitGoal);
+  async function startTask(explicitGoal?: string): Promise<boolean> {
+    return await submitTask("continue", explicitGoal);
   }
 
   async function startNewConversation(explicitGoal?: string): Promise<boolean> {

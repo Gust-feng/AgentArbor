@@ -1,0 +1,292 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { LoaderCircle, MoreHorizontal } from 'lucide-react'
+import { SidebarInlineRenameField } from './SidebarInlineRenameField'
+
+export interface SidebarNavRowProps {
+  readonly active: boolean
+  readonly onClick: () => void
+  readonly labelsVisible: boolean
+  readonly collapsed: boolean
+  readonly tooltip?: string
+  readonly icon: ReactNode
+  readonly label: string
+  readonly meta?: ReactNode
+}
+
+/** Fixed-geometry navigation row used by the workbench rail. */
+export function SidebarNavRow({ active, onClick, labelsVisible, collapsed, tooltip, icon, label, meta }: SidebarNavRowProps) {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title={!labelsVisible ? tooltip : undefined}
+      className="relative w-full text-sm"
+      style={{
+        display: 'block',
+        height: 32,
+        transition: 'color 120ms ease',
+        color: active ? 'var(--aa-accent)' : hovered ? 'var(--aa-text-1)' : 'var(--aa-text-2)',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: 0,
+          width: collapsed ? 40 : '100%',
+          borderRadius: 8,
+          background: active ? 'var(--aa-accent-bg)' : hovered ? 'rgba(45,40,34,0.04)' : 'transparent',
+          transition: 'background 120ms ease, width 240ms cubic-bezier(0.4,0,0.2,1)',
+        }}
+      />
+
+      {active && (
+        <span aria-hidden="true" style={{
+          position: 'absolute',
+          left: 3,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          width: 3,
+          height: 14,
+          borderRadius: 2,
+          background: 'var(--aa-accent)',
+          zIndex: 1,
+        }}/>
+      )}
+
+      <span style={{
+        position: 'absolute',
+        left: 10,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        width: 20,
+        height: 20,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        {icon}
+      </span>
+
+      <span style={{
+        position: 'absolute',
+        left: 38,
+        right: 10,
+        top: '50%',
+        transform: labelsVisible ? 'translateY(-50%)' : 'translateY(-50%) translateX(-6px)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
+        opacity: labelsVisible ? 1 : 0,
+        transition: 'opacity 160ms ease, transform 160ms ease',
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        minWidth: 0,
+        pointerEvents: labelsVisible ? 'auto' : 'none',
+      }}>
+        <span className="flex-1 text-left truncate">{label}</span>
+        {meta && <span style={{ flexShrink: 0 }}>{meta}</span>}
+      </span>
+    </button>
+  )
+}
+
+export interface SidebarRowAction {
+  readonly label: string
+  readonly icon: ReactNode
+  readonly danger?: boolean
+  readonly onClick: () => void
+}
+
+export interface SidebarListRowProps {
+  readonly active: boolean
+  readonly onClick: () => void
+  readonly dot: string
+  readonly label: string
+  readonly meta?: ReactNode
+  readonly editing: boolean
+  readonly editSelectAll?: boolean
+  readonly onRename: (value: string) => void
+  readonly onCancelRename: () => void
+  readonly actions: readonly SidebarRowAction[]
+  readonly pending?: boolean
+}
+
+/** Conversation and space row with stable geometry and delayed actions. */
+export function SidebarListRow({ active, onClick, dot, label, meta, editing, editSelectAll, onRename, onCancelRename, actions, pending = false }: SidebarListRowProps) {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <div
+      role="button"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => { if (!editing && !pending) onClick() }}
+      className="group/row relative flex items-center gap-2 rounded-lg cursor-pointer text-sm"
+      style={{
+        height: 32,
+        paddingLeft: 12,
+        paddingRight: 8,
+        color: active ? 'var(--aa-accent)' : 'var(--aa-text-2)',
+        background: active ? 'var(--aa-accent-bg)' : hovered ? 'rgba(45,40,34,0.04)' : 'transparent',
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flexShrink: 0 }}/>
+      {editing ? (
+        <SidebarInlineRenameField value={label} onCommit={onRename} onCancel={onCancelRename} selectAll={editSelectAll}/>
+      ) : (
+        <span className="flex-1 text-left truncate">{label}</span>
+      )}
+      {!editing && pending && (
+        <LoaderCircle aria-label="处理中" size={13} className="animate-spin shrink-0" />
+      )}
+      {!editing && !pending && (
+        <>
+          {meta && (
+            <span style={{ flexShrink: 0, opacity: hovered && actions.length > 0 ? 0 : 1 }}>
+              {meta}
+            </span>
+          )}
+          {actions.length > 0 && (
+            <SidebarRowMenu actions={actions} visible={hovered}/>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function SidebarRowMenu({ actions, visible }: { readonly actions: readonly SidebarRowAction[]; readonly visible: boolean }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const shown = visible || open
+
+  useEffect(() => {
+    if (!open) return
+    const onDocumentMouseDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocumentMouseDown)
+    return () => document.removeEventListener('mousedown', onDocumentMouseDown)
+  }, [open])
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute right-2 shrink-0"
+      style={{ opacity: shown ? 1 : 0, pointerEvents: shown ? 'auto' : 'none' }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <button
+        onClick={() => setOpen((value) => !value)}
+        aria-label="更多操作"
+        aria-hidden={!shown}
+        tabIndex={shown ? 0 : -1}
+        className="flex items-center justify-center rounded transition-colors hover:bg-black/10"
+        style={{ width: 20, height: 20, color: 'var(--aa-text-3)' }}
+      >
+        <MoreHorizontal size={14}/>
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg"
+          style={{
+            minWidth: 128,
+            background: 'var(--aa-surface)',
+            border: '1px solid var(--aa-border)',
+            boxShadow: '0 6px 20px rgba(45,40,34,0.14)',
+          }}
+        >
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              onClick={() => { setOpen(false); action.onClick() }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors hover:bg-black/5"
+              style={{ color: action.danger ? '#b3543f' : 'var(--aa-text-1)' }}
+            >
+              {action.icon}
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function SidebarSectionLabel({ label, labelsVisible, action }: { readonly label: string; readonly labelsVisible: boolean; readonly action?: ReactNode }) {
+  return (
+    <div
+      className="flex items-center justify-between pl-3 pr-2 pt-4 pb-1"
+      style={{
+        opacity: labelsVisible ? 1 : 0,
+        transition: 'opacity 140ms ease',
+        pointerEvents: labelsVisible ? 'auto' : 'none',
+      }}
+    >
+      <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: 'var(--aa-text-3)' }}>
+        {label}
+      </span>
+      {action}
+    </div>
+  )
+}
+
+const CONVERSATION_FADE_TOP = 20
+const CONVERSATION_FADE_BOTTOM = 24
+
+export function SidebarConversationScrollArea({ maxHeight, children }: { readonly maxHeight: number; readonly children: ReactNode }) {
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const [fadeTop, setFadeTop] = useState(0)
+  const [fadeBottom, setFadeBottom] = useState(0)
+
+  const measureMask = useCallback(() => {
+    const element = viewportRef.current
+    if (element === null) return
+    const distanceFromTop = element.scrollTop
+    const distanceFromBottom = element.scrollHeight - element.clientHeight - element.scrollTop
+    const easeOut = (value: number): number => 1 - Math.pow(1 - value, 2)
+    setFadeTop((previous) => {
+      const next = Math.round(CONVERSATION_FADE_TOP * easeOut(Math.min(distanceFromTop / CONVERSATION_FADE_TOP, 1)))
+      return next === previous ? previous : next
+    })
+    setFadeBottom((previous) => {
+      const next = Math.round(CONVERSATION_FADE_BOTTOM * easeOut(Math.min(Math.max(distanceFromBottom, 0) / CONVERSATION_FADE_BOTTOM, 1)))
+      return next === previous ? previous : next
+    })
+  }, [])
+
+  const animationFrameRef = useRef<number | null>(null)
+  const handleScroll = useCallback(() => {
+    if (animationFrameRef.current !== null) return
+    animationFrameRef.current = requestAnimationFrame(() => {
+      animationFrameRef.current = null
+      measureMask()
+    })
+  }, [measureMask])
+
+  useEffect(() => () => {
+    if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current)
+  }, [])
+
+  useLayoutEffect(measureMask, [children, measureMask])
+
+  const mask = `linear-gradient(to bottom, transparent 0px, #000 ${fadeTop}px, #000 calc(100% - ${fadeBottom}px), transparent 100%)`
+  return (
+    <div
+      ref={viewportRef}
+      onScroll={handleScroll}
+      className="aa-conversation-scroll space-y-0.5 overflow-y-auto"
+      style={{ maxHeight, WebkitMaskImage: mask, maskImage: mask }}
+      data-conversation-scroll
+    >
+      {children}
+    </div>
+  )
+}

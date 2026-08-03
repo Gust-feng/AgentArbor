@@ -5,10 +5,10 @@ import test from "node:test";
 import { readPanelUiSource } from "./panel-structure-test-utils.js";
 
 test("Panel App composes the current Personal Workbench from Ordinary runtime state", async () => {
-  const [app, personalWorkbench, redesignEntry, workbenchRuntime] = await Promise.all([
+  const [app, personalWorkbench, workbenchEntry, workbenchRuntime] = await Promise.all([
     readPanelUiSource("App.tsx"),
     readPanelUiSource(path.join("personal-workbench", "personal-workbench.tsx")),
-    readPanelUiSource(path.join("personal-workbench", "redesign", "app", "App.tsx")),
+    readPanelUiSource(path.join("personal-workbench", "workbench", "app", "App.tsx")),
     readPanelUiSource("app-workbench-runtime.ts"),
   ]);
 
@@ -19,15 +19,15 @@ test("Panel App composes the current Personal Workbench from Ordinary runtime st
   assert.match(app, /currentRun=\{currentRun\}/u);
   assert.match(app, /pendingConfirmation=\{pendingConfirmation\}/u);
   assert.match(app, /settingsDialogProps=\{settingsDialogProps\}/u);
-  assert.match(personalWorkbench, /from "\.\/redesign\/app\/App"/u);
-  assert.match(redesignEntry, /from "\.\.\/agentarbor-workbench"/u);
+  assert.match(personalWorkbench, /from "\.\/workbench\/app\/App"/u);
+  assert.match(workbenchEntry, /from "\.\.\/agentarbor-workbench"/u);
   assert.match(workbenchRuntime, /export function useAppWorkbenchRuntime/u);
 });
 
 test("the production workbench keeps Multi-Agent deferred", async () => {
   const [app, workbench] = await Promise.all([
     readPanelUiSource("App.tsx"),
-    readPanelUiSource(path.join("personal-workbench", "redesign", "agentarbor-workbench.tsx")),
+    readPanelUiSource(path.join("personal-workbench", "workbench", "agentarbor-workbench.tsx")),
   ]);
 
   assert.match(app, /const agentClusterActive = false;/u);

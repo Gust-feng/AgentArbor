@@ -1,7 +1,7 @@
 import type { WorkbenchSettingsDialogProps } from "./components/workbench-settings-dialog";
 import type { SettingsGroup } from "./components/settings-types";
 
-export function buildWorkbenchSettingsDialogProps(options: {
+export function workbenchSettingsDialogPropsFrom(options: {
   readonly settingsOpen: boolean;
   readonly closeSettings: () => void;
   readonly settingsGroup: SettingsGroup;

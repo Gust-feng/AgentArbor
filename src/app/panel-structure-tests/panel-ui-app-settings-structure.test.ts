@@ -4,16 +4,16 @@ import test from "node:test";
 
 import { readPanelUiSource } from "./panel-structure-test-utils.js";
 
-test("settings commands remain outside the Redesign view", async () => {
+test("settings commands remain outside the personal workbench view", async () => {
   const [app, runtime, settingsController, workbench, settingsDialog] = await Promise.all([
     readPanelUiSource("App.tsx"),
     readPanelUiSource("app-workbench-runtime.ts"),
     readPanelUiSource("app-settings-controller.ts"),
-    readPanelUiSource(path.join("personal-workbench", "redesign", "agentarbor-workbench.tsx")),
+    readPanelUiSource(path.join("personal-workbench", "workbench", "agentarbor-workbench.tsx")),
     readPanelUiSource(path.join("components", "workbench-settings-dialog.tsx")),
   ]);
 
-  assert.match(app, /buildWorkbenchSettingsDialogProps\(\{/u);
+  assert.match(app, /workbenchSettingsDialogPropsFrom\(\{/u);
   assert.match(app, /settingsDialogProps=\{settingsDialogProps\}/u);
   assert.match(runtime, /createAppSettingsController\(\{/u);
   assert.match(settingsController, /saveModelProviderConfig/u);

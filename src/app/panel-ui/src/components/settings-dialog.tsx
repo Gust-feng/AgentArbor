@@ -28,6 +28,7 @@ import type {
   ModelProviderModelCatalog,
   SkillTriggerMode,
 } from "../contracts/config";
+import type { ConversationFollowUpMode } from "../contracts/composer";
 import type { AppUpdateInfo, AppUpdateStatus } from "../contracts/app-update";
 import { MULTI_AGENT_ENTRY_AVAILABLE } from "../app-multi-agent-availability";
 import type { SkillDefinition } from "../contracts/skills";
@@ -60,6 +61,8 @@ export function SettingsDialog(props: {
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly modelUsageDisplayEnabled: boolean;
   readonly onModelUsageDisplayChange: (enabled: boolean) => void;
+  readonly conversationFollowUpMode?: ConversationFollowUpMode;
+  readonly onConversationFollowUpModeChange?: (mode: ConversationFollowUpMode) => void;
   readonly agentClusterEnabled: boolean;
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
   readonly developerModeEnabled: boolean;
@@ -209,6 +212,13 @@ export function SettingsDialog(props: {
                 onSaveModelCapabilities={props.onSaveModelCapabilities}
                 modelUsageDisplayEnabled={props.modelUsageDisplayEnabled}
                 onModelUsageDisplayChange={props.onModelUsageDisplayChange}
+                desktopAgentSystemPrompt={props.desktopAgentSystemPrompt}
+                setDesktopAgentSystemPrompt={props.setDesktopAgentSystemPrompt}
+                conversationFollowUpMode={props.conversationFollowUpMode ?? "queue"}
+                onConversationFollowUpModeChange={props.onConversationFollowUpModeChange ?? (() => undefined)}
+                savingDesktopAgent={props.savingDesktopAgent}
+                onSaveDesktopAgentSystemPrompt={props.onSaveDesktopAgentSystemPrompt}
+                onResetDesktopAgentSystemPrompt={props.onResetDesktopAgentSystemPrompt}
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}

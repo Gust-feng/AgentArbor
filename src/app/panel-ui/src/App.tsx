@@ -1,13 +1,13 @@
-import React, { useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { PersonalWorkbench } from "./personal-workbench/personal-workbench";
 import { useAppShellEffects } from "./app-shell-effects";
 import { persistSidebarCollapsedPreference, useAppShellState } from "./app-shell-state";
 import { useAppQueuedMessages } from "./app-queued-message-state";
 import { useAppWorkbenchConfigState } from "./app-workbench-config-state";
 import { useAppWorkbenchRuntime } from "./app-workbench-runtime";
-import { buildWorkbenchSettingsDialogProps } from "./app-settings-dialog-props";
+import { workbenchSettingsDialogPropsFrom } from "./app-settings-dialog-props";
 import { useAppWorkbenchTaskState } from "./app-workbench-task-state";
-import { buildWorkbenchInputProps } from "./app-workbench-input-props";
+import { workbenchInputPropsFrom } from "./app-workbench-input-props";
 import { createInitialAppState } from "./app-state";
 import { useSpaceProjection } from "./app-space-state";
 
@@ -56,7 +56,7 @@ export function App(): React.ReactElement {
     },
   });
   const {
-    setScreen,
+    setLegacyConversationScreen,
     settingsOpen,
     settingsGroup,
     sidebarCollapsed,
@@ -65,6 +65,7 @@ export function App(): React.ReactElement {
     setModelUsageDisplayEnabled,
     agentClusterEnabled,
     developerModeEnabled,
+    conversationFollowUpMode,
     inputCloseSignal,
     setInputCloseSignal,
     openSettings,
@@ -72,6 +73,7 @@ export function App(): React.ReactElement {
     changeModelUsageDisplay,
     changeAgentClusterEnabled,
     changeDeveloperMode,
+    changeConversationFollowUpMode,
   } = shellState;
   // The personal workbench is the production Ordinary entry. Deferred Deep
   // remains a settings/runtime compatibility concern, not a rendered surface.
@@ -79,7 +81,7 @@ export function App(): React.ReactElement {
   const runtime = useAppWorkbenchRuntime({
     app,
     setApp,
-    setScreen,
+    setLegacyConversationScreen,
     setGoal,
     goal,
     aiMode,
@@ -162,13 +164,15 @@ export function App(): React.ReactElement {
     queuedMessages,
     removeQueuedMessage,
     updateQueuedMessage,
+    clearQueuedMessages,
+    guideQueuedMessage,
   } = useAppQueuedMessages({
     busy: app.busy,
+    queueScopeId: app.conversation?.conversationId ?? currentRun.run?.conversationId,
     currentRun: currentRun.run,
-    setGoal,
     startTask,
   });
-  const { inputProps: baseInputProps } = buildWorkbenchInputProps({
+  const { inputProps: baseInputProps } = workbenchInputPropsFrom({
     agentClusterActive,
     goal,
     setGoal,
@@ -194,9 +198,11 @@ export function App(): React.ReactElement {
     submitDeepInput,
     enqueueMessage,
     startTask,
+    clearQueuedMessages,
     cancelRun,
     stopDeepTask,
     modelResponding,
+    followUpMode: conversationFollowUpMode,
     deepBusy: app.deepBusy,
     deep: app.deep,
     deepActiveRunId: app.deepActiveRunId,
@@ -207,9 +213,18 @@ export function App(): React.ReactElement {
     queuedMessages,
     onRemoveQueuedMessage: removeQueuedMessage,
     onUpdateQueuedMessage: updateQueuedMessage,
+    onGuideQueuedMessage: guideQueuedMessage,
   };
+  const startNewConversation = useCallback(() => {
+    clearQueuedMessages();
+    return runActions.startNewConversation();
+  }, [clearQueuedMessages, runActions.startNewConversation]);
+  const openConversation = useCallback((conversationId: string) => {
+    clearQueuedMessages();
+    return openNormalConversation(conversationId);
+  }, [clearQueuedMessages, openNormalConversation]);
 
-  const settingsDialogProps = buildWorkbenchSettingsDialogProps({
+  const settingsDialogProps = workbenchSettingsDialogPropsFrom({
     settingsOpen,
     closeSettings,
     settingsGroup,
@@ -234,6 +249,8 @@ export function App(): React.ReactElement {
       onAgentClusterEnabledChange: changeAgentClusterEnabled,
       developerModeEnabled,
       onDeveloperModeChange: changeDeveloperMode,
+      conversationFollowUpMode,
+      onConversationFollowUpModeChange: changeConversationFollowUpMode,
     },
     saving: {
       model: savingModel,
@@ -263,8 +280,8 @@ export function App(): React.ReactElement {
       pendingConfirmation={pendingConfirmation}
       confirmationBusy={confirmationBusy}
       onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
-      onStartNewConversation={runActions.startNewConversation}
-      onOpenConversation={openNormalConversation}
+      onStartNewConversation={startNewConversation}
+      onOpenConversation={openConversation}
       pendingConversationIds={pendingConversationIds}
       onRenameConversation={sidebarActions.renameConversation}
       onToggleConversationPinned={sidebarActions.toggleConversationPinned}

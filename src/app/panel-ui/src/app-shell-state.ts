@@ -4,11 +4,13 @@ import {
   saveModelUsageDisplayEnabled,
 } from "./app-model-usage-display";
 import { type SettingsGroup } from "./components/settings-types";
-import type { Screen } from "./app-screen";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { AgentMode } from "./app-config-projection";
 import { readLocalPreference, writeLocalPreference } from "./app-local-preferences";
 import { isMultiAgentEntryEnabled } from "./app-multi-agent-availability";
 import { getDeveloperModeEnabled, saveDeveloperModeEnabled } from "./app-developer-mode";
+import { getConversationFollowUpMode, saveConversationFollowUpMode } from "./app-follow-up-preference";
+import type { ConversationFollowUpMode } from "./contracts/composer";
 
 export type AppShellStateOptions = {
   readonly agentMode: AgentMode;
@@ -16,8 +18,8 @@ export type AppShellStateOptions = {
 };
 
 export type AppShellState = {
-  readonly screen: Screen;
-  readonly setScreen: Dispatch<SetStateAction<Screen>>;
+  readonly legacyConversationScreen: LegacyConversationScreen;
+  readonly setLegacyConversationScreen: Dispatch<SetStateAction<LegacyConversationScreen>>;
   readonly settingsOpen: boolean;
   readonly setSettingsOpen: Dispatch<SetStateAction<boolean>>;
   readonly settingsGroup: SettingsGroup;
@@ -27,6 +29,7 @@ export type AppShellState = {
   readonly setModelUsageDisplayEnabled: Dispatch<SetStateAction<boolean>>;
   readonly agentClusterEnabled: boolean;
   readonly developerModeEnabled: boolean;
+  readonly conversationFollowUpMode: ConversationFollowUpMode;
   readonly pinningConversationIds: ReadonlySet<string>;
   readonly setPinningConversationIds: Dispatch<SetStateAction<ReadonlySet<string>>>;
   readonly inputCloseSignal: number;
@@ -36,10 +39,11 @@ export type AppShellState = {
   readonly changeModelUsageDisplay: (enabled: boolean) => void;
   readonly changeAgentClusterEnabled: (enabled: boolean) => void;
   readonly changeDeveloperMode: (enabled: boolean) => void;
+  readonly changeConversationFollowUpMode: (mode: ConversationFollowUpMode) => void;
 };
 
 export function useAppShellState(options: AppShellStateOptions): AppShellState {
-  const [screen, setScreen] = useState<Screen>("chat-empty");
+  const [legacyConversationScreen, setLegacyConversationScreen] = useState<LegacyConversationScreen>("chat-empty");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("models");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsedPreference);
@@ -48,6 +52,7 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     isMultiAgentEntryEnabled(loadAgentClusterEnabledPreference())
   );
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(getDeveloperModeEnabled);
+  const [conversationFollowUpMode, setConversationFollowUpMode] = useState(getConversationFollowUpMode);
   const [pinningConversationIds, setPinningConversationIds] = useState<ReadonlySet<string>>(() => new Set());
   const [inputCloseSignal, setInputCloseSignal] = useState(0);
 
@@ -80,9 +85,14 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     saveDeveloperModeEnabled(enabled);
   }
 
+  function changeConversationFollowUpMode(mode: ConversationFollowUpMode): void {
+    setConversationFollowUpMode(mode);
+    saveConversationFollowUpMode(mode);
+  }
+
   return {
-    screen,
-    setScreen,
+    legacyConversationScreen,
+    setLegacyConversationScreen,
     settingsOpen,
     setSettingsOpen,
     settingsGroup,
@@ -92,6 +102,7 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     setModelUsageDisplayEnabled,
     agentClusterEnabled,
     developerModeEnabled,
+    conversationFollowUpMode,
     pinningConversationIds,
     setPinningConversationIds,
     inputCloseSignal,
@@ -101,6 +112,7 @@ export function useAppShellState(options: AppShellStateOptions): AppShellState {
     changeModelUsageDisplay,
     changeAgentClusterEnabled,
     changeDeveloperMode,
+    changeConversationFollowUpMode,
   };
 }
 

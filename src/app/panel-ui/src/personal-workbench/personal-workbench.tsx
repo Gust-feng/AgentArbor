@@ -1,6 +1,6 @@
 export {
   default as PersonalWorkbench,
-} from "./redesign/app/App";
+} from "./workbench/app/App";
 export type {
-  RedesignWorkbenchProps as PersonalWorkbenchProps,
-} from "./redesign/app/App";
+  PersonalWorkbenchProps,
+} from "./workbench/app/App";

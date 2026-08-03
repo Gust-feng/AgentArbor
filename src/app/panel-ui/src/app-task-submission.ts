@@ -17,6 +17,7 @@ import type { ToolCallResult } from "../../../domain/tools";
 import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
 import type { AppState } from "./app-state";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { ContextAttachment } from "./contracts/context";
 import type { Conversation } from "./contracts/conversation";
 import type { TranscriptNode } from "./contracts/run";
@@ -39,7 +40,7 @@ import type { LiveRunSubscription } from "./app-live-run-updates";
 export type PanelTaskSubmissionOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly setGoal: (goal: string) => void;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
@@ -70,8 +71,13 @@ export async function submitPanelTask(
   conversationBehavior: PanelTaskConversationBehavior = "continue",
 ): Promise<boolean> {
   const trimmed = (explicitGoal ?? options.goal).trim();
-  if (trimmed.length === 0 || options.app.busy) return false;
   const startsNewConversation = conversationBehavior === "new";
+  // An active conversation can accept a successor run; a new conversation
+  // still remains blocked while another run is busy.
+  const activeConversationRun = !startsNewConversation && options.app.conversation !== undefined &&
+    options.app.run !== undefined &&
+    shouldKeepRefreshing(options.app.run.status);
+  if (trimmed.length === 0 || (options.app.busy && !activeConversationRun)) return false;
   const conversationForSubmit = startsNewConversation ? undefined : options.app.conversation;
   const runForSubmit = startsNewConversation ? undefined : options.app.run;
   const epoch = options.viewEpochRef.current + 1;
@@ -109,7 +115,7 @@ export async function submitPanelTask(
     stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
   }
   options.activeRunIdRef.current = previousObservedRunId;
-  options.setScreen("chat-active");
+  options.setLegacyConversationScreen("chat-active");
   options.setGoal("");
   options.setAttachments([]);
   options.setApp((previous) => {
@@ -301,7 +307,7 @@ export async function submitPanelTask(
     options.setAttachments(attachmentsBeforeSubmit);
     if (startsNewConversation) {
       options.activeRunIdRef.current = undefined;
-      options.setScreen("chat-empty");
+      options.setLegacyConversationScreen("chat-empty");
     }
     options.setApp((previous) => ({
       ...previous,

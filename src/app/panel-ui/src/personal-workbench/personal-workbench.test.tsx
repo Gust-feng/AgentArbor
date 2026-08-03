@@ -2,22 +2,22 @@ import React, { useState } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
-import type { ChatInputProps } from "../components/chat-empty";
+import type { ChatInputProps } from "../contracts/composer";
 import { PersonalWorkbench, type PersonalWorkbenchProps } from "./personal-workbench";
-import { BrainPage } from "./redesign/app/components/BrainPage";
+import { BrainPage } from "./workbench/app/components/BrainPage";
 import {
   collectManagedSpaceReference,
   getPersonalKnowledgeError,
   getPersonalKnowledgeSnapshot,
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
-} from "./redesign/app/components/personalKnowledgeClient";
-import { fetchDocumentPreview, getCachedReferencePreview } from "./redesign/app/components/referencePreviewClient";
-import { resolvePage } from "./redesign/app/components/brainStore";
+} from "./workbench/app/components/personalKnowledgeClient";
+import { fetchDocumentPreview, getCachedReferencePreview } from "./workbench/app/components/referencePreviewClient";
+import { resolvePage } from "./workbench/app/components/brainStore";
 
 beforeEach(() => resetPersonalKnowledgeForTesting());
 
-test("submits a real Ordinary task from the redesign home", async () => {
+test("submits a real Ordinary task from the workbench home", async () => {
   const user = userEvent.setup();
   const onStartNewConversation = vi.fn(async () => true);
   const onContinueConversation = vi.fn();
@@ -515,7 +515,7 @@ test("starts inline naming only after the created Space returns in the real proj
   expect((input as HTMLInputElement).selectionEnd).toBe("新空间".length);
 });
 
-test("shows Space projection failures in the Redesign sidebar and retries them", async () => {
+test("shows Space projection failures in the workbench sidebar and retries them", async () => {
   const user = userEvent.setup();
   const onRetry = vi.fn().mockResolvedValue(undefined);
   renderWorkbench({
@@ -532,7 +532,7 @@ test("shows Space projection failures in the Redesign sidebar and retries them",
   expect(onRetry).toHaveBeenCalledTimes(1);
 });
 
-test("keeps bootstrap failures inside the Redesign workbench and retries in place", async () => {
+test("keeps bootstrap failures inside the personal workbench and retries in place", async () => {
   const onRetry = vi.fn();
   renderWorkbench({
     bootstrapState: {
@@ -777,7 +777,7 @@ test("deletes app-owned folders and creates files from a linked workspace folder
   ));
 });
 
-test("routes the Redesign material add menu through Space actions", async () => {
+test("routes the workbench material add menu through Space actions", async () => {
   const user = userEvent.setup();
   const createManagedFolder = vi.fn().mockResolvedValue(undefined);
   const addLocalFile = vi.fn().mockResolvedValue(undefined);
@@ -1136,7 +1136,7 @@ test("renders and opens backend conversation projections in pinned and updated o
   expect(onOpenConversation).toHaveBeenCalledWith("older");
 });
 
-test("keeps a long conversation history inside the redesign scroll section", () => {
+test("keeps a long conversation history inside the workbench scroll section", () => {
   renderWorkbench({
     conversations: Array.from({ length: 12 }, (_, index) => ({
       conversationId: `conversation-${index}`,
@@ -1167,7 +1167,7 @@ test("routes sidebar conversation actions to backend commands", async () => {
   expect(onToggleConversationPinned).toHaveBeenCalledWith("conversation-1", true);
 });
 
-test("exposes model, context usage, and reasoning controls in the redesign composer", async () => {
+test("exposes model, context usage, and reasoning controls in the workbench composer", async () => {
   const user = userEvent.setup();
   const onModelSelect = vi.fn();
   const onReasoningEffortChange = vi.fn();

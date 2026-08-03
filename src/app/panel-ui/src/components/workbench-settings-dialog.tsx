@@ -2,6 +2,7 @@ import React from "react";
 import type { AppSettingsController } from "../app-settings-controller";
 import type { AppState } from "../app-state";
 import type { ModelProviderModelCatalog } from "../contracts/config";
+import type { ConversationFollowUpMode } from "../contracts/composer";
 import { SettingsDialog } from "./settings-dialog";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 
@@ -25,6 +26,8 @@ type WorkbenchSettingsDialogPreferences = {
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
   readonly developerModeEnabled: boolean;
   readonly onDeveloperModeChange: (enabled: boolean) => void;
+  readonly conversationFollowUpMode: ConversationFollowUpMode;
+  readonly onConversationFollowUpModeChange: (mode: ConversationFollowUpMode) => void;
 };
 
 type WorkbenchSettingsDialogSavingState = {
@@ -66,6 +69,8 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       onAgentClusterEnabledChange={props.preferences.onAgentClusterEnabledChange}
       developerModeEnabled={props.preferences.developerModeEnabled}
       onDeveloperModeChange={props.preferences.onDeveloperModeChange}
+      conversationFollowUpMode={props.preferences.conversationFollowUpMode}
+      onConversationFollowUpModeChange={props.preferences.onConversationFollowUpModeChange}
       onSaveCommandShell={props.actions.saveCommandShell}
       savingModel={props.saving.model}
       savingWorkspace={props.saving.workspace}

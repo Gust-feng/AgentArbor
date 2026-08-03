@@ -4,6 +4,7 @@ import { createInitialAppState, type AppState } from "./app-state";
 import { createAppRunController } from "./app-run-controller";
 import { createAppSidebarConversationController } from "./app-sidebar-conversation-controller";
 import type { ContextAttachment } from "./contracts/context";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { BasicAgentRun, BasicAgentRunView } from "./contracts/run";
 
 const statisticsMocks = vi.hoisted(() => ({
@@ -54,7 +55,7 @@ describe("ordinary run cancellation", () => {
     const controller = createAppRunController({
       app,
       setApp: dispatch((next) => { app = next; }, () => app),
-      setScreen: () => undefined,
+      setLegacyConversationScreen: () => undefined,
       setGoal: () => undefined,
       attachments: [],
       setAttachments: () => undefined,
@@ -195,7 +196,7 @@ describe("conversation switching", () => {
     const controller = createAppRunController({
       app,
       setApp: dispatch((next) => { app = next; }, () => app),
-      setScreen: () => undefined,
+      setLegacyConversationScreen: () => undefined,
       setGoal: () => undefined,
       attachments: [],
       setAttachments: () => undefined,
@@ -272,7 +273,7 @@ describe("new conversation submission", () => {
     };
     let goal = "Fresh goal";
     let attachments: readonly ContextAttachment[] = [];
-    let screen: "chat-empty" | "chat-active" = "chat-empty";
+    let legacyScreen: LegacyConversationScreen = "chat-empty";
     const activeRunIdRef = { current: completed.runId as string | undefined };
     const controller = submissionController({
       readApp: () => app,
@@ -281,7 +282,7 @@ describe("new conversation submission", () => {
       writeGoal: (next) => { goal = next; },
       readAttachments: () => attachments,
       writeAttachments: (next) => { attachments = next; },
-      writeScreen: (next) => { screen = next; },
+      writeLegacyConversationScreen: (next) => { legacyScreen = next; },
       activeRunIdRef,
     });
 
@@ -293,7 +294,7 @@ describe("new conversation submission", () => {
     expect(app.run?.runId).toBe("run-new");
     expect(activeRunIdRef.current).toBe("run-new");
     expect(goal).toBe("");
-    expect(screen).toBe("chat-active");
+    expect(legacyScreen).toBe("chat-active");
   });
 
   it("keeps a failed fresh submission on an empty entry and restores its input", async () => {
@@ -318,7 +319,7 @@ describe("new conversation submission", () => {
       readonlyPreviewMeta: { available: false },
       status: "ready",
     }];
-    let screen: "chat-empty" | "chat-active" = "chat-empty";
+    let legacyScreen: LegacyConversationScreen = "chat-empty";
     const controller = submissionController({
       readApp: () => app,
       writeApp: (next) => { app = next; },
@@ -326,7 +327,7 @@ describe("new conversation submission", () => {
       writeGoal: (next) => { goal = next; },
       readAttachments: () => attachments,
       writeAttachments: (next) => { attachments = next; },
-      writeScreen: (next) => { screen = next; },
+      writeLegacyConversationScreen: (next) => { legacyScreen = next; },
       activeRunIdRef: { current: completed.runId },
     });
 
@@ -338,7 +339,7 @@ describe("new conversation submission", () => {
     expect(app.error).toBe("network unavailable");
     expect(goal).toBe("Retry this");
     expect(attachments.map((attachment) => attachment.attachmentId)).toEqual(["attachment-1"]);
-    expect(screen).toBe("chat-empty");
+    expect(legacyScreen).toBe("chat-empty");
   });
 
   it("reuses the submission identity when the create response is lost", async () => {
@@ -392,7 +393,7 @@ describe("new conversation submission", () => {
       writeGoal: (next) => { goal = next; },
       readAttachments: () => attachments,
       writeAttachments: (next) => { attachments = next; },
-      writeScreen: (next) => { screen = next; },
+      writeLegacyConversationScreen: (next) => { screen = next; },
       activeRunIdRef: { current: completed.runId },
       submissionAttemptRef,
     });
@@ -442,7 +443,7 @@ function sidebarController(
     setInputCloseSignal: () => undefined,
     setGoal: () => undefined,
     setAttachments: () => undefined,
-    setScreen: () => undefined,
+    setLegacyConversationScreen: () => undefined,
   });
 }
 
@@ -453,14 +454,14 @@ function submissionController(input: {
   readonly writeGoal: (goal: string) => void;
   readonly readAttachments: () => readonly ContextAttachment[];
   readonly writeAttachments: (attachments: readonly ContextAttachment[]) => void;
-  readonly writeScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly writeLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly submissionAttemptRef?: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
 }) {
   return createAppRunController({
     app: input.readApp(),
     setApp: dispatch(input.writeApp, input.readApp),
-    setScreen: input.writeScreen,
+    setLegacyConversationScreen: input.writeLegacyConversationScreen,
     setGoal: input.writeGoal,
     attachments: input.readAttachments(),
     setAttachments: dispatch(input.writeAttachments, input.readAttachments),

@@ -3,6 +3,7 @@ import { ApiError, getJson } from "./api";
 import { transcriptNodesFrom } from "./app-run-projection";
 import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
+import type { LegacyConversationScreen } from "./app-screen";
 import { liveRunForObservedReplay } from "./app-task-submit-flow";
 import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
 import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
@@ -22,7 +23,7 @@ const HISTORICAL_RUN_LOAD_CONCURRENCY = 4;
 export type ConversationSessionControllerOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly setGoal: (goal: string) => void;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly import("./contracts/context").ContextAttachment[]>>;
   readonly mountedRef: React.MutableRefObject<boolean>;
@@ -132,7 +133,7 @@ export async function loadConversationSession(
       : undefined,
     error: undefined,
   }));
-  options.setScreen("chat-active");
+  options.setLegacyConversationScreen("chat-active");
   options.setAttachments([]);
   if (run !== undefined && shouldKeepRefreshing(run.status)) {
     options.startLiveUpdates({
@@ -152,7 +153,7 @@ export async function loadConversationSession(
   //
   // 2. EXTERNAL cache — historical nodes are written to a module-level
   //    cache (panel-ui-transcript-store) instead of app state.  Only
-  //    The Redesign transcript subscribes via useSyncExternalStore, so the
+  //    ConversationTranscript subscribes via useSyncExternalStore, so the
   //    rest of the workbench does
   //    NOT re-render.  The historical nodes carry no data-entering
   //    attribute, so no CSS animation fires — the user perceives a
@@ -196,7 +197,7 @@ export function resetConversationSession(options: ConversationSessionControllerO
   options.viewEpochRef.current += 1;
   stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
   options.activeRunIdRef.current = undefined;
-  options.setScreen("chat-empty");
+  options.setLegacyConversationScreen("chat-empty");
   options.setGoal("");
   options.setAttachments([]);
   options.setApp((previous) => ({

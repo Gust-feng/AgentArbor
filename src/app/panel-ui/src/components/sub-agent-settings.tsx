@@ -62,6 +62,7 @@ function SubAgentRow(props: {
   const hasMeta = hasCategory || sourceLabel !== undefined || props.subAgent.version !== undefined;
   const hasWhenToUse = props.subAgent.whenToUse !== undefined && props.subAgent.whenToUse.length > 0;
   const hasWhenNotToUse = props.subAgent.whenNotToUse !== undefined && props.subAgent.whenNotToUse.length > 0;
+  const hasDiagnostics = props.subAgent.diagnostics !== undefined && props.subAgent.diagnostics.length > 0;
   const RoleIcon = subAgentRoleIcon(props.subAgent);
   return (
     <details className={`sub-agent-panel ${props.subAgent.enabled ? "" : "disabled"}`}>
@@ -90,7 +91,7 @@ function SubAgentRow(props: {
           <ChevronDown size={15} aria-hidden="true" />
         </span>
       </summary>
-      {(hasWhenToUse || hasWhenNotToUse) && (
+      {(hasWhenToUse || hasWhenNotToUse || hasDiagnostics) && (
         <div className="sub-agent-panel-detail">
           {hasWhenToUse && (
             <section>
@@ -105,6 +106,18 @@ function SubAgentRow(props: {
               <h4>避免使用</h4>
               <ul>
                 {props.subAgent.whenNotToUse.map((item, index) => <li key={index}>{item}</li>)}
+              </ul>
+            </section>
+          )}
+          {hasDiagnostics && (
+            <section className="sub-agent-diagnostics">
+              <h4>配置提示</h4>
+              <ul>
+                {props.subAgent.diagnostics.map((diagnostic, index) => (
+                  <li key={`${diagnostic.code}:${diagnostic.path ?? "definition"}:${index}`}>
+                    {diagnostic.message}
+                  </li>
+                ))}
               </ul>
             </section>
           )}

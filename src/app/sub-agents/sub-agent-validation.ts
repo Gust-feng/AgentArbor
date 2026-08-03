@@ -26,8 +26,6 @@ export type NormalizedSubAgentFrontmatter = {
   readonly whenToUse: readonly string[];
   readonly whenNotToUse: readonly string[];
   readonly allowedTools: readonly string[];
-  readonly model?: string;
-  readonly maxSteps?: number;
 };
 
 export function parseSubAgentMarkdown(raw: string): ParsedSubAgentMarkdown {
@@ -57,13 +55,11 @@ export function normalizeSubAgentFrontmatter(
     whenToUse: stringArray(frontmatter["when-to-use"] ?? frontmatter.whenToUse),
     whenNotToUse: stringArray(frontmatter["when-not-to-use"] ?? frontmatter.whenNotToUse),
     allowedTools: stringArray(frontmatter["allowed-tools"] ?? frontmatter.allowedTools),
-    model: firstString(frontmatter.model),
-    maxSteps: numberOrUndefined(frontmatter["max-steps"] ?? frontmatter.maxSteps),
   };
 }
 
 export function validateSubAgentFrontmatter(
-  frontmatter: NormalizedSubAgentFrontmatter
+  frontmatter: NormalizedSubAgentFrontmatter,
 ): readonly SubAgentValidationIssue[] {
   const issues: SubAgentValidationIssue[] = [];
 
@@ -97,15 +93,34 @@ export function validateSubAgentFrontmatter(
     });
   }
 
-  if (frontmatter.maxSteps !== undefined && (frontmatter.maxSteps <= 0 || !Number.isFinite(frontmatter.maxSteps))) {
-    issues.push({
-      code: "invalid_max_steps",
-      path: "max-steps",
-      message: "Sub-agent max-steps must be a positive integer when present.",
+  return issues;
+}
+
+export function diagnoseIgnoredSubAgentFrontmatter(
+  rawFrontmatter: Readonly<Record<string, unknown>>,
+): readonly SubAgentValidationIssue[] {
+  const warnings: SubAgentValidationIssue[] = [];
+  if (hasOwnFrontmatterKey(rawFrontmatter, "model")) {
+    warnings.push({
+      code: "ignored_model_override",
+      path: "model",
+      message: "Sub-agent model override is ignored; nested agents use the parent run's frozen model.",
     });
   }
 
-  return issues;
+  const maxStepsKey = hasOwnFrontmatterKey(rawFrontmatter, "max-steps")
+    ? "max-steps"
+    : hasOwnFrontmatterKey(rawFrontmatter, "maxSteps")
+      ? "maxSteps"
+      : undefined;
+  if (maxStepsKey !== undefined) {
+    warnings.push({
+      code: "ignored_step_limit",
+      path: maxStepsKey,
+      message: "Sub-agent step limit is ignored because the nested loop has no defined step unit.",
+    });
+  }
+  return warnings;
 }
 
 export function hashSubAgentText(value: string): string {
@@ -130,10 +145,9 @@ export function booleanOrDefault(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined;
+function hasOwnFrontmatterKey(frontmatter: Readonly<Record<string, unknown>>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(frontmatter, key);
 }
-
 
 function parseYamlFrontmatter(value: string): Readonly<Record<string, unknown>> {
   if (value.trim().length === 0) {

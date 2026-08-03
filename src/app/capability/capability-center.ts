@@ -880,6 +880,10 @@ function commandSummaryFor(command: string | undefined, args: readonly string[] 
 }
 
 function projectSubAgentCatalogItem(subAgent: SubAgentDefinition): CapabilitySubAgentCatalogItem {
+  const diagnostics = [
+    ...(subAgent.validationErrors ?? []).map((issue) => ({ ...issue, severity: "error" as const })),
+    ...(subAgent.validationWarnings ?? []).map((issue) => ({ ...issue, severity: "warning" as const })),
+  ];
   return {
     id: subAgent.id,
     name: subAgent.name,
@@ -893,8 +897,7 @@ function projectSubAgentCatalogItem(subAgent: SubAgentDefinition): CapabilitySub
     whenToUse: subAgent.whenToUse,
     whenNotToUse: subAgent.whenNotToUse,
     allowedTools: subAgent.allowedTools,
-    model: subAgent.model,
-    maxSteps: subAgent.maxSteps,
+    diagnostics: diagnostics.length > 0 ? diagnostics : undefined,
     contentHash: subAgent.contentHash,
     bodyHash: subAgent.bodyHash,
   };

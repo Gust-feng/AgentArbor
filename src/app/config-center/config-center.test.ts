@@ -287,18 +287,24 @@ test("ConfigCenter persists Desktop Agent system prompt settings", async () => {
     const updated = await configCenter.updateDesktopAgentConfig({ systemPrompt: customPrompt });
     const reloaded = await new ConfigCenter({ settingsStore, secretStore }).getDesktopAgentConfig();
     const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
-      readonly desktopAgent?: { readonly systemPrompt?: string };
+      readonly desktopAgent?: { readonly systemPromptMode?: string; readonly systemPrompt?: string };
     };
     const reset = await configCenter.updateDesktopAgentConfig({ resetSystemPrompt: true });
+    const resetSettingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
+      readonly desktopAgent?: { readonly systemPromptMode?: string; readonly systemPrompt?: string };
+    };
 
     assert.equal(initial.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
     assert.equal(initial.isDefault, true);
     assert.equal(updated.systemPrompt, customPrompt);
     assert.equal(updated.isDefault, false);
     assert.equal(reloaded.systemPrompt, customPrompt);
+    assert.equal(settingsRaw.desktopAgent?.systemPromptMode, "custom");
     assert.equal(settingsRaw.desktopAgent?.systemPrompt, customPrompt);
     assert.equal(reset.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
     assert.equal(reset.isDefault, true);
+    assert.equal(resetSettingsRaw.desktopAgent?.systemPromptMode, "built_in");
+    assert.equal(resetSettingsRaw.desktopAgent?.systemPrompt, undefined);
   } finally {
     await removeTestDirectory(directory);
   }

@@ -34,7 +34,7 @@ import type { SkillDefinition } from "../contracts/skills";
 import type { SubAgentDefinition } from "../contracts/sub-agents";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { AppearanceSettings } from "./appearance-settings";
-import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-settings";
+import { BasicCapabilitiesSettings, DesktopAgentPromptSettings, McpServiceSettings } from "./capability-settings";
 import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { SkillSettings } from "./skill-settings";
@@ -148,7 +148,10 @@ export function SettingsDialog(props: {
   if (!props.open) return null;
 
   const visibleGroups = settingsGroupsForDeveloperMode(props.developerModeEnabled);
-  const activeInfo = visibleGroups.find((group) => group.id === activeGroup) ?? visibleGroups[0]!;
+  const visibleActiveGroup = !props.developerModeEnabled && DEVELOPER_SETTINGS_GROUPS.has(activeGroup)
+    ? "about"
+    : activeGroup;
+  const activeInfo = visibleGroups.find((group) => group.id === visibleActiveGroup) ?? visibleGroups[0]!;
   return (
     <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="设置">
       <button type="button" className="settings-backdrop" aria-label="关闭设置" onClick={props.onClose} />
@@ -162,7 +165,7 @@ export function SettingsDialog(props: {
               <button
                 type="button"
                 key={group.id}
-                className={group.id === activeGroup ? "active" : ""}
+                className={group.id === visibleActiveGroup ? "active" : ""}
                 onClick={() => setActiveGroup(group.id)}
                 onFocus={() => {
                   if (group.id === "statistics" || group.id === "developer") preloadUsageStatistics();
@@ -181,8 +184,8 @@ export function SettingsDialog(props: {
           <header>
             <h2>{activeInfo.label}</h2>
           </header>
-          <div className={`settings-content ${activeGroup === "models" ? "model-settings-content" : ""}`}>
-            {activeGroup === "models" && (
+          <div className={`settings-content ${visibleActiveGroup === "models" ? "model-settings-content" : ""}`}>
+            {visibleActiveGroup === "models" && (
               <ModelSettings
                 config={props.config}
                 modelForm={props.modelForm}
@@ -198,19 +201,14 @@ export function SettingsDialog(props: {
                 modelCatalogs={props.modelCatalogs}
               />
             )}
-            {activeGroup === "basicCapabilities" && (
+            {visibleActiveGroup === "basicCapabilities" && (
               <BasicCapabilitiesSettings
                 config={props.config}
                 modelCatalogs={props.modelCatalogs}
                 savingModel={props.savingModel}
                 onSaveModelCapabilities={props.onSaveModelCapabilities}
-                desktopAgentSystemPrompt={props.desktopAgentSystemPrompt}
-                setDesktopAgentSystemPrompt={props.setDesktopAgentSystemPrompt}
                 modelUsageDisplayEnabled={props.modelUsageDisplayEnabled}
                 onModelUsageDisplayChange={props.onModelUsageDisplayChange}
-                savingDesktopAgent={props.savingDesktopAgent}
-                onSaveDesktopAgentSystemPrompt={props.onSaveDesktopAgentSystemPrompt}
-                onResetDesktopAgentSystemPrompt={props.onResetDesktopAgentSystemPrompt}
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}
@@ -219,7 +217,7 @@ export function SettingsDialog(props: {
                 onSaveSkillTriggerMode={props.onSaveSkillTriggerMode}
               />
             )}
-            {activeGroup === "mcp" && (
+            {visibleActiveGroup === "mcp" && (
               <McpServiceSettings
                 tools={props.tools}
                 mcpServerForm={props.mcpServerForm}
@@ -235,7 +233,7 @@ export function SettingsDialog(props: {
                 onUpdateMcpTool={props.onUpdateMcpTool}
               />
             )}
-            {activeGroup === "skills" && (
+            {visibleActiveGroup === "skills" && (
               <SkillSettings
                 skills={props.skills}
                 saving={props.savingTools}
@@ -243,14 +241,14 @@ export function SettingsDialog(props: {
                 onUpdateSkill={props.onUpdateSkill}
               />
             )}
-            {activeGroup === "subAgents" && (
+            {visibleActiveGroup === "subAgents" && (
               <SubAgentSettings
                 subAgents={props.subAgents}
                 refreshing={props.savingTools}
                 onRefresh={props.onRefreshSubAgents}
               />
             )}
-            {activeGroup === "workspace" && (
+            {visibleActiveGroup === "workspace" && (
               <WorkspaceSettings
                 commandShell={props.config?.commandShell}
                 workspaceDirectory={props.workspaceDirectory}
@@ -261,16 +259,26 @@ export function SettingsDialog(props: {
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
-            {activeGroup === "appearance" && <AppearanceSettings />}
-            {activeGroup === "statistics" && <UsageStatisticsSettings />}
-            {activeGroup === "pathMemory" && <PathMemorySettings />}
-            {activeGroup === "developer" && (
+            {visibleActiveGroup === "appearance" && <AppearanceSettings />}
+            {visibleActiveGroup === "statistics" && <UsageStatisticsSettings />}
+            {visibleActiveGroup === "pathMemory" && <PathMemorySettings />}
+            {visibleActiveGroup === "developer" && (
               <>
+                <div className="basic-capabilities-settings developer-prompt-settings">
+                  <DesktopAgentPromptSettings
+                    config={props.config}
+                    systemPrompt={props.desktopAgentSystemPrompt}
+                    setSystemPrompt={props.setDesktopAgentSystemPrompt}
+                    saving={props.savingDesktopAgent}
+                    onSave={props.onSaveDesktopAgentSystemPrompt}
+                    onReset={props.onResetDesktopAgentSystemPrompt}
+                  />
+                </div>
                 <ResponsivenessDiagnostics />
                 <DeveloperToolStatistics />
               </>
             )}
-            {activeGroup === "about" && (
+            {visibleActiveGroup === "about" && (
               <AboutSettings
                 config={props.config}
                 appUpdate={props.appUpdate}

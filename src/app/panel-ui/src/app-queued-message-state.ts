@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import type { TaskStatus } from "./contracts/common.js";
 
+/** Node-testable queue fact; the Panel composer projects it into its own props contract. */
 export type QueuedChatMessage = {
   readonly id: string;
   readonly content: string;

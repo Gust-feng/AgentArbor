@@ -3,6 +3,7 @@ import { ChevronDown, FileText, Send, X } from 'lucide-react'
 import type { ChatInputProps } from '../../../../contracts/composer'
 import { ModelOptionPicker } from '../../../../components/model-option-picker'
 import { RADII, composerSurface } from './tokens'
+import { QueuedMessageList } from './QueuedMessageList'
 
 export function ConversationComposer({ input }: { readonly input: ChatInputProps }) {
   const [focused, setFocused] = useState(false)
@@ -27,6 +28,13 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
 
   return (
     <div className="aa-conversation-composer" style={composerSurface(focused)}>
+      {input.queuedMessages !== undefined && input.queuedMessages.length > 0 && (
+        <QueuedMessageList
+          messages={input.queuedMessages}
+          onRemove={input.onRemoveQueuedMessage ?? (() => undefined)}
+          onUpdate={input.onUpdateQueuedMessage ?? (() => undefined)}
+        />
+      )}
       {input.attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-3 pt-3">
           {input.attachments.map((attachment) => (

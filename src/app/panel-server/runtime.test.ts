@@ -6,11 +6,86 @@ import test from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { FileSystemAgentSessionRepository } from "../../adapters/intelligence/file-system-agent-session-repository.js";
+import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort } from "../ordinary-agent/contracts.js";
 import { ordinaryAgentSessionRef, ordinaryRunBirth, ordinaryRunTurn } from "../ordinary-agent/test-support.js";
+import {
+  createFileSystemSpaceReferenceDeletionJournal,
+  type SpaceReferenceDeletionJournalRecord,
+} from "../spaces/file-system-reference-deletion-journal.js";
 import { releasePanelRuntimeResources } from "./request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
 import { spaceReferenceAttachmentId } from "../spaces/space-file-access.js";
+
+test("Panel composition closes failed Workbench storage before Space recovery starts", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-startup-failure-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  const sourcePath = path.join(directory, "source.md");
+  await fs.writeFile(sourcePath, "staged content", "utf8");
+
+  const first = createPanelRuntime({
+    configDirectory: directory,
+    testOnlySkipInitialWorkbenchData: true,
+  });
+  const space = await first.spaceFeature.commands.createSpace({ title: "Startup recovery" });
+  const reference = await first.spaceFeature.commands.addReference({
+    spaceId: space.id,
+    title: "source.md",
+    reference: { kind: "local_file", path: sourcePath },
+  });
+  await releasePanelRuntimeResources(first);
+
+  const runtimeHome = path.join(directory, "runtime");
+  const databasePath = path.join(runtimeHome, "workbench.sqlite3");
+  const setupDatabase = new SqliteRuntimeDatabase(databasePath);
+  setupDatabase.connection.prepare("DELETE FROM schema_migrations WHERE owner = ?").run("personal-knowledge");
+  setupDatabase.close();
+
+  const deletionId = "startup-migration-failure";
+  const stagedPath = path.join(
+    path.dirname(sourcePath),
+    `.${path.basename(sourcePath)}.agentarbor-delete-${deletionId}-0`,
+  );
+  await fs.rename(sourcePath, stagedPath);
+  const journal = createFileSystemSpaceReferenceDeletionJournal(
+    path.join(runtimeHome, "space-reference-deletions"),
+  );
+  const record: SpaceReferenceDeletionJournalRecord = {
+    schemaVersion: "space-reference-deletion/v1",
+    deletionId,
+    phase: "files_staged",
+    rootReferenceId: reference.id,
+    removedReferences: [reference],
+    targets: [{
+      referenceId: reference.id,
+      kind: "local_file",
+      sourcePath: path.resolve(sourcePath),
+      stagedPath,
+    }],
+    createdAt: reference.createdAt,
+  };
+  await journal.save(record);
+
+  const originalClose = SqliteRuntimeDatabase.prototype.close;
+  let closeCalls = 0;
+  t.mock.method(SqliteRuntimeDatabase.prototype, "close", function (this: SqliteRuntimeDatabase) {
+    closeCalls += 1;
+    return originalClose.call(this);
+  });
+
+  assert.throws(
+    () => createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true }),
+    (error: unknown) => error instanceof Error && /personal_notes/u.test(error.message),
+  );
+  for (let turn = 0; turn < 20; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(closeCalls, 1);
+  await assert.rejects(fs.access(sourcePath), { code: "ENOENT" });
+  assert.equal(await fs.readFile(stagedPath, "utf8"), "staged content");
+  assert.deepEqual(await journal.list(), [record]);
+});
 
 test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary capability discovery", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-capability-root-"));

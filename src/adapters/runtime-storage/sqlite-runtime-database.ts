@@ -15,30 +15,43 @@ export class SqliteRuntimeDatabase {
 
   constructor(readonly filePath: string) {
     mkdirSync(path.dirname(filePath), { recursive: true });
-    this.connection = new DatabaseSync(filePath);
-    this.connection.exec("PRAGMA journal_mode = WAL");
-    this.connection.exec("PRAGMA foreign_keys = ON");
-    this.connection.exec("PRAGMA synchronous = NORMAL");
-    this.connection.exec("PRAGMA busy_timeout = 5000");
-    this.connection.exec(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        owner TEXT PRIMARY KEY,
-        version INTEGER NOT NULL,
-        applied_at TEXT NOT NULL
-      ) STRICT
-    `);
-    this.connection.exec(`
-      CREATE TABLE IF NOT EXISTS compatibility_imports (
-        import_key TEXT PRIMARY KEY,
-        imported_at TEXT NOT NULL
-      ) STRICT
-    `);
-    this.connection.exec(`
-      CREATE TABLE IF NOT EXISTS runtime_initializations (
-        initialization_key TEXT PRIMARY KEY,
-        initialized_at TEXT NOT NULL
-      ) STRICT
-    `);
+    const connection = new DatabaseSync(filePath);
+    try {
+      connection.exec("PRAGMA journal_mode = WAL");
+      connection.exec("PRAGMA foreign_keys = ON");
+      connection.exec("PRAGMA synchronous = NORMAL");
+      connection.exec("PRAGMA busy_timeout = 5000");
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          owner TEXT PRIMARY KEY,
+          version INTEGER NOT NULL,
+          applied_at TEXT NOT NULL
+        ) STRICT
+      `);
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS compatibility_imports (
+          import_key TEXT PRIMARY KEY,
+          imported_at TEXT NOT NULL
+        ) STRICT
+      `);
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS runtime_initializations (
+          initialization_key TEXT PRIMARY KEY,
+          initialized_at TEXT NOT NULL
+        ) STRICT
+      `);
+    } catch (initializationError) {
+      try {
+        connection.close();
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [initializationError, cleanupError],
+          "SQLite runtime database initialization and cleanup both failed.",
+        );
+      }
+      throw initializationError;
+    }
+    this.connection = connection;
   }
 
   migrate(owner: string, migrations: readonly SqliteMigration[]): void {

@@ -23,6 +23,7 @@ import {
   cleanupPanelRuntimeOwnedProcesses,
   createPanelRuntime,
   isPanelRuntime,
+  preparePanelRuntimeStorageForStartup,
   type PanelRuntime,
 } from "./runtime.js";
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
@@ -75,8 +76,12 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
     : await acquirePanelRuntimeDirectoryLease(runtimeDirectory);
   let runtime: PanelRuntime | undefined;
   try {
+    if (runtimeDirectory !== undefined) {
+      await preparePanelRuntimeStorageForStartup(runtimeDirectory);
+    }
     const createdRuntime = createPanelRuntime(options);
     runtime = createdRuntime;
+    await createdRuntime.spaceFeature.ready();
     const server = createServer(createPanelRequestHandler(createdRuntime));
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 9090;
@@ -459,23 +464,10 @@ async function captureCleanupError(errors: unknown[], operation: () => Promise<v
 }
 
 async function releaseWorkbenchStorage(runtime: PanelRuntime): Promise<void> {
-  const errors: unknown[] = [];
-  try {
-    await runtime.flushSpaceKnowledgeSync();
-  } catch (error) {
-    errors.push(error);
-  }
-  const results = await Promise.allSettled([
-    runtime.personalKnowledgeFeature.release(),
-    runtime.spaceFeature.release(),
-  ]);
-  errors.push(...results.flatMap((result) => result.status === "rejected" ? [result.reason] : []));
-  try {
-    runtime.workbenchDatabase.close();
-  } catch (error) {
-    errors.push(error);
-  }
-  if (errors.length > 0) throw new AggregateError(errors, "Workbench storage cleanup did not complete.");
+  await runtime.flushSpaceKnowledgeSync();
+  await runtime.personalKnowledgeFeature.release();
+  await runtime.spaceFeature.release();
+  runtime.workbenchDatabase.close();
 }
 
 function ordinaryFeatureHttpError(error: OrdinaryFeatureError): PanelHttpError {

@@ -29,10 +29,12 @@ import {
 import { CapabilityCenter } from "../capability/capability-center.js";
 import {
   captureKnowledgeAsset,
+  managedKnowledgeDocumentTarget,
   reconcileKnowledgeAssets,
   removeKnowledgeAsset,
   stageKnowledgeAssetRemoval,
 } from "./knowledge-asset-store.js";
+import { updateLocalDocumentText } from "./local-document-preview.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center/index.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import {
@@ -67,23 +69,28 @@ import {
   type AgentNotesFeature,
 } from "../agent-notes/index.js";
 import {
+  createFileSystemSpaceReferenceDeletionJournal,
   createSqliteSpaceRepository,
   createSpaceFeature,
+  inspectFileSystemSpaceReferenceDeletionJournal,
   type SpaceEvent,
   type SpaceFeature,
 } from "../spaces/index.js";
 import {
   createPersonalKnowledgeFeature,
   createSqlitePersonalKnowledgeRepository,
+  PersonalKnowledgeError,
   type PersonalKnowledgeEvent,
   type PersonalKnowledgeFeature,
 } from "../personal-knowledge/index.js";
 import {
   applyPendingWorkbenchRestore,
   createWorkbenchDataMaintenance,
+  hasUnappliedPendingWorkbenchRestore,
+  WorkbenchDataMaintenanceError,
   type WorkbenchDataMaintenance,
 } from "./workbench-data-maintenance.js";
-import { runSpaceReferenceRemoval } from "./space-reference-deletion.js";
+import { createSpaceReferenceDeletionFilePort } from "./space-reference-deletion.js";
 import { reconcileMissingRunSpaceFiles } from "./space-file-reference-reconciliation.js";
 import {
   createPlatformProcessTerminator,
@@ -148,7 +155,7 @@ export type PanelRuntime = {
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
   readonly agentNotesFeature: AgentNotesFeature;
   readonly spaceFeature: SpaceFeature;
-  readonly personalKnowledgeFeature: PersonalKnowledgeFeature;
+  readonly personalKnowledgeFeature: PersonalKnowledgeFeature<import("../panel-api-contracts.js").DocumentPreview>;
   readonly workbenchDataMaintenance: WorkbenchDataMaintenance;
   readonly pathMemoryFeature: PathMemoryFeature;
   readonly experienceCandidateFeature: ExperienceCandidateFeature;
@@ -237,6 +244,57 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
   });
 }
 
+export async function preparePanelRuntimeStorageForStartup(runtimeHome: string): Promise<void> {
+  const journalRoot = path.join(runtimeHome, "space-reference-deletions");
+  if (!hasUnappliedPendingWorkbenchRestore(runtimeHome) ||
+    inspectFileSystemSpaceReferenceDeletionJournal(journalRoot) === "idle") return;
+
+  const databasePath = path.join(runtimeHome, "workbench.sqlite3");
+  try {
+    await fs.access(databasePath);
+  } catch (error) {
+    throw new WorkbenchDataMaintenanceError(
+      "data_maintenance_failed",
+      "Workbench 恢复前无法读取保存 Space 删除身份的当前数据库；恢复未修改任何数据。",
+      { cause: error },
+    );
+  }
+  const database = new SqliteRuntimeDatabase(databasePath);
+  let spaceFeature: SpaceFeature | undefined;
+  let startupError: unknown;
+  try {
+    spaceFeature = createSpaceFeature({
+      repository: createSqliteSpaceRepository(database),
+      referenceDeletion: {
+        journal: createFileSystemSpaceReferenceDeletionJournal(journalRoot),
+        files: createSpaceReferenceDeletionFilePort(path.join(runtimeHome, "space-folders")),
+        leases: new InMemoryLocalWorkspaceMutationCoordinator(),
+      },
+    });
+    await spaceFeature.ready();
+  } catch (error) {
+    startupError = error;
+  }
+
+  const cleanupErrors: unknown[] = [];
+  if (spaceFeature !== undefined) {
+    try { await spaceFeature.release(); } catch (error) { cleanupErrors.push(error); }
+  }
+  try { database.close(); } catch (error) { cleanupErrors.push(error); }
+  if (startupError !== undefined) {
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [startupError, ...cleanupErrors],
+        "Space deletion recovery before Workbench restore and cleanup both failed.",
+      );
+    }
+    throw startupError;
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Space deletion recovery cleanup before Workbench restore failed.");
+  }
+}
+
 export function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value is PanelRuntime {
   return (
     value.configCenter instanceof ConfigCenter &&
@@ -282,19 +340,39 @@ function assemblePanelRuntime(input: {
   const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
   let knowledgeAssetsReady = Promise.resolve();
   let spaceFileReconciliation = Promise.resolve();
-  applyPendingWorkbenchRestore(runtimeHome);
-  const workbenchDatabase = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
-  const workbenchAssets = createSqliteWorkbenchAssetRepository(workbenchDatabase);
+  applyPendingWorkbenchRestore(runtimeHome, {
+    assertSpaceDeletionIdle: () => assertSpaceDeletionJournalIdle(runtimeHome),
+  });
+  const {
+    database: workbenchDatabase,
+    workbenchAssets,
+    spaceRepository,
+    personalKnowledgeRepository,
+  } = openPanelWorkbenchStorage(runtimeHome);
+  let beforeWorkbenchRestoreStage: (() => Promise<void>) | undefined;
   const workbenchDataMaintenance = createWorkbenchDataMaintenance({
     database: workbenchDatabase,
     runtimeHome,
     restorePicker: input.workbenchRestorePicker,
+    beforeRestoreStage: async () => {
+      if (beforeWorkbenchRestoreStage === undefined) {
+        throw new Error("Panel runtime restore preparation is not initialized.");
+      }
+      await beforeWorkbenchRestoreStage();
+    },
     runOwnedStorageSnapshot: async (operation) => {
       await knowledgeAssetsReady;
-      return await fileMutationCoordinator.runExclusive(runtimeHome, operation);
+      return await fileMutationCoordinator.runExclusive(runtimeHome, async () => {
+        if ((await spaceReferenceDeletionJournal.list()).length > 0) {
+          throw new Error("Workbench storage cannot be snapshotted while a Space deletion journal is pending.");
+        }
+        return await operation();
+      });
     },
   });
-  const spaceRepository = createSqliteSpaceRepository(workbenchDatabase);
+  const spaceReferenceDeletionJournal = createFileSystemSpaceReferenceDeletionJournal(
+    path.join(runtimeHome, "space-reference-deletions"),
+  );
   const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
   const agentNotesFeature = createAgentNotesFeature({
     repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
@@ -302,19 +380,24 @@ function assemblePanelRuntime(input: {
   const spaceFeature = createSpaceFeature({
     repository: spaceRepository,
     workspaceMountIdentity: canonicalWorkspaceMountIdentity,
-    runReferenceRemoval: async (items, removeMetadata) => await runSpaceReferenceRemoval(
-      items,
-      managedSpaceFolderRoot,
-      fileMutationCoordinator,
-      removeMetadata,
-    ),
+    referenceDeletion: {
+      journal: spaceReferenceDeletionJournal,
+      files: createSpaceReferenceDeletionFilePort(managedSpaceFolderRoot),
+      leases: fileMutationCoordinator,
+      onDiagnostic: (diagnostic) => {
+        console.error(
+          `[panel-server] Committed Space deletion ${diagnostic.deletionId} cleanup reported a failure; any retained journal state will be reconciled on the next startup`,
+          diagnostic.error,
+        );
+      },
+    },
   });
   const personalKnowledgeFeature = createPersonalKnowledgeFeature({
-    repository: createSqlitePersonalKnowledgeRepository(workbenchDatabase),
+    repository: personalKnowledgeRepository,
     spaceExists: async (spaceId) => await spaceFeature.queries.getTree(spaceId) !== undefined,
     runManagedAssetMutation: async (operation) => {
       await knowledgeAssetsReady;
-      return await fileMutationCoordinator.run(knowledgeAssetRoot, operation);
+      return await fileMutationCoordinator.runExclusive(knowledgeAssetRoot, operation);
     },
     captureSpaceReference: async ({ assetId, referenceId, relativePath }) => {
       const item = await spaceFeature.queries.getReference(referenceId);
@@ -323,6 +406,23 @@ function assemblePanelRuntime(input: {
     },
     removeManagedAsset: async (itemId) => await removeKnowledgeAsset(knowledgeAssetRoot, itemId),
     stageManagedAssetRemoval: async (itemId) => await stageKnowledgeAssetRemoval(knowledgeAssetRoot, itemId),
+    writeManagedAssetText: async ({ page, relativePath, expectedFingerprint, text }) => {
+      await knowledgeAssetsReady;
+      const target = managedKnowledgeDocumentTarget(knowledgeAssetRoot, page);
+      return await fileMutationCoordinator.runExclusive(target.mutationKey, async () =>
+        await updateLocalDocumentText(
+          target.rootDir,
+          relativePath,
+          { expectedFingerprint, text },
+          target.meta,
+          {
+            contentBaseUrl: `/api/personal-knowledge/assets/${encodeURIComponent(page.refId)}/content`,
+            contentTypeHintPath: target.contentTypeHintPath(relativePath),
+          },
+        ).catch((error: unknown) => {
+          throw managedKnowledgeAssetWriteError(error);
+        }));
+    },
   });
   const initialWorkbenchData = createInitialWorkbenchDataInitializer(
     input.testOnlySkipInitialWorkbenchData
@@ -335,7 +435,7 @@ function assemblePanelRuntime(input: {
       }),
   );
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
-    await fileMutationCoordinator.run(knowledgeAssetRoot, async () => await reconcileKnowledgeAssets(
+    await fileMutationCoordinator.runExclusive(knowledgeAssetRoot, async () => await reconcileKnowledgeAssets(
       knowledgeAssetRoot,
       new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)),
     ));
@@ -412,7 +512,7 @@ function assemblePanelRuntime(input: {
       } else if (diagnostic.kind === "conversation_unavailable") {
         console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} is unavailable after startup recovery; its data remains on disk for diagnosis`, diagnostic.error);
       } else if (diagnostic.kind === "successor_activation_failed") {
-        console.error(`[panel-server] Ordinary successor activation failed after bounded retry for predecessor ${diagnostic.predecessorRunId}; the successor remains queued`, diagnostic.error);
+        console.error(`[panel-server] Ordinary successor activation failed after bounded retry for ${diagnostic.predecessorRunId}; the successor remains queued`, diagnostic.error);
       } else {
         console.error(`[panel-server] Ordinary startup recovery could not enumerate ${diagnostic.source}; new live conversations remain available`, diagnostic.error);
       }
@@ -521,7 +621,45 @@ function assemblePanelRuntime(input: {
     flushSpaceFileReconciliation: () => spaceFileReconciliation,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
+  let restorePreparation: Promise<void> | undefined;
+  beforeWorkbenchRestoreStage = () => restorePreparation ??= (async () => {
+    runtime.isQuiescing = true;
+    await ordinaryAgentFeature.release();
+    await spaceFileReconciliation;
+    await initialWorkbenchData.ensure();
+    await personalKnowledgeFeature.release();
+    await spaceFeature.release();
+  })();
   return runtime;
+}
+
+function openPanelWorkbenchStorage(runtimeHome: string) {
+  const database = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
+  try {
+    return {
+      database,
+      workbenchAssets: createSqliteWorkbenchAssetRepository(database),
+      spaceRepository: createSqliteSpaceRepository(database),
+      personalKnowledgeRepository: createSqlitePersonalKnowledgeRepository(database),
+    };
+  } catch (startupError) {
+    try {
+      database.close();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startupError, cleanupError],
+        "Workbench storage initialization and cleanup both failed.",
+      );
+    }
+    throw startupError;
+  }
+}
+
+function assertSpaceDeletionJournalIdle(runtimeHome: string): void {
+  const status = inspectFileSystemSpaceReferenceDeletionJournal(
+    path.join(runtimeHome, "space-reference-deletions"),
+  );
+  if (status !== "idle") throw new Error("Space deletion recovery is still pending.");
 }
 
 function projectionChangeFromSpace(event: SpaceEvent) {
@@ -574,6 +712,20 @@ function projectionChangeFromPersonalKnowledge(event: PersonalKnowledgeEvent) {
         owners: ["personal_knowledge"] as const,
         ...(event.refIds === undefined ? {} : { referenceIds: event.refIds }),
       };
+  }
+}
+
+function managedKnowledgeAssetWriteError(error: unknown): unknown {
+  if (!(error instanceof PanelHttpError)) return error;
+  switch (error.code) {
+    case "space_reference_revision_conflict":
+      return new PersonalKnowledgeError("knowledge_asset_revision_conflict", error.message, { cause: error });
+    case "space_reference_source_missing":
+      return new PersonalKnowledgeError("knowledge_asset_source_missing", error.message, { cause: error });
+    case "space_reference_not_editable":
+      return new PersonalKnowledgeError("knowledge_asset_not_editable", error.message, { cause: error });
+    default:
+      return new PersonalKnowledgeError("knowledge_asset_write_failed", error.message, { cause: error });
   }
 }
 
@@ -685,7 +837,7 @@ async function prepareOrdinaryRunBirth(
     input.reasoningEffort,
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
-  const workspaceRoot = input.workspaceDirectory ?? process.cwd();
+  const workspaceRoot = capabilitySnapshot.workspace.workspaceDirectory;
   const noteInjection = await runtime.agentNotesFeature.queries.startupInjection(workspaceRoot);
   // The injected note is frozen with this run's definition. This preserves the
   // existing definition/hash invariant: a restarted run uses exactly the notes

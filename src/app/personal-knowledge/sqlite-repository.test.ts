@@ -134,6 +134,93 @@ test("persists only existing Space references as knowledge pages", async (t) => 
   );
 });
 
+test("managed asset text updates return the lease-captured result and publish only after the write commits", async (t) => {
+  const writes: Array<{
+    readonly refId: string;
+    readonly relativePath: string;
+    readonly expectedFingerprint: string;
+    readonly text: string;
+  }> = [];
+  let writeError: Error | undefined;
+  const { feature } = await fixture(t, {
+    writeManagedAssetText: async ({ page, relativePath, expectedFingerprint, text }) => {
+      if (writeError !== undefined) throw writeError;
+      writes.push({ refId: page.refId, relativePath, expectedFingerprint, text });
+      return { committedText: text };
+    },
+  });
+  const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
+  const events: Array<{ readonly type: string; readonly refIds?: readonly string[] }> = [];
+  feature.events.subscribe((event) => events.push(event));
+
+  const updated = await feature.commands.updateManagedAssetText({
+    refId: page.refId,
+    relativePath: "chapter.md",
+    expectedFingerprint: " 1:10 ",
+    text: "updated",
+  });
+
+  assert.equal(updated.page.refId, page.refId);
+  assert.deepEqual(updated.writeResult, { committedText: "updated" });
+  assert.deepEqual(writes, [{
+    refId: page.refId,
+    relativePath: "chapter.md",
+    expectedFingerprint: " 1:10 ",
+    text: "updated",
+  }]);
+  assert.deepEqual(events, [{ type: "personal_knowledge.changed", refIds: [page.refId] }]);
+
+  writeError = new Error("write failed");
+  await assert.rejects(feature.commands.updateManagedAssetText({
+    refId: page.refId,
+    relativePath: "chapter.md",
+    expectedFingerprint: "1:10",
+    text: "not committed",
+  }), writeError);
+  await assert.rejects(feature.commands.updateManagedAssetText({
+    refId: "missing",
+    relativePath: "",
+    expectedFingerprint: "1:10",
+    text: "not committed",
+  }), (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "knowledge_asset_not_found");
+  assert.deepEqual(events, [{ type: "personal_knowledge.changed", refIds: [page.refId] }]);
+});
+
+test("concurrent managed asset writes keep each command's lease-captured result", async (t) => {
+  let releaseFirstWrite!: () => void;
+  let firstWriteEntered!: () => void;
+  const firstWriteStarted = new Promise<void>((resolve) => { firstWriteEntered = resolve; });
+  const firstWriteRelease = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+  const { feature } = await fixture(t, {
+    writeManagedAssetText: async ({ text }) => {
+      if (text === "first") {
+        firstWriteEntered();
+        await firstWriteRelease;
+      }
+      return { committedText: text };
+    },
+  });
+  const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
+
+  const first = feature.commands.updateManagedAssetText({
+    refId: page.refId,
+    relativePath: "",
+    expectedFingerprint: "before-first",
+    text: "first",
+  });
+  await firstWriteStarted;
+  const second = feature.commands.updateManagedAssetText({
+    refId: page.refId,
+    relativePath: "",
+    expectedFingerprint: "after-first",
+    text: "second",
+  });
+  releaseFirstWrite();
+
+  assert.deepEqual((await first).writeResult, { committedText: "first" });
+  assert.deepEqual((await second).writeResult, { committedText: "second" });
+});
+
 test("migrates existing material knowledge pages before adding Space references", async (t) => {
   const { database } = await fixture(t);
   database.connection.exec(`
@@ -180,7 +267,17 @@ test("migration removes relationships whose knowledge pages no longer exist", as
   assert.equal(database.connection.prepare("SELECT COUNT(*) AS count FROM knowledge_recently_opened").get()?.count, 0);
 });
 
-async function fixture(t: import("node:test").TestContext) {
+async function fixture(
+  t: import("node:test").TestContext,
+  options: {
+    readonly writeManagedAssetText?: (input: {
+      readonly page: import("./contracts.js").KnowledgePage;
+      readonly relativePath: string;
+      readonly expectedFingerprint: string;
+      readonly text: string;
+    }) => Promise<unknown>;
+  } = {},
+) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-personal-knowledge-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   const feature = createPersonalKnowledgeFeature({
@@ -188,6 +285,7 @@ async function fixture(t: import("node:test").TestContext) {
     spaceExists: async (spaceId) => spaceId === "space-one",
     captureSpaceReference: async () => ({ status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "directory", sourceReferenceId: "reference-one", sourceRelativePath: "" }),
     removeManagedAsset: async () => undefined,
+    writeManagedAssetText: options.writeManagedAssetText,
   });
   t.after(async () => {
     await feature.release();

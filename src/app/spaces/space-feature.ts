@@ -11,16 +11,26 @@ import {
   type SpaceTreeSnapshot,
 } from "./contracts.js";
 import { validateSpaceReference } from "./space-validation.js";
+import {
+  createSpaceReferenceDeletionLifecycle,
+  type SpaceReferenceDeletionDiagnostic,
+  type SpaceReferenceDeletionFilePort,
+  type SpaceReferenceDeletionLeasePort,
+} from "./space-reference-deletion.js";
+import type { SpaceReferenceDeletionJournalStore } from "./file-system-reference-deletion-journal.js";
 
 export type CreateSpaceFeatureInput = {
   readonly repository: SpaceRepository;
   readonly now?: () => string;
   readonly idFactory?: () => string;
   readonly workspaceMountIdentity?: (workspacePath: string) => Promise<string>;
-  readonly runReferenceRemoval?: (
-    items: readonly SpaceReferenceItem[],
-    removeMetadata: () => Promise<void>,
-  ) => Promise<void>;
+  readonly referenceDeletion?: {
+    readonly journal: SpaceReferenceDeletionJournalStore;
+    readonly files: SpaceReferenceDeletionFilePort;
+    readonly leases: SpaceReferenceDeletionLeasePort;
+    readonly createDeletionId?: () => string;
+    readonly onDiagnostic?: (diagnostic: SpaceReferenceDeletionDiagnostic) => void;
+  };
 };
 
 export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature {
@@ -28,9 +38,20 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
   const createId = input.idFactory ?? (() => crypto.randomUUID());
   const listeners = new Set<(event: SpaceEvent) => void>();
   let released = false;
+  let runtimeFailure: unknown;
+  let releasePromise: Promise<void> | undefined;
+  let startupSucceeded = false;
   let tail = Promise.resolve();
-  const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = tail.then(operation, operation);
+  let startup: Promise<void> | undefined;
+  const serialize = <T>(operation: () => Promise<T>, waitForStartup = true): Promise<T> => {
+    const guarded = async () => {
+      if (waitForStartup) {
+        await startup;
+        if (runtimeFailure !== undefined) throw runtimeFailure;
+      }
+      return operation();
+    };
+    const result = tail.then(guarded, guarded);
     tail = result.then(() => undefined, () => undefined);
     return result;
   };
@@ -41,6 +62,21 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
     for (const listener of [...listeners]) {
       try { listener(event); } catch { /* Observers cannot roll back an already committed Space command. */ }
     }
+  };
+  const deletionLifecycle = input.referenceDeletion === undefined
+    ? undefined
+    : createSpaceReferenceDeletionLifecycle({
+        repository: input.repository,
+        ...input.referenceDeletion,
+      });
+  const ready = deletionLifecycle === undefined
+    ? Promise.resolve()
+    : serialize(() => deletionLifecycle.recover(), false);
+  void ready.then(() => { startupSucceeded = true; }, () => undefined);
+  startup = ready;
+  const waitUntilUsable = async (): Promise<void> => {
+    await ready;
+    if (runtimeFailure !== undefined) throw runtimeFailure;
   };
   const removeReferenceWithPolicy = (
     itemId: string,
@@ -53,15 +89,27 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       const at = now();
       const subtree = referenceSubtreeIds(snapshot, itemId);
       const removedItems = snapshot.referenceItems.filter((entry) => subtree.has(entry.id));
-      const removeMetadata = async () => await input.repository.write({
+      const nextSnapshot = {
         ...snapshot,
         referenceItems: snapshot.referenceItems.filter((entry) => !subtree.has(entry.id)),
         spaces: touchSpaces(snapshot.spaces, [item.spaceId], at),
-      });
-      if (runOwnershipLifecycle && input.runReferenceRemoval !== undefined) {
-        await input.runReferenceRemoval(removedItems, removeMetadata);
+      };
+      if (runOwnershipLifecycle && deletionLifecycle !== undefined) {
+        try {
+          await deletionLifecycle.remove({
+            rootReferenceId: itemId,
+            removedReferences: removedItems,
+            nextSnapshot,
+            createdAt: at,
+          });
+        } catch (error) {
+          if (error instanceof SpaceFeatureError && error.code === "space_deletion_recovery_failed") {
+            runtimeFailure ??= error;
+          }
+          throw error;
+        }
       } else {
-        await removeMetadata();
+        await input.repository.write(nextSnapshot);
       }
       publish({
         type: "space.reference_removed",
@@ -80,6 +128,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
   };
 
   return {
+    ready: waitUntilUsable,
     commands: {
       createSpace({ id, title }) {
         assertUsable("create a Space");
@@ -159,6 +208,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
     queries: {
       async list() {
         assertUsable("list Spaces");
+        await waitUntilUsable();
         const snapshot = await input.repository.read();
         return snapshot.spaces.map((space) => ({
           ...space,
@@ -168,6 +218,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       },
       async getTree(spaceId) {
         assertUsable("read a Space");
+        await waitUntilUsable();
         const snapshot = await input.repository.read();
         const space = snapshot.spaces.find((entry) => entry.id === spaceId);
         if (space === undefined) return undefined;
@@ -177,10 +228,12 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       },
       async getReference(itemId) {
         assertUsable("read a reference");
+        await waitUntilUsable();
         return (await input.repository.read()).referenceItems.find((entry) => entry.id === itemId);
       },
       async findConversationOwner(conversationId) {
         assertUsable("resolve a conversation owner");
+        await waitUntilUsable();
         const matches = (await input.repository.read()).referenceItems.filter((entry) =>
           entry.reference.kind === "conversation" && entry.reference.conversationId === conversationId
         );
@@ -195,6 +248,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       },
       async hasWorkspaceMountConflict(itemId) {
         assertUsable("check a workspace mount");
+        await waitUntilUsable();
         const snapshot = await input.repository.read();
         const item = requireReference(snapshot, itemId);
         if (item.reference.kind !== "workspace_folder") return false;
@@ -209,7 +263,23 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
     events: {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     },
-    async release() { released = true; await tail; listeners.clear(); },
+    async release() {
+      if (releasePromise !== undefined) return await releasePromise;
+      released = true;
+      const attempt = (async () => {
+        await ready.catch(() => undefined);
+        await tail;
+        listeners.clear();
+        if (startupSucceeded) await deletionLifecycle?.recover();
+      })();
+      releasePromise = attempt;
+      try {
+        await attempt;
+      } catch (error) {
+        releasePromise = undefined;
+        throw error;
+      }
+    },
   };
 }
 

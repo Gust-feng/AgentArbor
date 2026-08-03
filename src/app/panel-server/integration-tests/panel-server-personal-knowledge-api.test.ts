@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { contentFingerprint } from "../../local-filesystem/index.js";
 import { closePanelServer, createPanelRequestHandler } from "../request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "../runtime.js";
 import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
@@ -58,12 +59,17 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       body: { title: "研究资料", reference: { kind: "local_file", path: sourcePath } },
     });
     const referenceId = reference.body.item.id as string;
+    const collectCursor = server.runtime.workbenchProjectionChanges.replay().cursor;
     const collected = await requestJson(server.baseUrl, "/api/personal-knowledge/collect-space-reference", {
       method: "POST",
       body: { referenceId },
     });
     assert.equal(collected.status, 201);
     const knowledgeRefId = collected.body.page.refId as string;
+    assert.deepEqual(server.runtime.workbenchProjectionChanges.replay(collectCursor).changes.map(({ owners, referenceIds }) => ({
+      owners,
+      referenceIds,
+    })), [{ owners: ["personal_knowledge"], referenceIds: [knowledgeRefId] }]);
     const openedReference = await requestJson(server.baseUrl, `/api/spaces/references/${encodeURIComponent(referenceId)}/open`, {
       method: "POST",
       body: {},
@@ -88,6 +94,7 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     assert.equal(managedBeforeRemoval.body.preview.content.text, "# 托管正文");
     assert.equal(managedBeforeRemoval.body.preview.content.language, "md");
     assert.equal(managedBeforeRemoval.body.preview.content.editable, true);
+    const assetUpdateCursor = server.runtime.workbenchProjectionChanges.replay().cursor;
     const editedManaged = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/content`, {
       method: "PUT",
       body: { relativePath: "", expectedFingerprint: managedBeforeRemoval.body.preview.fingerprint, text: "# 已编辑托管正文" },
@@ -96,6 +103,48 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     assert.equal(editedManaged.body.preview.content.text, "# 已编辑托管正文");
     assert.equal(editedManaged.body.preview.content.language, "md");
     assert.equal(await fs.readFile(sourcePath, "utf8"), "# 托管正文");
+    const assetUpdateChanges = server.runtime.workbenchProjectionChanges.replay(assetUpdateCursor).changes;
+    assert.deepEqual(assetUpdateChanges.map(({ owners, referenceIds }) => ({ owners, referenceIds })), [{
+      owners: ["personal_knowledge"],
+      referenceIds: [knowledgeRefId],
+    }]);
+
+    const rejectedUpdateCursor = server.runtime.workbenchProjectionChanges.replay().cursor;
+    const rejectedUpdate = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/content`, {
+      method: "PUT",
+      body: {
+        relativePath: "",
+        expectedFingerprint: ` ${editedManaged.body.preview.fingerprint as string} `,
+        text: "# 不应提交",
+      },
+    });
+    assert.equal(rejectedUpdate.status, 409);
+    assert.equal(rejectedUpdate.body.error.code, "space_reference_revision_conflict");
+    assert.deepEqual(server.runtime.workbenchProjectionChanges.replay(rejectedUpdateCursor).changes, []);
+
+    const missingUpdateCursor = server.runtime.workbenchProjectionChanges.replay().cursor;
+    const missingUpdate = await requestJson(server.baseUrl, "/api/personal-knowledge/assets/missing/content", {
+      method: "PUT",
+      body: { relativePath: "", expectedFingerprint: "missing", text: "# 不应提交" },
+    });
+    assert.equal(missingUpdate.status, 404);
+    assert.equal(missingUpdate.body.error.code, "knowledge_asset_not_found");
+    assert.equal(missingUpdate.body.error.message, "知识条目已不存在。");
+    assert.deepEqual(server.runtime.workbenchProjectionChanges.replay(missingUpdateCursor).changes, []);
+
+    await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
+      method: "POST",
+      body: { type: "knowledge.collect", page: { refId: "plain-material", kind: "material", collectedAt: 3 } },
+    });
+    const unmanagedUpdateCursor = server.runtime.workbenchProjectionChanges.replay().cursor;
+    const unmanagedUpdate = await requestJson(server.baseUrl, "/api/personal-knowledge/assets/plain-material/content", {
+      method: "PUT",
+      body: { relativePath: "", expectedFingerprint: "missing", text: "# 不应提交" },
+    });
+    assert.equal(unmanagedUpdate.status, 404);
+    assert.equal(unmanagedUpdate.body.error.code, "knowledge_asset_not_found");
+    assert.equal(unmanagedUpdate.body.error.message, "这条旧知识尚未生成托管副本。");
+    assert.deepEqual(server.runtime.workbenchProjectionChanges.replay(unmanagedUpdateCursor).changes, []);
 
     const missingReference = await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
       method: "POST",
@@ -135,11 +184,21 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       method: "DELETE",
     });
     assert.equal(deletedNote.status, 200);
+    const uncollectCursor = server.runtime.workbenchProjectionChanges.replay().cursor;
     const uncollected = await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
       method: "POST",
       body: { type: "knowledge.uncollect", refId: knowledgeRefId },
     });
     assert.equal(uncollected.status, 200);
+    assert.deepEqual(server.runtime.workbenchProjectionChanges.replay(uncollectCursor).changes.map(({ owners, referenceIds }) => ({
+      owners,
+      referenceIds,
+    })), [{ owners: ["personal_knowledge"], referenceIds: [knowledgeRefId] }]);
+    const uncollectedMaterial = await requestJson(server.baseUrl, "/api/personal-knowledge/commands", {
+      method: "POST",
+      body: { type: "knowledge.uncollect", refId: "plain-material" },
+    });
+    assert.equal(uncollectedMaterial.status, 200);
     const removedAsset = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview`);
     assert.equal(removedAsset.status, 404);
 
@@ -158,6 +217,58 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       `/api/spaces/${encodeURIComponent(space.body.space.id as string)}`,
     );
     assert.equal(treeContainsItem(persistedTree.body.tree.entries, referenceId), false);
+  } finally {
+    await closePanelServer(server.httpServer, server.runtime).catch(() => undefined);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("managed knowledge media edits retain the Personal Knowledge content URL", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-personal-knowledge-media-edit-"));
+  const server = await start(directory);
+  try {
+    const sourceRoot = path.join(directory, "source");
+    const sourceText = "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>";
+    await fs.mkdir(sourceRoot);
+    await fs.writeFile(path.join(sourceRoot, "diagram.svg"), sourceText, "utf8");
+    const space = await requestJson(server.baseUrl, "/api/spaces", {
+      method: "POST",
+      body: { title: "媒体空间" },
+    });
+    const reference = await requestJson(
+      server.baseUrl,
+      `/api/spaces/${encodeURIComponent(space.body.space.id as string)}/references`,
+      {
+        method: "POST",
+        body: { title: "媒体目录", reference: { kind: "workspace_folder", path: sourceRoot } },
+      },
+    );
+    const collected = await requestJson(server.baseUrl, "/api/personal-knowledge/collect-space-reference", {
+      method: "POST",
+      body: { referenceId: reference.body.item.id, relativePath: "diagram.svg" },
+    });
+    const refId = collected.body.page.refId as string;
+    const updatedText = "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>updated</title></svg>";
+
+    const updated = await requestJson(
+      server.baseUrl,
+      `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`,
+      {
+        method: "PUT",
+        body: {
+          relativePath: "",
+          expectedFingerprint: contentFingerprint(Buffer.from(sourceText, "utf8")),
+          text: updatedText,
+        },
+      },
+    );
+
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.preview.content.kind, "media");
+    assert.equal(
+      updated.body.preview.content.url,
+      `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`,
+    );
   } finally {
     await closePanelServer(server.httpServer, server.runtime).catch(() => undefined);
     await removeTemporaryTree(directory);

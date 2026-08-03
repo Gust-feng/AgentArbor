@@ -274,6 +274,8 @@ export function spaceFeatureHttpError(error: SpaceFeatureError): PanelHttpError 
     case "space_invalid_input":
       return new PanelHttpError(400, error.code, error.message);
     case "space_snapshot_incompatible":
+    case "space_deletion_journal_failure":
+    case "space_deletion_recovery_failed":
     case "space_repository_failure":
       return new PanelHttpError(500, error.code, error.message);
   }

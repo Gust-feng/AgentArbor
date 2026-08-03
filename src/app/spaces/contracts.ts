@@ -67,6 +67,8 @@ export type SpaceFeatureErrorCode =
   | "space_invalid_input"
   | "space_id_collision"
   | "space_snapshot_incompatible"
+  | "space_deletion_journal_failure"
+  | "space_deletion_recovery_failed"
   | "space_repository_failure";
 
 export class SpaceFeatureError extends Error {
@@ -84,6 +86,8 @@ export type SpaceEvent =
   | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string };
 
 export type SpaceFeature = {
+  /** Startup deletion reconciliation must settle before the Host accepts requests. */
+  ready(): Promise<void>;
   readonly commands: {
     createSpace(input: { readonly id?: string; readonly title: string }): Promise<Space>;
     addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceReference }): Promise<SpaceReferenceItem>;
@@ -91,7 +95,7 @@ export type SpaceFeature = {
     move(input: { readonly target: SpaceMovableTarget; readonly destinationSpaceId: string }): Promise<SpaceMovableTarget>;
     /** Removes only the Space metadata link and never deletes source content. */
     unlinkReference(itemId: string): Promise<void>;
-    /** Removes the reference using the Host-provided ownership policy. */
+    /** Removes the reference and any Space-owned source content through the durable deletion lifecycle. */
     removeReference(itemId: string): Promise<void>;
   };
   readonly queries: {
@@ -102,5 +106,6 @@ export type SpaceFeature = {
     hasWorkspaceMountConflict(itemId: string): Promise<boolean>;
   };
   readonly events: { subscribe(listener: (event: SpaceEvent) => void): () => void };
+  /** Stops admission, drains accepted commands, and leaves no formal deletion journal on success. */
   release(): Promise<void>;
 };

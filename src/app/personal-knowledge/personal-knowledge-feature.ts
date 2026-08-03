@@ -5,10 +5,11 @@ import {
   type PersonalKnowledgeCommand,
   type PersonalKnowledgeFeature,
   type PersonalKnowledgeEvent,
+  type KnowledgePage,
   type PersonalKnowledgeRepository,
 } from "./contracts.js";
 
-export function createPersonalKnowledgeFeature(options: {
+export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = unknown>(options: {
   readonly repository: PersonalKnowledgeRepository;
   readonly spaceExists: (spaceId: string) => Promise<boolean>;
   readonly captureSpaceReference?: (input: { readonly assetId: string; readonly referenceId: string; readonly relativePath: string }) => Promise<NonNullable<import("./contracts.js").KnowledgePage["asset"]> | undefined>;
@@ -18,7 +19,13 @@ export function createPersonalKnowledgeFeature(options: {
     readonly rollback: () => Promise<void>;
   } | undefined>;
   readonly runManagedAssetMutation?: <T>(operation: () => Promise<T>) => Promise<T>;
-}): PersonalKnowledgeFeature {
+  readonly writeManagedAssetText?: (input: {
+    readonly page: KnowledgePage;
+    readonly relativePath: string;
+    readonly expectedFingerprint: string;
+    readonly text: string;
+  }) => Promise<TManagedAssetTextWriteResult>;
+}): PersonalKnowledgeFeature<TManagedAssetTextWriteResult> {
   const repository = options.repository;
   let released = false;
   let queue = Promise.resolve();
@@ -127,6 +134,29 @@ export function createPersonalKnowledgeFeature(options: {
           publish({ type: "personal_knowledge.changed", refIds: [page.refId] });
           return page;
         }));
+      },
+      async updateManagedAssetText(input) {
+        return await run(async () => {
+          const refId = required(input.refId, "refId");
+          const page = (await repository.readSnapshot()).pages.find((candidate) => candidate.refId === refId);
+          if (page === undefined) {
+            throw new PersonalKnowledgeError("knowledge_asset_not_found", "知识条目已不存在。");
+          }
+          if (page.asset?.status !== "managed") {
+            throw new PersonalKnowledgeError("knowledge_asset_not_found", "这条旧知识尚未生成托管副本。");
+          }
+          if (options.writeManagedAssetText === undefined) {
+            throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "Managed knowledge asset storage is unavailable.");
+          }
+          const writeResult = await options.writeManagedAssetText({
+            page,
+            relativePath: input.relativePath,
+            expectedFingerprint: input.expectedFingerprint,
+            text: input.text,
+          });
+          publish({ type: "personal_knowledge.changed", refIds: [refId] });
+          return { page, writeResult };
+        });
       },
       async uncollect(refIdInput) {
         await run(() => runManagedAssetMutation(async () => {

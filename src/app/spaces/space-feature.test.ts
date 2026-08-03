@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createSpaceFeature } from "./space-feature.js";
-import { SPACE_TREE_SCHEMA_VERSION, type SpaceTreeSnapshot } from "./contracts.js";
+import { SPACE_TREE_SCHEMA_VERSION, SpaceFeatureError, type SpaceTreeSnapshot } from "./contracts.js";
+import type {
+  SpaceReferenceDeletionJournalRecord,
+  SpaceReferenceDeletionJournalStore,
+} from "./file-system-reference-deletion-journal.js";
+import type { SpaceReferenceDeletionFilePort } from "./space-reference-deletion.js";
 
 test("Space stores only top-level roots and counts filesystem folder roots", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
@@ -67,11 +72,7 @@ test("Space runs the configured ownership lifecycle around reference metadata re
   const feature = createSpaceFeature({
     repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
     idFactory: () => `id-${++id}`,
-    runReferenceRemoval: async (items, removeMetadata) => {
-      lifecycle.push(`before:${items.map((item) => item.reference.kind).sort().join(",")}`);
-      await removeMetadata();
-      lifecycle.push("after");
-    },
+    referenceDeletion: referenceDeletionFixture(lifecycle),
   });
   const space = await feature.commands.createSpace({ title: "项目" });
   const folder = await feature.commands.addReference({ spaceId: space.id, title: "资料", reference: { kind: "asset_folder" } });
@@ -79,18 +80,25 @@ test("Space runs the configured ownership lifecycle around reference metadata re
 
   await feature.commands.removeReference(folder.id);
 
-  assert.deepEqual(lifecycle, ["before:asset_folder,local_file", "after"]);
+  assert.deepEqual(lifecycle, [
+    "journal:prepared",
+    "stage:id-3",
+    "journal:files_staged",
+    "journal:metadata_committed",
+    "remove-staged:id-3",
+    "journal:deleted",
+  ]);
   assert.equal(await feature.queries.getReference(file.id), undefined);
 });
 
 test("Space unlinks a local file without running its ownership deletion lifecycle", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
-  let removalLifecycleCalled = false;
+  const lifecycle: string[] = [];
   let id = 0;
   const feature = createSpaceFeature({
     repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
     idFactory: () => `id-${++id}`,
-    runReferenceRemoval: async () => { removalLifecycleCalled = true; },
+    referenceDeletion: referenceDeletionFixture(lifecycle),
   });
   const space = await feature.commands.createSpace({ title: "项目" });
   const file = await feature.commands.addReference({
@@ -101,8 +109,82 @@ test("Space unlinks a local file without running its ownership deletion lifecycl
 
   await feature.commands.unlinkReference(file.id);
 
-  assert.equal(removalLifecycleCalled, false);
+  assert.deepEqual(lifecycle, []);
   assert.equal(await feature.queries.getReference(file.id), undefined);
+});
+
+test("Space startup recovery failure keeps commands and queries fail closed", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  const recoveryError = new SpaceFeatureError("space_deletion_recovery_failed", "journal is inconsistent");
+  const deletion = referenceDeletionFixture([]);
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    referenceDeletion: {
+      ...deletion,
+      journal: {
+        ...deletion.journal,
+        async list() { throw recoveryError; },
+      },
+    },
+  });
+
+  await assert.rejects(feature.ready(), (error: unknown) => error === recoveryError);
+  await assert.rejects(feature.queries.list(), (error: unknown) => error === recoveryError);
+  await assert.rejects(feature.commands.createSpace({ title: "不可创建" }), (error: unknown) => error === recoveryError);
+  await feature.release();
+});
+
+test("Space latches an unrecoverable in-process deletion rollback and rejects later work", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let failWrites = false;
+  let failRestore = true;
+  let id = 0;
+  const lifecycle: string[] = [];
+  const deletion = referenceDeletionFixture(lifecycle);
+  const feature = createSpaceFeature({
+    repository: {
+      async read() { return snapshot; },
+      async write(value) {
+        if (failWrites) throw new Error("metadata write failed");
+        snapshot = value;
+      },
+    },
+    idFactory: () => `id-${++id}`,
+    referenceDeletion: {
+      ...deletion,
+      files: {
+        ...deletion.files,
+        async restore(target) {
+          if (failRestore) throw new Error("restore failed");
+          await deletion.files.restore(target);
+        },
+      },
+    },
+  });
+  const space = await feature.commands.createSpace({ title: "项目" });
+  const file = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "文档",
+    reference: { kind: "local_file", path: "C:/note.md" },
+  });
+  failWrites = true;
+
+  let fatalFailure: unknown;
+  try {
+    await feature.commands.removeReference(file.id);
+    assert.fail("deletion should fail when metadata and rollback both fail");
+  } catch (error) {
+    fatalFailure = error;
+  }
+
+  assert.equal(fatalFailure instanceof SpaceFeatureError && fatalFailure.code === "space_deletion_recovery_failed", true);
+  assert.equal((await deletion.journal.list()).length, 1);
+  await assert.rejects(feature.ready(), (error: unknown) => error === fatalFailure);
+  await assert.rejects(feature.queries.list(), (error: unknown) => error === fatalFailure);
+  await assert.rejects(feature.commands.createSpace({ title: "不可继续" }), (error: unknown) => error === fatalFailure);
+  failRestore = false;
+  await feature.release();
+  assert.deepEqual(await deletion.journal.list(), []);
 });
 
 test("Space content changes do not reorder Spaces", async () => {
@@ -206,3 +288,57 @@ test("Space accepts only internal asset folders as metadata parents", async () =
     reference: { kind: "workbench_asset", assetId: "cross-space" },
   }), { code: "space_invalid_input" });
 });
+
+function referenceDeletionFixture(lifecycle: string[]) {
+  const records = new Map<string, SpaceReferenceDeletionJournalRecord>();
+  const journal: SpaceReferenceDeletionJournalStore = {
+    mutationKey: "C:/runtime/space-reference-deletions",
+    async list() { return [...records.values()]; },
+    async save(record) {
+      lifecycle.push(`journal:${record.phase}`);
+      records.set(record.deletionId, record);
+    },
+    async delete(deletionId) {
+      lifecycle.push("journal:deleted");
+      records.delete(deletionId);
+    },
+  };
+  const states = new Map<string, { sourceExists: boolean; stagedExists: boolean }>();
+  const files: SpaceReferenceDeletionFilePort = {
+    async prepare({ item, deletionId, targetIndex }) {
+      if (item.reference.kind !== "local_file" && item.reference.kind !== "managed_folder") return undefined;
+      states.set(item.id, { sourceExists: true, stagedExists: false });
+      return {
+        referenceId: item.id,
+        kind: item.reference.kind,
+        sourcePath: item.reference.path,
+        stagedPath: `${item.reference.path}.staged-${deletionId}-${targetIndex}`,
+      };
+    },
+    async inspect(target) {
+      return states.get(target.referenceId) ?? { sourceExists: false, stagedExists: false };
+    },
+    async stage(target) {
+      lifecycle.push(`stage:${target.referenceId}`);
+      states.set(target.referenceId, { sourceExists: false, stagedExists: true });
+    },
+    async restore(target) {
+      lifecycle.push(`restore:${target.referenceId}`);
+      states.set(target.referenceId, { sourceExists: true, stagedExists: false });
+    },
+    async removeStaged(target) {
+      lifecycle.push(`remove-staged:${target.referenceId}`);
+      const current = states.get(target.referenceId) ?? { sourceExists: false, stagedExists: false };
+      states.set(target.referenceId, { ...current, stagedExists: false });
+    },
+  };
+  return {
+    journal,
+    files,
+    leases: {
+      async run<T>(_path: string, operation: () => Promise<T>) { return operation(); },
+      async runExclusive<T>(_path: string, operation: () => Promise<T>) { return operation(); },
+    },
+    createDeletionId: () => "delete-test",
+  };
+}

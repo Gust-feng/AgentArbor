@@ -4,7 +4,16 @@ import { createServer, type Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { closePanelServer, createPanelRequestHandler } from "../request-handler.js";
+import { SqliteRuntimeDatabase } from "../../../adapters/runtime-storage/index.js";
+import { createSqlitePersonalKnowledgeRepository } from "../../personal-knowledge/index.js";
+import {
+  SPACE_TREE_SCHEMA_VERSION,
+  createFileSystemSpaceReferenceDeletionJournal,
+  createSqliteSpaceRepository,
+  SpaceFeatureError,
+  type SpaceReferenceItem,
+} from "../../spaces/index.js";
+import { closePanelServer, createPanelRequestHandler, startLocalPanelServer } from "../request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "../runtime.js";
 import { readSseUntil, removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
@@ -14,6 +23,7 @@ async function startSpaceTestServer(directory: string): Promise<{
   readonly httpServer: Server;
 }> {
   const runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+  await runtime.spaceFeature.ready();
   const httpServer = createServer(createPanelRequestHandler(runtime));
   await new Promise<void>((resolve, reject) => {
     httpServer.once("error", reject);
@@ -225,6 +235,208 @@ test("Space API lets a linked file be unlinked or physically deleted and only un
   }
 });
 
+test("Panel startup restores staged Space content when deletion metadata was not committed", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-recover-uncommitted-"));
+  const sourcePath = path.join(directory, "outside", "note.md");
+  await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+  await fs.writeFile(sourcePath, "original", "utf8");
+  const first = await startSpaceTestServer(directory);
+  let firstClosed = false;
+  let restarted: Awaited<ReturnType<typeof startLocalPanelServer>> | undefined;
+  try {
+    const created = await requestJson(first.baseUrl, "/api/spaces", { method: "POST", body: { title: "恢复" } });
+    const spaceId = created.body.space.id as string;
+    const linked = await requestJson(first.baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "note.md", reference: { kind: "local_file", path: sourcePath } },
+    });
+    const item = linked.body.item as SpaceReferenceItem;
+    const staged = await stageSpaceDeletionCrash(first.runtime, item, "restart-uncommitted");
+
+    await closePanelServer(first.httpServer, first.runtime);
+    firstClosed = true;
+    restarted = await startLocalPanelServer({
+      port: 0,
+      configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
+    });
+
+    assert.equal(await fs.readFile(sourcePath, "utf8"), "original");
+    assert.equal(await pathExists(staged.stagedPath), false);
+    assert.deepEqual(await staged.journal.list(), []);
+    const tree = await requestJson(restarted.url, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    assert.equal(tree.status, 200);
+    assert.equal(
+      (tree.body.tree.entries as Array<{ item: { id: string } }>).some((entry) => entry.item.id === item.id),
+      true,
+    );
+  } finally {
+    await restarted?.close().catch(() => undefined);
+    if (!firstClosed) await closePanelServer(first.httpServer, first.runtime).catch(() => undefined);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Panel resolves an old Space deletion before applying a pending Workbench restore", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-before-workbench-restore-"));
+  const runtimeHome = path.join(directory, "runtime");
+  const sourcePath = path.join(directory, "outside", "note.md");
+  const deletionId = "before-workbench-restore";
+  const stagedPath = path.join(
+    path.dirname(sourcePath),
+    `.${path.basename(sourcePath)}.agentarbor-delete-${deletionId}-0`,
+  );
+  const createdAt = "2026-08-03T00:00:00.000Z";
+  const item: SpaceReferenceItem = {
+    id: "old-reference",
+    spaceId: "old-space",
+    title: "note.md",
+    reference: { kind: "local_file", path: sourcePath },
+    createdAt,
+    updatedAt: createdAt,
+  };
+  let restarted: Awaited<ReturnType<typeof startLocalPanelServer>> | undefined;
+  try {
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, "old generation content", "utf8");
+    const current = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
+    const currentSpaces = createSqliteSpaceRepository(current);
+    createSqlitePersonalKnowledgeRepository(current);
+    await currentSpaces.write({
+      schemaVersion: SPACE_TREE_SCHEMA_VERSION,
+      spaces: [{ id: "old-space", title: "Old generation", createdAt, updatedAt: createdAt }],
+      referenceItems: [item],
+    });
+    current.close();
+
+    await fs.rename(sourcePath, stagedPath);
+    const journal = createFileSystemSpaceReferenceDeletionJournal(
+      path.join(runtimeHome, "space-reference-deletions"),
+    );
+    await journal.save({
+      schemaVersion: "space-reference-deletion/v1",
+      deletionId,
+      phase: "files_staged",
+      rootReferenceId: item.id,
+      removedReferences: [item],
+      targets: [{
+        referenceId: item.id,
+        kind: "local_file",
+        sourcePath: path.resolve(sourcePath),
+        stagedPath,
+      }],
+      createdAt,
+    });
+
+    const pending = new SqliteRuntimeDatabase(
+      path.join(runtimeHome, "workbench.restore-pending.sqlite3"),
+    );
+    createSqliteSpaceRepository(pending);
+    createSqlitePersonalKnowledgeRepository(pending);
+    pending.close();
+    await fs.mkdir(
+      path.join(runtimeHome, "workbench.restore-pending.assets", "knowledge-assets"),
+      { recursive: true },
+    );
+    await fs.mkdir(
+      path.join(runtimeHome, "workbench.restore-pending.assets", "space-folders"),
+      { recursive: true },
+    );
+
+    restarted = await startLocalPanelServer({
+      port: 0,
+      configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
+    });
+
+    assert.equal(await fs.readFile(sourcePath, "utf8"), "old generation content");
+    assert.equal(await pathExists(stagedPath), false);
+    assert.deepEqual(await journal.list(), []);
+    assert.equal(await pathExists(path.join(runtimeHome, "workbench.restore-pending.sqlite3")), false);
+    const oldTree = await requestJson(restarted.url, "/api/spaces/old-space");
+    assert.equal(oldTree.status, 404);
+  } finally {
+    await restarted?.close().catch(() => undefined);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Panel startup finalizes committed Space deletion without overwriting a recreated source", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-recover-committed-"));
+  const sourcePath = path.join(directory, "outside", "note.md");
+  await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+  await fs.writeFile(sourcePath, "old content", "utf8");
+  const first = await startSpaceTestServer(directory);
+  let firstClosed = false;
+  let restarted: Awaited<ReturnType<typeof startLocalPanelServer>> | undefined;
+  try {
+    const created = await requestJson(first.baseUrl, "/api/spaces", { method: "POST", body: { title: "恢复" } });
+    const spaceId = created.body.space.id as string;
+    const linked = await requestJson(first.baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "note.md", reference: { kind: "local_file", path: sourcePath } },
+    });
+    const item = linked.body.item as SpaceReferenceItem;
+    const staged = await stageSpaceDeletionCrash(first.runtime, item, "restart-committed");
+    await first.runtime.spaceFeature.commands.unlinkReference(item.id);
+    await fs.writeFile(sourcePath, "new content", "utf8");
+
+    await closePanelServer(first.httpServer, first.runtime);
+    firstClosed = true;
+    restarted = await startLocalPanelServer({
+      port: 0,
+      configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
+    });
+
+    assert.equal(await fs.readFile(sourcePath, "utf8"), "new content");
+    assert.equal(await pathExists(staged.stagedPath), false);
+    assert.deepEqual(await staged.journal.list(), []);
+    const tree = await requestJson(restarted.url, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    assert.equal(
+      (tree.body.tree.entries as Array<{ item: { id: string } }>).some((entry) => entry.item.id === item.id),
+      false,
+    );
+  } finally {
+    await restarted?.close().catch(() => undefined);
+    if (!firstClosed) await closePanelServer(first.httpServer, first.runtime).catch(() => undefined);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Panel refuses to listen when the Space deletion journal is corrupt and releases startup resources", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-corrupt-startup-"));
+  const seed = await startSpaceTestServer(directory);
+  const runtimeHome = requireRuntimeHome(seed.runtime);
+  await closePanelServer(seed.httpServer, seed.runtime);
+  const journalRoot = path.join(runtimeHome, "space-reference-deletions");
+  await fs.mkdir(journalRoot, { recursive: true });
+  const corruptPath = path.join(journalRoot, "broken.json");
+  await fs.writeFile(corruptPath, "{not-json", "utf8");
+  let restarted: Awaited<ReturnType<typeof startLocalPanelServer>> | undefined;
+  try {
+    await assert.rejects(
+      startLocalPanelServer({
+        port: 0,
+        configDirectory: directory,
+        testOnlySkipInitialWorkbenchData: true,
+      }),
+      (error: unknown) => error instanceof SpaceFeatureError && error.code === "space_deletion_journal_failure",
+    );
+
+    await fs.rm(corruptPath);
+    restarted = await startLocalPanelServer({
+      port: 0,
+      configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
+    });
+    assert.match(restarted.url, /^http:\/\/127\.0\.0\.1:\d+\/$/u);
+  } finally {
+    await restarted?.close().catch(() => undefined);
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Space API validates the source Space when moving an entry", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-move-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
@@ -256,6 +468,50 @@ test("Space API validates the source Space when moving an entry", async () => {
     await removeTemporaryTree(directory);
   }
 });
+
+async function stageSpaceDeletionCrash(
+  runtime: PanelRuntime,
+  item: SpaceReferenceItem,
+  deletionId: string,
+) {
+  assert.equal(item.reference.kind, "local_file");
+  if (item.reference.kind !== "local_file") throw new Error("Test requires a local file reference");
+  const runtimeHome = requireRuntimeHome(runtime);
+  const journal = createFileSystemSpaceReferenceDeletionJournal(
+    path.join(runtimeHome, "space-reference-deletions"),
+  );
+  const sourcePath = path.resolve(item.reference.path);
+  const stagedPath = path.join(
+    path.dirname(sourcePath),
+    `.${path.basename(sourcePath)}.agentarbor-delete-${deletionId}-0`,
+  );
+  await fs.rename(sourcePath, stagedPath);
+  await journal.save({
+    schemaVersion: "space-reference-deletion/v1",
+    deletionId,
+    phase: "files_staged",
+    rootReferenceId: item.id,
+    removedReferences: [item],
+    targets: [{
+      referenceId: item.id,
+      kind: "local_file",
+      sourcePath,
+      stagedPath,
+    }],
+    createdAt: "2026-08-02T00:00:00.000Z",
+  });
+  return { journal, stagedPath };
+}
+
+function requireRuntimeHome(runtime: PanelRuntime): string {
+  const runtimeHome = runtime.runtimePaths?.runtimeHome;
+  assert.ok(runtimeHome, "Panel test runtime must expose its runtime home");
+  return runtimeHome;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  return await fs.lstat(targetPath).then(() => true, () => false);
+}
 
 test("Space API previews referenced files without copying them", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-preview-"));

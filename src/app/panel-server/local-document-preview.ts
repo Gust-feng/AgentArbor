@@ -224,7 +224,39 @@ export async function updateLocalDocumentText(
     throw new PanelHttpError(500, "space_reference_not_editable", "无法保存文件更改。");
   }
 
-  return buildLocalDocumentPreview(rootDir, relativePath, meta, options);
+  const updatedStat = await fs.stat(source).catch(() => undefined);
+  const byteLength = Buffer.byteLength(input.text, "utf8");
+  const mimeType = mimeTypeForPath(typePath);
+  const mediaKind = mediaKindForMimeType(mimeType);
+  if (mediaKind !== undefined) {
+    const normalizedRelative = normalizeRelativePath(relativePath);
+    const contentUrl = options?.contentBaseUrl ?? `/api/spaces/references/${encodeURIComponent(meta.itemId)}/content`;
+    return {
+      ...basePreview(meta, source, "ready", {
+        kind: "media",
+        mediaKind,
+        mimeType,
+        url: `${contentUrl}${normalizedRelative.length === 0 ? "" : `?path=${encodeURIComponent(normalizedRelative)}`}`,
+      }),
+      fingerprint: result.value.fingerprint,
+      byteLength,
+      ...(updatedStat === undefined ? {} : { modifiedAt: Math.trunc(updatedStat.mtimeMs) }),
+    };
+  }
+  const content: Extract<DocumentPreview["content"], { readonly kind: "text" }> = {
+    kind: "text",
+    text: input.text,
+    encoding: "UTF-8",
+    truncated: false,
+    editable: true,
+    ...(current.value.language === null ? {} : { language: current.value.language }),
+  };
+  return {
+    ...basePreview(meta, source, "ready", content),
+    fingerprint: result.value.fingerprint,
+    byteLength,
+    ...(updatedStat === undefined ? {} : { modifiedAt: Math.trunc(updatedStat.mtimeMs) }),
+  };
 }
 
 // ─── helpers ──────────────────────────────────────────────────────

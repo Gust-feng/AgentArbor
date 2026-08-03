@@ -9,7 +9,6 @@ import { managedKnowledgeDocumentTarget } from "./knowledge-asset-store.js";
 import {
   buildLocalDocumentPreview,
   streamLocalDocumentContent,
-  updateLocalDocumentText,
 } from "./local-document-preview.js";
 import { createWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 
@@ -132,22 +131,17 @@ export async function handlePanelPersonalKnowledgeRoute(
   if (assetContent !== null && request.method === "PUT") {
     await runtime.knowledgeAssetsReady;
     const refId = decode(assetContent[1]);
-    const page = (await feature.queries.snapshot()).pages.find((candidate) => candidate.refId === refId);
-    if (page === undefined) throw new PanelHttpError(404, "knowledge_asset_not_found", "知识条目已不存在。");
-    const target = managedKnowledgeDocumentTarget(requireAssetRoot(runtime), page);
     const input = parse(updateAssetTextSchema, await readJsonBody(request));
     const relativePath = input.relativePath ?? "";
-    const contentBaseUrl = `/api/personal-knowledge/assets/${encodeURIComponent(refId)}/content`;
+    const updated = await feature.commands.updateManagedAssetText({
+      refId,
+      relativePath,
+      expectedFingerprint: input.expectedFingerprint,
+      text: input.text,
+    });
     writeJson(response, 200, {
       ok: true,
-      preview: await runtime.fileMutationCoordinator.run(target.mutationKey, async () =>
-        await updateLocalDocumentText(
-          target.rootDir,
-          relativePath,
-          { expectedFingerprint: input.expectedFingerprint, text: input.text },
-          target.meta,
-          { contentBaseUrl, contentTypeHintPath: target.contentTypeHintPath(relativePath) },
-        )),
+      preview: updated.writeResult,
     });
     return true;
   }
@@ -216,10 +210,19 @@ export function personalKnowledgeHttpError(error: PersonalKnowledgeError): Panel
     case "personal_knowledge_invalid_input":
       return new PanelHttpError(400, error.code, error.message);
     case "personal_note_not_found":
+    case "knowledge_asset_not_found":
     case "knowledge_theme_not_found":
       return new PanelHttpError(404, error.code, error.message);
     case "personal_note_revision_conflict":
       return new PanelHttpError(409, error.code, error.message);
+    case "knowledge_asset_revision_conflict":
+      return new PanelHttpError(409, "space_reference_revision_conflict", error.message);
+    case "knowledge_asset_source_missing":
+      return new PanelHttpError(404, "space_reference_source_missing", error.message);
+    case "knowledge_asset_not_editable":
+      return new PanelHttpError(409, "space_reference_not_editable", error.message);
+    case "knowledge_asset_write_failed":
+      return new PanelHttpError(500, "space_reference_not_editable", error.message);
     case "personal_knowledge_repository_failure":
       return new PanelHttpError(500, error.code, error.message);
   }

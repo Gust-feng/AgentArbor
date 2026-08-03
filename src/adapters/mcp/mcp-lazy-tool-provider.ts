@@ -109,7 +109,7 @@ export class LazyMcpToolExecutorProvider {
       .map((session) => session.client)
       .filter((client): client is McpClientWrapper => client !== undefined);
 
-    this.disconnecting = (async () => {
+    const disconnecting = (async () => {
       // A connecting client owns a transport before it becomes visible as session.client.
       // Wait for every attempt so its stale-path cleanup has completed before release returns.
       await Promise.allSettled(connecting);
@@ -119,14 +119,34 @@ export class LazyMcpToolExecutorProvider {
           clients.add(session.client);
         }
       }
-      await Promise.allSettled([...clients].map((client) => client.disconnect()));
+      const clientList = [...clients];
+      const results = await Promise.allSettled(clientList.map((client) => client.disconnect()));
+      const failures: unknown[] = [];
+      for (const [index, result] of results.entries()) {
+        const client = clientList[index]!;
+        if (result.status === "rejected") {
+          failures.push(result.reason);
+          continue;
+        }
+        for (const session of this.sessions.values()) {
+          if (session.client === client) session.client = undefined;
+        }
+      }
       for (const session of this.sessions.values()) {
-        session.client = undefined;
         session.connecting = undefined;
         session.connectAbortController = undefined;
       }
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "One or more lazy MCP clients could not disconnect.");
+      }
     })();
-    return this.disconnecting;
+    this.disconnecting = disconnecting;
+    try {
+      await disconnecting;
+    } catch (error) {
+      if (this.disconnecting === disconnecting) this.disconnecting = undefined;
+      throw error;
+    }
   }
 
   private async getClient(session: LazyServerSession): Promise<McpClientWrapper> {
@@ -154,7 +174,15 @@ export class LazyMcpToolExecutorProvider {
       session.client = client;
       return client;
     }).catch(async (error: unknown) => {
-      await client.disconnect().catch(() => undefined);
+      try {
+        await client.disconnect();
+      } catch (disconnectError) {
+        session.client = client;
+        throw new AggregateError(
+          [error, disconnectError],
+          `Lazy MCP client ${session.server.serverId} failed while closing an incomplete connection.`,
+        );
+      }
       if (this.closed || generation !== this.lifecycleGeneration) {
         throw lazyProviderClosedError();
       }

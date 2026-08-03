@@ -200,3 +200,55 @@ test("LazyMcpToolExecutorProvider disconnects an established client once across 
     /Lazy MCP provider is closed/u,
   );
 });
+
+test("LazyMcpToolExecutorProvider retries only clients whose disconnect failed", async () => {
+  const firstDisconnectError = new Error("first client disconnect failed");
+  const disconnectCalls = [0, 0];
+  const connected = [false, false];
+  const clients = [0, 1].map((index) => ({
+    async connect() {
+      connected[index] = true;
+    },
+    async disconnect() {
+      disconnectCalls[index] += 1;
+      if (index === 0 && disconnectCalls[index] === 1) throw firstDisconnectError;
+      connected[index] = false;
+    },
+    isConnected() {
+      return connected[index];
+    },
+    async callTool() {
+      return { content: [{ type: "text" as const, text: `found-${index}` }] };
+    },
+  })) as unknown as readonly McpClientWrapper[];
+  let nextClient = 0;
+  const provider = new LazyMcpToolExecutorProvider(
+    {
+      servers: [
+        TEST_SERVER,
+        { ...TEST_SERVER, serverId: "lazy-test-2", label: "Lazy test 2" },
+      ],
+    },
+    { createClient: () => clients[nextClient++]! },
+  );
+  const executors = provider.getToolsForRegistry();
+  assert.equal(executors.length, 2);
+
+  await Promise.all(executors.map((executor, index) => executor.execute(
+    {},
+    { callerAgentId: "test-agent", traceId: `trace-${index}`, goalId: `goal-${index}` },
+  )));
+
+  await assert.rejects(provider.disconnectAll(), (error: unknown) => {
+    assert.ok(error instanceof AggregateError);
+    assert.deepEqual(error.errors, [firstDisconnectError]);
+    return true;
+  });
+  assert.deepEqual(disconnectCalls, [1, 1]);
+  assert.deepEqual(connected, [true, false]);
+
+  await provider.disconnectAll();
+
+  assert.deepEqual(disconnectCalls, [2, 1]);
+  assert.deepEqual(connected, [false, false]);
+});

@@ -62,6 +62,8 @@ Sub-Agent 模块不拥有 Ordinary run 状态、conversation、持久化、确�
 
 Markdown 正文作为专家 instructions 的主体。加载时校验文件、frontmatter 和内容 hash；无效定义保留诊断信息但不向新 run 暴露为可调用专家。
 
+`model` 与 `max-steps` / `maxSteps` 不属于 Sub-Agent 定义契约。nested Agent 使用父 Ordinary run 已冻结的模型与 reasoning 配置；当前没有单独的 Sub-Agent 轮次预算，因为机械循环尚未定义可稳定计数的 step 单位和耗尽 outcome。为兼容 `v0.3.2` 已经可读的定义，loader 会保留 user/project/custom 专家可用性并生成设置页可见的非致命诊断，但不会再把字段写入正式定义、冻结 catalog 或 Panel DTO。仓库内置包暂时保留 `v0.3.2` 的原始 metadata 字节，只对五个固定历史 `contentHash` 抑制旧 step 诊断，用于维持 frozen catalog 身份；这些值同样不会进入执行契约，任何新增或修改后的内置包都会重新告警。未来若引入覆盖，必须先定义 provider-neutral 模型引用或明确的 turn policy、计数和耗尽语义，再贯通冻结快照与 AgentLoop invocation。
+
 发现根支持 `builtin`、`user`、`project` 和显式 custom root。重名时按已冻结的 root precedence 选择一个定义；运行中不因磁盘文件变化偷偷替换本轮专家事实。
 
 ## `agent_call`

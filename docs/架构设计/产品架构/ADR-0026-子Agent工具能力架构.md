@@ -33,7 +33,7 @@ Sub-Agent 不拥有独立 conversation、task board、run tree、业务状态、
 <sub-agent-root>/<package-name>/SUB_AGENT.md
 ```
 
-`SUB_AGENT.md` 使用 YAML frontmatter 与 Markdown 正文。名称、描述、enabled、使用边界和 `allowed-tools` 由 loader 校验；正文作为专家 instructions 主体。
+`SUB_AGENT.md` 使用 YAML frontmatter 与 Markdown 正文。名称、描述、enabled、使用边界和 `allowed-tools` 由 loader 校验；正文作为专家 instructions 主体。定义不接受 `model` 或 `max-steps` / `maxSteps`：nested Agent 使用父 Ordinary run 已冻结的模型与 reasoning 配置，当前也没有定义独立 step 单位和耗尽 outcome。为兼容 `v0.3.2` 已可读取的定义，loader 对 user/project/custom 文件中的这些字段生成非致命诊断并继续按真实继承行为执行，但不再把字段投影进正式定义、冻结 catalog 或 Panel DTO。仓库内置文件保留 `v0.3.2` 的原始 metadata 字节，只对五个固定历史 `contentHash` 抑制旧 step 诊断，用于维持 frozen catalog 身份；字段仍不进入执行契约，新增或修改后的内置包不会继承该例外。未来只有在 provider-neutral 模型引用或显式 turn policy 完整贯通 invocation 和 nested loop 后，才能另行扩展。
 
 发现支持 `builtin`、`user`、`project` 与显式 custom root，并用稳定 precedence 解决重名。无效定义保留诊断信息但不暴露给新 run。每个 Ordinary run 使用冻结后的目录事实，运行中不因磁盘变化替换专家身份或权限。
 

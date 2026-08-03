@@ -69,8 +69,13 @@ export async function submitPanelTask(
   conversationBehavior: PanelTaskConversationBehavior = "continue",
 ): Promise<boolean> {
   const trimmed = (explicitGoal ?? options.goal).trim();
-  if (trimmed.length === 0 || options.app.busy) return false;
   const startsNewConversation = conversationBehavior === "new";
+  // An active conversation can accept a successor run; a new conversation
+  // still remains blocked while another run is busy.
+  const activeConversationRun = !startsNewConversation && options.app.conversation !== undefined &&
+    options.app.run !== undefined &&
+    shouldKeepRefreshing(options.app.run.status);
+  if (trimmed.length === 0 || (options.app.busy && !activeConversationRun)) return false;
   const conversationForSubmit = startsNewConversation ? undefined : options.app.conversation;
   const runForSubmit = startsNewConversation ? undefined : options.app.run;
   const epoch = options.viewEpochRef.current + 1;

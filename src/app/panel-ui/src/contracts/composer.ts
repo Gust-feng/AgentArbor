@@ -21,6 +21,8 @@ export type QueuedChatMessage = {
   readonly content: string;
 };
 
+export type ConversationFollowUpMode = "guide" | "queue";
+
 type AttachmentInputProps = {
   readonly attachments: readonly ContextAttachment[];
   readonly selectedWorkspaceDirectory?: string;
@@ -57,5 +59,6 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly queuedMessages?: readonly QueuedChatMessage[];
   readonly onRemoveQueuedMessage?: (id: string) => void;
   readonly onUpdateQueuedMessage?: (id: string, content: string) => void;
+  readonly onGuideQueuedMessage?: (id: string) => Promise<boolean> | void;
   readonly closeSignal?: number;
 };

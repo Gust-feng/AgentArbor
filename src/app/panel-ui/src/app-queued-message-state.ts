@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TaskStatus } from "./contracts/common.js";
 
 /** Node-testable queue fact; the Panel composer projects it into its own props contract. */
@@ -12,13 +12,13 @@ export type AppQueuedMessageState = {
   readonly enqueueMessage: (content: string) => void;
   readonly removeQueuedMessage: (id: string) => void;
   readonly updateQueuedMessage: (id: string, content: string) => void;
+  readonly guideQueuedMessage: (id: string) => Promise<boolean>;
 };
 
 export type AppQueuedMessageStateOptions = {
   readonly busy: boolean;
   readonly currentRun: QueuedMessageDispatchRun | undefined;
-  readonly setGoal: Dispatch<SetStateAction<string>>;
-  readonly startTask: (explicitGoal?: string) => Promise<void>;
+  readonly startTask: (explicitGoal?: string) => Promise<boolean>;
 };
 
 export type QueuedMessageDispatchRun = {
@@ -66,6 +66,7 @@ export function useAppQueuedMessages(
 ): AppQueuedMessageState {
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedChatMessage[]>([]);
   const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
+  const guidedAfterRunRef = useRef<string | undefined>(undefined);
 
   const enqueueMessage = useCallback((content: string) => {
     const trimmed = content.trim();
@@ -86,6 +87,23 @@ export function useAppQueuedMessages(
     );
   }, []);
 
+  const guideQueuedMessage = useCallback(async (id: string): Promise<boolean> => {
+    const run = options.currentRun;
+    if (run === undefined || !queuedMessageCanGuide(run)) return false;
+    if (guidedAfterRunRef.current === run.runId) return false;
+    const message = queuedMessages.find((candidate) => candidate.id === id);
+    if (message === undefined) return false;
+
+    guidedAfterRunRef.current = run.runId;
+    const accepted = await options.startTask(message.content);
+    if (accepted) {
+      setQueuedMessages((previous) => previous.filter((candidate) => candidate.id !== id));
+    } else if (guidedAfterRunRef.current === run.runId) {
+      guidedAfterRunRef.current = undefined;
+    }
+    return accepted;
+  }, [options.currentRun, options.startTask, queuedMessages]);
+
   useEffect(() => {
     const decision = queuedMessageDispatchDecision({
       busy: options.busy,
@@ -98,20 +116,25 @@ export function useAppQueuedMessages(
     // dispatch to that run id so StrictMode and unrelated renders cannot send
     // the same or subsequent queued message early.
     dispatchedQueueAfterRunRef.current = decision.sourceRunId;
-    setQueuedMessages((previous) =>
-      previous[0]?.id === decision.message.id
-        ? previous.slice(1)
-        : previous.filter((message) => message.id !== decision.message.id)
-    );
-    options.setGoal(decision.message.content);
-    void options.startTask(decision.message.content);
-  }, [options.busy, options.currentRun, options.setGoal, options.startTask, queuedMessages]);
+    void options.startTask(decision.message.content).then((accepted) => {
+      if (accepted) {
+        setQueuedMessages((previous) =>
+          previous[0]?.id === decision.message.id
+            ? previous.slice(1)
+            : previous.filter((message) => message.id !== decision.message.id)
+        );
+      } else if (dispatchedQueueAfterRunRef.current === decision.sourceRunId) {
+        dispatchedQueueAfterRunRef.current = undefined;
+      }
+    });
+  }, [options.busy, options.currentRun, options.startTask, queuedMessages]);
 
   return {
     queuedMessages,
     enqueueMessage,
     removeQueuedMessage,
     updateQueuedMessage,
+    guideQueuedMessage,
   };
 }
 
@@ -119,4 +142,9 @@ function queuedMessageMayFollow(run: QueuedMessageDispatchRun): boolean {
   return !run.requiresUserAction &&
     (run.status === "completed" || run.status === "failed" ||
       run.status === "cancelled" || run.status === "blocked");
+}
+
+function queuedMessageCanGuide(run: QueuedMessageDispatchRun): boolean {
+  return !run.requiresUserAction &&
+    (run.status === "queued" || run.status === "planning" || run.status === "running");
 }

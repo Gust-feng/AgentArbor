@@ -33,6 +33,7 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
           messages={input.queuedMessages}
           onRemove={input.onRemoveQueuedMessage ?? (() => undefined)}
           onUpdate={input.onUpdateQueuedMessage ?? (() => undefined)}
+          onGuide={input.onGuideQueuedMessage ?? (async () => false)}
         />
       )}
       {input.attachments.length > 0 && (
@@ -69,7 +70,7 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
             submit()
           }
         }}
-        placeholder={input.placeholder ?? (input.running ? '运行中，继续输入会在完成后发送…' : '继续对话…')}
+        placeholder={input.placeholder ?? runningPlaceholder(input)}
         rows={2}
         disabled={!canEdit}
         className="aa-conversation-composer__input w-full resize-none px-4 pt-3 outline-none disabled:cursor-not-allowed"
@@ -121,6 +122,11 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
       </div>
     </div>
   )
+}
+
+function runningPlaceholder(input: ChatInputProps): string {
+  if (!input.running) return '继续对话…';
+  return '运行中，继续输入…';
 }
 
 function ComposerModelSelect({ input }: { readonly input: ChatInputProps }) {

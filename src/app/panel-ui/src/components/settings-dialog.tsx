@@ -32,6 +32,7 @@ import type { AppUpdateInfo, AppUpdateStatus } from "../contracts/app-update";
 import { MULTI_AGENT_ENTRY_AVAILABLE } from "../app-multi-agent-availability";
 import type { SkillDefinition } from "../contracts/skills";
 import type { SubAgentDefinition } from "../contracts/sub-agents";
+import type { ConversationFollowUpMode } from "../contracts/composer";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { AppearanceSettings } from "./appearance-settings";
 import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-settings";
@@ -64,6 +65,8 @@ export function SettingsDialog(props: {
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
   readonly developerModeEnabled: boolean;
   readonly onDeveloperModeChange: (enabled: boolean) => void;
+  readonly conversationFollowUpMode: ConversationFollowUpMode;
+  readonly onConversationFollowUpModeChange: (mode: ConversationFollowUpMode) => void;
   readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => Promise<void> | void;
   readonly savingModel?: boolean;
   readonly savingWorkspace?: boolean;
@@ -208,6 +211,8 @@ export function SettingsDialog(props: {
                 setDesktopAgentSystemPrompt={props.setDesktopAgentSystemPrompt}
                 modelUsageDisplayEnabled={props.modelUsageDisplayEnabled}
                 onModelUsageDisplayChange={props.onModelUsageDisplayChange}
+                conversationFollowUpMode={props.conversationFollowUpMode}
+                onConversationFollowUpModeChange={props.onConversationFollowUpModeChange}
                 savingDesktopAgent={props.savingDesktopAgent}
                 onSaveDesktopAgentSystemPrompt={props.onSaveDesktopAgentSystemPrompt}
                 onResetDesktopAgentSystemPrompt={props.onResetDesktopAgentSystemPrompt}

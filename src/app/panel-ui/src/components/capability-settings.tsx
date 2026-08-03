@@ -3,7 +3,7 @@ import { Cpu, Globe, Link2, MessageSquareText, Plus, RotateCcw, Save, SlidersHor
 import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { modelOptionsFromConfig } from "../model-options";
-import type { ChatModelOption } from "../contracts/composer";
+import type { ChatModelOption, ConversationFollowUpMode } from "../contracts/composer";
 import { ModelOptionPicker } from "./model-option-picker";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import "./capability-settings.css";
@@ -47,6 +47,8 @@ export function BasicCapabilitiesSettings(props: {
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly modelUsageDisplayEnabled: boolean;
   readonly onModelUsageDisplayChange: (enabled: boolean) => void;
+  readonly conversationFollowUpMode: ConversationFollowUpMode;
+  readonly onConversationFollowUpModeChange: (mode: ConversationFollowUpMode) => void;
   readonly savingDesktopAgent?: boolean;
   readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
   readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
@@ -82,6 +84,10 @@ export function BasicCapabilitiesSettings(props: {
           <ModelUsageDisplaySettings
             enabled={props.modelUsageDisplayEnabled}
             onChange={props.onModelUsageDisplayChange}
+          />
+          <ConversationFollowUpSettings
+            mode={props.conversationFollowUpMode}
+            onChange={props.onConversationFollowUpModeChange}
           />
           <SkillTriggerSettings
             config={props.config}
@@ -143,6 +149,30 @@ function ModelUsageDisplaySettings(props: {
       >
         {props.enabled ? "显示" : "隐藏"}
       </button>
+    </div>
+  );
+}
+
+function ConversationFollowUpSettings(props: {
+  readonly mode: ConversationFollowUpMode;
+  readonly onChange: (mode: ConversationFollowUpMode) => void;
+}): React.ReactElement {
+  return (
+    <div className="capability-preference-row" aria-label="默认追加方式">
+      <div className="capability-preference-copy">
+        <strong>默认追加方式</strong>
+        <span>运行中发送新消息时</span>
+      </div>
+      <SettingsSelectControl
+        id="conversation-follow-up-mode"
+        ariaLabel="默认追加方式"
+        value={props.mode}
+        options={[
+          { value: "queue", label: "排队" },
+          { value: "guide", label: "引导" },
+        ]}
+        onChange={(value) => props.onChange(value as ConversationFollowUpMode)}
+      />
     </div>
   );
 }

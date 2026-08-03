@@ -14,12 +14,14 @@ describe("ordinary workbench input", () => {
     expect(cancelCalls).toBe(1);
   });
 
-  it("queues a message while the current response is active", () => {
+  it("queues a message when delayed follow-up mode is selected", () => {
     let queued = "";
     let goal = "next instruction";
     let startCalls = 0;
     const view = workbenchInputPropsFrom(options({
       busy: true,
+      modelResponding: true,
+      followUpMode: "queue",
       goal,
       enqueueMessage: (content) => { queued = content; },
       setGoal: (value) => { goal = value; },
@@ -31,6 +33,27 @@ describe("ordinary workbench input", () => {
     expect(queued).toBe("next instruction");
     expect(goal).toBe("");
     expect(startCalls).toBe(0);
+  });
+
+  it("guides the current conversation immediately while a response is active", () => {
+    let goal = "add one constraint";
+    let startCalls = 0;
+    let queued = "";
+    const view = workbenchInputPropsFrom(options({
+      busy: true,
+      modelResponding: true,
+      followUpMode: "guide",
+      goal,
+      setGoal: (value) => { goal = value; },
+      enqueueMessage: (content) => { queued = content; },
+      startTask: () => { startCalls += 1; },
+    }));
+
+    view.inputProps.onSubmit();
+
+    expect(startCalls).toBe(1);
+    expect(queued).toBe("");
+    expect(goal).toBe("");
   });
 
   it("starts a task when no response is active", () => {
@@ -71,10 +94,11 @@ function options(
     onOpenSettings: () => undefined,
     submitDeepInput: () => undefined,
     enqueueMessage: () => undefined,
-    startTask: async () => undefined,
+    startTask: async () => true,
     cancelRun: () => undefined,
     stopDeepTask: () => undefined,
     modelResponding: true,
+    followUpMode: "queue",
     deepBusy: false,
     deep: undefined,
     ...overrides,

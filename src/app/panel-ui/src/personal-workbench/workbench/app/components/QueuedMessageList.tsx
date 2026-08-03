@@ -1,4 +1,4 @@
-import { Check, PencilLine, X } from "lucide-react";
+import { ArrowUpRight, Check, PencilLine, X } from "lucide-react";
 import { useState } from "react";
 import type { QueuedChatMessage } from "../../../../contracts/composer";
 
@@ -6,10 +6,11 @@ export type QueuedMessageListProps = {
   readonly messages: readonly QueuedChatMessage[];
   readonly onRemove: (id: string) => void;
   readonly onUpdate: (id: string, content: string) => void;
+  readonly onGuide: (id: string) => Promise<boolean> | void;
 };
 
 /** Shows messages waiting behind the current run without changing composer flow. */
-export function QueuedMessageList({ messages, onRemove, onUpdate }: QueuedMessageListProps) {
+export function QueuedMessageList({ messages, onRemove, onUpdate, onGuide }: QueuedMessageListProps) {
   const [editingId, setEditingId] = useState<string | undefined>();
   const [editingContent, setEditingContent] = useState("");
 
@@ -105,6 +106,17 @@ export function QueuedMessageList({ messages, onRemove, onUpdate }: QueuedMessag
                   </>
                 ) : (
                   <>
+                    <button
+                      type="button"
+                      onClick={() => void onGuide(message.id)}
+                      className="flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium transition-colors hover:bg-black/5"
+                      style={{ color: "var(--aa-accent)" }}
+                      aria-label={`引导待发送消息：${message.content}`}
+                      title="引导：立即作为下一步发送"
+                    >
+                      <ArrowUpRight size={11} />
+                      引导
+                    </button>
                     <button
                       type="button"
                       onClick={() => beginEditing(message)}

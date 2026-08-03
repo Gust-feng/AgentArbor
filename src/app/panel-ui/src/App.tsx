@@ -65,6 +65,7 @@ export function App(): React.ReactElement {
     setModelUsageDisplayEnabled,
     agentClusterEnabled,
     developerModeEnabled,
+    conversationFollowUpMode,
     inputCloseSignal,
     setInputCloseSignal,
     openSettings,
@@ -72,6 +73,7 @@ export function App(): React.ReactElement {
     changeModelUsageDisplay,
     changeAgentClusterEnabled,
     changeDeveloperMode,
+    changeConversationFollowUpMode,
   } = shellState;
   // The personal workbench is the production Ordinary entry. Deferred Deep
   // remains a settings/runtime compatibility concern, not a rendered surface.
@@ -162,10 +164,10 @@ export function App(): React.ReactElement {
     queuedMessages,
     removeQueuedMessage,
     updateQueuedMessage,
+    guideQueuedMessage,
   } = useAppQueuedMessages({
     busy: app.busy,
     currentRun: currentRun.run,
-    setGoal,
     startTask,
   });
   const { inputProps: baseInputProps } = workbenchInputPropsFrom({
@@ -197,6 +199,7 @@ export function App(): React.ReactElement {
     cancelRun,
     stopDeepTask,
     modelResponding,
+    followUpMode: conversationFollowUpMode,
     deepBusy: app.deepBusy,
     deep: app.deep,
     deepActiveRunId: app.deepActiveRunId,
@@ -207,6 +210,7 @@ export function App(): React.ReactElement {
     queuedMessages,
     onRemoveQueuedMessage: removeQueuedMessage,
     onUpdateQueuedMessage: updateQueuedMessage,
+    onGuideQueuedMessage: guideQueuedMessage,
   };
 
   const settingsDialogProps = workbenchSettingsDialogPropsFrom({
@@ -234,6 +238,8 @@ export function App(): React.ReactElement {
       onAgentClusterEnabledChange: changeAgentClusterEnabled,
       developerModeEnabled,
       onDeveloperModeChange: changeDeveloperMode,
+      conversationFollowUpMode,
+      onConversationFollowUpModeChange: changeConversationFollowUpMode,
     },
     saving: {
       model: savingModel,

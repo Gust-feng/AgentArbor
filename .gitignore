@@ -12,6 +12,7 @@ coverage/
 output/
 # Local analysis/reference bundles that are not product docs.
 分析/
+.local-assets/
 # Local environment
 .env
 .env.*

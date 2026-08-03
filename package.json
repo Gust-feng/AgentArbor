@@ -15,8 +15,6 @@
     "copy:sub-agents": "node scripts/copy-sub-agent-assets.mjs",
     "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
     "build:panel": "vite build --config vite.panel.config.ts",
-    "panel:prototype:dev": "vite --config vite.panel-prototype.config.ts --open /prototype.html",
-    "build:prototype": "vite build --config vite.panel-prototype.config.ts",
     "test:panel": "vitest run --config vitest.panel.config.ts",
     "test:release-gate": "node --test scripts/windows-release-validation.test.mjs",
     "test:dev-scripts": "node --test scripts/panel-dev-process-tree.test.mjs",

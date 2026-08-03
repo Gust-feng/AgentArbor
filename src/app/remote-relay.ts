@@ -1,13 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SqliteRuntimeDatabase } from "../adapters/runtime-storage/index.js";
+import { SqliteRuntimeDatabase } from "../adapters/runtime-storage/sqlite-runtime-database.js";
 import {
   DEFAULT_RELAY_ACCOUNT_QUOTA_BYTES,
   DEFAULT_RELAY_DOCUMENT_QUOTA_BYTES,
   createRemoteRelayStore,
-  startRemoteRelayServer,
-} from "./remote-collaboration/index.js";
+} from "./remote-collaboration/relay-store.js";
+import { startRemoteRelayServer } from "./remote-collaboration/relay-server.js";
 
 const host = process.env.AGENTARBOR_RELAY_HOST ?? "127.0.0.1";
 const port = parsePort(process.env.AGENTARBOR_RELAY_PORT ?? "4310");

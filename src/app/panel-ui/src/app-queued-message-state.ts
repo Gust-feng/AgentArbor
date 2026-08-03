@@ -70,6 +70,7 @@ export function useAppQueuedMessages(
   const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
   const guidedAfterRunRef = useRef<string | undefined>(undefined);
   const queueScopeRef = useRef(options.queueScopeId);
+  const queueResetVersionRef = useRef(0);
   const skipDispatchAfterScopeChangeRef = useRef(false);
 
   const enqueueMessage = useCallback((content: string) => {
@@ -92,9 +93,25 @@ export function useAppQueuedMessages(
   }, []);
 
   const clearQueuedMessages = useCallback(() => {
+    queueResetVersionRef.current += 1;
     dispatchedQueueAfterRunRef.current = undefined;
     guidedAfterRunRef.current = undefined;
     setQueuedMessages([]);
+  }, []);
+
+  const restoreQueuedMessage = useCallback((input: {
+    readonly message: QueuedChatMessage;
+    readonly index: number;
+    readonly scopeId: string | undefined;
+    readonly resetVersion: number;
+  }): void => {
+    if (queueScopeRef.current !== input.scopeId || queueResetVersionRef.current !== input.resetVersion) return;
+    setQueuedMessages((previous) => {
+      if (previous.some((message) => message.id === input.message.id)) return previous;
+      const next = [...previous];
+      next.splice(Math.min(input.index, next.length), 0, input.message);
+      return next;
+    });
   }, []);
 
   const guideQueuedMessage = useCallback(async (id: string): Promise<boolean> => {
@@ -104,21 +121,30 @@ export function useAppQueuedMessages(
     const message = queuedMessages.find((candidate) => candidate.id === id);
     if (message === undefined) return false;
 
+    const messageIndex = queuedMessages.findIndex((candidate) => candidate.id === id);
+    const scopeId = options.queueScopeId;
+    const resetVersion = queueResetVersionRef.current;
     guidedAfterRunRef.current = run.runId;
-    const accepted = await options.startTask(message.content);
-    if (accepted) {
-      setQueuedMessages((previous) => previous.filter((candidate) => candidate.id !== id));
-    } else if (guidedAfterRunRef.current === run.runId) {
+    setQueuedMessages((previous) => previous.filter((candidate) => candidate.id !== id));
+    let accepted = false;
+    try {
+      accepted = await options.startTask(message.content);
+    } catch {
+      accepted = false;
+    }
+    if (!accepted) {
+      restoreQueuedMessage({ message, index: messageIndex, scopeId, resetVersion });
       guidedAfterRunRef.current = undefined;
     }
     return accepted;
-  }, [options.currentRun, options.startTask, queuedMessages]);
+  }, [options.currentRun, options.queueScopeId, options.startTask, queuedMessages, restoreQueuedMessage]);
 
   // Queue entries are conversation-local drafts. Reset them before the
   // dispatch effect can observe the previous conversation's run.
   useEffect(() => {
     if (queueScopeRef.current === options.queueScopeId) return;
     queueScopeRef.current = options.queueScopeId;
+    queueResetVersionRef.current += 1;
     dispatchedQueueAfterRunRef.current = undefined;
     guidedAfterRunRef.current = undefined;
     skipDispatchAfterScopeChangeRef.current = true;
@@ -141,18 +167,30 @@ export function useAppQueuedMessages(
     // dispatch to that run id so StrictMode and unrelated renders cannot send
     // the same or subsequent queued message early.
     dispatchedQueueAfterRunRef.current = decision.sourceRunId;
+    const messageIndex = queuedMessages.findIndex((message) => message.id === decision.message.id);
+    const scopeId = options.queueScopeId;
+    const resetVersion = queueResetVersionRef.current;
+    setQueuedMessages((previous) => previous.filter((message) => message.id !== decision.message.id));
     void options.startTask(decision.message.content).then((accepted) => {
-      if (accepted) {
-        setQueuedMessages((previous) =>
-          previous[0]?.id === decision.message.id
-            ? previous.slice(1)
-            : previous.filter((message) => message.id !== decision.message.id)
-        );
-      } else if (dispatchedQueueAfterRunRef.current === decision.sourceRunId) {
+      if (!accepted) {
+        restoreQueuedMessage({
+          message: decision.message,
+          index: messageIndex,
+          scopeId,
+          resetVersion,
+        });
         dispatchedQueueAfterRunRef.current = undefined;
       }
+    }).catch(() => {
+      restoreQueuedMessage({
+        message: decision.message,
+        index: messageIndex,
+        scopeId,
+        resetVersion,
+      });
+      dispatchedQueueAfterRunRef.current = undefined;
     });
-  }, [options.busy, options.currentRun, options.startTask, options.queueScopeId, queuedMessages]);
+  }, [options.busy, options.currentRun, options.startTask, options.queueScopeId, queuedMessages, restoreQueuedMessage]);
 
   return {
     queuedMessages,

@@ -82,3 +82,28 @@ test('clears local messages when the active conversation changes', async () => {
   await waitFor(() => expect(hook.result.current.queuedMessages).toEqual([]))
   expect(startTask).not.toHaveBeenCalled()
 })
+
+test('removes a guided item while submitting and restores it on failure', async () => {
+  let resolveStart: (accepted: boolean) => void = () => undefined
+  const startTask = vi.fn(() => new Promise<boolean>((resolve) => {
+    resolveStart = resolve
+  }))
+  const hook = renderHook(() => useAppQueuedMessages({
+    busy: true,
+    queueScopeId: 'conversation-1',
+    currentRun: { runId: 'run-active', status: 'running', requiresUserAction: false },
+    startTask,
+  }))
+
+  act(() => hook.result.current.enqueueMessage('等待提交结果'))
+  const messageId = hook.result.current.queuedMessages[0]!.id
+  let guidePromise: Promise<boolean> | undefined
+  act(() => {
+    guidePromise = hook.result.current.guideQueuedMessage(messageId)
+  })
+  await waitFor(() => expect(hook.result.current.queuedMessages).toEqual([]))
+
+  act(() => resolveStart(false))
+  await expect(guidePromise).resolves.toBe(false)
+  await waitFor(() => expect(hook.result.current.queuedMessages.map((message) => message.content)).toEqual(['等待提交结果']))
+})

@@ -49,6 +49,7 @@ import { handleWorkbenchProjectionRoute } from "./workbench-projection-routes.js
 import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
 import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
 import { acquirePanelRuntimeDirectoryLease } from "./runtime-directory-lease.js";
+import { handlePanelRemoteCollaborationRoute } from "./remote-collaboration-routes.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 const PANEL_REQUEST_DRAIN_TIMEOUT_MS = 1_000;
@@ -270,6 +271,10 @@ async function handlePanelRequest(
     return;
   }
 
+  if (await handlePanelRemoteCollaborationRoute(runtime, request, response, url)) {
+    return;
+  }
+
   if (await handlePanelOrdinaryRoute(runtime, request, response, url)) {
     return;
   }
@@ -376,6 +381,8 @@ export async function closePanelServer(
   // callbacks may still run while active jobs converge, but they must not
   // admit the next queued conversation run.
   runtime.isQuiescing = true;
+  const remoteDisposal = runtime.remoteCollaborationFeature.release();
+  void remoteDisposal.catch(() => undefined);
   const ordinaryDisposal = runtime.ordinaryAgentFeature.release();
   void ordinaryDisposal.catch(() => undefined);
   let serverCloseError: unknown;
@@ -386,7 +393,7 @@ export async function closePanelServer(
   const runtimeCleanup = (async () => {
     await cleanupPanelRuntimeOwnedProcesses(runtime);
     await waitForPanelRequestIdle(server, runtime);
-    await releasePanelRuntimeResources(runtime, ordinaryDisposal);
+    await releasePanelRuntimeResources(runtime, ordinaryDisposal, remoteDisposal);
   })();
   // A forced timeout may return while a broken provider promise is still
   // pending. Own its eventual rejection so shutdown never creates an unhandled
@@ -433,11 +440,13 @@ async function disposePanelRuntimeAfterFailedStart(runtime: PanelRuntime): Promi
 /** Releases every resource owned by the Panel composition root, without server transport cleanup. */
 export async function releasePanelRuntimeResources(
   runtime: PanelRuntime,
-  ordinaryDisposal: Promise<void> = runtime.ordinaryAgentFeature.release(),
+  ordinaryDisposal?: Promise<void>,
+  remoteDisposal?: Promise<void>,
 ): Promise<void> {
   runtime.isQuiescing = true;
   const errors: unknown[] = [];
-  await captureCleanupError(errors, () => ordinaryDisposal);
+  await captureCleanupError(errors, () => remoteDisposal ?? runtime.remoteCollaborationFeature.release());
+  await captureCleanupError(errors, () => ordinaryDisposal ?? runtime.ordinaryAgentFeature.release());
   await captureCleanupError(errors, () => runtime.flushSpaceFileReconciliation());
   // Keep the connector subscribed until Ordinary has produced its final stable facts.
   await captureCleanupError(errors, () => runtime.ordinaryPathMemoryConnector.release());

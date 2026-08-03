@@ -12,6 +12,7 @@ import {
   SqliteRuntimeDatabase,
   type AgentArborRuntimePaths,
 } from "../../adapters/runtime-storage/index.js";
+import { FileSystemLocalDevSecretStore } from "../../adapters/config/index.js";
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { createMinimalReadonlySoilStore } from "../../domain/soil/index.js";
@@ -121,6 +122,14 @@ import {
   createWorkbenchProjectionChangeFeed,
   type WorkbenchProjectionChangeFeed,
 } from "./workbench-projection-change-feed.js";
+import {
+  createRemoteCollaborationFeature,
+  createRemoteCommandHandler,
+  createRemoteDesktopStore,
+  type RemoteCollaborationFeature,
+  type RemoteDesktopStore,
+} from "../remote-collaboration/index.js";
+import { createPanelRemoteCollaborationPorts } from "./remote-collaboration-ports.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -153,6 +162,8 @@ export type PanelRuntime = {
   readonly pathMemoryFeature: PathMemoryFeature;
   readonly experienceCandidateFeature: ExperienceCandidateFeature;
   readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
+  readonly remoteCollaborationFeature: RemoteCollaborationFeature;
+  readonly remoteDesktopStore: RemoteDesktopStore;
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
   readonly workbenchDatabase: SqliteRuntimeDatabase;
@@ -472,7 +483,26 @@ function assemblePanelRuntime(input: {
       diagnostic.error,
     ),
   });
-  const runtime: PanelRuntime = {
+  const remoteDesktopStore = createRemoteDesktopStore(workbenchDatabase);
+  let runtime!: PanelRuntime;
+  const remoteCollaborationFeature = createRemoteCollaborationFeature({
+    store: remoteDesktopStore,
+    credentials: new FileSystemLocalDevSecretStore(resolveRemoteConfigDirectory(input)),
+    commandHandler: createRemoteCommandHandler({
+      ports: createPanelRemoteCollaborationPorts({
+        ordinary: ordinaryAgentFeature,
+        spaces: spaceFeature,
+        notes: agentNotesFeature,
+        assets: workbenchAssets,
+        store: remoteDesktopStore,
+        managedSpaceFolderRoot,
+        fileMutationCoordinator,
+        prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
+        defaultWorkspaceRoot: async () => (await input.configCenter.getWorkspaceConfig()).workspaceDirectory,
+      }),
+    }),
+  });
+  runtime = {
     isQuiescing: false,
     configCenter: input.configCenter,
     capabilityCenter,
@@ -503,6 +533,8 @@ function assemblePanelRuntime(input: {
     pathMemoryFeature,
     experienceCandidateFeature,
     ordinaryPathMemoryConnector,
+    remoteCollaborationFeature,
+    remoteDesktopStore,
     prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
     workbenchDatabase,
@@ -521,6 +553,9 @@ function assemblePanelRuntime(input: {
     flushSpaceFileReconciliation: () => spaceFileReconciliation,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
+  void remoteCollaborationFeature.start().catch((error) => {
+    console.error("[panel-server] Remote Collaboration connector could not start", error);
+  });
   return runtime;
 }
 
@@ -591,6 +626,13 @@ function resolveRuntimeHome(input: {
     (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
   if (runtimeHome === undefined) throw new Error("Panel runtime requires a runtime directory.");
   return runtimeHome;
+}
+
+function resolveRemoteConfigDirectory(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  return input.configDirectory ?? path.join(input.runtimePaths?.appHome ?? resolveRuntimeHome(input), "config");
 }
 
 function resolveOrdinaryRuntimeRoot(input: {

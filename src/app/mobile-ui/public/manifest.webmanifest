@@ -1,0 +1,13 @@
+{
+  "name": "AgentArbor 移动协同",
+  "short_name": "AgentArbor",
+  "description": "与电脑上的 AgentArbor 对话、确认动作并同步软件自有内容。",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f6f3",
+  "theme_color": "#f7f6f3",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

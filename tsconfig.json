@@ -13,5 +13,5 @@
     "sourceMap": true
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": ["dist", "node_modules", "src/app/panel-ui/src", "src/deferred"]
+  "exclude": ["dist", "node_modules", "src/app/panel-ui/src", "src/app/mobile-ui/src", "src/deferred"]
 }

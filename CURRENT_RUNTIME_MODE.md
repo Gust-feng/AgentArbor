@@ -8,7 +8,7 @@
 
 Multi-Agent 的 Panel UI、Deep DTO 和实现源码暂时保留，以便未来重构复用其中可验证的局部机制；当前 Panel 不装配其 feature、不加载 Deep 历史，也不接受 `/api/deep/*` 请求。该路径统一返回 `410 multi_agent_deferred`，不会创建 provider、ToolCenter、store 或后台运行。
 
-后端只有一个生产组合根：`createPanelRuntime()`。它当前创建 `OrdinaryAgentFeature`、`AgentNotesFeature`、`PathMemoryFeature`、后者与 Ordinary 之间的 `OrdinaryPathMemoryConnector` 以及所需的中性资源；`ordinary-routes` 只做 HTTP/SSE 适配。Multi-Agent 的 feature、store、control registry 和资源装配不进入当前生产运行时，也不参与关闭流程。
+后端只有一个桌面生产组合根：`createPanelRuntime()`。它当前创建 `OrdinaryAgentFeature`、`AgentNotesFeature`、`PathMemoryFeature`、后者与 Ordinary 之间的 `OrdinaryPathMemoryConnector`、可选的 `RemoteCollaborationFeature` 以及所需的中性资源；`ordinary-routes` 只做 HTTP/SSE 适配。Remote Collaboration 通过 Host 注入的窄 facade 使用各业务 feature，不读取其 store，也不建立第二个 Agent runtime。Multi-Agent 的 feature、store、control registry 和资源装配不进入当前生产运行时，也不参与关闭流程。
 
 Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -> OrdinaryAgentFeature -> Agent Session adapter -> Pi AgentHarness/Session -> ToolCenter`。Pi 负责模型-工具循环、Session 分支和压缩；Ordinary feature 负责业务状态、持久化和 read-model 事实。旧 BasicAgent、Desktop session、Panel run job、应用层 Underground、`MinimalRuntime`、旧 conversation/run route、`/api/desktop/runs` 与 `/api/underground/*` 已删除。Panel JSON 输入已在 HTTP 边界使用 Zod 校验；当前尚未完成的是 Workbench/UI surface 隔离。
 
@@ -17,11 +17,13 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 当前 AgentArbor 以桌面普通 `agent` 作为唯一默认运行方式。
 
 - 用户入口：`Desktop Shell / Panel`；Workbench 首页是唯一的空白新对话入口，侧栏“首页”只负责返回这一完整空态，不提前重置已有会话或输入。用户在首页提交内容时才创建新 conversation；对话页只展示正在执行或从历史打开的 conversation，并在提交时继续当前 conversation
+- 可选远程入口：Android 9+ React PWA；通过独立 Linux Relay 与桌面 connector 配对后，可提交 Ordinary 消息、取消、处理确认，并同步白名单内的 Space、受管文件、Workbench Assets 和 Agent Notes。Relay 只做配对与持久消息中继
 - 默认运行模式：`agent`
 - 默认执行主线：`用户消息 -> OrdinaryAgentFeature -> Pi AgentHarness/Session -> ToolCenter/命令确认 -> ordinary-run/v5 -> 事实 read-model`
 - 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断
 - Multi-Agent 的入口、历史加载和生产 API 已全部停用；`/api/deep/*` 返回 `410 multi_agent_deferred`，保留源码不代表可触发 `deep` run
 - `/api/conversations` 是普通 `agent` 的唯一提交入口；旧 `/api/desktop/runs` 已删除
+- 远程消息不绕过 Ordinary feature：desktop connector 直接调用同一 command facade，并以远程 `commandId` 作为稳定 `submissionId`；手机和 Relay 都不执行模型或工具
 - 当前 Ordinary 通过 Pi provider/model binding 使用冻结的模型协议能力；自定义 OpenAI-compatible endpoint 仍由 provider binding 接入，fake provider 仅供测试。Chat binding 把 DeepSeek、Kimi、GLM、MiniMax 的冻结请求方言映射到 Pi `compat` 与公开 payload hook，并按冻结能力声明视觉输入；动态 API key 每次请求重新解析，清空后不会回退旧 key。普通 Agent 的语义 Skills 路由使用同一 Pi Models/provider binding 的窄无工具通道，并保留现有 JSON 校验与确定性 fallback。仓库通过 pnpm patch 固化 pi-ai 0.80.10 的必要上游补齐：Chat/Responses `stream:false`、refusal diagnostic、Responses hosted output continuation 与 `incomplete_details.reason`、MiniMax 累计 delta 和文本 `reasoning_details`；Responses provider-native Web Search 由冻结 binding 注入 hosted tool，并只在 provider/API/model 相同的 Session 后续轮次回放 opaque output item。provider error、refusal、content filter、输出截断与 context overflow 都形成 Ordinary 可观察失败。Pi 公共消息契约仍不能无损表达普通 file/audio 与 URL/file-id 附件，provider transport 也没有 Host 自定义 fetch 注入口；相关旧 Chat/Responses transport 只作为延期 Multi-Agent 的源码依赖保留，不进入当前生产组合根
 - Panel 普通输入栏可选择“当前工作区”作为本轮普通 `agent` 运行的工作根目录；该选择只作为前端会话内的显式覆盖，不写入设置。未选择当前工作区时，新 run 使用设置页保存的工作区作为默认工作区
 - `/api/deep/*` 已停用；旧 `/api/underground/*` 已删除。Deep 及其 run-tree 契约仅作为未来重构的代码基础保留

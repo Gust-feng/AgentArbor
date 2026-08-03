@@ -27,6 +27,9 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
   const runtime = {
     isQuiescing: false,
     activeRequestJobs: new Set<Promise<void>>(),
+    remoteCollaborationFeature: {
+      async release() { disposalOrder.push("remote-collaboration"); },
+    },
     ordinaryAgentFeature: {
       async release() { disposalOrder.push("ordinary"); },
     },
@@ -76,6 +79,7 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
   assert.equal(runtime.isQuiescing, true);
   // Memory drains only after Ordinary produced its final stable terminal facts.
   assert.deepEqual(disposalOrder, [
+    "remote-collaboration",
     "ordinary",
     "space-file-reconciliation",
     "path-memory-connector",

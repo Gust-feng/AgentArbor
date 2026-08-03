@@ -41,6 +41,7 @@ export type SettingsGroup =
   | "skills"
   | "subAgents"
   | "workspace"
+  | "remoteCollaboration"
   | "appearance"
   | "statistics"
   | "pathMemory"

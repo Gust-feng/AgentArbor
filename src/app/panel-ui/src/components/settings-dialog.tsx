@@ -20,6 +20,7 @@ import {
   Route,
   Server,
   SlidersHorizontal,
+  Smartphone,
   X,
 } from "lucide-react";
 import type {
@@ -43,6 +44,7 @@ import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistic
 import { ResponsivenessDiagnostics } from "./responsiveness-diagnostics";
 import { PathMemorySettings } from "./path-memory-settings";
 import { WorkspaceSettings } from "./workspace-settings";
+import { RemoteCollaborationSettings } from "./remote-collaboration-settings";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 
@@ -261,6 +263,7 @@ export function SettingsDialog(props: {
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
+            {activeGroup === "remoteCollaboration" && <RemoteCollaborationSettings />}
             {activeGroup === "appearance" && <AppearanceSettings />}
             {activeGroup === "statistics" && <UsageStatisticsSettings />}
             {activeGroup === "pathMemory" && <PathMemorySettings />}
@@ -296,6 +299,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "subAgents", label: "Sub Agent", icon: <Bot size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
+  { id: "remoteCollaboration", label: "移动协同", icon: <Smartphone size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
   { id: "pathMemory", label: "路径记忆", icon: <Route size={15} /> },

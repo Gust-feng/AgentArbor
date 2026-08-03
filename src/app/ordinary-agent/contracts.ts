@@ -396,6 +396,12 @@ export type StartOrdinaryRunInput = {
 };
 
 export type SubmitOrdinaryTurnInput = {
+  /**
+   * Stable caller identity for retry-safe submissions. When present it also
+   * becomes the run id, so a process restart can resolve a retransmission from
+   * the Ordinary repository without a parallel idempotency store.
+   */
+  readonly submissionId?: string;
   readonly conversationId?: string;
   readonly input: OrdinaryRunInput;
   readonly birth: OrdinaryRunBirth;

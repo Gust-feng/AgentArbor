@@ -1392,8 +1392,52 @@ export function createOrdinaryAgentFeature(input: {
   async function submitTurn(submitInput: SubmitOrdinaryTurnInput): Promise<SubmitOrdinaryTurnResult> {
     assertLive();
     await readyPromise;
-    const conversationId = submitInput.conversationId ?? idFactory("conversation");
+    const submissionId = normalizeSubmissionId(submitInput.submissionId);
+    if (submissionId !== undefined) {
+      return enqueue(`submission:${submissionId}`, async () => {
+        const existing = await load(submissionId);
+        if (existing !== undefined) return resolveRepeatedSubmission(existing.state, submitInput);
+        return submitTurnOnce(submitInput, submissionId);
+      });
+    }
+    return submitTurnOnce(submitInput);
+  }
+
+  async function resolveRepeatedSubmission(
+    existing: OrdinaryRunState,
+    submitInput: SubmitOrdinaryTurnInput,
+  ): Promise<SubmitOrdinaryTurnResult> {
+    if (
+      (submitInput.conversationId !== undefined && submitInput.conversationId !== existing.turn.conversationId)
+      || JSON.stringify(submitInput.input) !== JSON.stringify(existing.input)
+    ) {
+      throw new OrdinaryFeatureError(
+        "ordinary_run_conflict",
+        `Submission ${existing.runId} was already used with different input or conversation`,
+      );
+    }
+    const control = await loadConversationControl(existing.turn.conversationId);
+    if (control === undefined || control.state.deletedAt !== undefined) {
+      throw new OrdinaryFeatureError(
+        "ordinary_conversation_deleted",
+        `The conversation for submission ${existing.runId} is no longer available`,
+      );
+    }
+    return { conversation: await requireConversationView(control), run: clone(existing) };
+  }
+
+  async function submitTurnOnce(
+    submitInput: SubmitOrdinaryTurnInput,
+    submissionId?: string,
+  ): Promise<SubmitOrdinaryTurnResult> {
+    const conversationId = submitInput.conversationId ?? (
+      submissionId === undefined ? idFactory("conversation") : `conversation:${submissionId}`
+    );
     return enqueue(`conversation:${conversationId}`, async () => {
+      if (submissionId !== undefined) {
+        const existing = await load(submissionId);
+        if (existing !== undefined) return resolveRepeatedSubmission(existing.state, submitInput);
+      }
       let control = await loadConversationControl(conversationId);
       if (control === undefined) {
         if (submitInput.conversationId !== undefined) {
@@ -1423,7 +1467,7 @@ export function createOrdinaryAgentFeature(input: {
       assertConversationWritable(control);
       const runs = await visibleRuns(control);
       const predecessor = runs.at(-1);
-      const runId = idFactory("ordinary-run");
+      const runId = submissionId ?? idFactory("ordinary-run");
       const run = await startWithinConversation({
         runId,
         sessionRef: control.state.sessionRef,
@@ -2100,4 +2144,13 @@ function ordinaryExecutionFailureFacts(value: unknown): { readonly code: string;
   return { code: "ordinary_execution_failed", message: errorMessage(value) };
 }
 function errorMessage(value: unknown): string { return value instanceof Error ? value.message : String(value); }
+function normalizeSubmissionId(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  if (normalized.length < 1 || normalized.length > 160) {
+    throw new OrdinaryFeatureError("ordinary_run_conflict", "Submission ids must contain 1 to 160 characters");
+  }
+  return normalized;
+}
+
 function clone<T>(value: T): T { return globalThis.structuredClone(value); }

@@ -40,6 +40,31 @@ test("submitTurn serializes queued turns from the active Session branch", async 
   assert.deepEqual((await run.feature.queries.getConversation(first.conversation.conversationId))?.turns.map((turn) => turn.content), ["first", "answer:first", "second", "answer:second"]);
 });
 
+test("submitTurn resolves stable submission ids idempotently and rejects changed input", async (t) => {
+  const run = await fixture(t, immediateExecution);
+  const first = await run.feature.commands.submitTurn({
+    submissionId: "remote-command-1",
+    input: { userMessage: "from phone" },
+    birth: ordinaryRunBirth(),
+  });
+  const repeated = await run.feature.commands.submitTurn({
+    submissionId: "remote-command-1",
+    input: { userMessage: "from phone" },
+    birth: ordinaryRunBirth(),
+  });
+  assert.equal(repeated.run.runId, first.run.runId);
+  assert.equal(repeated.conversation.conversationId, first.conversation.conversationId);
+  assert.equal(repeated.conversation.turns.filter((turn) => turn.role === "user").length, 1);
+  await assert.rejects(
+    run.feature.commands.submitTurn({
+      submissionId: "remote-command-1",
+      input: { userMessage: "changed retry" },
+      birth: ordinaryRunBirth(),
+    }),
+    (error: unknown) => error instanceof OrdinaryFeatureError && error.code === "ordinary_run_conflict",
+  );
+});
+
 test("conversation projection reads completed Session answers in one batch", async (t) => {
   const run = await fixture(t, immediateExecution);
   const first = await submitAndComplete(run.feature, undefined, "one");

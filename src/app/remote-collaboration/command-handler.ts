@@ -1,0 +1,158 @@
+import { randomUUID } from "node:crypto";
+
+import type { RemoteCommand, RemoteEvent } from "./protocol.js";
+
+type ConversationSnapshot = Extract<RemoteEvent, { readonly kind: "conversation.snapshot" }>;
+type RunSnapshot = Extract<RemoteEvent, { readonly kind: "run.snapshot" }>;
+type SpaceSnapshot = Extract<RemoteEvent, { readonly kind: "space.snapshot" }>;
+type NotebookSnapshot = Extract<RemoteEvent, { readonly kind: "notebook.snapshot" }>;
+
+export type RemoteCommandHandlerPorts = {
+  readonly ordinary: {
+    submit(input: {
+      readonly submissionId: string;
+      readonly conversationId?: string;
+      readonly message: string;
+      readonly spaceId?: string;
+    }): Promise<{ readonly conversationId: string; readonly runId: string }>;
+    cancel(runId: string): Promise<void>;
+    decide(input: {
+      readonly runId: string;
+      readonly confirmationId: string;
+      readonly decision: "approve_once" | "deny" | "guidance";
+      readonly guidance?: string;
+    }): Promise<void>;
+    conversationSnapshot(conversationId: string): Promise<ConversationSnapshot>;
+    runSnapshot(runId: string): Promise<RunSnapshot>;
+    allConversationSnapshots(): Promise<readonly ConversationSnapshot[]>;
+  };
+  readonly spaces: {
+    create(input: { readonly spaceId: string; readonly title: string }): Promise<void>;
+    addReference(input: Extract<RemoteCommand, { readonly kind: "space.reference.add" }>): Promise<void>;
+    snapshot(): Promise<SpaceSnapshot>;
+  };
+  readonly notebooks: {
+    replace(input: Extract<RemoteCommand, { readonly kind: "note.replace" }>): Promise<void>;
+    snapshot(): Promise<NotebookSnapshot>;
+  };
+  readonly assets: {
+    replaceText(input: Extract<RemoteCommand, { readonly kind: "asset.replace_text" }>): Promise<void>;
+    snapshot(): Promise<Extract<RemoteEvent, { readonly kind: "asset.snapshot" }>>;
+  };
+  readonly managedFiles: {
+    replaceText(input: Extract<RemoteCommand, { readonly kind: "managed_file.replace_text" }>): Promise<void>;
+    createText(input: Extract<RemoteCommand, { readonly kind: "managed_file.create_text" }>): Promise<void>;
+    snapshot(): Promise<Extract<RemoteEvent, { readonly kind: "managed_folder.snapshot" }>>;
+  };
+};
+
+export type RemoteCommandApplication = {
+  readonly result: Extract<RemoteEvent, { readonly kind: "command.result" }>;
+  readonly snapshots: readonly Exclude<RemoteEvent, { readonly kind: "command.result" }>[];
+};
+
+export class RemoteCommandConflict extends Error {
+  readonly name = "RemoteCommandConflict";
+  constructor(readonly code: string, message: string) { super(message); }
+}
+
+export function createRemoteCommandHandler(input: {
+  readonly ports: RemoteCommandHandlerPorts;
+  readonly idFactory?: () => string;
+}) {
+  const idFactory = input.idFactory ?? randomUUID;
+
+  return {
+    async apply(command: RemoteCommand): Promise<RemoteCommandApplication> {
+      try {
+        const snapshots = await applyCommand(input.ports, command);
+        return {
+          result: {
+            kind: "command.result",
+            eventId: idFactory(),
+            commandId: command.commandId,
+            status: "applied",
+          },
+          snapshots,
+        };
+      } catch (error) {
+        const conflict = error instanceof RemoteCommandConflict;
+        return {
+          result: {
+            kind: "command.result",
+            eventId: idFactory(),
+            commandId: command.commandId,
+            status: conflict ? "conflict" : "failed",
+            error: {
+              code: conflict ? error.code : errorCode(error),
+              message: error instanceof Error ? error.message : "Remote command failed",
+            },
+          },
+          snapshots: [],
+        };
+      }
+    },
+  };
+}
+
+async function applyCommand(
+  ports: RemoteCommandHandlerPorts,
+  command: RemoteCommand,
+): Promise<readonly Exclude<RemoteEvent, { readonly kind: "command.result" }>[]> {
+  switch (command.kind) {
+    case "conversation.submit": {
+      const submitted = await ports.ordinary.submit({
+        submissionId: command.commandId,
+        ...(command.conversationId === undefined ? {} : { conversationId: command.conversationId }),
+        message: command.message,
+        ...(command.spaceId === undefined ? {} : { spaceId: command.spaceId }),
+      });
+      return Promise.all([
+        ports.ordinary.conversationSnapshot(submitted.conversationId),
+        ports.ordinary.runSnapshot(submitted.runId),
+      ]);
+    }
+    case "run.cancel":
+      await ports.ordinary.cancel(command.runId);
+      return [await ports.ordinary.runSnapshot(command.runId)];
+    case "confirmation.decide":
+      await ports.ordinary.decide({
+        runId: command.runId,
+        confirmationId: command.confirmationId,
+        decision: command.decision,
+        ...(command.guidance === undefined ? {} : { guidance: command.guidance }),
+      });
+      return [await ports.ordinary.runSnapshot(command.runId)];
+    case "space.create":
+      await ports.spaces.create({ spaceId: command.spaceId, title: command.title });
+      return [await ports.spaces.snapshot()];
+    case "space.reference.add":
+      await ports.spaces.addReference(command);
+      return [await ports.spaces.snapshot()];
+    case "note.replace":
+      await ports.notebooks.replace(command);
+      return [await ports.notebooks.snapshot()];
+    case "asset.replace_text":
+      await ports.assets.replaceText(command);
+      return [await ports.assets.snapshot()];
+    case "managed_file.replace_text":
+      await ports.managedFiles.replaceText(command);
+      return [await ports.managedFiles.snapshot()];
+    case "managed_file.create_text":
+      await ports.managedFiles.createText(command);
+      return [await ports.managedFiles.snapshot()];
+    case "sync.snapshot.request":
+      return [
+        ...(await ports.ordinary.allConversationSnapshots()),
+        await ports.spaces.snapshot(),
+        await ports.notebooks.snapshot(),
+        await ports.assets.snapshot(),
+        await ports.managedFiles.snapshot(),
+      ];
+  }
+}
+
+function errorCode(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string") return error.code;
+  return "remote_command_failed";
+}

@@ -9,6 +9,7 @@ test('automatically sends the first queued message after the current run settles
   const hook = renderHook(
     ({ busy, currentRun }: { busy: boolean; currentRun: QueuedMessageDispatchRun }) => useAppQueuedMessages({
       busy,
+      queueScopeId: 'conversation-1',
       currentRun,
       startTask,
     }),
@@ -27,6 +28,7 @@ test('does not dispatch a queued message when the run still needs user action', 
   const startTask = vi.fn().mockResolvedValue(true)
   const hook = renderHook(() => useAppQueuedMessages({
     busy: false,
+    queueScopeId: 'conversation-1',
     currentRun: { runId: 'run-approval', status: 'completed', requiresUserAction: true },
     startTask,
   }))
@@ -41,6 +43,7 @@ test('guides a selected queued message once for the active run', async () => {
   const startTask = vi.fn().mockResolvedValue(true)
   const hook = renderHook(() => useAppQueuedMessages({
     busy: true,
+    queueScopeId: 'conversation-1',
     currentRun: { runId: 'run-active', status: 'running', requiresUserAction: false },
     startTask,
   }))
@@ -59,4 +62,23 @@ test('guides a selected queued message once for the active run', async () => {
   expect(startTask).toHaveBeenCalledWith('优先引导这个')
   expect(hook.result.current.queuedMessages.map((message) => message.content)).toEqual(['先保留这个'])
   await expect(hook.result.current.guideQueuedMessage(hook.result.current.queuedMessages[0]!.id)).resolves.toBe(false)
+})
+
+test('clears local messages when the active conversation changes', async () => {
+  const startTask = vi.fn().mockResolvedValue(true)
+  const hook = renderHook(
+    ({ queueScopeId }: { queueScopeId: string }) => useAppQueuedMessages({
+      busy: true,
+      queueScopeId,
+      currentRun: { runId: 'run-active', status: 'running', requiresUserAction: false },
+      startTask,
+    }),
+    { initialProps: { queueScopeId: 'conversation-1' } },
+  )
+
+  act(() => hook.result.current.enqueueMessage('不要带到另一段对话'))
+  hook.rerender({ queueScopeId: 'conversation-2' })
+
+  await waitFor(() => expect(hook.result.current.queuedMessages).toEqual([]))
+  expect(startTask).not.toHaveBeenCalled()
 })

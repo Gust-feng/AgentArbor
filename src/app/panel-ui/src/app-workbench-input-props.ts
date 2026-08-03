@@ -33,6 +33,7 @@ export type WorkbenchInputPropsOptions = {
   readonly submitDeepInput: () => void | Promise<void>;
   readonly enqueueMessage: (content: string) => void;
   readonly startTask: (explicitGoal?: string) => void | Promise<boolean>;
+  readonly clearQueuedMessages: () => void;
   readonly cancelRun: () => void | Promise<void>;
   readonly stopDeepTask: () => void | Promise<void>;
   readonly modelResponding: boolean;
@@ -91,6 +92,7 @@ export function workbenchInputPropsFrom(
     },
     allowInputWhileBusy: true,
     onCancel: () => {
+      options.clearQueuedMessages();
       void options.cancelRun();
     },
   };

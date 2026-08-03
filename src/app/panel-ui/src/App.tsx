@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { PersonalWorkbench } from "./personal-workbench/personal-workbench";
 import { useAppShellEffects } from "./app-shell-effects";
 import { persistSidebarCollapsedPreference, useAppShellState } from "./app-shell-state";
@@ -164,9 +164,11 @@ export function App(): React.ReactElement {
     queuedMessages,
     removeQueuedMessage,
     updateQueuedMessage,
+    clearQueuedMessages,
     guideQueuedMessage,
   } = useAppQueuedMessages({
     busy: app.busy,
+    queueScopeId: app.conversation?.conversationId ?? currentRun.run?.conversationId,
     currentRun: currentRun.run,
     startTask,
   });
@@ -196,6 +198,7 @@ export function App(): React.ReactElement {
     submitDeepInput,
     enqueueMessage,
     startTask,
+    clearQueuedMessages,
     cancelRun,
     stopDeepTask,
     modelResponding,
@@ -212,6 +215,14 @@ export function App(): React.ReactElement {
     onUpdateQueuedMessage: updateQueuedMessage,
     onGuideQueuedMessage: guideQueuedMessage,
   };
+  const startNewConversation = useCallback(() => {
+    clearQueuedMessages();
+    return runActions.startNewConversation();
+  }, [clearQueuedMessages, runActions.startNewConversation]);
+  const openConversation = useCallback((conversationId: string) => {
+    clearQueuedMessages();
+    return openNormalConversation(conversationId);
+  }, [clearQueuedMessages, openNormalConversation]);
 
   const settingsDialogProps = workbenchSettingsDialogPropsFrom({
     settingsOpen,
@@ -269,8 +280,8 @@ export function App(): React.ReactElement {
       pendingConfirmation={pendingConfirmation}
       confirmationBusy={confirmationBusy}
       onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
-      onStartNewConversation={runActions.startNewConversation}
-      onOpenConversation={openNormalConversation}
+      onStartNewConversation={startNewConversation}
+      onOpenConversation={openConversation}
       pendingConversationIds={pendingConversationIds}
       onRenameConversation={sidebarActions.renameConversation}
       onToggleConversationPinned={sidebarActions.toggleConversationPinned}

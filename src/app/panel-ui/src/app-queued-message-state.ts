@@ -12,11 +12,13 @@ export type AppQueuedMessageState = {
   readonly enqueueMessage: (content: string) => void;
   readonly removeQueuedMessage: (id: string) => void;
   readonly updateQueuedMessage: (id: string, content: string) => void;
+  readonly clearQueuedMessages: () => void;
   readonly guideQueuedMessage: (id: string) => Promise<boolean>;
 };
 
 export type AppQueuedMessageStateOptions = {
   readonly busy: boolean;
+  readonly queueScopeId: string | undefined;
   readonly currentRun: QueuedMessageDispatchRun | undefined;
   readonly startTask: (explicitGoal?: string) => Promise<boolean>;
 };
@@ -67,6 +69,8 @@ export function useAppQueuedMessages(
   const [queuedMessages, setQueuedMessages] = useState<readonly QueuedChatMessage[]>([]);
   const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
   const guidedAfterRunRef = useRef<string | undefined>(undefined);
+  const queueScopeRef = useRef(options.queueScopeId);
+  const skipDispatchAfterScopeChangeRef = useRef(false);
 
   const enqueueMessage = useCallback((content: string) => {
     const trimmed = content.trim();
@@ -87,6 +91,12 @@ export function useAppQueuedMessages(
     );
   }, []);
 
+  const clearQueuedMessages = useCallback(() => {
+    dispatchedQueueAfterRunRef.current = undefined;
+    guidedAfterRunRef.current = undefined;
+    setQueuedMessages([]);
+  }, []);
+
   const guideQueuedMessage = useCallback(async (id: string): Promise<boolean> => {
     const run = options.currentRun;
     if (run === undefined || !queuedMessageCanGuide(run)) return false;
@@ -104,7 +114,22 @@ export function useAppQueuedMessages(
     return accepted;
   }, [options.currentRun, options.startTask, queuedMessages]);
 
+  // Queue entries are conversation-local drafts. Reset them before the
+  // dispatch effect can observe the previous conversation's run.
   useEffect(() => {
+    if (queueScopeRef.current === options.queueScopeId) return;
+    queueScopeRef.current = options.queueScopeId;
+    dispatchedQueueAfterRunRef.current = undefined;
+    guidedAfterRunRef.current = undefined;
+    skipDispatchAfterScopeChangeRef.current = true;
+    setQueuedMessages([]);
+  }, [options.queueScopeId]);
+
+  useEffect(() => {
+    if (skipDispatchAfterScopeChangeRef.current) {
+      skipDispatchAfterScopeChangeRef.current = false;
+      return;
+    }
     const decision = queuedMessageDispatchDecision({
       busy: options.busy,
       currentRun: options.currentRun,
@@ -127,13 +152,14 @@ export function useAppQueuedMessages(
         dispatchedQueueAfterRunRef.current = undefined;
       }
     });
-  }, [options.busy, options.currentRun, options.startTask, queuedMessages]);
+  }, [options.busy, options.currentRun, options.startTask, options.queueScopeId, queuedMessages]);
 
   return {
     queuedMessages,
     enqueueMessage,
     removeQueuedMessage,
     updateQueuedMessage,
+    clearQueuedMessages,
     guideQueuedMessage,
   };
 }

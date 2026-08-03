@@ -4,14 +4,17 @@ import { workbenchInputPropsFrom, type WorkbenchInputPropsOptions } from "./app-
 describe("ordinary workbench input", () => {
   it("preserves queued messages and follows the shell running state while cancellation is pending", () => {
     let cancelCalls = 0;
+    let clearCalls = 0;
     const view = workbenchInputPropsFrom(options({
       modelResponding: false,
       cancelRun: () => { cancelCalls += 1; },
+      clearQueuedMessages: () => { clearCalls += 1; },
     }));
 
     expect(view.inputProps.running).toBe(false);
     view.inputProps.onCancel?.();
     expect(cancelCalls).toBe(1);
+    expect(clearCalls).toBe(1);
   });
 
   it("queues a message when delayed follow-up mode is selected", () => {
@@ -95,6 +98,7 @@ function options(
     submitDeepInput: () => undefined,
     enqueueMessage: () => undefined,
     startTask: async () => true,
+    clearQueuedMessages: () => undefined,
     cancelRun: () => undefined,
     stopDeepTask: () => undefined,
     modelResponding: true,

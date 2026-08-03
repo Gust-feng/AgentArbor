@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: { host: "0.0.0.0", port: 4311 },
   build: {
+    target: "chrome74",
     outDir: "../../../dist/app/mobile-ui",
     emptyOutDir: true,
     sourcemap: true,

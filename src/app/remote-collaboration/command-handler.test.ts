@@ -41,6 +41,25 @@ test("remote command handler exposes CAS conflicts without applying a guessed me
   assert.deepEqual(application.snapshots, []);
 });
 
+test("remote command handler projects Ordinary live deltas and durable state snapshots", async () => {
+  const ports = fakePorts();
+  let emit: Parameters<RemoteCommandHandlerPorts["ordinary"]["subscribe"]>[1] | undefined;
+  ports.ordinary.subscribe = (_runId, listener) => {
+    emit = listener;
+    return () => undefined;
+  };
+  const events: import("./protocol.js").RemoteEvent[] = [];
+  const handler = createRemoteCommandHandler({ ports, idFactory: () => `event-${events.length + 1}` });
+  handler.watchRun("run-1", (next) => events.push(...next));
+
+  emit?.({ kind: "text_delta", sequence: 1, delta: "partial" });
+  emit?.({ kind: "state_changed", sequence: 2 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(events.map((event) => event.kind), ["run.delta", "run.snapshot"]);
+  assert.equal(events[0]?.kind === "run.delta" ? events[0].delta : undefined, "partial");
+});
+
 function fakePorts(): RemoteCommandHandlerPorts {
   const conversationSnapshot = {
     kind: "conversation.snapshot" as const,
@@ -69,6 +88,7 @@ function fakePorts(): RemoteCommandHandlerPorts {
       async conversationSnapshot() { return conversationSnapshot; },
       async runSnapshot() { return runSnapshot; },
       async allConversationSnapshots() { return [conversationSnapshot]; },
+      subscribe() { return () => undefined; },
     },
     spaces: {
       async create() {},

@@ -148,6 +148,15 @@ export function createPanelRemoteCollaborationPorts(input: {
         }
         return snapshots;
       },
+      subscribe(runId, listener) {
+        return input.ordinary.events.subscribe(runId, (activity) => {
+          if (activity.type === "model.output.delta") {
+            listener({ kind: "text_delta", sequence: activity.sequence, delta: activity.delta });
+            return;
+          }
+          listener({ kind: "state_changed", sequence: activity.sequence });
+        });
+      },
     },
     spaces: {
       async create({ spaceId, title }) {

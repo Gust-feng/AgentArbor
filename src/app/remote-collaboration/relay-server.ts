@@ -2,13 +2,16 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 import {
   REMOTE_COLLABORATION_PROTOCOL_VERSION,
+  isRemoteSyncSnapshot,
   parseRemoteClientFrame,
+  type RemoteRelayMessage,
   type RemoteServerFrame,
 } from "./protocol.js";
 import {
@@ -18,6 +21,7 @@ import {
 } from "./relay-store.js";
 
 const MAX_HTTP_BODY_BYTES = 64 * 1_024;
+const DEFAULT_MAX_SYNC_HTTP_BODY_BYTES = 20 * 1_024 * 1_024 + 64 * 1_024;
 const MAX_WEBSOCKET_PAYLOAD_BYTES = 1_100_000;
 const MAX_WEBSOCKET_BUFFERED_BYTES = 1_100_000;
 const HELLO_TIMEOUT_MS = 10_000;
@@ -25,6 +29,9 @@ const HELLO_TIMEOUT_MS = 10_000;
 const deviceNameSchema = z.string().trim().min(1).max(160);
 const pairingCodeSchema = z.string().regex(/^\d{6}$/u);
 const claimSecretSchema = z.string().min(32).max(512);
+const invitationCodeSchema = z.string().trim().min(8).max(128);
+
+class RequestBodyTooLarge extends Error {}
 
 export type RemoteRelayServerOptions = {
   readonly store: RemoteRelayStore;
@@ -32,6 +39,7 @@ export type RemoteRelayServerOptions = {
   readonly port?: number;
   /** Optional built PWA root served by the same Linux process. */
   readonly staticRoot?: string;
+  readonly maxSyncBodyBytes?: number;
 };
 
 export type StartedRemoteRelayServer = {
@@ -44,8 +52,17 @@ export type StartedRemoteRelayServer = {
 
 export async function startRemoteRelayServer(options: RemoteRelayServerOptions): Promise<StartedRemoteRelayServer> {
   const sockets = new Map<string, WebSocket>();
+  const deliveries = new Map<string, PendingDelivery>();
   const server = createServer((request, response) => {
-    void handleHttp(options.store, sockets, request, response, options.staticRoot).catch((error: unknown) => {
+    void handleHttp(
+      options.store,
+      sockets,
+      deliveries,
+      request,
+      response,
+      options.staticRoot,
+      options.maxSyncBodyBytes ?? DEFAULT_MAX_SYNC_HTTP_BODY_BYTES,
+    ).catch((error: unknown) => {
       writeHttpError(response, error);
     });
   });
@@ -61,7 +78,7 @@ export async function startRemoteRelayServer(options: RemoteRelayServerOptions):
     });
   });
   websocketServer.on("connection", (websocket) => {
-    handleWebSocket(options.store, sockets, websocket);
+    handleWebSocket(options.store, sockets, deliveries, websocket);
   });
   await listen(server, options.port ?? 4310, options.host ?? "127.0.0.1");
   const address = server.address() as AddressInfo;
@@ -74,6 +91,7 @@ export async function startRemoteRelayServer(options: RemoteRelayServerOptions):
     websocketUrl: `${url.replace(/^http/u, "ws")}/v1/connect`,
     async close() {
       for (const socket of sockets.values()) socket.close(1001, "relay_shutdown");
+      deliveries.clear();
       await new Promise<void>((resolve) => websocketServer.close(() => resolve()));
       await closeServer(server);
     },
@@ -83,9 +101,11 @@ export async function startRemoteRelayServer(options: RemoteRelayServerOptions):
 async function handleHttp(
   store: RemoteRelayStore,
   sockets: Map<string, WebSocket>,
+  deliveries: Map<string, PendingDelivery>,
   request: IncomingMessage,
   response: ServerResponse,
   staticRoot?: string,
+  maxSyncBodyBytes = DEFAULT_MAX_SYNC_HTTP_BODY_BYTES,
 ): Promise<void> {
   setCorsHeaders(response);
   if (request.method === "OPTIONS") {
@@ -98,8 +118,9 @@ async function handleHttp(
     return;
   }
   if (request.method === "POST" && url.pathname === "/v1/pairings") {
-    const input = z.object({ deviceName: deviceNameSchema }).strict().parse(await readJson(request));
-    writeJson(response, 201, { ok: true, pairing: store.createPairing(input.deviceName) });
+    const input = z.object({ deviceName: deviceNameSchema, invitationCode: invitationCodeSchema.optional() })
+      .strict().parse(await readJson(request));
+    writeJson(response, 201, { ok: true, pairing: store.createPairing(input.deviceName, input.invitationCode) });
     return;
   }
   if (request.method === "POST" && url.pathname === "/v1/pairings/join") {
@@ -130,12 +151,39 @@ async function handleHttp(
     writeJson(response, 200, { ok: true, devices: store.listDevices(bearerToken(request)) });
     return;
   }
+  if (request.method === "GET" && url.pathname === "/v1/sync/snapshots") {
+    const sync = store.listSyncSnapshots(bearerToken(request));
+    writeJson(response, 200, { ok: true, ...sync });
+    return;
+  }
+  const syncWrite = /^\/v1\/sync\/snapshots\/(space\.snapshot|notebook\.snapshot|asset\.snapshot|managed_folder\.snapshot)$/u.exec(url.pathname);
+  if (request.method === "PUT" && syncWrite !== null) {
+    const auth = store.authenticate(bearerToken(request));
+    const snapshot = await readJson(request, maxSyncBodyBytes);
+    if (typeof snapshot !== "object" || snapshot === null || !("kind" in snapshot) || snapshot.kind !== syncWrite[1]) {
+      throw new RemoteRelayError("sync_write_forbidden", "The synchronized document kind does not match the request path");
+    }
+    const document = store.saveSyncSnapshot(auth, snapshot);
+    writeJson(response, 200, {
+      ok: true,
+      document: {
+        kind: document.kind,
+        version: document.version,
+        bytes: document.bytes,
+        updatedAt: document.updatedAt,
+      },
+    });
+    return;
+  }
   const revoke = /^\/v1\/devices\/([^/]+)\/revoke$/u.exec(url.pathname);
   if (request.method === "POST" && revoke !== null) {
     const deviceId = decodeURIComponent(revoke[1]);
     store.revokeDevice(bearerToken(request), deviceId);
     sockets.get(deviceId)?.close(4003, "device_revoked");
     sockets.delete(deviceId);
+    for (const [messageId, delivery] of deliveries) {
+      if (delivery.sourceDeviceId === deviceId || delivery.targetDeviceId === deviceId) deliveries.delete(messageId);
+    }
     writeJson(response, 200, { ok: true, revokedDeviceId: deviceId });
     return;
   }
@@ -182,7 +230,12 @@ function contentType(filePath: string): string {
   }
 }
 
-function handleWebSocket(store: RemoteRelayStore, sockets: Map<string, WebSocket>, websocket: WebSocket): void {
+function handleWebSocket(
+  store: RemoteRelayStore,
+  sockets: Map<string, WebSocket>,
+  deliveries: Map<string, PendingDelivery>,
+  websocket: WebSocket,
+): void {
   let auth: RelayAuthenticatedDevice | undefined;
   let accessToken: string | undefined;
   const helloTimer = setTimeout(() => websocket.close(4401, "client_hello_required"), HELLO_TIMEOUT_MS);
@@ -208,17 +261,20 @@ function handleWebSocket(store: RemoteRelayStore, sockets: Map<string, WebSocket
           const previous = sockets.get(auth.deviceId);
           if (previous !== undefined && previous !== websocket) previous.close(4001, "connection_replaced");
           sockets.set(auth.deviceId, websocket);
-          if (frame.cursor > auth.lastAckSequence) store.acknowledge(auth.deviceId, frame.cursor);
-          auth = store.authenticate(accessToken);
+          const peerOnline = sockets.has(auth.peerDeviceId);
           sendFrame(websocket, {
             protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
             type: "server.ready",
             deviceId: auth.deviceId,
             peerDeviceId: auth.peerDeviceId,
             peerDeviceName: auth.peerDeviceName,
-            cursor: auth.lastAckSequence,
+            peerOnline,
           });
-          deliverPending(store, websocket, auth);
+          if (peerOnline) sendFrame(sockets.get(auth.peerDeviceId)!, {
+            protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+            type: "peer.presence",
+            online: true,
+          });
           return;
         }
         auth = store.authenticate(accessToken!);
@@ -234,22 +290,59 @@ function handleWebSocket(store: RemoteRelayStore, sockets: Map<string, WebSocket
           });
           return;
         }
-        if (frame.type === "message.ack") {
-          store.acknowledge(auth.deviceId, frame.sequence);
-          auth = store.authenticate(accessToken!);
-          deliverPending(store, websocket, auth);
+        if (frame.type === "message.received") {
+          settleDelivery(deliveries, sockets, auth, frame.messageId);
           return;
         }
-        const message = store.enqueueMessage(auth, frame.clientMessageId, frame.content);
+        const peerSocket = sockets.get(auth.peerDeviceId);
+        const syncSnapshot = frame.content.type === "event" && isRemoteSyncSnapshot(frame.content.event)
+          ? frame.content.event
+          : undefined;
+        if (syncSnapshot !== undefined) {
+          sendFrame(websocket, {
+            protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+            type: "message.rejected",
+            clientMessageId: frame.clientMessageId,
+            code: "sync_requires_http",
+            message: "Synchronized snapshots must use the authenticated HTTPS endpoint",
+          });
+          return;
+        }
+        if (peerSocket === undefined || peerSocket.readyState !== WebSocket.OPEN) {
+          sendFrame(websocket, {
+            protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+            type: "message.rejected",
+            clientMessageId: frame.clientMessageId,
+            code: "peer_offline",
+            message: "The paired device is offline; the message remains in the local outbox",
+          });
+          return;
+        }
+        const message: RemoteRelayMessage = {
+          protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+          messageId: randomUUID(),
+          clientMessageId: frame.clientMessageId,
+          sourceDeviceId: auth.deviceId,
+          targetDeviceId: auth.peerDeviceId,
+          createdAt: new Date().toISOString(),
+          content: frame.content,
+        };
+        if (peerSocket !== undefined && peerSocket.readyState === WebSocket.OPEN) {
+          deliveries.set(message.messageId, {
+            messageId: message.messageId,
+            clientMessageId: message.clientMessageId,
+            sourceDeviceId: message.sourceDeviceId,
+            targetDeviceId: message.targetDeviceId,
+          });
+        }
         sendFrame(websocket, {
           protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
           type: "message.accepted",
           clientMessageId: message.clientMessageId,
           messageId: message.messageId,
-          sequence: message.sequence,
+          settled: false,
         });
-        const peerSocket = sockets.get(message.targetDeviceId);
-        if (peerSocket !== undefined) {
+        if (peerSocket !== undefined && peerSocket.readyState === WebSocket.OPEN) {
           sendFrame(peerSocket, {
             protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
             type: "message.deliver",
@@ -266,19 +359,39 @@ function handleWebSocket(store: RemoteRelayStore, sockets: Map<string, WebSocket
   });
   websocket.on("close", () => {
     clearTimeout(helloTimer);
-    if (auth !== undefined && sockets.get(auth.deviceId) === websocket) sockets.delete(auth.deviceId);
+    if (auth !== undefined && sockets.get(auth.deviceId) === websocket) {
+      sockets.delete(auth.deviceId);
+      for (const [messageId, delivery] of deliveries) {
+        if (delivery.sourceDeviceId === auth.deviceId || delivery.targetDeviceId === auth.deviceId) deliveries.delete(messageId);
+      }
+      const peerSocket = sockets.get(auth.peerDeviceId);
+      if (peerSocket !== undefined) sendFrame(peerSocket, {
+        protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+        type: "peer.presence",
+        online: false,
+      });
+    }
   });
   websocket.on("error", () => undefined);
 }
 
-function deliverPending(store: RemoteRelayStore, websocket: WebSocket, auth: RelayAuthenticatedDevice): void {
-  for (const message of store.pendingMessages(auth.deviceId, auth.lastAckSequence)) {
-    if (!sendFrame(websocket, {
-      protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
-      type: "message.deliver",
-      message,
-    })) return;
-  }
+function settleDelivery(
+  deliveries: Map<string, PendingDelivery>,
+  sockets: Map<string, WebSocket>,
+  receiver: RelayAuthenticatedDevice,
+  messageId: string,
+): void {
+  const delivery = deliveries.get(messageId);
+  if (delivery === undefined || delivery.targetDeviceId !== receiver.deviceId) return;
+  deliveries.delete(messageId);
+  const sender = sockets.get(delivery.sourceDeviceId);
+  if (sender === undefined) return;
+  sendFrame(sender, {
+    protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+    type: "message.received",
+    clientMessageId: delivery.clientMessageId,
+    messageId,
+  });
 }
 
 function sendFrame(websocket: WebSocket, frame: RemoteServerFrame): boolean {
@@ -301,6 +414,13 @@ function serverError(code: string, message: string): RemoteServerFrame {
   return { protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION, type: "server.error", code, message };
 }
 
+type PendingDelivery = {
+  readonly messageId: string;
+  readonly clientMessageId: string;
+  readonly sourceDeviceId: string;
+  readonly targetDeviceId: string;
+};
+
 function parseWebSocketJson(raw: RawData): unknown {
   return JSON.parse(raw.toString()) as unknown;
 }
@@ -313,13 +433,13 @@ function bearerToken(request: IncomingMessage): string {
   return authorization.slice("Bearer ".length).trim();
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+async function readJson(request: IncomingMessage, limitBytes = MAX_HTTP_BODY_BYTES): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > MAX_HTTP_BODY_BYTES) throw new Error("Request body is too large");
+    if (bytes > limitBytes) throw new RequestBodyTooLarge("Request body is too large");
     chunks.push(buffer);
   }
   if (chunks.length === 0) return {};
@@ -343,6 +463,10 @@ function writeHttpError(response: ServerResponse, error: unknown): void {
     writeJson(response, 400, { ok: false, error: { code: "invalid_request", message: error.message } });
     return;
   }
+  if (error instanceof RequestBodyTooLarge) {
+    writeJson(response, 413, { ok: false, error: { code: "request_too_large", message: error.message } });
+    return;
+  }
   writeJson(response, 500, { ok: false, error: { code: "relay_failure", message: error instanceof Error ? error.message : "Relay request failed" } });
 }
 
@@ -355,7 +479,7 @@ function writeJson(response: ServerResponse, status: number, value: unknown): vo
 function setCorsHeaders(response: ServerResponse): void {
   response.setHeader("access-control-allow-origin", "*");
   response.setHeader("access-control-allow-headers", "authorization, content-type");
-  response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  response.setHeader("access-control-allow-methods", "GET, POST, PUT, OPTIONS");
 }
 
 function formatHost(host: string): string {

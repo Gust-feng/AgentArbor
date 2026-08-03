@@ -6,6 +6,9 @@ type ConversationSnapshot = Extract<RemoteEvent, { readonly kind: "conversation.
 type RunSnapshot = Extract<RemoteEvent, { readonly kind: "run.snapshot" }>;
 type SpaceSnapshot = Extract<RemoteEvent, { readonly kind: "space.snapshot" }>;
 type NotebookSnapshot = Extract<RemoteEvent, { readonly kind: "notebook.snapshot" }>;
+type RemoteOrdinaryActivity =
+  | { readonly kind: "text_delta"; readonly sequence: number; readonly delta: string }
+  | { readonly kind: "state_changed"; readonly sequence: number };
 
 export type RemoteCommandHandlerPorts = {
   readonly ordinary: {
@@ -25,6 +28,7 @@ export type RemoteCommandHandlerPorts = {
     conversationSnapshot(conversationId: string): Promise<ConversationSnapshot>;
     runSnapshot(runId: string): Promise<RunSnapshot>;
     allConversationSnapshots(): Promise<readonly ConversationSnapshot[]>;
+    subscribe(runId: string, listener: (activity: RemoteOrdinaryActivity) => void): () => void;
   };
   readonly spaces: {
     create(input: { readonly spaceId: string; readonly title: string }): Promise<void>;
@@ -49,6 +53,7 @@ export type RemoteCommandHandlerPorts = {
 export type RemoteCommandApplication = {
   readonly result: Extract<RemoteEvent, { readonly kind: "command.result" }>;
   readonly snapshots: readonly Exclude<RemoteEvent, { readonly kind: "command.result" }>[];
+  readonly watchRunId?: string;
 };
 
 export class RemoteCommandConflict extends Error {
@@ -66,6 +71,11 @@ export function createRemoteCommandHandler(input: {
     async apply(command: RemoteCommand): Promise<RemoteCommandApplication> {
       try {
         const snapshots = await applyCommand(input.ports, command);
+        const watchRunId = command.kind === "confirmation.decide"
+          ? command.runId
+          : command.kind === "conversation.submit"
+            ? snapshots.find((snapshot): snapshot is RunSnapshot => snapshot.kind === "run.snapshot")?.runId
+            : undefined;
         return {
           result: {
             kind: "command.result",
@@ -74,6 +84,7 @@ export function createRemoteCommandHandler(input: {
             status: "applied",
           },
           snapshots,
+          ...(watchRunId === undefined ? {} : { watchRunId }),
         };
       } catch (error) {
         const conflict = error instanceof RemoteCommandConflict;
@@ -91,6 +102,37 @@ export function createRemoteCommandHandler(input: {
           snapshots: [],
         };
       }
+    },
+    watchRun(
+      runId: string,
+      listener: (events: readonly RemoteEvent[]) => void,
+      onError?: (error: unknown) => void,
+    ): () => void {
+      let chain = Promise.resolve();
+      return input.ports.ordinary.subscribe(runId, (activity) => {
+        chain = chain.then(async () => {
+          if (activity.kind === "text_delta") {
+            listener([{
+              kind: "run.delta",
+              eventId: idFactory(),
+              runId,
+              activitySequence: activity.sequence,
+              delta: activity.delta,
+            }]);
+            return;
+          }
+          const run = await input.ports.ordinary.runSnapshot(runId);
+          if (!["completed", "failed", "cancelled", "blocked"].includes(run.status)) {
+            listener([run]);
+            return;
+          }
+          listener([run, await input.ports.ordinary.conversationSnapshot(run.conversationId)]);
+        }).catch((error: unknown) => onError?.(error));
+      });
+    },
+    async snapshotsForRun(runId: string): Promise<readonly RemoteEvent[]> {
+      const run = await input.ports.ordinary.runSnapshot(runId);
+      return [await input.ports.ordinary.conversationSnapshot(run.conversationId), run];
     },
   };
 }

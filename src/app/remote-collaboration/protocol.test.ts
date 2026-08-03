@@ -5,6 +5,7 @@ import {
   REMOTE_COLLABORATION_PROTOCOL_VERSION,
   parseRemoteClientFrame,
   parseRemoteMessageContent,
+  parseRemoteSyncSnapshot,
 } from "./protocol.js";
 
 test("remote protocol accepts mobile commands and requires guidance text", () => {
@@ -70,13 +71,28 @@ test("remote protocol exposes only the syncable Space reference whitelist", () =
   }));
 });
 
-test("client hello carries a durable cursor", () => {
+test("client hello carries only the device token", () => {
   const frame = parseRemoteClientFrame({
     protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
     type: "client.hello",
     token: "x".repeat(32),
-    cursor: 41,
   });
   assert.equal(frame.type, "client.hello");
-  assert.equal(frame.cursor, 41);
+  assert.deepEqual(Object.keys(frame).sort(), ["protocolVersion", "token", "type"]);
+});
+
+test("durable synchronization rejects conversation and command bodies", () => {
+  assert.throws(() => parseRemoteSyncSnapshot({
+    kind: "conversation.snapshot",
+    eventId: "conversation-event",
+    conversationId: "conversation-1",
+    title: "Private",
+    updatedAt: "2026-08-03T00:00:00.000Z",
+    turns: [],
+  }));
+  assert.doesNotThrow(() => parseRemoteSyncSnapshot({
+    kind: "space.snapshot",
+    eventId: "space-event",
+    spaces: [],
+  }));
 });

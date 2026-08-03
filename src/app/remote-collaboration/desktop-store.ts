@@ -60,6 +60,20 @@ const MIGRATIONS = [{
       shared_at TEXT NOT NULL
     ) STRICT;
   `,
+}, {
+  version: 3,
+  sql: `
+    DROP TABLE remote_desktop_inbox;
+
+    CREATE TABLE remote_desktop_inbox (
+      message_id TEXT PRIMARY KEY,
+      command_id TEXT NOT NULL UNIQUE,
+      state TEXT NOT NULL CHECK(state IN ('applying', 'applied')),
+      result_json TEXT,
+      received_at TEXT NOT NULL,
+      applied_at TEXT
+    ) STRICT;
+  `,
 }] as const;
 
 export type RemoteDesktopPairing = {
@@ -78,14 +92,12 @@ export type RemoteDesktopBinding = {
   readonly deviceId: string;
   readonly peerDeviceId?: string;
   readonly peerDeviceName?: string;
-  readonly lastInboxSequence: number;
   readonly updatedAt: string;
 };
 
 export type RemoteDesktopInboxEntry = {
   readonly messageId: string;
   readonly commandId: string;
-  readonly sequence: number;
   readonly state: "applying" | "applied";
   readonly result?: unknown;
   readonly receivedAt: string;
@@ -144,36 +156,32 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
       database.connection.prepare(`
         INSERT INTO remote_desktop_binding(
           singleton, relay_url, device_id, peer_device_id, peer_device_name,
-          last_inbox_sequence, updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?, ?)
+          updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?)
         ON CONFLICT(singleton) DO UPDATE SET
           relay_url = excluded.relay_url,
           device_id = excluded.device_id,
           peer_device_id = excluded.peer_device_id,
           peer_device_name = excluded.peer_device_name,
-          last_inbox_sequence = MAX(remote_desktop_binding.last_inbox_sequence, excluded.last_inbox_sequence),
           updated_at = excluded.updated_at
       `).run(
         binding.relayUrl,
         binding.deviceId,
         binding.peerDeviceId ?? null,
         binding.peerDeviceName ?? null,
-        binding.lastInboxSequence,
         binding.updatedAt,
       );
     },
     getBinding(): RemoteDesktopBinding | undefined {
       const row = database.connection.prepare(`
         SELECT relay_url AS relayUrl, device_id AS deviceId, peer_device_id AS peerDeviceId,
-               peer_device_name AS peerDeviceName, last_inbox_sequence AS lastInboxSequence,
-               updated_at AS updatedAt
+               peer_device_name AS peerDeviceName, updated_at AS updatedAt
         FROM remote_desktop_binding WHERE singleton = 1
       `).get() as {
         relayUrl: string;
         deviceId: string;
         peerDeviceId: string | null;
         peerDeviceName: string | null;
-        lastInboxSequence: number;
         updatedAt: string;
       } | undefined;
       return row === undefined ? undefined : {
@@ -181,7 +189,6 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
         deviceId: row.deviceId,
         ...(row.peerDeviceId === null ? {} : { peerDeviceId: row.peerDeviceId }),
         ...(row.peerDeviceName === null ? {} : { peerDeviceName: row.peerDeviceName }),
-        lastInboxSequence: Number(row.lastInboxSequence),
         updatedAt: row.updatedAt,
       };
     },
@@ -193,13 +200,13 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
         database.connection.prepare("DELETE FROM remote_desktop_outbox").run();
       });
     },
-    beginInbox(input: { messageId: string; commandId: string; sequence: number; receivedAt: string }): RemoteDesktopInboxEntry {
+    beginInbox(input: { messageId: string; commandId: string; receivedAt: string }): RemoteDesktopInboxEntry {
       database.connection.prepare(`
         INSERT OR IGNORE INTO remote_desktop_inbox(
-          message_id, command_id, sequence, state, received_at
-        ) VALUES (?, ?, ?, 'applying', ?)
-      `).run(input.messageId, input.commandId, input.sequence, input.receivedAt);
-      return requireInbox(database, input.messageId);
+          message_id, command_id, state, received_at
+        ) VALUES (?, ?, 'applying', ?)
+      `).run(input.messageId, input.commandId, input.receivedAt);
+      return requireInbox(database, input.messageId, input.commandId);
     },
     completeInbox(messageId: string, result: unknown, appliedAt: string): RemoteDesktopInboxEntry {
       return database.transaction(() => {
@@ -209,11 +216,6 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
           WHERE message_id = ?
         `).run(JSON.stringify(result), appliedAt, messageId);
         const entry = requireInbox(database, messageId);
-        database.connection.prepare(`
-          UPDATE remote_desktop_binding
-          SET last_inbox_sequence = MAX(last_inbox_sequence, ?), updated_at = ?
-          WHERE singleton = 1
-        `).run(entry.sequence, appliedAt);
         return entry;
       });
     },
@@ -305,21 +307,20 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
 
 export type RemoteDesktopStore = ReturnType<typeof createRemoteDesktopStore>;
 
-function requireInbox(database: SqliteRuntimeDatabase, messageId: string): RemoteDesktopInboxEntry {
-  const entry = inboxRow(database, messageId);
+function requireInbox(database: SqliteRuntimeDatabase, messageId: string, commandId?: string): RemoteDesktopInboxEntry {
+  const entry = inboxRow(database, messageId) ?? (commandId === undefined ? undefined : inboxRowByCommand(database, commandId));
   if (entry === undefined) throw new Error(`Remote inbox ${messageId} was not found`);
   return entry;
 }
 
 function inboxRow(database: SqliteRuntimeDatabase, messageId: string): RemoteDesktopInboxEntry | undefined {
   const row = database.connection.prepare(`
-    SELECT message_id AS messageId, command_id AS commandId, sequence, state,
+    SELECT message_id AS messageId, command_id AS commandId, state,
            result_json AS resultJson, received_at AS receivedAt, applied_at AS appliedAt
     FROM remote_desktop_inbox WHERE message_id = ?
   `).get(messageId) as {
     messageId: string;
     commandId: string;
-    sequence: number;
     state: "applying" | "applied";
     resultJson: string | null;
     receivedAt: string;
@@ -328,7 +329,29 @@ function inboxRow(database: SqliteRuntimeDatabase, messageId: string): RemoteDes
   return row === undefined ? undefined : {
     messageId: row.messageId,
     commandId: row.commandId,
-    sequence: Number(row.sequence),
+    state: row.state,
+    ...(row.resultJson === null ? {} : { result: JSON.parse(row.resultJson) as unknown }),
+    receivedAt: row.receivedAt,
+    ...(row.appliedAt === null ? {} : { appliedAt: row.appliedAt }),
+  };
+}
+
+function inboxRowByCommand(database: SqliteRuntimeDatabase, commandId: string): RemoteDesktopInboxEntry | undefined {
+  const row = database.connection.prepare(`
+    SELECT message_id AS messageId, command_id AS commandId, state,
+           result_json AS resultJson, received_at AS receivedAt, applied_at AS appliedAt
+    FROM remote_desktop_inbox WHERE command_id = ?
+  `).get(commandId) as {
+    messageId: string;
+    commandId: string;
+    state: "applying" | "applied";
+    resultJson: string | null;
+    receivedAt: string;
+    appliedAt: string | null;
+  } | undefined;
+  return row === undefined ? undefined : {
+    messageId: row.messageId,
+    commandId: row.commandId,
     state: row.state,
     ...(row.resultJson === null ? {} : { result: JSON.parse(row.resultJson) as unknown }),
     receivedAt: row.receivedAt,

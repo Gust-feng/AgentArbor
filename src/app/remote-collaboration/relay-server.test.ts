@@ -15,13 +15,13 @@ test("Relay HTTP pairing and WebSocket delivery form one local end-to-end transp
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-relay-server-"));
   const database = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));
   const relay = await startRemoteRelayServer({
-    store: createRemoteRelayStore({ database, codeFactory: () => "246810" }),
+    store: createRemoteRelayStore({ database, codeFactory: () => "246810", allowOpenSignup: true }),
     port: 0,
   });
   t.after(async () => {
     await relay.close();
     database.close();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
   });
 
   const desktop = await post(relay.url, "/v1/pairings", { deviceName: "Desktop" });
@@ -47,6 +47,7 @@ test("Relay HTTP pairing and WebSocket delivery form one local end-to-end transp
   const mobileSocket = await connect(relay.websocketUrl, mobileToken.accessToken);
   const accepted = waitForFrame(mobileSocket, (frame) => frame.type === "message.accepted");
   const delivered = waitForFrame(desktopSocket, (frame) => frame.type === "message.deliver");
+  const received = waitForFrame(mobileSocket, (frame) => frame.type === "message.received");
   mobileSocket.send(JSON.stringify({
     protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
     type: "message.submit",
@@ -61,11 +62,56 @@ test("Relay HTTP pairing and WebSocket delivery form one local end-to-end transp
   assert.equal(acceptedFrame.type, "message.accepted");
   assert.equal(deliveredFrame.type, "message.deliver");
   if (deliveredFrame.type === "message.deliver") {
-    assert.equal(deliveredFrame.message.sequence, 1);
     assert.equal(deliveredFrame.message.content.type, "command");
+    desktopSocket.send(JSON.stringify({
+      protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+      type: "message.received",
+      messageId: deliveredFrame.message.messageId,
+    }));
   }
-  desktopSocket.close();
+  assert.equal((await received).type, "message.received");
+
+  const peerOffline = waitForFrame(desktopSocket, (frame) => frame.type === "peer.presence" && !frame.online);
   mobileSocket.close();
+  await peerOffline;
+
+  const persistedResponse = await fetch(`${relay.url}/v1/sync/snapshots/space.snapshot`, {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${desktopToken.accessToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ kind: "space.snapshot", eventId: "space-event", spaces: [] }),
+  });
+  assert.equal(persistedResponse.ok, true, await persistedResponse.text());
+
+  const syncResponse = await fetch(`${relay.url}/v1/sync/snapshots`, {
+    headers: { authorization: `Bearer ${mobileToken.accessToken}` },
+  });
+  const syncBody = await syncResponse.json() as { documents: readonly { snapshot: { kind: string } }[] };
+  assert.equal(syncResponse.ok, true);
+  assert.equal(syncBody.documents[0]?.snapshot.kind, "space.snapshot");
+
+  const rejected = waitForFrame(desktopSocket, (frame) => frame.type === "message.rejected");
+  desktopSocket.send(JSON.stringify({
+    protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+    type: "message.submit",
+    clientMessageId: "offline-conversation",
+    content: {
+      type: "event",
+      event: {
+        kind: "conversation.snapshot",
+        eventId: "conversation-event",
+        conversationId: "conversation-1",
+        title: "Private conversation",
+        updatedAt: "2026-08-03T00:00:00.000Z",
+        turns: [],
+      },
+    },
+  }));
+  const rejectedFrame = await rejected;
+  assert.equal(rejectedFrame.type === "message.rejected" && rejectedFrame.code, "peer_offline");
+  desktopSocket.close();
 });
 
 async function post(baseUrl: string, pathname: string, body: unknown): Promise<Record<string, unknown>> {
@@ -90,7 +136,6 @@ async function connect(url: string, token: string): Promise<WebSocket> {
     protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
     type: "client.hello",
     token,
-    cursor: 0,
   }));
   assert.equal((await ready).type, "server.ready");
   return socket;

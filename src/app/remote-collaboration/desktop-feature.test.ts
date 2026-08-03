@@ -21,16 +21,13 @@ test("desktop connector applies a mobile command once and returns result and sna
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-remote-desktop-"));
   const relayDatabase = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));
   const desktopDatabase = new SqliteRuntimeDatabase(path.join(root, "desktop.sqlite"));
-  const relayStore = createRemoteRelayStore({ database: relayDatabase, codeFactory: () => "135790" });
+  const relayStore = createRemoteRelayStore({
+    database: relayDatabase,
+    codeFactory: () => "135790",
+    allowOpenSignup: true,
+  });
   const relay = await startRemoteRelayServer({ store: relayStore, port: 0 });
   const desktopStore = createRemoteDesktopStore(desktopDatabase);
-  t.after(async () => {
-    await relay.close();
-    relayDatabase.close();
-    desktopDatabase.close();
-    await rm(root, { recursive: true, force: true });
-  });
-
   const desktop = relayStore.createPairing("Desktop");
   const mobile = relayStore.joinPairing(desktop.pairingCode, "Phone");
   relayStore.confirmPairing(desktop.pairingId, desktop.claimSecret, desktop.pairingCode);
@@ -42,11 +39,11 @@ test("desktop connector applies a mobile command once and returns result and sna
     deviceId: desktop.deviceId,
     peerDeviceId: mobile.deviceId,
     peerDeviceName: mobile.deviceName,
-    lastInboxSequence: 0,
     updatedAt: "2026-08-03T00:00:00.000Z",
   });
 
   let applied = 0;
+  let watched = 0;
   let deleted = false;
   const feature = createRemoteCollaborationFeature({
     store: desktopStore,
@@ -57,6 +54,12 @@ test("desktop connector applies a mobile command once and returns result and sna
     },
     commandHandler: {
       async apply(command) {
+        if (command.kind === "sync.snapshot.request") {
+          return {
+            result: { kind: "command.result", eventId: "sync-result", commandId: command.commandId, status: "applied" },
+            snapshots: [],
+          };
+        }
         applied += 1;
         return {
           result: {
@@ -66,19 +69,27 @@ test("desktop connector applies a mobile command once and returns result and sna
             status: "applied",
           },
           snapshots: [{ kind: "space.snapshot", eventId: `space-${applied}`, spaces: [] }],
+          watchRunId: "run-1",
         };
       },
+      watchRun() { watched += 1; return () => undefined; },
+      async snapshotsForRun() { return []; },
     },
     now: () => "2026-08-03T00:00:00.000Z",
   });
-  t.after(() => feature.release());
-
   await feature.commands.connect();
   const mobileSocket = await connect(relay.websocketUrl, relayStore.issueDeviceToken(mobile.pairingId, mobile.claimSecret).accessToken);
-  t.after(() => mobileSocket.close());
+  t.after(async () => {
+    mobileSocket.close();
+    await feature.release();
+    await relay.close();
+    relayDatabase.close();
+    desktopDatabase.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+  });
 
   const firstResult = waitForFrame(mobileSocket, isCommandResult);
-  const firstSnapshot = waitForFrame(mobileSocket, isSpaceSnapshot);
+  const firstSnapshot = waitForFrame(mobileSocket, isSyncChanged);
   mobileSocket.send(JSON.stringify({
     protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
     type: "message.submit",
@@ -88,8 +99,11 @@ test("desktop connector applies a mobile command once and returns result and sna
       command: { kind: "space.create", commandId: "mobile-command-1", spaceId: "space-1", title: "Phone space" },
     },
   }));
-  await Promise.all([firstResult, firstSnapshot]);
+  const delivered = await Promise.all([firstResult, firstSnapshot]);
+  for (const frame of delivered) acknowledgeDelivery(mobileSocket, frame);
+  await waitFor(() => desktopStore.pendingOutbox().length === 0);
   assert.equal(applied, 1);
+  assert.equal(watched, 1);
   assert.equal(desktopStore.pendingOutbox().length, 0);
 
   const duplicateResult = waitForFrame(mobileSocket, isCommandResult);
@@ -102,8 +116,9 @@ test("desktop connector applies a mobile command once and returns result and sna
       command: { kind: "space.create", commandId: "mobile-command-1", spaceId: "space-1", title: "Phone space" },
     },
   }));
-  await duplicateResult;
+  acknowledgeDelivery(mobileSocket, await duplicateResult);
   assert.equal(applied, 1);
+  assert.equal(watched, 1);
 
   await feature.commands.forgetDevice();
   assert.equal(deleted, true);
@@ -122,7 +137,6 @@ async function connect(url: string, token: string): Promise<WebSocket> {
     protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
     type: "client.hello",
     token,
-    cursor: 0,
   }));
   await ready;
   return socket;
@@ -154,12 +168,29 @@ function waitForFrame(socket: WebSocket, predicate: (frame: RemoteServerFrame) =
   });
 }
 
+function acknowledgeDelivery(socket: WebSocket, frame: RemoteServerFrame): void {
+  if (frame.type !== "message.deliver") return;
+  socket.send(JSON.stringify({
+    protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+    type: "message.received",
+    messageId: frame.message.messageId,
+  }));
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail("Timed out waiting for the expected connector state");
+}
+
 function isCommandResult(frame: RemoteServerFrame): boolean {
   return frame.type === "message.deliver" && frame.message.content.type === "event"
     && frame.message.content.event.kind === "command.result";
 }
 
-function isSpaceSnapshot(frame: RemoteServerFrame): boolean {
+function isSyncChanged(frame: RemoteServerFrame): boolean {
   return frame.type === "message.deliver" && frame.message.content.type === "event"
-    && frame.message.content.event.kind === "space.snapshot";
+    && frame.message.content.event.kind === "sync.changed";
 }

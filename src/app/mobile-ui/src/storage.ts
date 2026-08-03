@@ -1,7 +1,7 @@
 import type { RemoteEvent, RemoteMessageContent } from "../../remote-collaboration/protocol";
 
 const DATABASE_NAME = "agentarbor-remote-v1";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 
 export type MobilePairingClaim = {
   readonly relayUrl: string;
@@ -19,7 +19,6 @@ export type MobileBinding = {
   readonly accessToken: string;
   readonly peerDeviceId: string;
   readonly peerDeviceName: string;
-  readonly cursor: number;
 };
 
 export type MobileOutboxEntry = {
@@ -35,9 +34,12 @@ export interface MobileRemoteStorage {
   getBinding(): Promise<MobileBinding | undefined>;
   saveBinding(binding: MobileBinding): Promise<void>;
   clearBinding(): Promise<void>;
+  clearDeviceData(): Promise<void>;
   putOutbox(entry: MobileOutboxEntry): Promise<void>;
   listOutbox(): Promise<readonly MobileOutboxEntry[]>;
   removeOutbox(clientMessageId: string): Promise<void>;
+  hasReceived(clientMessageId: string): Promise<boolean>;
+  markReceived(clientMessageId: string, receivedAt: string): Promise<void>;
   saveEvent(event: RemoteEvent): Promise<void>;
   listEvents(): Promise<readonly RemoteEvent[]>;
 }
@@ -51,9 +53,19 @@ export function createIndexedDbMobileRemoteStorage(): MobileRemoteStorage {
     async getBinding() { return getKey<MobileBinding>(await database, "binding"); },
     async saveBinding(binding) { await putKey(await database, "binding", binding); },
     async clearBinding() { await deleteKey(await database, "binding"); },
+    async clearDeviceData() {
+      const resolved = await database;
+      await clearStores(resolved, ["kv", "outbox", "events", "receipts"]);
+    },
     async putOutbox(entry) { await put(await database, "outbox", entry); },
     async listOutbox() { return getAll<MobileOutboxEntry>(await database, "outbox"); },
     async removeOutbox(clientMessageId) { await remove(await database, "outbox", clientMessageId); },
+    async hasReceived(clientMessageId) {
+      return (await getKey<string>(await database, `received:${clientMessageId}`, "receipts")) !== undefined;
+    },
+    async markReceived(clientMessageId, receivedAt) {
+      await putKey(await database, `received:${clientMessageId}`, receivedAt, "receipts");
+    },
     async saveEvent(event) { await put(await database, "events", { ...event, cacheKey: eventCacheKey(event) }); },
     async listEvents() {
       return (await getAll<RemoteEvent & { cacheKey: string }>(await database, "events"))
@@ -70,6 +82,7 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains("kv")) database.createObjectStore("kv");
       if (!database.objectStoreNames.contains("outbox")) database.createObjectStore("outbox", { keyPath: "clientMessageId" });
       if (!database.objectStoreNames.contains("events")) database.createObjectStore("events", { keyPath: "cacheKey" });
+      if (!database.objectStoreNames.contains("receipts")) database.createObjectStore("receipts");
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -80,6 +93,8 @@ function eventCacheKey(event: RemoteEvent): string {
   switch (event.kind) {
     case "conversation.snapshot": return `conversation:${event.conversationId}`;
     case "run.snapshot": return `run:${event.runId}`;
+    case "run.delta": return `run-delta:${event.eventId}`;
+    case "sync.changed": return `sync-change:${event.documentKind}`;
     case "space.snapshot": return "spaces";
     case "notebook.snapshot": return "notebooks";
     case "asset.snapshot": return "assets";
@@ -88,12 +103,12 @@ function eventCacheKey(event: RemoteEvent): string {
   }
 }
 
-function getKey<T>(database: IDBDatabase, key: string): Promise<T | undefined> {
-  return requestResult<T | undefined>(database.transaction("kv", "readonly").objectStore("kv").get(key));
+function getKey<T>(database: IDBDatabase, key: string, store = "kv"): Promise<T | undefined> {
+  return requestResult<T | undefined>(database.transaction(store, "readonly").objectStore(store).get(key));
 }
 
-async function putKey(database: IDBDatabase, key: string, value: unknown): Promise<void> {
-  await requestResult(database.transaction("kv", "readwrite").objectStore("kv").put(value, key));
+async function putKey(database: IDBDatabase, key: string, value: unknown, store = "kv"): Promise<void> {
+  await requestResult(database.transaction(store, "readwrite").objectStore(store).put(value, key));
 }
 
 async function deleteKey(database: IDBDatabase, key: string): Promise<void> {
@@ -116,5 +131,15 @@ function requestResult<T = unknown>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+function clearStores(database: IDBDatabase, stores: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction([...stores], "readwrite");
+    for (const store of stores) transaction.objectStore(store).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
   });
 }

@@ -1,4 +1,4 @@
-const CACHE = "agentarbor-mobile-v1";
+const CACHE = "agentarbor-mobile-shell-v1";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -13,9 +13,11 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/v1/")) return;
   event.respondWith(fetch(event.request).then((response) => {
     const copy = response.clone();
     void caches.open(CACHE).then((cache) => cache.put(event.request, copy));
     return response;
-  }).catch(() => caches.match(event.request).then((cached) => cached ?? caches.match("/"))));
+  }).catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))));
 });

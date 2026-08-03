@@ -501,6 +501,7 @@ function assemblePanelRuntime(input: {
         defaultWorkspaceRoot: async () => (await input.configCenter.getWorkspaceConfig()).workspaceDirectory,
       }),
     }),
+    defaultRelayUrl: process.env.AGENTARBOR_RELAY_PUBLIC_URL,
   });
   runtime = {
     isQuiescing: false,

@@ -47,6 +47,45 @@ describe("mobile remote projection", () => {
     expect(result.commandResults[0]?.error?.code).toBe("note_version_conflict");
   });
 
+  test("applies live assistant deltas to the current run without inventing a terminal state", () => {
+    const initial = state({
+      runs: [{
+        kind: "run.snapshot",
+        eventId: "run-event",
+        runId: "run-1",
+        conversationId: "conversation-1",
+        status: "running",
+        visibleAssistantText: "Hello",
+        pendingConfirmations: [],
+        updatedAt: "2026-08-03T00:00:00.000Z",
+      }],
+    });
+    const next = applyRemoteEvent(initial, {
+      kind: "run.delta",
+      eventId: "delta-1",
+      runId: "run-1",
+      activitySequence: 2,
+      delta: " world",
+    });
+    expect(next.runs[0]?.visibleAssistantText).toBe("Hello world");
+    expect(next.runs[0]?.status).toBe("running");
+  });
+
+  test("keeps an offline command in the mobile outbox", async () => {
+    let stored: unknown;
+    const storage = {
+      async putOutbox(entry: unknown) { stored = entry; },
+    } as unknown as MobileRemoteStorage;
+    const client = new RemoteMobileClient(storage);
+
+    const commandId = await client.sendCommand({ kind: "conversation.submit", message: "queued locally" });
+
+    expect(stored).toMatchObject({
+      clientMessageId: commandId,
+      content: { type: "command", command: { commandId, message: "queued locally" } },
+    });
+  });
+
   test("revokes the mobile device before clearing its local binding", async () => {
     const binding = {
       relayUrl: "http://relay.local",
@@ -54,16 +93,13 @@ describe("mobile remote projection", () => {
       accessToken: "token-1",
       peerDeviceId: "desktop-1",
       peerDeviceName: "Desktop",
-      cursor: 0,
     };
     let request: { url: string; authorization?: string } | undefined;
-    let clearedBinding = false;
-    let clearedPairing = false;
+    let clearedDeviceData = false;
     const storage = {
       async getBinding() { return binding; },
-      async clearBinding() { clearedBinding = true; },
-      async clearPairing() { clearedPairing = true; },
-    } as MobileRemoteStorage;
+      async clearDeviceData() { clearedDeviceData = true; },
+    } as unknown as MobileRemoteStorage;
     const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const headers = init?.headers;
       const authorization = headers instanceof Headers
@@ -79,14 +115,14 @@ describe("mobile remote projection", () => {
     await client.forgetDevice();
 
     expect(request).toEqual({ url: "http://relay.local/v1/devices/mobile-1/revoke", authorization: "Bearer token-1" });
-    expect(clearedBinding).toBe(true);
-    expect(clearedPairing).toBe(true);
+    expect(clearedDeviceData).toBe(true);
   });
 });
 
 function state(overrides: Partial<MobileRemoteState> = {}): MobileRemoteState {
   return {
     connection: "connected",
+    peerOnline: true,
     conversations: [],
     runs: [],
     spaces: [],

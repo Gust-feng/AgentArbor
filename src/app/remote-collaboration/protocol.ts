@@ -10,7 +10,7 @@ const isoDateSchema = z.iso.datetime({ offset: true });
 const fingerprintSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 
 const relativeManagedPathSchema = z.string().trim().min(1).max(512).superRefine((value, context) => {
-  const normalized = value.replaceAll("\\", "/");
+  const normalized = value.replace(/\\/gu, "/");
   if (normalized.startsWith("/") || /^[a-zA-Z]:/u.test(normalized)) {
     context.addIssue({ code: "custom", message: "managed file paths must be relative" });
   }
@@ -160,6 +160,22 @@ const remoteRunSnapshotSchema = z.object({
   updatedAt: isoDateSchema,
 }).strict();
 
+const remoteRunDeltaSchema = z.object({
+  kind: z.literal("run.delta"),
+  eventId: stableIdSchema,
+  runId: stableIdSchema,
+  activitySequence: z.number().int().positive(),
+  delta: z.string().min(1).max(262_144),
+}).strict();
+
+const remoteSyncChangedSchema = z.object({
+  kind: z.literal("sync.changed"),
+  eventId: stableIdSchema,
+  documentKind: z.enum(["space.snapshot", "notebook.snapshot", "asset.snapshot", "managed_folder.snapshot"]),
+  version: z.number().int().positive(),
+  updatedAt: isoDateSchema,
+}).strict();
+
 const remoteSpaceSnapshotSchema = z.object({
   kind: z.literal("space.snapshot"),
   eventId: stableIdSchema,
@@ -220,10 +236,20 @@ const remoteManagedFolderSnapshotSchema = z.object({
   }).strict()).max(1_000),
 }).strict();
 
+export const remoteSyncSnapshotSchema = z.discriminatedUnion("kind", [
+  remoteSpaceSnapshotSchema,
+  remoteNotebookSnapshotSchema,
+  remoteAssetSnapshotSchema,
+  remoteManagedFolderSnapshotSchema,
+]);
+export type RemoteSyncSnapshot = z.infer<typeof remoteSyncSnapshotSchema>;
+
 export const remoteEventSchema = z.discriminatedUnion("kind", [
   commandResultSchema,
   remoteConversationSnapshotSchema,
   remoteRunSnapshotSchema,
+  remoteRunDeltaSchema,
+  remoteSyncChangedSchema,
   remoteSpaceSnapshotSchema,
   remoteNotebookSnapshotSchema,
   remoteAssetSnapshotSchema,
@@ -241,7 +267,6 @@ export const remoteRelayMessageSchema = z.object({
   protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
   messageId: stableIdSchema,
   clientMessageId: stableIdSchema,
-  sequence: z.number().int().positive(),
   sourceDeviceId: stableIdSchema,
   targetDeviceId: stableIdSchema,
   createdAt: isoDateSchema,
@@ -254,7 +279,6 @@ export const remoteClientFrameSchema = z.discriminatedUnion("type", [
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
     type: z.literal("client.hello"),
     token: z.string().min(32).max(512),
-    cursor: z.number().int().nonnegative(),
   }).strict(),
   z.object({
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
@@ -264,8 +288,8 @@ export const remoteClientFrameSchema = z.discriminatedUnion("type", [
   }).strict(),
   z.object({
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
-    type: z.literal("message.ack"),
-    sequence: z.number().int().nonnegative(),
+    type: z.literal("message.received"),
+    messageId: stableIdSchema,
   }).strict(),
   z.object({
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
@@ -282,14 +306,32 @@ export const remoteServerFrameSchema = z.discriminatedUnion("type", [
     deviceId: stableIdSchema,
     peerDeviceId: stableIdSchema,
     peerDeviceName: z.string().min(1).max(160),
-    cursor: z.number().int().nonnegative(),
+    peerOnline: z.boolean(),
   }).strict(),
   z.object({
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
     type: z.literal("message.accepted"),
     clientMessageId: stableIdSchema,
     messageId: stableIdSchema,
-    sequence: z.number().int().positive(),
+    settled: z.boolean(),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
+    type: z.literal("message.received"),
+    clientMessageId: stableIdSchema,
+    messageId: stableIdSchema,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
+    type: z.literal("message.rejected"),
+    clientMessageId: stableIdSchema,
+    code: z.enum(["peer_offline", "sync_requires_http"]),
+    message: z.string().min(1).max(4_000),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
+    type: z.literal("peer.presence"),
+    online: z.boolean(),
   }).strict(),
   z.object({
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
@@ -316,4 +358,13 @@ export function parseRemoteClientFrame(value: unknown): RemoteClientFrame {
 
 export function parseRemoteMessageContent(value: unknown): RemoteMessageContent {
   return remoteMessageContentSchema.parse(value);
+}
+
+export function parseRemoteSyncSnapshot(value: unknown): RemoteSyncSnapshot {
+  return remoteSyncSnapshotSchema.parse(value);
+}
+
+export function isRemoteSyncSnapshot(event: RemoteEvent): event is RemoteSyncSnapshot {
+  return event.kind === "space.snapshot" || event.kind === "notebook.snapshot"
+    || event.kind === "asset.snapshot" || event.kind === "managed_folder.snapshot";
 }

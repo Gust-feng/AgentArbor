@@ -1,8 +1,10 @@
 import {
   REMOTE_COLLABORATION_PROTOCOL_VERSION,
+  parseRemoteSyncSnapshot,
   remoteServerFrameSchema,
   type RemoteCommand,
   type RemoteEvent,
+  type RemoteMessageContent,
 } from "../../remote-collaboration/protocol";
 import type {
   MobileBinding,
@@ -25,6 +27,7 @@ export type MobileRemoteState = {
     readonly peerConfirmed?: boolean;
   };
   readonly binding?: MobileBinding;
+  readonly peerOnline: boolean;
   readonly conversations: readonly ConversationSnapshot[];
   readonly runs: readonly RunSnapshot[];
   readonly spaces: SpaceSnapshot["spaces"];
@@ -73,6 +76,7 @@ export class RemoteMobileClient {
     state = {
       ...state,
       connection: binding !== undefined ? "offline" : pairing !== undefined ? "pairing" : "unpaired",
+      peerOnline: false,
       ...(pairing === undefined ? {} : { pairing }),
       ...(binding === undefined ? {} : { binding }),
       pendingCommandIds: outbox.flatMap((entry) => entry.content.type === "command" ? [entry.content.command.commandId] : []),
@@ -137,7 +141,6 @@ export class RemoteMobileClient {
       accessToken: token.accessToken,
       peerDeviceId: status.peer.deviceId,
       peerDeviceName: status.peer.deviceName,
-      cursor: 0,
     };
     await this.storage.saveBinding(binding);
     await this.storage.clearPairing();
@@ -160,7 +163,6 @@ export class RemoteMobileClient {
         protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
         type: "client.hello",
         token: binding.accessToken,
-        cursor: binding.cursor,
       }));
       socket.onmessage = (message) => {
         void (async () => {
@@ -175,22 +177,45 @@ export class RemoteMobileClient {
               ...current,
               peerDeviceId: frame.peerDeviceId,
               peerDeviceName: frame.peerDeviceName,
-              cursor: Math.max(current.cursor, frame.cursor),
             };
             await this.storage.saveBinding(next);
-            this.#setState({ ...this.#state, connection: "connected", binding: next, error: undefined });
+            this.#setState({
+              ...this.#state,
+              connection: "connected",
+              binding: next,
+              peerOnline: frame.peerOnline,
+              error: undefined,
+            });
             await this.#flushOutbox();
-            await this.sendCommand({ kind: "sync.snapshot.request" });
+            await this.#pullSnapshots();
             resolve();
             return;
           }
           if (frame.type === "message.accepted") {
+            if (frame.settled) await this.storage.removeOutbox(frame.clientMessageId);
+            return;
+          }
+          if (frame.type === "message.received") {
             await this.storage.removeOutbox(frame.clientMessageId);
             return;
           }
+          if (frame.type === "message.rejected") {
+            this.#setState({ ...this.#state, peerOnline: false, error: frame.message });
+            return;
+          }
+          if (frame.type === "peer.presence") {
+            this.#setState({ ...this.#state, peerOnline: frame.online, error: undefined });
+            if (frame.online) {
+              await this.#flushOutbox();
+            }
+            return;
+          }
           if (frame.type === "message.deliver") {
-            if (frame.message.content.type === "event") await this.#receiveEvent(frame.message.sequence, frame.message.content.event);
-            else await this.#acknowledge(frame.message.sequence);
+            await this.#receiveMessage(
+              frame.message.messageId,
+              frame.message.clientMessageId,
+              frame.message.content,
+            );
             return;
           }
           if (frame.type === "server.error") {
@@ -211,12 +236,17 @@ export class RemoteMobileClient {
         window.clearTimeout(timeout);
         if (this.#socket === socket) this.#socket = undefined;
         if (!this.#released) {
-          this.#setState({ ...this.#state, connection: "offline" });
+          this.#setState({ ...this.#state, connection: "offline", peerOnline: false });
           this.#scheduleReconnect();
         }
       };
     }).catch((error: unknown) => {
-      this.#setState({ ...this.#state, connection: "offline", error: error instanceof Error ? error.message : "连接失败" });
+      this.#setState({
+        ...this.#state,
+        connection: "offline",
+        peerOnline: false,
+        error: error instanceof Error ? error.message : "连接失败",
+      });
       this.#scheduleReconnect();
       throw error;
     });
@@ -263,7 +293,7 @@ export class RemoteMobileClient {
     }
     this.#socket?.close(1000, "mobile_forgot_device");
     this.#socket = undefined;
-    await Promise.all([this.storage.clearBinding(), this.storage.clearPairing()]);
+    await this.storage.clearDeviceData();
     this.#released = false;
     this.#setState(emptyState("unpaired"));
   }
@@ -276,22 +306,32 @@ export class RemoteMobileClient {
     this.#listeners.clear();
   }
 
-  async #receiveEvent(sequence: number, event: RemoteEvent): Promise<void> {
-    await this.storage.saveEvent(event);
-    this.#setState(applyRemoteEvent(this.#state, event));
-    await this.#acknowledge(sequence);
+  async #receiveMessage(
+    messageId: string,
+    clientMessageId: string,
+    content: RemoteMessageContent,
+  ): Promise<void> {
+    if (await this.storage.hasReceived(clientMessageId)) {
+      this.#acknowledge(messageId);
+      return;
+    }
+    if (content.type === "event") {
+      if (content.event.kind === "sync.changed") {
+        await this.#pullSnapshots();
+      } else {
+        if (content.event.kind !== "run.delta") await this.storage.saveEvent(content.event);
+        this.#setState(applyRemoteEvent(this.#state, content.event));
+      }
+    }
+    await this.storage.markReceived(clientMessageId, new Date().toISOString());
+    this.#acknowledge(messageId);
   }
 
-  async #acknowledge(sequence: number): Promise<void> {
-    const binding = await this.storage.getBinding();
-    if (binding === undefined) return;
-    const next = { ...binding, cursor: Math.max(binding.cursor, sequence) };
-    await this.storage.saveBinding(next);
-    this.#setState({ ...this.#state, binding: next });
+  #acknowledge(messageId: string): void {
     if (this.#socket?.readyState === WebSocket.OPEN) this.#socket.send(JSON.stringify({
       protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
-      type: "message.ack",
-      sequence,
+      type: "message.received",
+      messageId,
     }));
   }
 
@@ -303,6 +343,22 @@ export class RemoteMobileClient {
       clientMessageId: entry.clientMessageId,
       content: entry.content,
     }));
+  }
+
+  async #pullSnapshots(): Promise<void> {
+    const binding = await this.storage.getBinding();
+    if (binding === undefined) return;
+    const body = await fetchJson(this.fetch, `${binding.relayUrl}/v1/sync/snapshots`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${binding.accessToken}` },
+    });
+    const documents = Array.isArray(body.documents) ? body.documents : [];
+    for (const document of documents) {
+      if (typeof document !== "object" || document === null || !("snapshot" in document)) continue;
+      const snapshot = parseRemoteSyncSnapshot((document as { snapshot: unknown }).snapshot);
+      await this.storage.saveEvent(snapshot);
+      this.#setState(applyRemoteEvent(this.#state, snapshot));
+    }
   }
 
   #scheduleReconnect(): void {
@@ -326,6 +382,18 @@ export function applyRemoteEvent(state: MobileRemoteState, event: RemoteEvent): 
       return { ...state, conversations: replaceBy(state.conversations, event, "conversationId") };
     case "run.snapshot":
       return { ...state, runs: replaceBy(state.runs, event, "runId") };
+    case "run.delta": {
+      const current = state.runs.find((run) => run.runId === event.runId);
+      if (current === undefined) return state;
+      return {
+        ...state,
+        runs: replaceBy(state.runs, {
+          ...current,
+          visibleAssistantText: `${current.visibleAssistantText ?? ""}${event.delta}`,
+        }, "runId"),
+      };
+    }
+    case "sync.changed": return state;
     case "space.snapshot": return { ...state, spaces: event.spaces };
     case "notebook.snapshot": return { ...state, notebooks: event.notebooks };
     case "asset.snapshot": return { ...state, assets: event.assets };
@@ -345,6 +413,7 @@ function replaceBy<T, K extends keyof T>(items: readonly T[], item: T, key: K): 
 function emptyState(connection: MobileRemoteState["connection"] = "loading"): MobileRemoteState {
   return {
     connection,
+    peerOnline: false,
     conversations: [],
     runs: [],
     spaces: [],

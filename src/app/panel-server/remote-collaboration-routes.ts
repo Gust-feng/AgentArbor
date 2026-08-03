@@ -30,8 +30,13 @@ export async function handlePanelRemoteCollaborationRoute(
         return protocol === "http:" || protocol === "https:";
       }, "Relay 地址必须使用 http 或 https"),
       deviceName: z.string().trim().min(1).max(160),
+      invitationCode: z.string().trim().min(8).max(128).optional(),
     }).strict(), await readJsonBody(request));
-    const pairing = await runtime.remoteCollaborationFeature.commands.beginPairing(body.relayUrl, body.deviceName);
+    const pairing = await runtime.remoteCollaborationFeature.commands.beginPairing(
+      body.relayUrl,
+      body.deviceName,
+      body.invitationCode,
+    );
     writeJson(response, 201, { ok: true, pairing, remote: runtime.remoteCollaborationFeature.queries.status() });
     return true;
   }
@@ -63,11 +68,15 @@ export async function handlePanelRemoteCollaborationRoute(
   const share = /^\/api\/remote-collaboration\/conversations\/([^/]+)\/share$/u.exec(url.pathname);
   if (request.method === "POST" && share !== null) {
     const conversationId = decodeURIComponent(share[1]);
-    if (await runtime.ordinaryAgentFeature.queries.getConversation(conversationId) === undefined) {
+    const conversation = await runtime.ordinaryAgentFeature.queries.getConversation(conversationId);
+    if (conversation === undefined) {
       throw new PanelHttpError(404, "conversation_not_found", "未找到要共享的对话。");
     }
     runtime.remoteDesktopStore.shareConversation(conversationId, new Date().toISOString());
     await runtime.remoteCollaborationFeature.commands.publishSnapshots();
+    if (conversation.activeRunId !== undefined) {
+      await runtime.remoteCollaborationFeature.commands.publishRun(conversation.activeRunId);
+    }
     writeJson(response, 200, { ok: true, conversationId, shared: true });
     return true;
   }

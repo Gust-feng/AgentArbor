@@ -2,12 +2,13 @@ import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto";
 
 import type { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import {
-  REMOTE_COLLABORATION_PROTOCOL_VERSION,
-  parseRemoteMessageContent,
+  parseRemoteSyncSnapshot,
   type RemoteDeviceRole,
-  type RemoteMessageContent,
-  type RemoteRelayMessage,
+  type RemoteSyncSnapshot,
 } from "./protocol.js";
+
+export const DEFAULT_RELAY_ACCOUNT_QUOTA_BYTES = 150 * 1_024 * 1_024;
+export const DEFAULT_RELAY_DOCUMENT_QUOTA_BYTES = 20 * 1_024 * 1_024;
 
 const RELAY_MIGRATIONS = [{
   version: 1,
@@ -29,27 +30,55 @@ const RELAY_MIGRATIONS = [{
       confirmed_at TEXT,
       token_hash TEXT UNIQUE,
       revoked_at TEXT,
-      last_ack_sequence INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       UNIQUE(pairing_id, role)
     ) STRICT;
 
-    CREATE TABLE remote_messages (
-      message_id TEXT PRIMARY KEY,
-      client_message_id TEXT NOT NULL,
-      pairing_id TEXT NOT NULL REFERENCES remote_pairings(pairing_id) ON DELETE CASCADE,
-      sender_device_id TEXT NOT NULL REFERENCES remote_devices(device_id),
-      target_device_id TEXT NOT NULL REFERENCES remote_devices(device_id),
-      sequence INTEGER NOT NULL,
-      content_json TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      acked_at TEXT,
-      UNIQUE(sender_device_id, client_message_id),
-      UNIQUE(target_device_id, sequence)
+    CREATE TABLE remote_invitations (
+      code_hash TEXT PRIMARY KEY,
+      claimed_pairing_id TEXT REFERENCES remote_pairings(pairing_id),
+      claimed_at TEXT
     ) STRICT;
 
-    CREATE INDEX remote_messages_pending_idx
-      ON remote_messages(target_device_id, sequence) WHERE acked_at IS NULL;
+    CREATE TABLE remote_sync_documents (
+      pairing_id TEXT NOT NULL REFERENCES remote_pairings(pairing_id) ON DELETE CASCADE,
+      document_kind TEXT NOT NULL CHECK(document_kind IN (
+        'space.snapshot', 'notebook.snapshot', 'asset.snapshot', 'managed_folder.snapshot'
+      )),
+      version INTEGER NOT NULL,
+      content_json TEXT NOT NULL,
+      content_bytes INTEGER NOT NULL,
+      updated_by_device_id TEXT NOT NULL REFERENCES remote_devices(device_id),
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(pairing_id, document_kind)
+    ) STRICT;
+  `,
+}, {
+  version: 2,
+  sql: `
+    DROP TABLE IF EXISTS remote_messages;
+
+    CREATE TABLE IF NOT EXISTS remote_sync_documents (
+      pairing_id TEXT NOT NULL REFERENCES remote_pairings(pairing_id) ON DELETE CASCADE,
+      document_kind TEXT NOT NULL CHECK(document_kind IN (
+        'space.snapshot', 'notebook.snapshot', 'asset.snapshot', 'managed_folder.snapshot'
+      )),
+      version INTEGER NOT NULL,
+      content_json TEXT NOT NULL,
+      content_bytes INTEGER NOT NULL,
+      updated_by_device_id TEXT NOT NULL REFERENCES remote_devices(device_id),
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(pairing_id, document_kind)
+    ) STRICT;
+  `,
+}, {
+  version: 3,
+  sql: `
+    CREATE TABLE IF NOT EXISTS remote_invitations (
+      code_hash TEXT PRIMARY KEY,
+      claimed_pairing_id TEXT REFERENCES remote_pairings(pairing_id),
+      claimed_at TEXT
+    ) STRICT;
   `,
 }] as const;
 
@@ -84,7 +113,14 @@ export type RelayAuthenticatedDevice = {
   readonly peerDeviceId: string;
   readonly peerDeviceName: string;
   readonly peerRole: RemoteDeviceRole;
-  readonly lastAckSequence: number;
+};
+
+export type RelaySyncDocument = {
+  readonly kind: RemoteSyncSnapshot["kind"];
+  readonly version: number;
+  readonly bytes: number;
+  readonly updatedAt: string;
+  readonly snapshot: RemoteSyncSnapshot;
 };
 
 export class RemoteRelayError extends Error {
@@ -101,8 +137,11 @@ export class RemoteRelayError extends Error {
       | "invalid_device_token"
       | "device_revoked"
       | "peer_unavailable"
-      | "message_id_conflict"
-      | "invalid_ack_cursor",
+      | "invitation_required"
+      | "invitation_invalid_or_claimed"
+      | "sync_write_forbidden"
+      | "sync_document_too_large"
+      | "sync_account_quota_exceeded",
     message: string,
   ) {
     super(message);
@@ -116,6 +155,10 @@ export type CreateRemoteRelayStoreInput = {
   readonly secretFactory?: () => string;
   readonly codeFactory?: () => string;
   readonly pairingTtlMs?: number;
+  readonly accountQuotaBytes?: number;
+  readonly documentQuotaBytes?: number;
+  readonly invitationCodes?: readonly string[];
+  readonly allowOpenSignup?: boolean;
 };
 
 export type RemoteRelayStore = ReturnType<typeof createRemoteRelayStore>;
@@ -126,21 +169,36 @@ export function createRemoteRelayStore(input: CreateRemoteRelayStoreInput) {
   const secretFactory = input.secretFactory ?? (() => randomBytes(32).toString("base64url"));
   const codeFactory = input.codeFactory ?? (() => randomInt(0, 1_000_000).toString().padStart(6, "0"));
   const pairingTtlMs = input.pairingTtlMs ?? 10 * 60 * 1_000;
+  const accountQuotaBytes = positiveQuota(input.accountQuotaBytes ?? DEFAULT_RELAY_ACCOUNT_QUOTA_BYTES, "account");
+  const documentQuotaBytes = positiveQuota(input.documentQuotaBytes ?? DEFAULT_RELAY_DOCUMENT_QUOTA_BYTES, "document");
+  const allowOpenSignup = input.allowOpenSignup ?? false;
   const db = input.database;
   db.migrate("remote-relay", RELAY_MIGRATIONS);
+  seedInvitations(db, input.invitationCodes ?? []);
 
-  function createPairing(deviceName: string): RelayPairingClaim {
+  function createPairing(deviceName: string, invitationCode?: string): RelayPairingClaim {
     const createdAt = now();
     const expiresAt = new Date(createdAt.getTime() + pairingTtlMs);
     const pairingId = idFactory();
     const deviceId = idFactory();
     const claimSecret = secretFactory();
     const pairingCode = unusedPairingCode(codeFactory, db);
+    const invitationHash = allowOpenSignup ? undefined : invitationCodeHash(invitationCode);
     db.transaction(() => {
       db.connection.prepare(`
         INSERT INTO remote_pairings(pairing_id, pairing_code, created_at, expires_at)
         VALUES (?, ?, ?, ?)
       `).run(pairingId, pairingCode, createdAt.toISOString(), expiresAt.toISOString());
+      if (invitationHash !== undefined) {
+        const claimed = db.connection.prepare(`
+          UPDATE remote_invitations
+          SET claimed_pairing_id = ?, claimed_at = ?
+          WHERE code_hash = ? AND claimed_pairing_id IS NULL
+        `).run(pairingId, createdAt.toISOString(), invitationHash);
+        if (claimed.changes !== 1) {
+          throw new RemoteRelayError("invitation_invalid_or_claimed", "The invitation code is invalid or has already been used");
+        }
+      }
       insertDevice(db, {
         deviceId,
         pairingId,
@@ -263,7 +321,7 @@ export function createRemoteRelayStore(input: CreateRemoteRelayStoreInput) {
   function authenticate(accessToken: string): RelayAuthenticatedDevice {
     const row = db.connection.prepare(`
       SELECT d.device_id AS deviceId, d.pairing_id AS pairingId, d.name, d.role,
-             d.revoked_at AS revokedAt, d.last_ack_sequence AS lastAckSequence,
+             d.revoked_at AS revokedAt,
              p.completed_at AS completedAt
       FROM remote_devices d
       JOIN remote_pairings p ON p.pairing_id = d.pairing_id
@@ -282,7 +340,6 @@ export function createRemoteRelayStore(input: CreateRemoteRelayStoreInput) {
       peerDeviceId: peer.deviceId,
       peerDeviceName: peer.name,
       peerRole: peer.role,
-      lastAckSequence: Number(row.lastAckSequence),
     };
   }
 
@@ -321,86 +378,66 @@ export function createRemoteRelayStore(input: CreateRemoteRelayStoreInput) {
     return { pairingId: row.pairingId };
   }
 
-  function enqueueMessage(
-    sender: RelayAuthenticatedDevice,
-    clientMessageId: string,
-    rawContent: unknown,
-  ): RemoteRelayMessage {
-    const content = parseRemoteMessageContent(rawContent);
-    const contentJson = JSON.stringify(content);
-    const existing = messageByClientId(db, sender.deviceId, clientMessageId);
-    if (existing !== undefined) {
-      if (existing.contentJson !== contentJson) {
-        throw new RemoteRelayError("message_id_conflict", "The client message id was already used with different content");
-      }
-      return relayMessageFromRow(existing);
+  function saveSyncSnapshot(sender: RelayAuthenticatedDevice, rawSnapshot: unknown): RelaySyncDocument {
+    if (sender.role !== "desktop") {
+      throw new RemoteRelayError("sync_write_forbidden", "Only the paired desktop can publish synchronized snapshots");
     }
-    const createdAt = now().toISOString();
-    const messageId = idFactory();
+    const snapshot = parseRemoteSyncSnapshot(rawSnapshot);
+    const contentJson = JSON.stringify(snapshot);
+    const contentBytes = Buffer.byteLength(contentJson, "utf8");
+    if (contentBytes > documentQuotaBytes) {
+      throw new RemoteRelayError("sync_document_too_large", "The synchronized document exceeds the configured document quota");
+    }
+    const updatedAt = now().toISOString();
     return db.transaction(() => {
-      const peer = peerDevice(db, sender.pairingId, sender.deviceId, false);
-      if (peer === undefined || peer.deviceId !== sender.peerDeviceId) {
-        throw new RemoteRelayError("peer_unavailable", "The paired device is unavailable or revoked");
+      const current = db.connection.prepare(`
+        SELECT document_kind AS kind, version, content_json AS contentJson,
+               content_bytes AS bytes, updated_at AS updatedAt
+        FROM remote_sync_documents WHERE pairing_id = ? AND document_kind = ?
+      `).get(sender.pairingId, snapshot.kind) as SyncDocumentRow | undefined;
+      if (current?.contentJson === contentJson) return syncDocumentFromRow(current);
+      const usage = db.connection.prepare(`
+        SELECT COALESCE(SUM(content_bytes), 0) AS bytes
+        FROM remote_sync_documents WHERE pairing_id = ? AND document_kind <> ?
+      `).get(sender.pairingId, snapshot.kind) as { bytes: number };
+      if (Number(usage.bytes) + contentBytes > accountQuotaBytes) {
+        throw new RemoteRelayError("sync_account_quota_exceeded", "The account synchronized-data quota would be exceeded");
       }
-      const sequenceRow = db.connection.prepare(`
-        SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM remote_messages WHERE target_device_id = ?
-      `).get(peer.deviceId) as { sequence: number };
-      const sequence = Number(sequenceRow.sequence);
       db.connection.prepare(`
-        INSERT INTO remote_messages(
-          message_id, client_message_id, pairing_id, sender_device_id,
-          target_device_id, sequence, content_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(messageId, clientMessageId, sender.pairingId, sender.deviceId, peer.deviceId, sequence, contentJson, createdAt);
-      return {
-        protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
-        messageId,
-        clientMessageId,
-        sequence,
-        sourceDeviceId: sender.deviceId,
-        targetDeviceId: peer.deviceId,
-        createdAt,
-        content,
-      };
+        INSERT INTO remote_sync_documents(
+          pairing_id, document_kind, version, content_json, content_bytes,
+          updated_by_device_id, updated_at
+        ) VALUES (?, ?, 1, ?, ?, ?, ?)
+        ON CONFLICT(pairing_id, document_kind) DO UPDATE SET
+          version = remote_sync_documents.version + 1,
+          content_json = excluded.content_json,
+          content_bytes = excluded.content_bytes,
+          updated_by_device_id = excluded.updated_by_device_id,
+          updated_at = excluded.updated_at
+      `).run(sender.pairingId, snapshot.kind, contentJson, contentBytes, sender.deviceId, updatedAt);
+      return requireSyncDocument(db, sender.pairingId, snapshot.kind);
     });
   }
 
-  function pendingMessages(deviceId: string, afterSequence: number, limit = 256): readonly RemoteRelayMessage[] {
-    const boundedLimit = Math.max(1, Math.min(256, Math.floor(limit)));
+  function listSyncSnapshots(accessToken: string): {
+    readonly documents: readonly RelaySyncDocument[];
+    readonly usageBytes: number;
+    readonly accountQuotaBytes: number;
+    readonly documentQuotaBytes: number;
+  } {
+    const auth = authenticate(accessToken);
     const rows = db.connection.prepare(`
-      SELECT message_id AS messageId, client_message_id AS clientMessageId,
-             sender_device_id AS sourceDeviceId, target_device_id AS targetDeviceId,
-             sequence, content_json AS contentJson, created_at AS createdAt
-      FROM remote_messages
-      WHERE target_device_id = ? AND sequence > ? AND acked_at IS NULL
-      ORDER BY sequence ASC LIMIT ?
-    `).all(deviceId, afterSequence, boundedLimit) as unknown as readonly MessageRow[];
-    return rows.map(relayMessageFromRow);
-  }
-
-  function acknowledge(deviceId: string, sequence: number): number {
-    const cursor = Math.max(0, Math.floor(sequence));
-    const maxRow = db.connection.prepare(`
-      SELECT COALESCE(MAX(sequence), 0) AS maxSequence FROM remote_messages WHERE target_device_id = ?
-    `).get(deviceId) as { maxSequence: number };
-    if (cursor > Number(maxRow.maxSequence)) {
-      throw new RemoteRelayError("invalid_ack_cursor", "The acknowledgement cursor is ahead of the relay sequence");
-    }
-    return db.transaction(() => {
-      db.connection.prepare(`
-        UPDATE remote_devices
-        SET last_ack_sequence = MAX(last_ack_sequence, ?)
-        WHERE device_id = ? AND revoked_at IS NULL
-      `).run(cursor, deviceId);
-      db.connection.prepare(`
-        UPDATE remote_messages SET acked_at = COALESCE(acked_at, ?)
-        WHERE target_device_id = ? AND sequence <= ?
-      `).run(now().toISOString(), deviceId, cursor);
-      const row = db.connection.prepare(`
-        SELECT last_ack_sequence AS lastAckSequence FROM remote_devices WHERE device_id = ?
-      `).get(deviceId) as { lastAckSequence: number };
-      return Number(row.lastAckSequence);
-    });
+      SELECT document_kind AS kind, version, content_json AS contentJson,
+             content_bytes AS bytes, updated_at AS updatedAt
+      FROM remote_sync_documents WHERE pairing_id = ? ORDER BY document_kind
+    `).all(auth.pairingId) as unknown as readonly SyncDocumentRow[];
+    const documents = rows.map(syncDocumentFromRow);
+    return {
+      documents,
+      usageBytes: documents.reduce((total, document) => total + document.bytes, 0),
+      accountQuotaBytes,
+      documentQuotaBytes,
+    };
   }
 
   return {
@@ -412,9 +449,8 @@ export function createRemoteRelayStore(input: CreateRemoteRelayStoreInput) {
     authenticate,
     listDevices,
     revokeDevice,
-    enqueueMessage,
-    pendingMessages,
-    acknowledge,
+    saveSyncSnapshot,
+    listSyncSnapshots,
   };
 }
 
@@ -433,7 +469,6 @@ type DeviceRow = {
   readonly name: string;
   readonly confirmedAt: string | null;
   readonly revokedAt: string | null;
-  readonly lastAckSequence: number;
 };
 
 type DeviceAuthRow = DeviceRow & { readonly completedAt: string | null };
@@ -444,14 +479,12 @@ type RevocationCallerRow = {
   readonly completedAt: string | null;
 };
 
-type MessageRow = {
-  readonly messageId: string;
-  readonly clientMessageId: string;
-  readonly sourceDeviceId: string;
-  readonly targetDeviceId: string;
-  readonly sequence: number;
+type SyncDocumentRow = {
+  readonly kind: RemoteSyncSnapshot["kind"];
+  readonly version: number;
   readonly contentJson: string;
-  readonly createdAt: string;
+  readonly bytes: number;
+  readonly updatedAt: string;
 };
 
 function hashSecret(secret: string): string {
@@ -462,6 +495,36 @@ function normalizedDeviceName(value: string): string {
   const name = value.trim();
   if (name.length < 1 || name.length > 160) throw new Error("Device names must contain 1 to 160 characters");
   return name;
+}
+
+function positiveQuota(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Relay ${label} quota must be a positive safe integer`);
+  return value;
+}
+
+function seedInvitations(database: SqliteRuntimeDatabase, invitationCodes: readonly string[]): void {
+  if (invitationCodes.length > 10_000) throw new Error("Relay invitation configuration is too large");
+  const insert = database.connection.prepare(`
+    INSERT OR IGNORE INTO remote_invitations(code_hash) VALUES (?)
+  `);
+  database.transaction(() => {
+    for (const code of invitationCodes) insert.run(hashSecret(normalizedInvitationCode(code)));
+  });
+}
+
+function invitationCodeHash(value: string | undefined): string {
+  if (value === undefined || value.trim().length === 0) {
+    throw new RemoteRelayError("invitation_required", "An invitation code is required to create an account");
+  }
+  return hashSecret(normalizedInvitationCode(value));
+}
+
+function normalizedInvitationCode(value: string): string {
+  const code = value.trim();
+  if (code.length < 8 || code.length > 128) {
+    throw new RemoteRelayError("invitation_invalid_or_claimed", "The invitation code is invalid or has already been used");
+  }
+  return code;
 }
 
 function unusedPairingCode(factory: () => string, database: SqliteRuntimeDatabase): string {
@@ -524,8 +587,7 @@ function deviceByRole(
 ): DeviceRow | undefined {
   return database.connection.prepare(`
     SELECT device_id AS deviceId, pairing_id AS pairingId, role, name,
-           confirmed_at AS confirmedAt, revoked_at AS revokedAt,
-           last_ack_sequence AS lastAckSequence
+           confirmed_at AS confirmedAt, revoked_at AS revokedAt
     FROM remote_devices WHERE pairing_id = ? AND role = ?
   `).get(pairingId, role) as DeviceRow | undefined;
 }
@@ -537,8 +599,7 @@ function devicesForPairing(
 ): readonly DeviceRow[] {
   return database.connection.prepare(`
     SELECT device_id AS deviceId, pairing_id AS pairingId, role, name,
-           confirmed_at AS confirmedAt, revoked_at AS revokedAt,
-           last_ack_sequence AS lastAckSequence
+           confirmed_at AS confirmedAt, revoked_at AS revokedAt
     FROM remote_devices
     WHERE pairing_id = ? ${includeRevoked ? "" : "AND revoked_at IS NULL"}
     ORDER BY created_at
@@ -548,8 +609,7 @@ function devicesForPairing(
 function claimDevice(database: SqliteRuntimeDatabase, pairingId: string, claimSecret: string): DeviceRow {
   const row = database.connection.prepare(`
     SELECT device_id AS deviceId, pairing_id AS pairingId, role, name,
-           confirmed_at AS confirmedAt, revoked_at AS revokedAt,
-           last_ack_sequence AS lastAckSequence
+           confirmed_at AS confirmedAt, revoked_at AS revokedAt
     FROM remote_devices WHERE pairing_id = ? AND claim_hash = ?
   `).get(pairingId, hashSecret(claimSecret)) as DeviceRow | undefined;
   if (row === undefined) throw new RemoteRelayError("invalid_claim", "The pairing claim is invalid");
@@ -567,28 +627,26 @@ function peerDevice(
     .find((device) => device.deviceId !== localDeviceId && (includeRevoked || device.revokedAt === null));
 }
 
-function messageByClientId(
+function requireSyncDocument(
   database: SqliteRuntimeDatabase,
-  senderDeviceId: string,
-  clientMessageId: string,
-): (MessageRow & { readonly contentJson: string }) | undefined {
-  return database.connection.prepare(`
-    SELECT message_id AS messageId, client_message_id AS clientMessageId,
-           sender_device_id AS sourceDeviceId, target_device_id AS targetDeviceId,
-           sequence, content_json AS contentJson, created_at AS createdAt
-    FROM remote_messages WHERE sender_device_id = ? AND client_message_id = ?
-  `).get(senderDeviceId, clientMessageId) as MessageRow | undefined;
+  pairingId: string,
+  kind: RemoteSyncSnapshot["kind"],
+): RelaySyncDocument {
+  const row = database.connection.prepare(`
+    SELECT document_kind AS kind, version, content_json AS contentJson,
+           content_bytes AS bytes, updated_at AS updatedAt
+    FROM remote_sync_documents WHERE pairing_id = ? AND document_kind = ?
+  `).get(pairingId, kind) as SyncDocumentRow | undefined;
+  if (row === undefined) throw new Error(`Synchronized document ${kind} was not found after write`);
+  return syncDocumentFromRow(row);
 }
 
-function relayMessageFromRow(row: MessageRow): RemoteRelayMessage {
+function syncDocumentFromRow(row: SyncDocumentRow): RelaySyncDocument {
   return {
-    protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
-    messageId: row.messageId,
-    clientMessageId: row.clientMessageId,
-    sequence: Number(row.sequence),
-    sourceDeviceId: row.sourceDeviceId,
-    targetDeviceId: row.targetDeviceId,
-    createdAt: row.createdAt,
-    content: parseRemoteMessageContent(JSON.parse(row.contentJson) as unknown),
+    kind: row.kind,
+    version: Number(row.version),
+    bytes: Number(row.bytes),
+    updatedAt: row.updatedAt,
+    snapshot: parseRemoteSyncSnapshot(JSON.parse(row.contentJson) as unknown),
   };
 }

@@ -548,7 +548,7 @@ test("keeps bootstrap failures inside the Redesign workbench and retries in plac
   expect(screen.queryByText("新任务")).toBeNull();
 });
 
-test("uses the motion-only Workbench loader while bootstrap data is pending", () => {
+test("renders the Home surface directly while bootstrap data is pending", () => {
   const { container } = renderWorkbench({
     bootstrapState: {
       status: "loading",
@@ -556,10 +556,12 @@ test("uses the motion-only Workbench loader while bootstrap data is pending", ()
     },
   });
 
+  expect(screen.queryByRole("status", { name: "正在准备工作台" })).toBeNull();
+  expect(container.querySelector(".workbench-bootstrap-loading__progress")).toBeNull();
+  expect(screen.getByPlaceholderText("想从哪里开始？")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "知识库" }));
   expect(screen.getByRole("status", { name: "正在准备工作台" })).toBeTruthy();
-  expect(screen.queryByText("正在准备工作台")).toBeNull();
-  expect(container.querySelector(".workbench-bootstrap-loading__progress")).toBeTruthy();
-  expect(screen.queryByText("新任务")).toBeNull();
 });
 
 test("keeps folder expansion isolated per Space when switching projections", async () => {

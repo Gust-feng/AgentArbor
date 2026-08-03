@@ -68,7 +68,11 @@ export function ConversationScrollArea(props: {
         className="aa-conversation-scroll-viewport h-full overflow-y-auto"
         data-conversation-scroll="viewport"
       >
-        <div ref={contentRef} className={props.contentClassName} style={{ maxWidth: 'var(--reading-width)' }}>
+        <div
+          ref={contentRef}
+          className={`aa-conversation-scroll-content ${props.contentClassName}`}
+          style={{ maxWidth: 'var(--reading-width)' }}
+        >
           {props.children}
         </div>
       </div>

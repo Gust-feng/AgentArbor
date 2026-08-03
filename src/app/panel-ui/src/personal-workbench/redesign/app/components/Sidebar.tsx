@@ -21,7 +21,7 @@ import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
 import { useModalA11y } from './useModalA11y'
 
-export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'focus' | 'brain'
+export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'brain'
 
 interface SidebarProps {
   view: View
@@ -633,7 +633,7 @@ export function Sidebar({
           {orderedConversations.map((conversation, index) => (
             <ListRow
               key={conversation.conversationId}
-              active={view === 'conv-active' && activeConversationId === conversation.conversationId}
+            active={(view === 'conv-active' || view === 'conv-done') && activeConversationId === conversation.conversationId}
               onClick={() => void openConversation(conversation.conversationId)}
               dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
               label={conversation.title}
@@ -684,49 +684,39 @@ export function Sidebar({
         </div>
       </nav>
 
-      {/* ── Account footer ── */}
+      {/* Settings remains available independently of any future account/profile feature. */}
       <footer
         className="shrink-0 flex items-center"
         style={{
           borderTop: '1px solid var(--aa-border)',
-          padding: '8px 15px',
-          gap: 10,
+          padding: '8px',
         }}
       >
-        <span
-          className="flex items-center justify-center shrink-0 text-xs font-semibold"
-          title={!labelsVisible ? '张明' : undefined}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="打开设置"
+          title={!labelsVisible ? '设置' : undefined}
+          className="flex h-8 w-full items-center rounded-lg text-sm hover:bg-black/5"
           style={{
-            width: 26, height: 26,
-            borderRadius: '50%',
-            background: 'var(--aa-lavender)',
-            color: 'var(--aa-accent)',
-            flexShrink: 0,
+            gap: 8,
+            padding: '0 10px',
+            color: 'var(--aa-text-2)',
           }}
         >
-          张
-        </span>
-        <span style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          opacity: labelsVisible ? 1 : 0,
-          transition: 'opacity 160ms ease',
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-        }}>
-          <span className="flex-1 text-sm truncate" style={{ color: 'var(--aa-text-1)' }}>
-            张明
-          </span>
-          <button
-            onClick={onOpenSettings}
-            className="p-1.5 rounded-md hover:bg-black/5 shrink-0"
-            style={{ color: 'var(--aa-text-3)' }}
-          >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
             <Settings2 size={14}/>
-          </button>
-        </span>
+          </span>
+          <span
+            className="truncate"
+            style={{
+              opacity: labelsVisible ? 1 : 0,
+              transition: 'opacity 160ms ease',
+            }}
+          >
+            设置
+          </span>
+        </button>
       </footer>
       </div>
 

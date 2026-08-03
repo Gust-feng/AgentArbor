@@ -29,7 +29,7 @@ test('presents one stable ambient line with the quiet task entry', () => {
   )
 
   expect(screen.getByRole('region', { name: '开始任务' })).toBeTruthy()
-  expect(screen.getByText(selectHomeAmbientCopy(now))).toBeTruthy()
+  expect(screen.getByLabelText(selectHomeAmbientCopy(now))).toBeTruthy()
   expect(screen.getByPlaceholderText('想从哪里开始？')).toBeTruthy()
   expect(screen.getByRole('button', { name: '切换工作区：Z:\\AgentArbor' }).textContent).toContain('AgentArbor')
   expect(screen.queryByRole('heading')).toBeNull()

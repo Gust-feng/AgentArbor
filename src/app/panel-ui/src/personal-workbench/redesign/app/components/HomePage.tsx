@@ -4,6 +4,7 @@ import type { ChatInputProps } from '../../../../components/chat-empty'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { type View } from './Sidebar'
 import { ConversationComposer } from './ConversationComposer'
+import { HomeAmbientCopy } from './HomeAmbientCopy'
 import { selectHomeAmbientCopy } from './home-ambient-copy'
 import './home-page.css'
 
@@ -22,7 +23,7 @@ export function HomePage({ input, focusRequest }: HomePageProps) {
     <div className="aa-agent-home">
       <section className="aa-agent-home__stage" aria-label="开始任务">
         <div className="aa-agent-home__field">
-          <p className="aa-agent-home__ambient">{ambientCopy}</p>
+          <HomeAmbientCopy copy={ambientCopy} />
 
           <div className="aa-agent-home__composer">
             <ConversationComposer key={focusRequest} input={input} />

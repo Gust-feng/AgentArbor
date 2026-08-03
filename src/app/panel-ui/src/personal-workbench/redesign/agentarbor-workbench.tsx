@@ -1,5 +1,6 @@
 import { AlertCircle, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
 import type { ChatInputProps } from "../../components/chat-empty";
@@ -10,17 +11,17 @@ import type { Conversation, ConversationSummary } from "../../contracts/conversa
 import type { PendingConfirmation } from "../../contracts/run";
 import type { ConfirmationProjection } from "./app/components/ConfirmationCard";
 import type { PersonalSpaceActions, PersonalSpaceProjection } from "../space";
-import { ConversationPage, type LiveConversationState } from "./app/components/ConversationPage";
+import { ConversationPage } from "./app/components/ConversationPage";
 import { BrainPage } from "./app/components/BrainPage";
-import { ConversationComposer } from "./app/components/ConversationComposer";
 import { DeferredSurfaceBoundary } from "./app/components/DeferredSurfaceBoundary";
-import { FocusMode } from "./app/components/FocusMode";
 import { HomePage } from "./app/components/HomePage";
 import { RedesignTranscript } from "./app/components/RedesignTranscript";
 import { SearchPage } from "./app/components/SearchPage";
 import { type View, Sidebar } from "./app/components/Sidebar";
 import { SpacePage } from "./app/components/SpacePage";
 import { TopBar } from "./app/components/TopBar";
+import type { LiveConversationState } from "./app/components/conversation-surface-state";
+import { runFocusModeTransition, type FocusModeTransitionHandle } from "./app/components/focus-mode-transition";
 import { resolveById } from "./app/components/brainStore";
 import { applyPrefs, loadPrefs } from "../../reading-preferences";
 import {
@@ -75,19 +76,24 @@ export type RedesignWorkbenchProps = {
   readonly onInstallAppUpdate: () => void;
 };
 
+type ConversationMode = "normal" | "focus";
+
 /**
  * The visual composition root for the redesign. It deliberately holds only
  * navigation and selection: conversations, runs, confirmations, and Spaces
  * remain owned by their existing feature facades.
  */
 export function RedesignWorkbench(props: RedesignWorkbenchProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>(() => initialView(props));
+  const [conversationMode, setConversationModeState] = useState<ConversationMode>("normal");
   const [previousView, setPreviousView] = useState<View>("home");
   const [brainSelectedId, setBrainSelectedId] = useState<string | null>(null);
   const [spaceTargetId, setSpaceTargetId] = useState<string | null>(null);
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [homeFocusRequest, setHomeFocusRequest] = useState(0);
   const observedViewRef = useRef(view);
+  const focusTransitionRef = useRef<FocusModeTransitionHandle | null>(null);
   const knowledgeLoadState = useSyncExternalStore(
     subscribePersonalKnowledge,
     getPersonalKnowledgeLoadState,
@@ -100,6 +106,8 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   );
 
   const activeConversation = props.conversation;
+  const conversationProjection = projectConversationSurface(props, activeConversation);
+  const conversationState = projectLiveConversationState(conversationProjection, props);
   const hasAttention = requiresImmediateConversationView(props);
   const surfaceTitle = view === "space"
     ? props.spaces?.find((space) => space.spaceId === activeSpaceId)?.title ?? "空间"
@@ -139,34 +147,61 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
   }, [knowledgeLoadState.status, props.personalKnowledgePersistenceEnabled, view]);
 
   useEffect(() => {
-    if (hasAttention) setView("conv-active");
-  }, [hasAttention]);
+    if (hasAttention && !isConversationView(view)) setView("conv-active");
+  }, [hasAttention, view]);
+
+  useEffect(() => () => {
+    focusTransitionRef.current?.cancel();
+    focusTransitionRef.current = null;
+  }, []);
 
   useEffect(() => {
     applyPrefs(loadPrefs());
   }, []);
 
+  const setConversationMode = (next: ConversationMode, after?: () => void): void => {
+    if (next === conversationMode) {
+      after?.();
+      return;
+    }
+    focusTransitionRef.current?.cancel();
+    focusTransitionRef.current = runFocusModeTransition({
+      root: rootRef.current,
+      direction: next === "focus" ? "enter" : "exit",
+      update: () => flushSync(() => {
+        setConversationModeState(next);
+        after?.();
+      }),
+    });
+  };
+
+  const navigate = (target: View): void => {
+    const updateNavigation = (): void => {
+      if (target === "search") setPreviousView(view);
+      // Only search navigation sets a target explicitly. Normal navigation must
+      // clear it, otherwise a later Space switch can reuse an id from another Space.
+      setSpaceTargetId(null);
+      if (target !== "brain") setBrainSelectedId(null);
+      setView(target);
+    };
+    if (conversationMode === "focus") {
+      setConversationMode("normal", updateNavigation);
+      return;
+    }
+    updateNavigation();
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setPreviousView(view);
-        setView("search");
+        navigate("search");
       }
-      if (event.key === "Escape" && view === "search") setView(previousView);
+      if (event.key === "Escape" && view === "search") navigate(previousView);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [previousView, view]);
-
-  const navigate = (target: View): void => {
-    if (target === "search") setPreviousView(view);
-    // Only search navigation sets a target explicitly. Normal navigation must
-    // clear it, otherwise a later Space switch can reuse an id from another Space.
-    setSpaceTargetId(null);
-    if (target !== "brain") setBrainSelectedId(null);
-    setView(target);
-  };
+  }, [conversationMode, previousView, view]);
 
   const homeInput = useMemo<ChatInputProps>(() => ({
     ...props.inputProps,
@@ -190,8 +225,14 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
     autoFocus: true,
     placeholder: activeConversation === undefined ? "从一个想法开始" : "继续对话...",
   }), [activeConversation, props.inputProps]);
+  const showLoadingFallback = (
+    props.bootstrapState.status === "loading" && view !== "home"
+  ) || (
+    isKnowledgeView(view) && (knowledgeLoadState.status === "loading" || knowledgeLoadState.status === "retrying")
+  );
   return (
     <div
+      ref={rootRef}
       className="aa-redesign-root flex h-screen min-h-0 w-full overflow-hidden"
       style={{
         background: "var(--aa-canvas)",
@@ -201,8 +242,8 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
     >
       <style>{`
         @keyframes viewFadeIn {
-          from { opacity: 0; transform: translateY(3px); }
-          to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
         .aa-redesign-root .view-enter { animation: viewFadeIn 140ms ease; }
       `}</style>
@@ -237,35 +278,44 @@ export function RedesignWorkbench(props: RedesignWorkbenchProps) {
           sidebarCollapsed={props.sidebarCollapsed}
           onToggleSidebar={props.onToggleSidebar}
           surfaceTitle={surfaceTitle}
+          conversationState={isConversationView(view) ? conversationState : undefined}
+          onEnterFocus={isConversationView(view) && conversationMode === "normal"
+            ? () => setConversationMode("focus")
+            : undefined}
           brainFileTitle={brainSelectedId === null ? null : resolveById(brainSelectedId)?.title ?? null}
           onBrainRoot={() => setBrainSelectedId(null)}
         />
 
         <main
           aria-label={viewLabel(view)}
-          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          className="aa-workbench-main flex min-h-0 flex-1 flex-col overflow-hidden"
         >
-          <div className="view-enter flex min-h-0 flex-1 flex-col overflow-hidden" key={view}>
-            {props.bootstrapState.status === "loading" || (
-              isKnowledgeView(view) && (knowledgeLoadState.status === "loading" || knowledgeLoadState.status === "retrying")
-            ) ? <WorkbenchBootstrapLoading /> : (
+          <div
+            className="view-enter flex min-h-0 flex-1 flex-col overflow-hidden"
+            key={isConversationView(view) ? "conversation" : view}
+          >
+            {showLoadingFallback ? <WorkbenchBootstrapLoading /> : (
               <DeferredSurfaceBoundary resetKey={view} label="这个视图暂时无法打开">
                   {renderView({
                     view,
                     props,
                     activeConversation,
+                    conversationProjection,
+                    conversationState,
                     homeInput,
                     homeFocusRequest,
                     conversationInput,
                     brainSelectedId,
                     spaceTargetId,
                     activeSpaceId,
+                    conversationMode,
                     onBrainSelect: setBrainSelectedId,
                     navigate,
+                    onExitFocus: () => setConversationMode("normal"),
                     onOpenInSpace: (spaceId, id) => {
                       setActiveSpaceId(spaceId);
                       setSpaceTargetId(id);
-                      setView("space");
+                      navigate("space");
                     },
                   })}
               </DeferredSurfaceBoundary>
@@ -315,7 +365,6 @@ function viewLabel(view: View): string {
     case "space": return "空间";
     case "brain": return "知识库";
     case "search": return "搜索";
-    case "focus": return "专注模式";
     case "conv-active":
     case "conv-done": return "对话工作台";
   }
@@ -325,14 +374,18 @@ function renderView(input: {
   readonly view: View;
   readonly props: RedesignWorkbenchProps;
   readonly activeConversation?: Conversation;
+  readonly conversationProjection: ConversationSurfaceProjection;
+  readonly conversationState: LiveConversationState;
   readonly homeInput: ChatInputProps;
   readonly homeFocusRequest: number;
   readonly conversationInput: ChatInputProps;
   readonly brainSelectedId: string | null;
   readonly spaceTargetId: string | null;
   readonly activeSpaceId: string | null;
+  readonly conversationMode: ConversationMode;
   readonly onBrainSelect: (id: string | null) => void;
   readonly navigate: (view: View) => void;
+  readonly onExitFocus: () => void;
   readonly onOpenInSpace: (spaceId: string, id: string) => void;
 }) {
   if (input.view === "home") {
@@ -375,10 +428,15 @@ function renderView(input: {
       conversations={input.props.conversations}
     />;
   }
-  if (input.view === "focus") {
-    return <ConversationSurface props={input.props} conversation={input.activeConversation} input={input.conversationInput} focus onExitFocus={() => input.navigate("conv-active")} />;
-  }
-  return <ConversationSurface props={input.props} conversation={input.activeConversation} input={input.conversationInput} onEnterFocus={() => input.navigate("focus")} />;
+  return <ConversationSurface
+    props={input.props}
+    conversation={input.activeConversation}
+    projection={input.conversationProjection}
+    state={input.conversationState}
+    input={input.conversationInput}
+    focus={input.conversationMode === "focus"}
+    onExitFocus={input.onExitFocus}
+  />;
 }
 
 const EMPTY_ID_SET: ReadonlySet<string> = new Set();
@@ -386,36 +444,19 @@ const EMPTY_ID_SET: ReadonlySet<string> = new Set();
 function ConversationSurface(props: {
   readonly props: RedesignWorkbenchProps;
   readonly conversation?: Conversation;
+  readonly projection: ConversationSurfaceProjection;
+  readonly state: LiveConversationState;
   readonly input: ChatInputProps;
   readonly focus?: boolean;
-  readonly onEnterFocus?: () => void;
   readonly onExitFocus?: () => void;
 }) {
-  const active = projectChatActiveView({
-    conversation: props.conversation,
-    run: props.props.currentRun.run,
-    workView: props.props.currentRun.workView,
-    transcriptNodes: props.props.currentRun.transcriptNodes,
-    detail: props.props.currentRun.detail,
-    live: props.props.currentRun.live,
-    error: props.props.error,
-    pendingConfirmation: props.props.pendingConfirmation,
-  });
+  const active = props.projection;
   const composerInput = confirmationGuidanceInput(
     props.input,
     active.pending,
     props.props.confirmationBusy,
     props.props.onDecision,
   );
-  const state: LiveConversationState = active.pending !== undefined
-    ? "attention"
-    : active.running
-      ? "working"
-      : props.props.error !== undefined || isFailedRun(props.props.currentRun.run?.status)
-        ? "failed"
-        : active.hasVisibleContent
-          ? "completed"
-          : "initial";
   const content = active.hasVisibleContent ? (
     <DeferredSurfaceBoundary resetKey={props.props.currentRun.run?.runId ?? props.conversation?.conversationId ?? "transcript"} label="对话内容暂时无法显示">
         <RedesignTranscript
@@ -446,29 +487,51 @@ function ConversationSurface(props: {
         />
     </DeferredSurfaceBoundary>
   ) : undefined;
-  const pageProps = {
-    title: props.conversation?.title ?? "新的对话",
-    state,
-    scrollKey: `${props.conversation?.conversationId ?? "new-conversation"}:${active.currentRunId ?? "idle"}`,
-    content,
-    input: composerInput,
-  };
+  const title = props.conversation?.title ?? "新的对话";
+  const scrollKey = `${props.conversation?.conversationId ?? "new-conversation"}:${active.currentRunId ?? "idle"}`;
 
-  if (props.focus) {
-    return <FocusMode
-      title={pageProps.title}
-      state={pageProps.state}
-      scrollKey={pageProps.scrollKey}
-      content={pageProps.content}
-      composer={<ConversationComposer input={pageProps.input} />}
-      onExit={props.onExitFocus ?? (() => undefined)}
-    />;
-  }
-  return <ConversationPage {...pageProps} onFocus={props.onEnterFocus} />;
+  return <ConversationPage
+    scrollKey={scrollKey}
+    content={content}
+    input={composerInput}
+    focus={props.focus ? {
+      title,
+      state: props.state,
+      onExit: props.onExitFocus ?? (() => undefined),
+    } : undefined}
+  />;
+}
+
+function projectConversationSurface(
+  props: RedesignWorkbenchProps,
+  conversation: Conversation | undefined,
+) {
+  return projectChatActiveView({
+    conversation,
+    run: props.currentRun.run,
+    workView: props.currentRun.workView,
+    transcriptNodes: props.currentRun.transcriptNodes,
+    detail: props.currentRun.detail,
+    live: props.currentRun.live,
+    error: props.error,
+    pendingConfirmation: props.pendingConfirmation,
+  });
+}
+
+type ConversationSurfaceProjection = ReturnType<typeof projectConversationSurface>;
+
+function projectLiveConversationState(
+  active: ConversationSurfaceProjection,
+  props: RedesignWorkbenchProps,
+): LiveConversationState {
+  if (active.pending !== undefined) return "attention";
+  if (active.running) return "working";
+  if (props.error !== undefined || isFailedRun(props.currentRun.run?.status)) return "failed";
+  return active.hasVisibleContent ? "completed" : "initial";
 }
 
 function isConversationView(view: View): boolean {
-  return view === "conv-active" || view === "conv-done" || view === "focus";
+  return view === "conv-active" || view === "conv-done";
 }
 
 function isKnowledgeView(view: View): boolean {

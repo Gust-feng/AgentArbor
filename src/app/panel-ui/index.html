@@ -103,8 +103,7 @@
           place-items: center;
         }
 
-        .redesign-bootstrap__line,
-        .redesign-bootstrap__pulse {
+        .redesign-bootstrap__line {
           display: block;
           border-radius: 999px;
           background: #eeebe6;
@@ -120,30 +119,6 @@
           width: 76px;
         }
 
-        .redesign-bootstrap__pulse {
-          width: 64px;
-          height: 6px;
-          overflow: hidden;
-        }
-
-        .redesign-bootstrap__pulse::after {
-          display: block;
-          width: 50%;
-          height: 100%;
-          border-radius: inherit;
-          background: #6865a7;
-          content: "";
-          animation: redesign-bootstrap-pulse 1.2s ease-in-out infinite alternate;
-        }
-
-        @keyframes redesign-bootstrap-pulse {
-          from { opacity: 0.35; transform: translateX(0); }
-          to { opacity: 0.8; transform: translateX(100%); }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .redesign-bootstrap__pulse::after { animation: none; }
-        }
       </style>
       <div class="redesign-bootstrap" aria-label="正在加载 AgentArbor">
         <aside class="redesign-bootstrap__sidebar" aria-hidden="true">
@@ -152,9 +127,7 @@
         </aside>
         <main class="redesign-bootstrap__content">
           <div class="redesign-bootstrap__topbar" aria-hidden="true"></div>
-          <div class="redesign-bootstrap__canvas">
-            <span class="redesign-bootstrap__pulse" aria-hidden="true"></span>
-          </div>
+          <div class="redesign-bootstrap__canvas"></div>
         </main>
       </div>
       <!-- ordinary-screen-end -->

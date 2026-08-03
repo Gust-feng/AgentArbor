@@ -1,6 +1,11 @@
-import { ChevronLeft, Search, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
+import { ChevronLeft, Maximize2, Search, PanelLeftOpen, PanelLeftClose } from 'lucide-react'
 import { DesktopWindowControls } from './DesktopWindowControls'
 import { type View } from './Sidebar'
+import {
+  visibleConversationHeaderState,
+  type LiveConversationState,
+  type VisibleConversationHeaderState,
+} from './conversation-surface-state'
 import './top-bar.css'
 
 interface TopBarProps {
@@ -10,6 +15,8 @@ interface TopBarProps {
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
   surfaceTitle?: string
+  conversationState?: LiveConversationState
+  onEnterFocus?: () => void
   // 知识库路径面包屑:打开的文件标题(无则在知识库根部);点根部回到知识库列表。
   brainFileTitle: string | null
   onBrainRoot: () => void
@@ -25,11 +32,14 @@ export function TopBar({
   sidebarCollapsed,
   onToggleSidebar,
   surfaceTitle,
+  conversationState,
+  onEnterFocus,
   brainFileTitle,
   onBrainRoot,
 }: TopBarProps) {
   const isMinimal = MINIMAL_VIEWS.includes(view)
   const desktopShell = typeof window !== 'undefined' && window.agentarborDesktop !== undefined
+  const conversationStatus = visibleConversationHeaderState(conversationState)
 
   return (
     <header
@@ -55,6 +65,7 @@ export function TopBar({
           <button
             type="button"
             aria-label="搜索内容与文件"
+            aria-keyshortcuts="Control+K Meta+K"
             onClick={onSearch}
             className="topbar-search-trigger shrink-0"
             style={{ color: 'var(--aa-text-3)' }}
@@ -62,7 +73,7 @@ export function TopBar({
             <Search className="topbar-search-icon" size={14} aria-hidden="true" />
             <span className="topbar-search-details" aria-hidden="true">
               <span className="topbar-search-label">搜索内容与文件</span>
-              <kbd className="topbar-search-shortcut">⌘K</kbd>
+              <kbd className="topbar-search-shortcut">{searchShortcutLabel()}</kbd>
             </span>
           </button>
         )}
@@ -107,11 +118,22 @@ export function TopBar({
 
             {/* minimal 视图：在 TopBar 展示当前页标题作为路径标记 */}
             {isMinimal && surfaceTitle && (
-              <span
-                className="text-xs truncate max-w-[200px] -ml-1"
-                style={{ color: 'var(--aa-text-3)' }}
-              >
-                {surfaceTitle}
+              <span className="topbar-surface-context">
+                <span className="topbar-surface-title">{surfaceTitle}</span>
+                {conversationStatus !== undefined && (
+                  <ConversationHeaderStatus state={conversationStatus} />
+                )}
+                {onEnterFocus !== undefined && (
+                  <button
+                    type="button"
+                    onClick={onEnterFocus}
+                    title="专注阅读"
+                    aria-label="专注阅读"
+                    className="topbar-focus-button"
+                  >
+                    <Maximize2 size={13} aria-hidden="true" />
+                  </button>
+                )}
               </span>
             )}
           </>
@@ -122,4 +144,18 @@ export function TopBar({
       <DesktopWindowControls />
     </header>
   )
+}
+
+function ConversationHeaderStatus({ state }: { readonly state: VisibleConversationHeaderState }) {
+  return (
+    <span className="topbar-conversation-status" data-state={state} role="status">
+      <span className="topbar-conversation-status__dot" aria-hidden="true" />
+      {state === 'working' ? '处理中' : '需要确认'}
+    </span>
+  )
+}
+
+function searchShortcutLabel(): string {
+  if (typeof navigator === 'undefined') return 'Ctrl K'
+  return /Mac|iPhone|iPad|iPod/u.test(navigator.platform) ? '⌘K' : 'Ctrl K'
 }

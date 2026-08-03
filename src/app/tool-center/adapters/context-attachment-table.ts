@@ -85,6 +85,7 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
         requestedPath: stringOrUndefined(record.path),
         requireFile: true,
         projectPathRequired: true,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
       });
       const table = await loadTableTarget(entry, target, {
         sheetName: stringOrUndefined(record.sheetName),
@@ -170,6 +171,7 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
         requestedPath: stringOrUndefined(record.path),
         requireFile: true,
         projectPathRequired: true,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
       });
       const table = await loadTableTarget(entry, target, {
         sheetName: stringOrUndefined(record.sheetName),

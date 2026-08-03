@@ -39,6 +39,64 @@ describe("live Ordinary run updates", () => {
     vi.useRealTimers();
   });
 
+  it("serializes fallback polls and ignores an aborted response after polling restarts", async () => {
+    const requests: Array<{
+      readonly signal: AbortSignal | undefined;
+      readonly resolve: (view: BasicAgentRunView) => void;
+    }> = [];
+    runtimeMocks.safeBasicRunView.mockImplementation((
+      _runId: string,
+      _cursor: string | undefined,
+      init?: RequestInit,
+    ) => init?.signal === undefined
+      ? Promise.resolve(completedView("cursor-settled"))
+      : new Promise<BasicAgentRunView>((resolve) => {
+          requests.push({ signal: init.signal ?? undefined, resolve });
+        }));
+    let state: AppState = {
+      ...createInitialAppState(),
+      conversation: { conversationId: "conversation-1" } as AppState["conversation"],
+      run: { runId: "run-1", status: "running" } as AppState["run"],
+    };
+    const fallbackPollRef = { current: undefined as AbortController | undefined };
+    const controller = createLiveRunUpdateController({
+      setApp: ((next) => {
+        state = typeof next === "function" ? next(state) : next;
+      }) as React.Dispatch<React.SetStateAction<AppState>>,
+      mountedRef: { current: true },
+      pollTimer: { current: undefined },
+      streamRef: { current: undefined },
+      fallbackPollRef,
+      activeRunIdRef: { current: "run-1" },
+      viewEpochRef: { current: 1 },
+      refreshConversations: async () => undefined,
+    });
+    const subscription = {
+      runId: "run-1",
+      conversationId: "conversation-1",
+      epoch: 1,
+    } as const;
+
+    controller.startPolling(subscription);
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(3_600);
+    expect(requests).toHaveLength(1);
+
+    controller.startPolling({ ...subscription, cursor: "cursor-restart" });
+    await flushPromises();
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.signal?.aborted).toBe(true);
+
+    requests[1]?.resolve(completedView("cursor-terminal"));
+    await flushPromises();
+    expect(state.run?.status).toBe("completed");
+
+    requests[0]?.resolve(runningView("cursor-stale"));
+    await flushPromises();
+    expect(state.run?.status).toBe("completed");
+    expect(state.error).toBeUndefined();
+  });
+
   it("keeps low-frequency reconciliation after the first SSE event and falls back when heartbeats stop", async () => {
     let state: AppState = {
       ...createInitialAppState(),
@@ -53,6 +111,7 @@ describe("live Ordinary run updates", () => {
       mountedRef: { current: true },
       pollTimer,
       streamRef,
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: "run-1" },
       viewEpochRef: { current: 1 },
       refreshConversations: async () => undefined,
@@ -99,6 +158,7 @@ describe("live Ordinary run updates", () => {
       mountedRef: { current: true },
       pollTimer: { current: undefined },
       streamRef: { current: undefined },
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: "run-1" },
       viewEpochRef: { current: 1 },
       refreshConversations: async () => undefined,
@@ -140,6 +200,7 @@ describe("live Ordinary run updates", () => {
       mountedRef: { current: true },
       pollTimer: { current: undefined },
       streamRef: { current: undefined },
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: "run-1" },
       viewEpochRef: { current: 1 },
       refreshConversations: async () => undefined,
@@ -184,6 +245,7 @@ describe("live Ordinary run updates", () => {
       mountedRef: { current: true },
       pollTimer: { current: undefined },
       streamRef: { current: undefined },
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: "run-1" },
       viewEpochRef: { current: 1 },
       refreshConversations: async () => undefined,

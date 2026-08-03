@@ -47,6 +47,7 @@ export type AgentRunResourceHost = {
   readonly toolOutputStore?: ToolOutputStore;
   readonly testOnlyAllowFakeModel?: boolean;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 };
 
 export type AgentHostRunResources<
@@ -68,6 +69,7 @@ export type AgentHostRunResources<
   readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 };
 
 export type AgentRunResources<
@@ -215,12 +217,13 @@ async function prepareAgentHostRunResourcesWithEnvironment<
       ? []
       : [createMcpToolRegistryContribution(mcpManager, { useDiscoveredTools: false })],
     release: async () => {
-      await mcpManager?.disconnectAll?.().catch(() => undefined);
+      await mcpManager?.disconnectAll?.();
     },
     processRegistry: runtime.processRegistry,
     processTerminator: runtime.processTerminator,
     toolOutputStore: runtime.toolOutputStore,
     fileMutationCoordinator: runtime.fileMutationCoordinator,
+    resolveManagedAttachmentPath: runtime.resolveManagedAttachmentPath,
   };
 }
 
@@ -308,5 +311,6 @@ export function createAgentToolCenterFactory(
     outputTokenCounter: context?.outputTokenCounter,
     metricsSink: context?.metricsSink,
     fileMutationCoordinator: resources.fileMutationCoordinator,
+    resolveManagedAttachmentPath: resources.resolveManagedAttachmentPath,
   });
 }

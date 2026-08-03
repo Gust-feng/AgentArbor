@@ -171,6 +171,7 @@ async function submitTurn(
   };
   const submitted = await runtime.ordinaryAgentFeature.commands.submitTurn({
     conversationId,
+    submissionId: effectiveRunInput.submissionId,
     input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
     birth: await runtime.prepareOrdinaryRunBirth(effectiveRunInput),
   });

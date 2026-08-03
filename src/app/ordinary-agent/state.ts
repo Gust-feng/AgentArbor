@@ -11,6 +11,7 @@ import type {
   OrdinaryRunBirth,
   OrdinaryRunEvent,
   OrdinaryRunInput,
+  OrdinaryPendingNestedToolCall,
   OrdinaryRunState,
   OrdinaryRunStatus,
   OrdinaryRunTurn,
@@ -138,6 +139,12 @@ export function transitionOrdinaryRun(input: {
       terminalAt,
     },
   };
+  if (nextState.status.kind === "completed" && nextState.pendingNestedToolCalls !== undefined) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      `Completed Ordinary run ${nextState.runId} cannot retain pending nested tool calls`,
+    );
+  }
   assertAwaitingApprovalFacts(nextState);
   assertOrdinaryToolFactGraph(nextState);
   assertOrdinarySessionState(nextState);
@@ -470,6 +477,12 @@ function pendingToolRoundAfter(
       "Ordinary Session tool result checkpoint requires every root ToolCallResult fact",
     );
   }
+  if (state.pendingNestedToolCalls !== undefined) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      "Ordinary Session tool result checkpoint cannot close while nested tool outcomes are pending",
+    );
+  }
   return undefined;
 }
 
@@ -558,25 +571,89 @@ function acceptedOrdinaryToolRound(input: {
   };
 }
 
+/** Atomically accepts one provider-emitted nested batch before any call can execute. */
+export function recordOrdinaryNestedToolRequests(input: {
+  readonly state: OrdinaryRunState;
+  readonly requests: readonly ToolCallRequest[];
+  readonly recordedAt: string;
+}): OrdinaryRunState {
+  if (input.requests.length === 0) return input.state;
+  if (input.state.status.kind !== "running") {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      `Ordinary run ${input.state.runId} cannot accept nested tools while ${input.state.status.kind}`,
+    );
+  }
+  const accepted = input.requests.map(requirePendingNestedToolCall);
+  const acceptedFactIds = accepted.map((request) => request.factId);
+  if (new Set(acceptedFactIds).size !== acceptedFactIds.length) {
+    throw new OrdinaryFeatureError(
+      "ordinary_tool_result_conflict",
+      `Ordinary run ${input.state.runId} received duplicate nested tool facts in one batch`,
+    );
+  }
+  const pending = [...(input.state.pendingNestedToolCalls ?? [])];
+  for (const request of accepted) {
+    const existing = pending.find((item) => item.factId === request.factId);
+    if (existing !== undefined) {
+      if (JSON.stringify(existing) === JSON.stringify(request)) continue;
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary run ${input.state.runId} already accepted a different nested request for ${request.factId}`,
+      );
+    }
+    if (input.state.toolCalls.some((result) => toolCallFactId(result) === request.factId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary run ${input.state.runId} cannot reuse committed nested tool fact ${request.factId}`,
+      );
+    }
+    pending.push(request);
+  }
+  if (pending.length === (input.state.pendingNestedToolCalls?.length ?? 0)) return input.state;
+  const nextState: OrdinaryRunState = {
+    ...input.state,
+    pendingNestedToolCalls: pending,
+    timestamps: { ...input.state.timestamps, updatedAt: input.recordedAt },
+  };
+  assertOrdinaryToolFactGraph(nextState);
+  return nextState;
+}
+
 /** Records one factual tool result; Session checkpoint commits the ordered round boundary. */
 export function recordOrdinaryToolResult(input: {
   readonly state: OrdinaryRunState;
   readonly result: ToolCallResult;
   readonly recordedAt: string;
 }): OrdinaryRunState {
+  const key = ordinaryToolResultKey(input.result);
+  const factId = toolCallFactId(input.result);
+  const existing = input.state.toolCalls.find((result) =>
+    toolCallFactId(result) === factId);
+  const pendingNested = input.state.pendingNestedToolCalls ?? [];
+  const pendingRequest = pendingNested.find((request) => request.factId === factId);
+  if (pendingRequest !== undefined && !toolResultMatchesPendingNestedCall(input.result, pendingRequest)) {
+    throw new OrdinaryFeatureError(
+      "ordinary_tool_result_conflict",
+      `Ordinary nested tool result ${factId} does not match its accepted request`,
+    );
+  }
+  const nextPendingNested = input.result.status === "approval_required"
+    ? pendingNested
+    : pendingNested.filter((request) => request.factId !== factId);
   assertOrdinaryToolFactGraph({
     ...input.state,
+    pendingNestedToolCalls: nextPendingNested.length === 0 ? undefined : nextPendingNested,
     toolCalls: [...input.state.toolCalls, input.result],
   });
-  const key = ordinaryToolResultKey(input.result);
-  const existing = input.state.toolCalls.find((result) =>
-    toolCallFactId(result) === toolCallFactId(input.result));
-  if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(input.result)) {
+  if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(input.result) &&
+      nextPendingNested.length === pendingNested.length) {
     return input.state;
   }
-  const recorded = {
+  const recorded: OrdinaryRunState = {
     ...input.state,
     toolCalls: mergeOrdinaryToolResults(input.state.toolCalls, [input.result]),
+    pendingNestedToolCalls: nextPendingNested.length === 0 ? undefined : nextPendingNested,
     toolResultRecordedAt: {
       ...input.state.toolResultRecordedAt,
       [key]: input.state.toolResultRecordedAt[key] ?? input.recordedAt,
@@ -586,7 +663,42 @@ export function recordOrdinaryToolResult(input: {
       updatedAt: input.recordedAt,
     },
   };
+  assertOrdinaryToolFactGraph(recorded);
   return recorded;
+}
+
+/** Closes nested write-ahead facts after their live delegated execution owner is gone. */
+export function reconcileInterruptedOrdinaryNestedToolCalls(input: {
+  readonly state: OrdinaryRunState;
+  readonly recordedAt: string;
+}): OrdinaryRunState {
+  let state = input.state;
+  for (const request of input.state.pendingNestedToolCalls ?? []) {
+    const existing = state.toolCalls.find((result) => toolCallFactId(result) === request.factId);
+    if (existing !== undefined && !toolResultMatchesPendingNestedCall(existing, request)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Interrupted nested tool result ${request.factId} does not match its accepted request`,
+      );
+    }
+    if (existing !== undefined && existing.status !== "approval_required") {
+      state = recordOrdinaryToolResult({ state, result: existing, recordedAt: input.recordedAt });
+      continue;
+    }
+    const result: ToolCallResult = existing?.status === "approval_required"
+      ? interruptedOrdinaryApprovalResult(state, existing)
+      : {
+          ...request,
+          output: undefined,
+          status: "failed",
+          error: "The process stopped before the nested tool outcome could be determined. Do not automatically retry this call.",
+          errorDomain: "runtime_error",
+          errorFacts: { code: "tool_execution_outcome_unknown", doNotBlindlyRetry: true },
+          durationMs: 0,
+        };
+    state = recordOrdinaryToolResult({ state, result, recordedAt: input.recordedAt });
+  }
+  return state;
 }
 
 /**
@@ -707,6 +819,11 @@ export function assertOrdinaryToolFactGraph(
     readonly pendingToolRound?: {
       readonly toolCallIds: readonly string[];
     };
+    readonly pendingNestedToolCalls?: readonly {
+      readonly callId: string;
+      readonly factId: string;
+      readonly parentToolCallFactId: string;
+    }[];
     readonly toolCalls: readonly {
       readonly callId: string;
       readonly factId?: string;
@@ -714,8 +831,8 @@ export function assertOrdinaryToolFactGraph(
     }[];
   },
 ): void {
-  const rootFactIds = new Set<string>();
-  for (const callId of state.pendingToolRound?.toolCallIds ?? []) rootFactIds.add(callId);
+  const pendingRootFactIds = new Set(state.pendingToolRound?.toolCallIds ?? []);
+  const rootFactIds = new Set<string>(pendingRootFactIds);
 
   const nestedResults: Array<{
     readonly callId: string;
@@ -747,6 +864,23 @@ export function assertOrdinaryToolFactGraph(
   }
 
   const nestedFactIds = new Set(nestedResults.map((result) => result.factId));
+  const pendingNestedFactIds = new Set<string>();
+  for (const request of state.pendingNestedToolCalls ?? []) {
+    if (request.factId === request.callId) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary pending nested tool ${request.callId} must have a distinct fact identity`,
+      );
+    }
+    if (pendingNestedFactIds.has(request.factId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary pending nested tool fact ${request.factId} is duplicated`,
+      );
+    }
+    pendingNestedFactIds.add(request.factId);
+  }
+  const allNestedFactIds = new Set([...nestedFactIds, ...pendingNestedFactIds]);
   for (const result of nestedResults) {
     if (rootFactIds.has(result.factId)) {
       throw new OrdinaryFeatureError(
@@ -754,7 +888,7 @@ export function assertOrdinaryToolFactGraph(
         `Ordinary nested tool fact ${result.factId} identity conflicts with a root tool fact`,
       );
     }
-    if (nestedFactIds.has(result.parentToolCallFactId)) {
+    if (allNestedFactIds.has(result.parentToolCallFactId)) {
       throw new OrdinaryFeatureError(
         "ordinary_tool_result_conflict",
         `Ordinary nested tool fact ${result.factId} cannot reference nested tool fact ${result.parentToolCallFactId} as its parent`,
@@ -767,6 +901,54 @@ export function assertOrdinaryToolFactGraph(
       );
     }
   }
+  for (const request of state.pendingNestedToolCalls ?? []) {
+    if (rootFactIds.has(request.factId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary pending nested tool fact ${request.factId} conflicts with a root tool fact`,
+      );
+    }
+    if (allNestedFactIds.has(request.parentToolCallFactId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary pending nested tool fact ${request.factId} cannot reference nested parent ${request.parentToolCallFactId}`,
+      );
+    }
+    if (!pendingRootFactIds.has(request.parentToolCallFactId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary pending nested tool fact ${request.factId} references inactive root ${request.parentToolCallFactId}`,
+      );
+    }
+    const result = nestedResults.find((item) => item.factId === request.factId);
+    if (result !== undefined &&
+        (result.callId !== request.callId || result.parentToolCallFactId !== request.parentToolCallFactId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_tool_result_conflict",
+        `Ordinary nested tool fact ${request.factId} has conflicting request and result identities`,
+      );
+    }
+  }
+}
+
+function requirePendingNestedToolCall(request: ToolCallRequest): OrdinaryPendingNestedToolCall {
+  if (request.factId === undefined || request.parentToolCallFactId === undefined ||
+      request.factId === request.callId) {
+    throw new OrdinaryFeatureError(
+      "ordinary_tool_result_conflict",
+      `Ordinary nested tool request ${request.callId} is missing its scoped fact identity`,
+    );
+  }
+  return cloneJson(request) as OrdinaryPendingNestedToolCall;
+}
+
+function toolResultMatchesPendingNestedCall(
+  result: ToolCallResult,
+  request: OrdinaryPendingNestedToolCall,
+): boolean {
+  return result.callId === request.callId && result.factId === request.factId &&
+    result.parentToolCallFactId === request.parentToolCallFactId && result.toolName === request.toolName &&
+    JSON.stringify(result.input) === JSON.stringify(request.input);
 }
 
 function withoutConfirmationRequest(

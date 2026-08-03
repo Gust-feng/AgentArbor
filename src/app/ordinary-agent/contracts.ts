@@ -22,7 +22,12 @@ import type {
   AgentSessionWriteCheckpoint,
 } from "../model-runtime/agent-session.js";
 import type { DesktopTaskSoilInput } from "../task-soil/task-soil-workspace.js";
+import type { AgentNoteVersions } from "../agent-notes/contracts.js";
 import type { OrdinaryToolMetricsSnapshot } from "./tool-runtime-metrics.js";
+import type {
+  CreateOrdinaryManagedAttachmentDraftResult,
+  OrdinaryManagedAttachmentRecord,
+} from "./managed-attachment-repository.js";
 
 export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v6" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v2" as const;
@@ -39,7 +44,9 @@ export type OrdinaryFeatureErrorCode =
   | "ordinary_rollback_target_not_found"
   | "ordinary_confirmation_not_found"
   | "ordinary_confirmation_in_progress"
-  | "ordinary_tool_result_conflict";
+  | "ordinary_tool_result_conflict"
+  | "ordinary_submission_conflict"
+  | "ordinary_managed_attachment_unavailable";
 
 /** Expected command/query failures that protocol adapters may map without parsing messages. */
 export class OrdinaryFeatureError extends Error {
@@ -78,9 +85,47 @@ export type OrdinaryFeatureDiagnostic =
       readonly error: unknown;
     }
   | {
-      /** A successor remained queued after the bounded activation retry was exhausted. */
+      /** A successor activation attempt failed; the feature retains ownership and schedules another attempt. */
       readonly kind: "successor_activation_failed";
-      readonly predecessorRunId: string;
+      readonly conversationId: string;
+      readonly predecessorRunId?: string;
+      readonly consecutiveFailures: number;
+      readonly retryDelayMs: number;
+      readonly error: unknown;
+    }
+  | {
+      /** Post-commit cancellation cleanup failed without changing the durable cancelled fact. */
+      readonly kind: "cancellation_cleanup_failed";
+      readonly runId: string;
+      readonly phase: "continuation_release" | "terminal_settlement";
+      readonly error: unknown;
+    }
+  | {
+      /** Durable deletion remains authoritative while startup or background cleanup retries this resource. */
+      readonly kind: "conversation_cleanup_failed";
+      readonly conversationId: string;
+      readonly phase: "run_enumeration" | "tool_evidence" | "run_snapshot" | "session" | "terminal_settlement" | "conversation_control";
+      readonly runId?: string;
+      readonly error: unknown;
+    }
+  | {
+      /** A tombstoned conversation still owns managed attachments and startup cleanup will retry later. */
+      readonly kind: "managed_attachment_cleanup_failed";
+      readonly conversationId: string;
+      readonly error: unknown;
+    }
+  | {
+      /** One damaged managed attachment was isolated while unrelated recovery continued. */
+      readonly kind: "managed_attachment_recovery_issue";
+      readonly identity?: string;
+      readonly error: unknown;
+    }
+  | {
+      /** Run birth failed after claim; the feature retries rollback and startup recovery remains the final fallback. */
+      readonly kind: "managed_attachment_claim_rollback_failed";
+      readonly runId: string;
+      readonly conversationId: string;
+      readonly attachmentIds: readonly string[];
       readonly error: unknown;
     };
 
@@ -91,6 +136,8 @@ export type OrdinaryRunBirth = {
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly agentDefinitionRef: RunAgentDefinitionRef;
   readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  /** Versions of the Agent Notes text frozen into this run's instructions. */
+  readonly agentNoteVersions?: AgentNoteVersions;
   /** Frozen provenance prevents the configured fallback becoming a user selection after restore. */
   readonly workspaceSelection?: "default" | "explicit";
   readonly informationAccess: SanitizedInformationAccessConfig;
@@ -137,6 +184,8 @@ export type OrdinaryConversationControlSummary = {
 
 export interface OrdinaryConversationControlRepository {
   save(state: OrdinaryConversationControlState, expectedRevision: number, savedAt: string): Promise<OrdinaryConversationControlDocument>;
+  /** Removes a control document that never became user-visible and still has the expected revision. */
+  delete(conversationId: string, expectedRevision: number): Promise<void>;
   get(conversationId: string): Promise<OrdinaryConversationControlDocument | undefined>;
   list(limit?: number): Promise<readonly OrdinaryConversationControlSummary[]>;
 }
@@ -233,6 +282,8 @@ export type OrdinaryRunState = {
   readonly visibleAssistantText?: string;
   /** Durable write-ahead fact until every root call has a resolved tool result. */
   readonly pendingToolRound?: OrdinaryPendingToolRound;
+  /** Nested requests accepted before execution and not yet closed by a terminal fact. */
+  readonly pendingNestedToolCalls?: readonly OrdinaryPendingNestedToolCall[];
   readonly toolCalls: readonly ToolCallResult[];
   /** Durable occurrence time keyed by the stable tool result identity. */
   readonly toolResultRecordedAt: Readonly<Record<string, string>>;
@@ -247,6 +298,11 @@ export type OrdinaryRunState = {
     readonly updatedAt: string;
     readonly terminalAt?: string;
   };
+};
+
+export type OrdinaryPendingNestedToolCall = ToolCallRequest & {
+  readonly factId: string;
+  readonly parentToolCallFactId: string;
 };
 
 export type OrdinaryRunSnapshotDocument = {
@@ -266,10 +322,20 @@ export type OrdinaryRunSummary = {
   readonly updatedAt: string;
 };
 
+export type OrdinaryRunRecoveryInventory = {
+  readonly summaries: readonly OrdinaryRunSummary[];
+  readonly issues: readonly {
+    readonly runId: string;
+    readonly error: unknown;
+  }[];
+};
+
 export interface OrdinaryRunRepository {
   save(state: OrdinaryRunState, expectedRevision: number): Promise<OrdinaryRunSnapshotDocument>;
   get(runId: string): Promise<OrdinaryRunSnapshotDocument | undefined>;
   list(limit?: number): Promise<readonly OrdinaryRunSummary[]>;
+  /** Full startup inventory; any issue makes absence-based cleanup unsafe. */
+  inspectRecoveryInventory(): Promise<OrdinaryRunRecoveryInventory>;
   delete(runId: string): Promise<void>;
 }
 
@@ -325,6 +391,8 @@ export type OrdinaryExecutionInput = {
   readonly onReasoningDelta?: (delta: string) => void;
   readonly onReasoningCompleted?: (content: string) => Promise<void>;
   readonly onToolRequested?: (request: ToolCallRequest) => void;
+  /** Must settle before a provider-emitted nested tool batch can preflight or execute. */
+  readonly onNestedToolRequestsAccepted?: (requests: readonly ToolCallRequest[]) => Promise<void>;
   readonly onToolProgress?: (progress: ToolCallProgress) => void;
   readonly onSessionWriteCheckpoint?: (checkpoint: AgentSessionWriteCheckpoint) => Promise<void>;
   /** Must settle before the executed result is returned to the model. */
@@ -397,6 +465,7 @@ export type StartOrdinaryRunInput = {
 
 export type SubmitOrdinaryTurnInput = {
   readonly conversationId?: string;
+  readonly submissionId?: string;
   readonly input: OrdinaryRunInput;
   readonly birth: OrdinaryRunBirth;
 };
@@ -496,6 +565,14 @@ export interface OrdinaryAgentFeature {
     setConversationPinned(conversationId: string, pinned: boolean): Promise<OrdinaryConversationReadModel>;
     rollbackConversation(input: { readonly conversationId: string; readonly targetRunId?: string; readonly stepsBack?: number }): Promise<OrdinaryConversationReadModel>;
     deleteConversation(conversationId: string): Promise<void>;
+    createManagedAttachmentDraft(input: {
+      readonly originalName: string;
+      readonly mimeType?: string;
+      readonly content: Uint8Array;
+      readonly uploadRequestId?: string;
+      readonly uploadFileIndex?: number;
+    }): Promise<CreateOrdinaryManagedAttachmentDraftResult>;
+    discardManagedAttachmentDraft(attachmentId: string): Promise<void>;
     cancel(runId: string, reason?: string): Promise<OrdinaryRunState>;
     decideApproval(input: DecideOrdinaryApprovalInput): Promise<OrdinaryRunState>;
   };
@@ -504,6 +581,7 @@ export interface OrdinaryAgentFeature {
     listRuns(limit?: number): Promise<readonly OrdinaryRunSummary[]>;
     getConversation(conversationId: string): Promise<OrdinaryConversationReadModel | undefined>;
     listConversations(limit?: number): Promise<readonly OrdinaryConversationReadModel[]>;
+    getManagedAttachment(attachmentId: string): Promise<OrdinaryManagedAttachmentRecord | undefined>;
     /** Returns undefined until the run's terminal facts are durably settled. */
     getStableTerminalRunFacts(runId: string): Promise<OrdinaryStableTerminalRunFacts | undefined>;
   };

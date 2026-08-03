@@ -3,6 +3,10 @@ import type { ToolDefinition, ToolExecutionContext, ToolExecutor, ToolJsonSchema
 import { asOptionalRecord, asRecord, stringOrUndefined } from "../../kernel/values/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { AgentToolRegistryContribution } from "../tool-center/factory.js";
+import {
+  attachmentEntries,
+  resolveAttachmentTarget,
+} from "../tool-center/adapters/context-attachment-access.js";
 import { createLocalEditFileTool, createLocalWriteFileTool } from "../tool-center/adapters/local-workspace-write-tools.js";
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import {
@@ -15,6 +19,7 @@ import { SpaceFeatureError, type SpaceFeature, type SpaceReference, type SpaceTa
 
 export type SpaceToolOptions = {
   readonly spaces: Pick<SpaceFeature, "commands" | "queries">;
+  readonly workspaceRoot: string;
   readonly taskSoil?: TaskSoil;
   readonly mutationCoordinator?: LocalWorkspaceMutationCoordinator;
 };
@@ -96,7 +101,7 @@ export function createSpaceMoveTool(options: SpaceToolOptions): ToolExecutor {
 export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExecutor {
   return tool({
     name: "SpaceAddReference",
-    description: "Add an opaque reference to a local file, workspace folder, web page, generated artifact, or Ordinary conversation. This never copies the target's content or transfers its ownership.",
+    description: "Add an opaque reference to a current Task Soil attachment, web page, generated artifact, or Ordinary conversation. Select local files and folders by attachmentId from AttachmentList; raw local paths are not accepted. This never copies the target's content or transfers its ownership.",
     metadata: writeMetadata,
     inputSchema: requiredSchema({
       spaceId: { type: "string" }, title: { type: "string" }, reference: referenceSchema,
@@ -105,9 +110,10 @@ export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExec
       const record = asRecord(input);
       const spaceId = stringOrUndefined(record.spaceId);
       const title = stringOrUndefined(record.title);
-      const reference = referenceFromUnknown(record.reference);
-      if (spaceId === undefined || title === undefined || reference === undefined) return invalid("spaceId, title and a valid reference are required.");
-      return resultFor(() => options.spaces.commands.addReference({ spaceId, title, reference }), (item) => ({ status: "added", item }));
+      if (spaceId === undefined || title === undefined) return invalid("spaceId, title and a valid reference are required.");
+      const resolution = await resolveAgentSpaceReference(record.reference, options);
+      if ("error" in resolution) return resolution.error;
+      return resultFor(() => options.spaces.commands.addReference({ spaceId, title, reference: resolution.reference }), (item) => ({ status: "added", item }));
     },
   });
 }
@@ -263,8 +269,15 @@ function requiredSchema(properties: ToolDefinition["inputSchema"]["properties"],
 const referenceSchema: ToolJsonSchema = {
   type: "object",
   oneOf: [
-    { type: "object", properties: { kind: { const: "local_file" }, path: { type: "string" } }, required: ["kind", "path"], additionalProperties: false },
-    { type: "object", properties: { kind: { const: "workspace_folder" }, path: { type: "string" } }, required: ["kind", "path"], additionalProperties: false },
+    {
+      type: "object",
+      properties: {
+        kind: { const: "local_attachment" },
+        attachmentId: { type: "string", minLength: 1, description: "Current Task Soil attachment id returned by AttachmentList." },
+      },
+      required: ["kind", "attachmentId"],
+      additionalProperties: false,
+    },
     { type: "object", properties: { kind: { const: "web_page" }, url: { type: "string", format: "uri" } }, required: ["kind", "url"], additionalProperties: false },
     { type: "object", properties: { kind: { const: "generated_artifact" }, artifactRef: { type: "string" } }, required: ["kind", "artifactRef"], additionalProperties: false },
     { type: "object", properties: { kind: { const: "conversation" }, conversationId: { type: "string" }, conversationTitle: { type: "string" } }, required: ["kind", "conversationId"], additionalProperties: false },
@@ -288,7 +301,7 @@ function resolveSpaceFileTarget(
     if (requestedPath !== undefined && requestedPath !== ".") {
       throw new Error("A single-file Space reference does not accept a nested path.");
     }
-    const absolutePath = path.resolve(contextRef.ref.slice("local-file:".length));
+    const absolutePath = absoluteLocalReferencePath(contextRef.ref, "local-file:");
     return { rootPath: path.dirname(absolutePath), relativePath: path.basename(absolutePath) };
   }
   if (contextRef?.kind === "project" && contextRef.ref.startsWith("local-project:")) {
@@ -296,11 +309,19 @@ function resolveSpaceFileTarget(
       throw new Error("A folder Space reference requires a relative file path.");
     }
     return {
-      rootPath: path.resolve(contextRef.ref.slice("local-project:".length)),
+      rootPath: absoluteLocalReferencePath(contextRef.ref, "local-project:"),
       relativePath: requestedPath,
     };
   }
   throw new Error(`Space reference ${referenceId} has no frozen local file grant.`);
+}
+
+function absoluteLocalReferencePath(ref: string, prefix: "local-file:" | "local-project:"): string {
+  const rawPath = ref.slice(prefix.length);
+  if (!path.isAbsolute(rawPath)) {
+    throw new Error("Frozen local Space references must contain an absolute path.");
+  }
+  return path.resolve(rawPath);
 }
 
 function hasSpaceWriteGrant(taskSoil: TaskSoil): boolean {
@@ -324,19 +345,69 @@ function movableTarget(kind: unknown, id: unknown): { readonly kind: "reference"
   return target?.kind === "reference" ? { kind: "reference", id: target.id } : undefined;
 }
 
-function referenceFromUnknown(value: unknown): SpaceReference | undefined {
+type AgentSpaceReferenceResolution =
+  | { readonly reference: SpaceReference }
+  | { readonly error: Readonly<Record<string, unknown>> };
+
+async function resolveAgentSpaceReference(
+  value: unknown,
+  options: SpaceToolOptions,
+): Promise<AgentSpaceReferenceResolution> {
   const record = asOptionalRecord(value);
-  if (record === undefined) return undefined;
+  if (record === undefined) return { error: invalid("spaceId, title and a valid reference are required.") };
   const kind = stringOrUndefined(record.kind);
-  if ((kind === "local_file" || kind === "workspace_folder") && stringOrUndefined(record.path) !== undefined) return { kind, path: stringOrUndefined(record.path)! };
-  if (kind === "web_page" && stringOrUndefined(record.url) !== undefined) return { kind, url: stringOrUndefined(record.url)! };
-  if (kind === "generated_artifact" && stringOrUndefined(record.artifactRef) !== undefined) return { kind, artifactRef: stringOrUndefined(record.artifactRef)! };
+  if (kind === "local_attachment") {
+    const attachmentId = stringOrUndefined(record.attachmentId);
+    if (attachmentId === undefined) return { error: invalid("local_attachment requires attachmentId from AttachmentList.") };
+    const attachment = attachmentEntries(options.taskSoil).find((entry) => entry.attachmentId === attachmentId);
+    if (attachment === undefined) {
+      return {
+        error: {
+          status: "space_reference_attachment_not_found",
+          attachmentId,
+          message: "No current Task Soil attachment matched this attachmentId.",
+        },
+      };
+    }
+    if (!attachment.authorized) {
+      return {
+        error: {
+          status: "space_reference_attachment_not_authorized",
+          attachmentId,
+          message: "The selected attachment is not authorized for reading in this run.",
+        },
+      };
+    }
+    try {
+      const target = await resolveAttachmentTarget({
+        entry: attachment,
+        workspaceRoot: options.workspaceRoot,
+        requireFile: false,
+        projectPathRequired: false,
+      });
+      return {
+        reference: target.rootKind === "file"
+          ? { kind: "local_file", path: target.rootAbsolutePath }
+          : { kind: "workspace_folder", path: target.rootAbsolutePath },
+      };
+    } catch (error) {
+      return {
+        error: {
+          status: "space_reference_attachment_unsupported",
+          attachmentId,
+          message: error instanceof Error ? error.message : "The selected attachment is not a local file or folder.",
+        },
+      };
+    }
+  }
+  if (kind === "web_page" && stringOrUndefined(record.url) !== undefined) return { reference: { kind, url: stringOrUndefined(record.url)! } };
+  if (kind === "generated_artifact" && stringOrUndefined(record.artifactRef) !== undefined) return { reference: { kind, artifactRef: stringOrUndefined(record.artifactRef)! } };
   if (kind === "conversation" && stringOrUndefined(record.conversationId) !== undefined) {
     const conversationTitle = optionalString(record.conversationTitle);
-    if (conversationTitle === null) return undefined;
-    return { kind, conversationId: stringOrUndefined(record.conversationId)!, conversationTitle };
+    if (conversationTitle === null) return { error: invalid("conversationTitle must be a string when provided.") };
+    return { reference: { kind, conversationId: stringOrUndefined(record.conversationId)!, conversationTitle } };
   }
-  return undefined;
+  return { error: invalid("spaceId, title and a valid reference are required.") };
 }
 
 async function resultFor<T>(operation: () => Promise<T>, project: (value: T) => unknown): Promise<unknown> {

@@ -14,7 +14,7 @@ import {
 import { runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
 import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
 import type { ToolCallResult } from "../../../domain/tools";
-import { shouldKeepRefreshing, stopPolling, stopStream } from "./app-runtime-controls";
+import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
@@ -53,8 +53,10 @@ export type PanelTaskSubmissionOptions = {
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly pollTimer: React.MutableRefObject<number | undefined>;
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
+  readonly fallbackPollRef: React.MutableRefObject<AbortController | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly submissionAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
   readonly refreshConversations: () => Promise<void>;
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
@@ -78,6 +80,24 @@ export async function submitPanelTask(
     : options.activeRunIdRef.current ?? options.app.run?.runId;
   const appBeforeSubmit = options.app;
   const attachmentsBeforeSubmit = options.attachments;
+  const path = conversationForSubmit?.conversationId === undefined
+    ? "/api/conversations"
+    : `/api/conversations/${encodeURIComponent(conversationForSubmit.conversationId)}/messages`;
+  const requestBody = {
+    goal: trimmed,
+    aiMode: options.aiMode,
+    toolConfirmationPolicy: options.toolConfirmationPolicy,
+    modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
+    workspaceDirectory: options.selectedWorkspaceDirectory,
+    taskSoilInput: taskSoilInputFromAttachments(attachmentsBeforeSubmit),
+    ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
+  };
+  const requestKey = JSON.stringify({ path, requestBody });
+  const existingSubmission = options.submissionAttemptRef.current;
+  const submissionId = existingSubmission?.key === requestKey
+    ? existingSubmission.id
+    : crypto.randomUUID();
+  options.submissionAttemptRef.current = { key: requestKey, id: submissionId };
   const likelyQueuesBehindActiveRun = conversationForSubmit !== undefined &&
     previousObservedRunId !== undefined &&
     runForSubmit !== undefined &&
@@ -86,8 +106,7 @@ export async function submitPanelTask(
   options.conversationLoadAbortRef.current = undefined;
   options.viewEpochRef.current = epoch;
   if (!likelyQueuesBehindActiveRun) {
-    stopPolling(options.pollTimer);
-    stopStream(options.streamRef);
+    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
   }
   options.activeRunIdRef.current = previousObservedRunId;
   options.setScreen("chat-active");
@@ -118,22 +137,10 @@ export async function submitPanelTask(
     };
   });
   try {
-    const path =
-      conversationForSubmit?.conversationId === undefined
-        ? "/api/conversations"
-        : `/api/conversations/${encodeURIComponent(conversationForSubmit.conversationId)}/messages`;
     const response = await postJson<{
       readonly conversation: Conversation;
       readonly run: StartedConversationRun;
-    }>(path, {
-      goal: trimmed,
-      aiMode: options.aiMode,
-      toolConfirmationPolicy: options.toolConfirmationPolicy,
-      modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
-      workspaceDirectory: options.selectedWorkspaceDirectory,
-      taskSoilInput: taskSoilInputFromAttachments(attachmentsBeforeSubmit),
-      ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
-    });
+    }>(path, { ...requestBody, submissionId });
     const immediateObservedRunId = runIdToObserveAfterStart({
       conversation: response.conversation,
       responseRunId: response.run.runId,
@@ -283,6 +290,9 @@ export async function submitPanelTask(
         ...previous,
         error: error instanceof Error ? error.message : "历史会话记录加载失败。",
       }));
+    }
+    if (options.submissionAttemptRef.current?.id === submissionId) {
+      options.submissionAttemptRef.current = undefined;
     }
     return true;
   } catch (error) {

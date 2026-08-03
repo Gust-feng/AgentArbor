@@ -19,6 +19,7 @@ import type { BasicAgentRun } from "./contracts/run";
 export type AppRunController = {
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly submissionAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly loadConversation: (conversationId: string) => Promise<boolean>;
   readonly startTask: (explicitGoal?: string) => Promise<void>;
   readonly startNewConversation: (explicitGoal?: string) => Promise<boolean>;
@@ -48,8 +49,10 @@ export type AppRunControllerOptions = {
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly pollTimer: React.MutableRefObject<number | undefined>;
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
+  readonly fallbackPollRef: React.MutableRefObject<AbortController | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly submissionAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
   readonly setCancellingRunId: React.Dispatch<React.SetStateAction<string | undefined>>;
 };
@@ -61,6 +64,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     mountedRef: options.mountedRef,
     pollTimer: options.pollTimer,
     streamRef: options.streamRef,
+    fallbackPollRef: options.fallbackPollRef,
     activeRunIdRef: options.activeRunIdRef,
     viewEpochRef: options.viewEpochRef,
     refreshConversations,
@@ -114,7 +118,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     if (currentRunId === undefined) return;
     const cancellationEpoch = options.viewEpochRef.current;
     options.setCancellingRunId(currentRunId);
-    stopLiveUpdates(options.pollTimer, options.streamRef);
+    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
     try {
       const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
       if (!options.mountedRef.current) return;
@@ -181,6 +185,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
   return {
     activeRunIdRef: options.activeRunIdRef,
     viewEpochRef: options.viewEpochRef,
+    submissionAttemptRef: options.submissionAttemptRef,
     loadConversation,
     startTask,
     startNewConversation,

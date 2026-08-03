@@ -75,6 +75,19 @@ export function createFileSystemOrdinaryConversationControlRepository(rootDir: s
         return structuredClone(document);
       });
     },
+    delete(conversationId, expectedRevision) {
+      return enqueue(async () => {
+        const current = await readDocument(rootDir, conversationId);
+        if (current === undefined) return;
+        if (current.revision !== expectedRevision) {
+          const cause = new Error(
+            `Ordinary conversation ${conversationId} revision conflict: expected ${expectedRevision}, received ${current.revision}`,
+          );
+          throw new OrdinaryFeatureError("ordinary_revision_conflict", cause.message, { cause });
+        }
+        await fs.rm(path.dirname(documentPath(rootDir, conversationId)), { recursive: true, force: true });
+      });
+    },
     get(conversationId) { return readDocument(rootDir, conversationId); },
     async list(limit = 50) {
       const root = path.join(rootDir, "conversations");

@@ -133,8 +133,11 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   appRef.current = options.app;
   const pollTimer = useRef<number | undefined>(undefined);
   const streamRef = useRef<EventSource | undefined>(undefined);
+  const fallbackPollRef = useRef<AbortController | undefined>(undefined);
   const activeRunIdRef = useRef<string | undefined>(undefined);
   const viewEpochRef = useRef(0);
+  const submissionAttemptRef = useRef<{ readonly key: string; readonly id: string } | undefined>(undefined);
+  const attachmentUploadAttemptRef = useRef<{ readonly key: string; readonly id: string } | undefined>(undefined);
 
   const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
   const bootstrapAbortRef = useRef<AbortController | undefined>(undefined);
@@ -188,7 +191,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
       bootstrapAbortRef.current = undefined;
       conversationLoadAbortRef.current?.abort();
       conversationLoadAbortRef.current = undefined;
-      stopLiveUpdates(pollTimer, streamRef);
+      stopLiveUpdates(pollTimer, streamRef, fallbackPollRef);
 
     };
   }, [loadBootstrap]);
@@ -248,8 +251,10 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mountedRef,
     pollTimer,
     streamRef,
+    fallbackPollRef,
     activeRunIdRef,
     viewEpochRef,
+    submissionAttemptRef,
     conversationLoadAbortRef,
     setCancellingRunId,
   }), [
@@ -355,7 +360,9 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mountedRef,
     contextBusy,
     setContextBusy,
+    attachmentUploadAttemptRef,
     setAttachments: options.setAttachments,
+    attachments: options.attachments,
     setSelectedWorkspaceDirectory: options.setSelectedWorkspaceDirectory,
     selectedModelId: options.selectedModelId,
     setComposerSelectedModelId: options.setComposerSelectedModelId,
@@ -365,6 +372,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     saveToolConfirmationPolicy: settingsController.saveToolConfirmationPolicy,
   }), [
     contextBusy,
+    options.attachments,
     options.selectedModelId,
     options.setApp,
     options.setAttachments,

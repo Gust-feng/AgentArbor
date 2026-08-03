@@ -15,6 +15,7 @@ export function contextAttachmentToolCenter(input: {
   readonly taskSoil: TaskSoil;
   readonly workspaceRoot: string;
   readonly supportsVisionInput?: boolean;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 }): ToolCenter {
   const center = new ToolCenter();
   for (const tool of createContextAttachmentTools(input)) {

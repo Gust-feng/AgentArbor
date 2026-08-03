@@ -36,6 +36,11 @@ test("conversation control repository atomically advances v2 metadata around one
     error.code === "ordinary_revision_conflict" &&
     error.cause instanceof Error &&
     /revision conflict/u.test(error.cause.message));
+  await assert.rejects(repository.delete(initial.conversationId, 1), (error: unknown) =>
+    error instanceof OrdinaryFeatureError && error.code === "ordinary_revision_conflict");
+  await repository.delete(initial.conversationId, second.revision);
+  assert.equal(await repository.get(initial.conversationId), undefined);
+  assert.deepEqual(await repository.list(), []);
 });
 
 test("conversation control repository rejects missing Session refs and v1 snapshots without migration", async (t) => {

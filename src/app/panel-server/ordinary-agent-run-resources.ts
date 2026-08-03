@@ -195,6 +195,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
               featureContributions: options.resolveFeatureToolContributions?.({
                 workspaceRoot: resources.workspaceRoot,
                 taskSoil,
+                agentNoteVersions: input.birth.agentNoteVersions,
               }),
             }),
             createSkillToolRegistryContribution(skillContexts),
@@ -256,6 +257,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
           taskSoil,
           modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
           workspaceRoot: resources.workspaceRoot,
+          resolveManagedAttachmentPath: resources.resolveManagedAttachmentPath,
         });
         executionEnvironment = (dependencies.createExecutionEnvironment ??
           ((cwd: string) => new NodeExecutionEnv({ cwd })))(resources.workspaceRoot);
@@ -447,18 +449,27 @@ function ordinaryToolBoundary(
 }
 
 function idempotentRelease(releasers: readonly (() => Promise<void>)[]): () => Promise<void> {
+  const pending = new Set(releasers.keys());
   let releasePromise: Promise<void> | undefined;
   return () => {
-    releasePromise ??= releaseAll(releasers);
+    releasePromise ??= releaseAll(releasers, pending).finally(() => {
+      releasePromise = undefined;
+    });
     return releasePromise;
   };
 }
 
-async function releaseAll(releasers: readonly (() => Promise<void>)[]): Promise<void> {
+async function releaseAll(
+  releasers: readonly (() => Promise<void>)[],
+  pending: Set<number> = new Set(releasers.keys()),
+): Promise<void> {
   const failures: unknown[] = [];
-  for (const release of releasers) {
+  for (const index of [...pending]) {
+    const release = releasers[index];
+    if (release === undefined) continue;
     try {
       await release();
+      pending.delete(index);
     } catch (error) {
       failures.push(error);
     }

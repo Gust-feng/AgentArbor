@@ -31,7 +31,13 @@ import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.
 import { createOrdinaryAgentLoopExecutionPort } from "./agent-loop-execution.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
 import {
+  createFileSystemOrdinaryManagedAttachmentRepository,
+  OrdinaryManagedAttachmentRepositoryError,
+  type OrdinaryManagedAttachmentRepository,
+} from "./managed-attachment-repository.js";
+import {
   createInitialOrdinaryRunState,
+  recordOrdinaryNestedToolRequests,
   recordOrdinaryToolResult,
   transitionOrdinaryRun,
 } from "./state.js";
@@ -40,6 +46,9 @@ import {
   ordinaryRunBirth,
   ordinaryRunTurn,
 } from "./test-support.js";
+import type {
+  AgentLoopAgentTool,
+} from "../model-runtime/agent-loop.js";
 import type {
   AgentSessionEntryRef,
   AgentSessionExecutionRefs,
@@ -190,6 +199,161 @@ test("Pi immediate schema failures become Ordinary facts before the tool-round c
   assert.equal(model.state.callCount, 2);
 });
 
+test("Ordinary persists delegated nested write-ahead before execution and closes it with the result", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-nested-write-ahead-integration-"));
+  const executionEnvironment = new NodeExecutionEnv({ cwd: root });
+  const sessions = new FileSystemAgentSessionRepository({
+    fileSystem: executionEnvironment,
+    sessionsRoot: path.join(root, "sessions"),
+  });
+  const runId = "nested-write-ahead-integration";
+  const sessionRef = await sessions.create({ sessionId: `${runId}-session`, sessionCwd: root });
+  const baseRepository = createFileSystemOrdinaryRunRepository(root);
+  let nestedWriteAheadSaved = false;
+  const repository: OrdinaryRunRepository = {
+    ...baseRepository,
+    async save(state, expectedRevision) {
+      const saved = await baseRepository.save(state, expectedRevision);
+      if (state.pendingNestedToolCalls !== undefined) nestedWriteAheadSaved = true;
+      return saved;
+    },
+  };
+  const model = fauxProvider();
+  model.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "parent-agent-call" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "nested-read" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("delegated result"),
+    fauxAssistantMessage("parent result"),
+  ]);
+  const binding = createModelProviderBinding({
+    protocol: "openai_responses",
+    baseUrl: "https://responses.example/v1",
+    profileId: "nested-write-ahead-profile",
+    apiKey: "test-key",
+    model: "nested-write-ahead-model",
+  }, { createResponsesTransport: () => providerStreams(model.provider) });
+  const readDefinition: ToolDefinition = {
+    name: "read",
+    description: "Read one file.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    metadata: {
+      category: "workspace",
+      riskLevel: "low",
+      operationType: "read-only",
+      requiresConfirmation: false,
+    },
+  };
+  const agentDefinition: ToolDefinition = {
+    name: "agent_call",
+    description: "Call one bounded specialist Agent.",
+    inputSchema: {
+      type: "object",
+      properties: { task: { type: "string" } },
+      required: ["task"],
+      additionalProperties: false,
+    },
+    metadata: {
+      category: "other",
+      riskLevel: "medium",
+      operationType: "read-write",
+      requiresConfirmation: false,
+    },
+  };
+  let executeCount = 0;
+  const gateway: ToolExecutionGateway = {
+    list: () => [readDefinition],
+    has: (name) => name === readDefinition.name,
+    preflight: (request) => ({ status: "ready", request }),
+    async execute(request) {
+      assert.equal(nestedWriteAheadSaved, true);
+      executeCount += 1;
+      return { ...request, output: "contents", status: "completed", durationMs: 1 };
+    },
+    async deliverResult(result) { return result; },
+  };
+  const agentTool: AgentLoopAgentTool = {
+    toolName: "agent_call",
+    async resolve() {
+      return {
+        agentName: "reviewer",
+        instructions: "Inspect the delegated file.",
+        input: "Read README.md.",
+        callerAgentId: "sub-agent:reviewer",
+        allowedTools: ["read"],
+      };
+    },
+  };
+  const execution = createOrdinaryAgentLoopExecutionPort({
+    resources: {
+      async acquire(input) {
+        const lease = await sessions.acquire(input.sessionRef);
+        const loop = createAgentSessionLoop({
+          executionEnvironment,
+          modelRegistry: binding.modelRegistry,
+          selectedModel: binding.selectedModel,
+          agentSession: lease.session,
+        });
+        return {
+          loop,
+          resolvedMessages: [{ role: "user", content: input.runInput.userMessage }],
+          tools: {
+            definitions: [readDefinition, agentDefinition],
+            gateway,
+            context: {
+              callerAgentId: "ordinary-agent",
+              traceId: input.runId,
+              goalId: input.runId,
+              confirmationPolicy: "prompt",
+            },
+            permission: {
+              callerAgentId: "ordinary-agent",
+              allowedTools: [readDefinition.name, agentDefinition.name],
+              confirmationPolicy: "prompt",
+            },
+          },
+          agentTools: [agentTool],
+          revokeSessionTo: (target) => lease.revokeTo(target),
+          releaseSession: () => lease.release(),
+          release: () => loop.release(),
+        };
+      },
+    },
+  });
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution,
+    sessionRepository: sessions,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => {
+    await feature.release();
+    await executionEnvironment.cleanup();
+    await removeTestDirectory(root);
+  });
+
+  await feature.commands.start({ ...startInput(runId), sessionRef });
+  const state = await waitForStatus(feature, runId, "completed");
+
+  const nested = state.toolCalls.find((result) => result.parentToolCallFactId === "parent-agent-call");
+  assert.equal(state.pendingNestedToolCalls, undefined);
+  assert.equal(nested?.factId, "agent-tool:17:parent-agent-call/tool:nested-read");
+  assert.equal(nested?.status, "completed");
+  assert.equal(state.toolCalls.find((result) => result.callId === "parent-agent-call")?.status, "completed");
+  assert.equal(nestedWriteAheadSaved, true);
+  assert.equal(executeCount, 1);
+});
+
 test("terminal run snapshot is saved before Session finalization", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-terminal-order-"));
   const base = createFileSystemOrdinaryRunRepository(root);
@@ -222,6 +386,247 @@ test("terminal run snapshot is saved before Session finalization", async (t) => 
   await feature.commands.start(startInput("terminal-order"));
   await waitForStatus(feature, "terminal-order", "completed");
   assert.deepEqual(order, ["terminal-save", "session-finalize"]);
+});
+
+test("run birth rolls back newly claimed managed attachments when the run snapshot cannot be saved", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-managed-claim-rollback-"));
+  const attachmentRoot = path.join(root, "managed-attachments");
+  const managedRepository = createFileSystemOrdinaryManagedAttachmentRepository(attachmentRoot);
+  const instanceId = "instance-rollback";
+  const attachmentId = "ordinary-managed-attachment-rollback";
+  await managedRepository.createDraft({
+    attachmentId,
+    instanceId,
+    originalName: "notes.txt",
+    mimeType: "text/plain",
+    content: Buffer.from("rollback me", "utf8"),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const base = createFileSystemOrdinaryRunRepository(root);
+  const repository: OrdinaryRunRepository = {
+    ...base,
+    async save() {
+      throw new Error("run snapshot unavailable");
+    },
+  };
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { async execute() { throw new Error("execution must not start"); } },
+    sessionRepository: new SessionHarness(),
+    managedAttachmentRepository: managedRepository,
+    managedAttachmentInstanceId: instanceId,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release().catch(() => undefined); await removeTestDirectory(root); });
+
+  const input = startInput("managed-claim-rollback");
+  await assert.rejects(feature.commands.start({
+    ...input,
+    input: {
+      userMessage: input.input.userMessage,
+      taskSoil: {
+        contextRefs: [{
+          attachmentId,
+          ref: `uploaded-attachment:${attachmentId}`,
+          kind: "file",
+          title: "notes.txt",
+        }],
+        permissionBoundaryRefs: [`read:uploaded-attachment:${attachmentId}`],
+      },
+    },
+  }), /run snapshot unavailable/u);
+
+  const restored = await managedRepository.get(attachmentId);
+  assert.equal(restored.owner.kind, "draft");
+  assert.equal(restored.owner.kind === "draft" ? restored.owner.instanceId : undefined, instanceId);
+});
+
+test("run birth compensates attachment claims reported after a partial multi-file write", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-managed-partial-claim-"));
+  const attachmentRoot = path.join(root, "managed-attachments");
+  const baseManagedRepository = createFileSystemOrdinaryManagedAttachmentRepository(attachmentRoot);
+  const instanceId = "instance-partial-claim";
+  const attachmentIds = ["partial-first", "partial-second"];
+  let releaseAttempts = 0;
+  let resolveRollbackRetry!: () => void;
+  const rollbackRetried = new Promise<void>((resolve) => { resolveRollbackRetry = resolve; });
+  const diagnostics: string[] = [];
+  for (const attachmentId of attachmentIds) {
+    await baseManagedRepository.createDraft({
+      attachmentId,
+      instanceId,
+      originalName: attachmentId + ".txt",
+      content: Buffer.from(attachmentId, "utf8"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+  }
+  const managedRepository: OrdinaryManagedAttachmentRepository = {
+    createDraft: baseManagedRepository.createDraft.bind(baseManagedRepository),
+    get: baseManagedRepository.get.bind(baseManagedRepository),
+    resolveContentPath: baseManagedRepository.resolveContentPath.bind(baseManagedRepository),
+    async claimForConversation(input) {
+      const partial = await baseManagedRepository.claimForConversation({
+        ...input,
+        attachmentIds: [input.attachmentIds[0]!],
+      });
+      throw new OrdinaryManagedAttachmentRepositoryError(
+        "ordinary_managed_attachment_storage_failure",
+        "simulated second owner write failure",
+        {
+          partialClaim: {
+            instanceId: input.instanceId,
+            conversationId: input.conversationId,
+            attachmentIds: partial.newlyClaimedAttachmentIds,
+          },
+        },
+      );
+    },
+    async releaseConversationClaim(input) {
+      releaseAttempts += 1;
+      if (releaseAttempts === 1) {
+        throw new OrdinaryManagedAttachmentRepositoryError(
+          "ordinary_managed_attachment_storage_failure",
+          "simulated rollback write failure",
+        );
+      }
+      await baseManagedRepository.releaseConversationClaim(input);
+      resolveRollbackRetry();
+    },
+    discardDraft: baseManagedRepository.discardDraft.bind(baseManagedRepository),
+    deleteConversation: baseManagedRepository.deleteConversation.bind(baseManagedRepository),
+    removeDraftsOwnedBy: baseManagedRepository.removeDraftsOwnedBy.bind(baseManagedRepository),
+    recoverAtStartup: baseManagedRepository.recoverAtStartup.bind(baseManagedRepository),
+  };
+  const sessions = new SessionHarness();
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { async execute() { throw new Error("execution must not start"); } },
+    sessionRepository: sessions,
+    managedAttachmentRepository: managedRepository,
+    managedAttachmentInstanceId: instanceId,
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "managed_attachment_claim_rollback_failed") diagnostics.push(diagnostic.kind);
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release().catch(() => undefined); await removeTestDirectory(root); });
+
+  const input = startInput("partial-claim");
+  await assert.rejects(feature.commands.start({
+    ...input,
+    input: {
+      userMessage: input.input.userMessage,
+      taskSoil: {
+        contextRefs: attachmentIds.map((attachmentId) => ({
+          attachmentId,
+          ref: "uploaded-attachment:" + attachmentId,
+          kind: "file" as const,
+        })),
+        permissionBoundaryRefs: attachmentIds.map((attachmentId) => "read:uploaded-attachment:" + attachmentId),
+      },
+    },
+  }), (error: unknown) => error instanceof OrdinaryManagedAttachmentRepositoryError &&
+    error.code === "ordinary_managed_attachment_storage_failure");
+
+  await rollbackRetried;
+  assert.equal(releaseAttempts, 2);
+  assert.deepEqual(diagnostics, ["managed_attachment_claim_rollback_failed"]);
+  assert.deepEqual((await baseManagedRepository.get(attachmentIds[0]!)).owner, { kind: "draft", instanceId });
+  assert.deepEqual((await baseManagedRepository.get(attachmentIds[1]!)).owner, { kind: "draft", instanceId });
+});
+
+test("a delayed claim rollback cannot release an attachment adopted by a same-submission retry", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-managed-claim-adoption-"));
+  const attachmentRoot = path.join(root, "managed-attachments");
+  const baseManagedRepository = createFileSystemOrdinaryManagedAttachmentRepository(attachmentRoot);
+  const instanceId = "instance-claim-adoption";
+  const attachmentId = "claim-adoption";
+  await baseManagedRepository.createDraft({
+    attachmentId,
+    instanceId,
+    originalName: "adopted.txt",
+    content: Buffer.from("adopted", "utf8"),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  let claimAttempts = 0;
+  let releaseAttempts = 0;
+  const managedRepository: OrdinaryManagedAttachmentRepository = {
+    createDraft: baseManagedRepository.createDraft.bind(baseManagedRepository),
+    get: baseManagedRepository.get.bind(baseManagedRepository),
+    resolveContentPath: baseManagedRepository.resolveContentPath.bind(baseManagedRepository),
+    async claimForConversation(input) {
+      claimAttempts += 1;
+      return await baseManagedRepository.claimForConversation(input);
+    },
+    async releaseConversationClaim(input) {
+      releaseAttempts += 1;
+      if (releaseAttempts === 1) {
+        throw new OrdinaryManagedAttachmentRepositoryError(
+          "ordinary_managed_attachment_storage_failure",
+          "simulated first rollback failure",
+        );
+      }
+      await baseManagedRepository.releaseConversationClaim(input);
+    },
+    discardDraft: baseManagedRepository.discardDraft.bind(baseManagedRepository),
+    deleteConversation: baseManagedRepository.deleteConversation.bind(baseManagedRepository),
+    removeDraftsOwnedBy: baseManagedRepository.removeDraftsOwnedBy.bind(baseManagedRepository),
+    recoverAtStartup: baseManagedRepository.recoverAtStartup.bind(baseManagedRepository),
+  };
+  const baseRunRepository = createFileSystemOrdinaryRunRepository(root);
+  let runSaveAttempts = 0;
+  const runRepository: OrdinaryRunRepository = {
+    ...baseRunRepository,
+    async save(state, revision) {
+      runSaveAttempts += 1;
+      if (runSaveAttempts === 1) throw new Error("first run snapshot unavailable");
+      return await baseRunRepository.save(state, revision);
+    },
+  };
+  const sessions = new SessionHarness();
+  const feature = createOrdinaryAgentFeature({
+    repository: runRepository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: { execute: (input) => completedOutcome(input, "adopted answer", sessions) },
+    sessionRepository: sessions,
+    managedAttachmentRepository: managedRepository,
+    managedAttachmentInstanceId: instanceId,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release().catch(() => undefined); await removeTestDirectory(root); });
+
+  const runInput = {
+    userMessage: "retry this submission",
+    taskSoil: {
+      contextRefs: [{ attachmentId, ref: `uploaded-attachment:${attachmentId}`, kind: "file" as const }],
+      permissionBoundaryRefs: [`read:uploaded-attachment:${attachmentId}`],
+    },
+  };
+  await assert.rejects(feature.commands.submitTurn({
+    submissionId: "claim-adoption-submission",
+    input: runInput,
+    birth: ordinaryRunBirth(),
+  }), /first run snapshot unavailable/u);
+
+  const retried = await feature.commands.submitTurn({
+    submissionId: "claim-adoption-submission",
+    input: runInput,
+    birth: ordinaryRunBirth(),
+  });
+  await waitForStatus(feature, retried.run.runId, "completed");
+  await new Promise<void>((resolve) => setTimeout(resolve, 400));
+
+  assert.equal(releaseAttempts, 1);
+  assert.deepEqual((await baseManagedRepository.get(attachmentId)).owner, {
+    kind: "conversation",
+    conversationId: retried.run.turn.conversationId,
+  });
 });
 
 test("cancellation serializes behind an in-flight Session checkpoint save", async (t) => {
@@ -271,6 +676,329 @@ test("cancellation serializes behind an in-flight Session checkpoint save", asyn
   const state = await cancellation;
   assert.equal(state.status.kind, "cancelled");
   assert.equal(state.session.phase, "started");
+});
+
+test("cancellation aborts execution only after its durable terminal save succeeds", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-cancel-save-order-"));
+  const base = createFileSystemOrdinaryRunRepository(root);
+  const order: string[] = [];
+  let rejectCancellationSave = true;
+  const repository: OrdinaryRunRepository = {
+    ...base,
+    async save(state, revision) {
+      if (state.status.kind === "cancelled") {
+        if (rejectCancellationSave) {
+          rejectCancellationSave = false;
+          order.push("cancel-save-failed");
+          throw new Error("cancel snapshot unavailable");
+        }
+        order.push("cancel-save");
+      }
+      return base.save(state, revision);
+    },
+  };
+  const gate = createGate();
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: new SessionHarness(),
+    execution: {
+      async execute(input) {
+        gate.enter();
+        await waitForAbort(input.abortSignal, () => { order.push("abort"); });
+        return { status: "cancelled", reason: String(input.abortSignal.reason), toolCalls: [], usage: {} };
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("cancel-save-order"));
+  await gate.entered;
+  await assert.rejects(feature.commands.cancel("cancel-save-order"), /cancel snapshot unavailable/u);
+  assert.deepEqual(order, ["cancel-save-failed"]);
+  assert.equal((await feature.queries.getRun("cancel-save-order"))?.status.kind, "running");
+
+  const cancelled = await feature.commands.cancel("cancel-save-order");
+  assert.equal(cancelled.status.kind, "cancelled");
+  assert.deepEqual(order, ["cancel-save-failed", "cancel-save", "abort"]);
+});
+
+test("cancellation returns after its durable commit while Session cleanup continues in the background", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-cancel-background-finalize-"));
+  const sessions = new SessionHarness();
+  const executionStarted = createGate();
+  const finalizationStarted = createGate();
+  let releaseFinalization!: () => void;
+  const finalizationReleased = new Promise<void>((resolve) => { releaseFinalization = resolve; });
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        const session = await prepareSession(input, sessions);
+        if (input.runId === "background-finalize-predecessor") {
+          executionStarted.enter();
+          await waitForAbort(input.abortSignal);
+          return { status: "cancelled", reason: String(input.abortSignal.reason), session, toolCalls: [], usage: {} };
+        }
+        return completedOutcome(input, "successor completed", sessions, session);
+      },
+      async finalizeSession(runId) {
+        if (runId !== "background-finalize-predecessor") return;
+        finalizationStarted.enter();
+        await finalizationReleased;
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { releaseFinalization(); await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("background-finalize-predecessor"));
+  await executionStarted.entered;
+  const successor = startInput("background-finalize-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "background-finalize-predecessor" },
+  });
+
+  const cancelled = await feature.commands.cancel("background-finalize-predecessor");
+  assert.equal(cancelled.status.kind, "cancelled");
+  await finalizationStarted.entered;
+  assert.equal((await feature.queries.getRun(successor.runId))?.status.kind, "queued");
+
+  releaseFinalization();
+  assert.equal((await waitForStatus(feature, successor.runId, "completed")).status.kind, "completed");
+});
+
+test("repeated cancellation coalesces finalization and feature release waits for the owned cleanup", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-cancel-cleanup-owner-"));
+  const sessions = new SessionHarness();
+  const executionStarted = createGate();
+  const finalizationStarted = createGate();
+  let releaseFinalization!: () => void;
+  const finalizationReleased = new Promise<void>((resolve) => { releaseFinalization = resolve; });
+  let finalizeCalls = 0;
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        const session = await prepareSession(input, sessions);
+        executionStarted.enter();
+        await waitForAbort(input.abortSignal);
+        return { status: "cancelled", reason: String(input.abortSignal.reason), session, toolCalls: [], usage: {} };
+      },
+      async finalizeSession() {
+        finalizeCalls += 1;
+        finalizationStarted.enter();
+        await finalizationReleased;
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => {
+    releaseFinalization();
+    await feature.release().catch(() => undefined);
+    await removeTestDirectory(root);
+  });
+
+  await feature.commands.start(startInput("cancel-cleanup-owner"));
+  await executionStarted.entered;
+  assert.equal((await feature.commands.cancel("cancel-cleanup-owner")).status.kind, "cancelled");
+  await finalizationStarted.entered;
+  assert.equal((await feature.commands.cancel("cancel-cleanup-owner")).status.kind, "cancelled");
+  assert.equal(finalizeCalls, 1);
+
+  let releaseCompleted = false;
+  const release = feature.release().then(() => { releaseCompleted = true; });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(releaseCompleted, false);
+  releaseFinalization();
+  await release;
+  assert.equal(finalizeCalls, 1);
+});
+
+test("cancelled approval retries release before opening stable terminal facts", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-cancel-continuation-cleanup-"));
+  const sessions = new SessionHarness();
+  const request = confirmation("cancel-continuation-cleanup");
+  const diagnostics: Array<{ readonly phase: string; readonly message: string }> = [];
+  const firstReleaseFailed = createGate();
+  let releaseAttempts = 0;
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        const session = await prepareSession(input, sessions, {
+          toolCalls: [{ callId: request.toolCallFactId, toolName: "shell", input: { command: "write" } }],
+        });
+        return {
+          status: "approval_required" as const,
+          session,
+          toolCalls: [approvalResult(request)],
+          usage: {},
+          confirmationRequests: [request],
+          continuation: {
+            availability: "live_only" as const,
+            async decide() { throw new Error("decision is not expected"); },
+            async release() {
+              releaseAttempts += 1;
+              if (releaseAttempts === 1) {
+                firstReleaseFailed.enter();
+                throw new Error("continuation release failed");
+              }
+            },
+          },
+        };
+      },
+    },
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "cancellation_cleanup_failed") {
+        diagnostics.push({ phase: diagnostic.phase, message: String(diagnostic.error) });
+      }
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("cancel-continuation-cleanup"));
+  await waitForStatus(feature, "cancel-continuation-cleanup", "awaiting_approval");
+  assert.equal((await feature.commands.cancel("cancel-continuation-cleanup")).status.kind, "cancelled");
+  await firstReleaseFailed.entered;
+  assert.equal(await feature.queries.getStableTerminalRunFacts("cancel-continuation-cleanup"), undefined);
+  const stable = await waitForStableTerminalFacts(feature, "cancel-continuation-cleanup");
+
+  assert.equal(stable.status.kind, "cancelled");
+  assert.equal(stable.toolFacts.length, 1);
+  assert.equal(releaseAttempts, 2);
+  assert.deepEqual(diagnostics, [{ phase: "continuation_release", message: "Error: continuation release failed" }]);
+});
+
+test("cancelled approval waits for continuation release before terminal settlement", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-cancel-continuation-barrier-"));
+  const sessions = new SessionHarness();
+  const request = confirmation("cancel-continuation-barrier");
+  const releaseStarted = createGate();
+  let allowRelease!: () => void;
+  const releaseAllowed = new Promise<void>((resolve) => { allowRelease = resolve; });
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        const session = await prepareSession(input, sessions, {
+          toolCalls: [{ callId: request.toolCallFactId, toolName: "shell", input: { command: "write" } }],
+        });
+        const cancelledResult: ToolCallResult = {
+          callId: request.toolCallFactId,
+          toolName: "shell",
+          input: { command: "write" },
+          output: undefined,
+          status: "cancelled",
+          durationMs: 1,
+        };
+        return {
+          status: "approval_required" as const,
+          session,
+          toolCalls: [approvalResult(request)],
+          usage: {},
+          confirmationRequests: [request],
+          continuation: {
+            availability: "live_only" as const,
+            async decide() { throw new Error("decision is not expected"); },
+            async release() {
+              releaseStarted.enter();
+              await releaseAllowed;
+              await input.onToolResult?.(cancelledResult);
+            },
+          },
+        };
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("cancel-continuation-barrier"));
+  await waitForStatus(feature, "cancel-continuation-barrier", "awaiting_approval");
+  await feature.commands.cancel("cancel-continuation-barrier");
+  await releaseStarted.entered;
+  assert.equal(await feature.queries.getStableTerminalRunFacts("cancel-continuation-barrier"), undefined);
+
+  allowRelease();
+  const stable = await waitForStableTerminalFacts(feature, "cancel-continuation-barrier");
+  const state = await feature.queries.getRun("cancel-continuation-barrier");
+  assert.equal(stable.toolFacts[0]?.status, "cancelled");
+  assert.equal(state?.pendingToolRound, undefined);
+  assert.equal(state?.toolCalls[0]?.status, "cancelled");
+});
+
+test("cancelled approval retries failed Session finalization before activating its queued successor", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-cancel-finalize-retry-"));
+  const sessions = new SessionHarness();
+  const request = confirmation("cancel-finalize-retry");
+  let finalizeAttempts = 0;
+  const executed: string[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        executed.push(input.runId);
+        if (input.runId !== "cancel-finalize-predecessor") {
+          return completedOutcome(input, "successor completed", sessions);
+        }
+        const session = await prepareSession(input, sessions, {
+          toolCalls: [{ callId: request.toolCallFactId, toolName: "shell", input: { command: "write" } }],
+        });
+        return {
+          status: "approval_required" as const,
+          session,
+          toolCalls: [approvalResult(request)],
+          usage: {},
+          confirmationRequests: [request],
+          continuation: {
+            availability: "live_only" as const,
+            async decide() { throw new Error("decision is not expected"); },
+            async release() { return undefined; },
+          },
+        };
+      },
+      async finalizeSession(runId) {
+        if (runId !== "cancel-finalize-predecessor") return;
+        finalizeAttempts += 1;
+        if (finalizeAttempts <= 2) throw new Error("transient Session finalization failure");
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("cancel-finalize-predecessor"));
+  await waitForStatus(feature, "cancel-finalize-predecessor", "awaiting_approval");
+  const successor = startInput("cancel-finalize-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "cancel-finalize-predecessor" },
+  });
+  await feature.commands.cancel("cancel-finalize-predecessor");
+
+  assert.equal((await waitForStatus(feature, successor.runId, "completed")).status.kind, "completed");
+  assert.deepEqual(executed, ["cancel-finalize-predecessor", "cancel-finalize-successor"]);
+  assert.equal(finalizeAttempts, 3);
 });
 
 test("approval continuation resumes the exact Session branch and persists resolved tool facts", async (t) => {
@@ -326,6 +1054,68 @@ test("approval continuation resumes the exact Session branch and persists resolv
   assert.equal(state.status.kind, "completed");
   assert.equal(state.toolCalls.find((result) => result.callId === request.toolCallFactId)?.status, "completed");
   assert.equal(state.session.phase === "rollbackable" ? state.session.endLeafRef.entryId : undefined, "approval-run-answer");
+});
+
+test("approval continuation failure finalizes its Session before activating a queued successor", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-approval-failure-finalize-"));
+  const sessions = new SessionHarness();
+  const request = confirmation("approval-failure-finalize");
+  let predecessorFinalized = false;
+  const executed: string[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        executed.push(input.runId);
+        if (input.runId !== "approval-failure-predecessor") {
+          if (!predecessorFinalized) throw new Error("queued successor acquired Session before predecessor finalization");
+          return completedOutcome(input, "successor completed", sessions);
+        }
+        const session = await prepareSession(input, sessions, {
+          toolCalls: [{ callId: request.toolCallFactId, toolName: "shell", input: { command: "write" } }],
+        });
+        return {
+          status: "approval_required" as const,
+          session,
+          toolCalls: [approvalResult(request)],
+          usage: {},
+          confirmationRequests: [request],
+          continuation: {
+            availability: "live_only" as const,
+            async decide() { throw new Error("provider disconnected after approval"); },
+            async release() { return undefined; },
+          },
+        };
+      },
+      async finalizeSession(runId) {
+        if (runId === "approval-failure-predecessor") predecessorFinalized = true;
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("approval-failure-predecessor"));
+  await waitForStatus(feature, "approval-failure-predecessor", "awaiting_approval");
+  const successor = startInput("approval-failure-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "approval-failure-predecessor" },
+  });
+  await feature.commands.decideApproval({
+    ownerRunId: "approval-failure-predecessor",
+    confirmationId: request.confirmationId,
+    decision: "approve_once",
+    decidedAt: "2026-01-01T00:00:10.000Z",
+  });
+
+  assert.equal((await waitForStatus(feature, "approval-failure-predecessor", "failed")).status.kind, "failed");
+  assert.equal((await waitForStatus(feature, successor.runId, "completed")).status.kind, "completed");
+  assert.equal(predecessorFinalized, true);
+  assert.deepEqual(executed, ["approval-failure-predecessor", "approval-failure-successor"]);
 });
 
 test("successive approval pauses retain the original run cancellation controller", async (t) => {
@@ -459,6 +1249,18 @@ test("tool facts reconcile in provider order after restart without replaying exe
   state = transitionOrdinaryRun({ state, transition: { type: "record_session_checkpoint", checkpoint: { kind: "assistant_tool_call_entry_committed", sessionId: sessionRef.sessionId, assistantEntryRef: assistantLeaf, toolCallIds: ["call-1", "call-2"] } }, recordedAt: clock()(), eventId: "checkpoint-3" });
   state = { ...state, pendingToolRound: { assistantEntryRef: assistantLeaf, toolCallIds: ["call-1", "call-2"] } };
   state = recordOrdinaryToolResult({ state, result: completedTool("call-1", "a.txt"), recordedAt: "2026-01-01T00:00:04.000Z" });
+  const nestedRequest = {
+    callId: "nested-write",
+    factId: "agent-tool:6:call-2/tool:nested-write",
+    parentToolCallFactId: "call-2",
+    toolName: "write",
+    input: { path: "b.txt", content: "updated" },
+  };
+  state = recordOrdinaryNestedToolRequests({
+    state,
+    requests: [nestedRequest],
+    recordedAt: "2026-01-01T00:00:05.000Z",
+  });
   await repository.save(state, 0);
   await controls.save({ conversationId: "conversation-1", createdAt: state.timestamps.createdAt, sessionRef }, 0, state.timestamps.createdAt);
 
@@ -473,8 +1275,17 @@ test("tool facts reconcile in provider order after restart without replaying exe
   assert.equal(executions, 0);
   assert.equal(recovered.status.kind, "blocked");
   assert.equal(recovered.status.reason.code, "tool_execution_outcome_unknown");
-  assert.deepEqual(recovered.toolCalls.map((result) => result.callId), ["call-1", "call-2"]);
-  assert.equal(recovered.toolCalls[1]?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.deepEqual(recovered.toolCalls.map((result) => result.factId ?? result.callId), [
+    "call-1",
+    nestedRequest.factId,
+    "call-2",
+  ]);
+  const nestedUnknown = recovered.toolCalls.find((result) => result.factId === nestedRequest.factId);
+  assert.equal(recovered.pendingNestedToolCalls, undefined);
+  assert.equal(nestedUnknown?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.equal(nestedUnknown?.parentToolCallFactId, "call-2");
+  assert.deepEqual(nestedUnknown?.input, nestedRequest.input);
+  assert.equal(recovered.toolCalls.find((result) => result.callId === "call-2")?.errorFacts?.code, "tool_execution_outcome_unknown");
   assert.deepEqual(sessions.reconciled.at(-1)?.orderedResults.map((result) => result.callId), ["call-1", "call-2"]);
   assert.equal(sessions.active(sessionRef)?.entryId, "recovery-assistant-results-1");
 });
@@ -701,6 +1512,47 @@ test("restart activates a healthy persisted root queue and completes it", async 
   assert.equal(executions, 1);
 });
 
+test("restart isolates a persisted root queue when its conversation control is missing", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-missing-conversation-control-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  const runId = "missing-control-queued";
+  const sessionRef = ordinaryAgentSessionRef("missing-control-session");
+  const recordedAt = clock();
+  const queued = createInitialOrdinaryRunState({
+    runId,
+    sessionRef,
+    turn: ordinaryRunTurn(runId),
+    runInput: { userMessage: "do not recover without control" },
+    birth: ordinaryRunBirth(),
+    recordedAt: recordedAt(),
+    eventId: "missing-control-created",
+  });
+  await repository.save(queued, 0);
+
+  let executions = 0;
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute() {
+        executions += 1;
+        throw new Error("a run without conversation control must not execute");
+      },
+    },
+    now: clock("2026-01-01T00:01:00.000Z"),
+    idFactory: ids(120),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  assert.equal(await restarted.queries.getRun(runId), undefined);
+  assert.deepEqual(await restarted.queries.listRuns(Number.MAX_SAFE_INTEGER), []);
+  assert.equal(await restarted.events.replay(runId), undefined);
+  await restarted.release();
+  assert.equal(executions, 0);
+});
+
 test("restart does not activate a stale root queue when the Session branch is unavailable", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-stale-root-recovery-"));
   const repository = createFileSystemOrdinaryRunRepository(root);
@@ -771,7 +1623,9 @@ test("restart does not activate a stale root queue when the Session branch is un
   });
   t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
 
-  assert.equal((await restarted.queries.getRun("stale-root"))?.status.kind, "queued");
+  assert.equal(await restarted.queries.getRun("stale-root"), undefined);
+  assert.deepEqual(await restarted.queries.listRuns(Number.MAX_SAFE_INTEGER), []);
+  assert.equal(await restarted.events.replay("stale-root"), undefined);
   assert.equal(executions, 0);
   assert.equal(await restarted.queries.getConversation(completed.turn.conversationId), undefined);
 });
@@ -867,7 +1721,7 @@ test("startup enumeration failures stay diagnostic while new runs remain availab
   const feature = createOrdinaryAgentFeature({
     repository: {
       ...durableRuns,
-      async list() { throw new Error("run enumeration unavailable"); },
+      async inspectRecoveryInventory() { throw new Error("run enumeration unavailable"); },
     },
     conversationRepository: {
       ...durableConversations,
@@ -886,6 +1740,103 @@ test("startup enumeration failures stay diagnostic while new runs remain availab
   await feature.commands.start(startInput("live-after-enumeration-failure"));
   await waitForStatus(feature, "live-after-enumeration-failure", "completed");
   assert.deepEqual(diagnostics.sort(), ["conversation_repository", "run_repository"]);
+});
+
+test("startup run enumeration failure isolates persisted runs that were not reconciled", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-run-enumeration-isolation-"));
+  const durableRuns = createFileSystemOrdinaryRunRepository(root);
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const sessions = new SessionHarness();
+  const runId = "unreconciled-persisted-run";
+  const sessionRef = ordinaryAgentSessionRef("unreconciled-persisted-session");
+  const recordedAt = clock();
+  const queued = createInitialOrdinaryRunState({
+    runId,
+    sessionRef,
+    turn: ordinaryRunTurn(runId),
+    runInput: { userMessage: "do not expose without startup reconciliation" },
+    birth: ordinaryRunBirth(),
+    recordedAt: recordedAt(),
+    eventId: "unreconciled-created",
+  });
+  await durableRuns.save(queued, 0);
+  await controls.save({
+    conversationId: queued.turn.conversationId,
+    createdAt: queued.timestamps.createdAt,
+    sessionRef,
+  }, 0, queued.timestamps.createdAt);
+
+  let executions = 0;
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRuns,
+      async inspectRecoveryInventory() { throw new Error("run enumeration unavailable"); },
+    },
+    conversationRepository: controls,
+    sessionRepository: sessions,
+    execution: {
+      async execute() {
+        executions += 1;
+        throw new Error("an unreconciled persisted run must not execute");
+      },
+    },
+    now: clock("2026-01-01T00:01:00.000Z"),
+    idFactory: ids(100),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  assert.equal(await feature.queries.getRun(runId), undefined);
+  assert.equal(await feature.events.replay(runId), undefined);
+  await feature.release();
+  assert.equal(executions, 0);
+});
+
+test("incomplete run recovery inventory preserves conversation-owned managed attachments", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-managed-incomplete-inventory-"));
+  const managedRepository = createFileSystemOrdinaryManagedAttachmentRepository(path.join(root, "managed-attachments"));
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const sessions = new SessionHarness();
+  const conversationId = "managed-incomplete-conversation";
+  const attachmentId = "managed-incomplete-attachment";
+  const sessionRef = ordinaryAgentSessionRef("managed-incomplete-session");
+  sessions.ensure(sessionRef);
+  await managedRepository.createDraft({
+    attachmentId,
+    instanceId: "previous-instance",
+    originalName: "preserve.txt",
+    content: Buffer.from("must survive incomplete inventory", "utf8"),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  await managedRepository.claimForConversation({
+    attachmentIds: [attachmentId],
+    instanceId: "previous-instance",
+    conversationId,
+    claimedAt: "2026-01-01T00:00:01.000Z",
+  });
+  await controls.save({
+    conversationId,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    sessionRef,
+  }, 0, "2026-01-01T00:00:00.000Z");
+  const damagedRunDirectory = path.join(root, "runs", "damaged-managed-run");
+  await fs.mkdir(damagedRunDirectory, { recursive: true });
+  await fs.writeFile(path.join(damagedRunDirectory, "snapshot.json"), "{ invalid", "utf8");
+
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: controls,
+    sessionRepository: sessions,
+    managedAttachmentRepository: managedRepository,
+    managedAttachmentInstanceId: "current-instance",
+    execution: { async execute() { throw new Error("damaged recovery must not execute"); } },
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.queries.listConversations();
+  assert.deepEqual((await managedRepository.get(attachmentId)).owner, {
+    kind: "conversation",
+    conversationId,
+  });
 });
 
 test("feature release aborts live execution and releases its owned resources", async (t) => {
@@ -948,6 +1899,53 @@ test("a failed Session finalization surfaces a diagnostic and does not permanent
   assert.equal(finalizeAttempts >= 3, true);
 });
 
+test("queued successor activation keeps retrying failed Session finalization without a new turn", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-finalize-pump-"));
+  const sessions = new SessionHarness();
+  const predecessorStarted = createGate();
+  let releasePredecessor!: () => void;
+  const predecessorReleased = new Promise<void>((resolve) => { releasePredecessor = resolve; });
+  let finalizeAttempts = 0;
+  let finalizeFailures = 4;
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        if (input.runId === "finalize-pump-predecessor") {
+          predecessorStarted.enter();
+          await predecessorReleased;
+        }
+        return completedOutcome(input, `answer ${input.runId}`, sessions);
+      },
+      async finalizeSession(runId) {
+        if (runId !== "finalize-pump-predecessor") return;
+        finalizeAttempts += 1;
+        if (finalizeFailures > 0) {
+          finalizeFailures -= 1;
+          throw new Error("Session finalization remains temporarily unavailable");
+        }
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { releasePredecessor(); await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("finalize-pump-predecessor"));
+  await predecessorStarted.entered;
+  const successor = startInput("finalize-pump-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "finalize-pump-predecessor" },
+  });
+  releasePredecessor();
+
+  assert.equal((await waitForStatus(feature, successor.runId, "completed")).status.kind, "completed");
+  assert.equal(finalizeAttempts, 5);
+});
+
 test("successor activation retries one transient persistence failure", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-successor-activation-"));
   const durableRepository = createFileSystemOrdinaryRunRepository(root);
@@ -999,23 +1997,28 @@ test("successor activation retries one transient persistence failure", async (t)
   assert.equal(activationSaveFailures, 0);
 });
 
-test("successor activation leaves the run queued and diagnoses repeated persistence failures", async (t) => {
+test("successor activation retains ownership across repeated persistence failures", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-successor-activation-exhausted-"));
   const durableRepository = createFileSystemOrdinaryRunRepository(root);
   const sessions = new SessionHarness();
   let activationSaveAttempts = 0;
+  let activationSaveFailures = 4;
   let releasePredecessor!: () => void;
   const predecessorReleased = new Promise<void>((resolve) => { releasePredecessor = resolve; });
   let markPredecessorStarted!: () => void;
   const predecessorStarted = new Promise<void>((resolve) => { markPredecessorStarted = resolve; });
-  const diagnostics: string[] = [];
+  const diagnostics: Array<{ readonly predecessorRunId: string; readonly consecutiveFailures: number }> = [];
   const feature = createOrdinaryAgentFeature({
     repository: {
       ...durableRepository,
       async save(state, expectedRevision) {
-        if (state.runId === "activation-exhausted-successor" && state.status.kind === "running") {
+        if (state.runId === "activation-exhausted-successor" &&
+            state.status.kind === "running" && state.session.phase === "not_started") {
           activationSaveAttempts += 1;
-          throw new Error("successor persistence remains unavailable");
+          if (activationSaveFailures > 0) {
+            activationSaveFailures -= 1;
+            throw new Error("successor persistence remains temporarily unavailable");
+          }
         }
         return durableRepository.save(state, expectedRevision);
       },
@@ -1034,7 +2037,10 @@ test("successor activation leaves the run queued and diagnoses repeated persiste
     },
     onDiagnostic: (diagnostic) => {
       if (diagnostic.kind === "successor_activation_failed") {
-        diagnostics.push(diagnostic.predecessorRunId);
+        diagnostics.push({
+          predecessorRunId: diagnostic.predecessorRunId ?? "missing-predecessor",
+          consecutiveFailures: diagnostic.consecutiveFailures,
+        });
       }
     },
     now: clock(),
@@ -1052,13 +2058,49 @@ test("successor activation leaves the run queued and diagnoses repeated persiste
   assert.equal((await feature.queries.getRun(successor.runId))?.status.kind, "queued");
 
   releasePredecessor();
-  const deadline = Date.now() + 5_000;
-  while (diagnostics.length === 0 && Date.now() < deadline) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  assert.equal(activationSaveAttempts, 2);
-  assert.deepEqual(diagnostics, ["activation-exhausted-predecessor"]);
-  assert.equal((await feature.queries.getRun(successor.runId))?.status.kind, "queued");
+  assert.equal((await waitForStatus(feature, successor.runId, "completed")).status.kind, "completed");
+  assert.equal(activationSaveAttempts, 5);
+  assert.deepEqual(diagnostics, [1, 2, 3, 4].map((consecutiveFailures) => ({
+    predecessorRunId: "activation-exhausted-predecessor",
+    consecutiveFailures,
+  })));
+});
+
+test("root queued activation remains feature-owned after its initial start save fails", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-root-activation-retry-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  let activationSaveAttempts = 0;
+  let activationSaveFailures = 3;
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async save(state, expectedRevision) {
+        if (state.runId === "root-activation-retry" &&
+            state.status.kind === "running" && state.session.phase === "not_started") {
+          activationSaveAttempts += 1;
+          if (activationSaveFailures > 0) {
+            activationSaveFailures -= 1;
+            throw new Error("root activation persistence remains temporarily unavailable");
+          }
+        }
+        return durableRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: { execute: (input) => completedOutcome(input, "root completed", sessions) },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await assert.rejects(
+    feature.commands.start(startInput("root-activation-retry")),
+    /root activation persistence remains temporarily unavailable/u,
+  );
+  assert.equal((await waitForStatus(feature, "root-activation-retry", "completed")).status.kind, "completed");
+  assert.equal(activationSaveAttempts, 4);
 });
 
 test("stable terminal facts appear only after terminal commit and notify subscribers", async (t) => {
@@ -1161,6 +2203,114 @@ test("restart reconciliation makes recovered blocked runs stable and readable", 
   assert.equal(facts.status.kind, "blocked");
   assert.equal(facts.status.kind === "blocked" ? facts.status.reason.code : undefined, "execution_continuation_lost");
   assert.equal(facts.executionStarted, true);
+});
+
+test("restart restores the durable safe Session leaf before activating a queued successor", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-session-leaf-recovery-"));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const sessions = new SessionHarness();
+  const sessionRef = ordinaryAgentSessionRef("recovered-session");
+  const conversationId = "recovered-conversation";
+  const recordedAt = clock();
+  sessions.ensure(sessionRef);
+
+  let cancelled = createInitialOrdinaryRunState({
+    runId: "recovered-cancelled",
+    sessionRef,
+    turn: { ...ordinaryRunTurn("recovered-cancelled"), conversationId },
+    runInput: { userMessage: "cancelled before Session cleanup" },
+    birth: ordinaryRunBirth(),
+    recordedAt: recordedAt(),
+    eventId: "recovered-cancelled-created",
+  });
+  cancelled = transitionOrdinaryRun({
+    state: cancelled,
+    transition: { type: "start" },
+    recordedAt: recordedAt(),
+    eventId: "recovered-cancelled-started",
+  });
+  cancelled = transitionOrdinaryRun({
+    state: cancelled,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: { kind: "start_leaf_captured", sessionId: sessionRef.sessionId, startLeafRef: null },
+    },
+    recordedAt: recordedAt(),
+    eventId: "recovered-start-leaf",
+  });
+  const safeLeaf = sessions.append(sessionRef, "recovered-safe-input", null);
+  cancelled = transitionOrdinaryRun({
+    state: cancelled,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: { kind: "input_entry_committed", sessionId: sessionRef.sessionId, inputEntryRef: safeLeaf },
+    },
+    recordedAt: recordedAt(),
+    eventId: "recovered-input",
+  });
+  const unacceptedLeaf = sessions.append(sessionRef, "recovered-unaccepted-answer", safeLeaf);
+  cancelled = transitionOrdinaryRun({
+    state: cancelled,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: {
+        kind: "assistant_response_entry_committed",
+        sessionId: sessionRef.sessionId,
+        assistantEntryRef: unacceptedLeaf,
+      },
+    },
+    recordedAt: recordedAt(),
+    eventId: "recovered-unaccepted-output",
+  });
+  cancelled = transitionOrdinaryRun({
+    state: cancelled,
+    transition: { type: "cancel", reason: "cancelled_by_user" },
+    recordedAt: recordedAt(),
+    eventId: "recovered-cancelled-terminal",
+  });
+  await repository.save(cancelled, 0);
+
+  const successor = createInitialOrdinaryRunState({
+    runId: "recovered-successor",
+    sessionRef,
+    turn: {
+      ...ordinaryRunTurn("recovered-successor"),
+      conversationId,
+      ordinal: 2,
+      predecessorRunId: cancelled.runId,
+    },
+    runInput: { userMessage: "continue from the accepted prefix" },
+    birth: ordinaryRunBirth(),
+    recordedAt: recordedAt(),
+    eventId: "recovered-successor-created",
+  });
+  await repository.save(successor, 0);
+  await controls.save({
+    conversationId,
+    createdAt: cancelled.timestamps.createdAt,
+    sessionRef,
+  }, 0, cancelled.timestamps.createdAt);
+
+  let observedStartLeaf: AgentSessionEntryRef | null | undefined;
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: controls,
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        observedStartLeaf = await sessions.getActiveLeaf(input.sessionRef);
+        return completedOutcome(input, "continued", sessions);
+      },
+    },
+    now: clock("2026-01-01T00:01:00.000Z"),
+    idFactory: ids(90),
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+
+  await waitForStatus(restarted, successor.runId, "completed");
+  assert.deepEqual(observedStartLeaf, safeLeaf);
+  assert.notDeepEqual(observedStartLeaf, unacceptedLeaf);
 });
 
 test("listRuns plus stable facts reconciliation view skips runs that are not yet stable", async (t) => {

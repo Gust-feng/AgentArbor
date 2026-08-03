@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
-import { OrdinaryFeatureError, type OrdinaryExecutionOutcome, type OrdinaryExecutionPort, type OrdinaryRunState } from "./contracts.js";
+import { OrdinaryFeatureError, type OrdinaryExecutionOutcome, type OrdinaryExecutionPort, type OrdinaryFeatureDiagnostic, type OrdinaryRunRepository, type OrdinaryRunState } from "./contracts.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
@@ -38,6 +38,46 @@ test("submitTurn serializes queued turns from the active Session branch", async 
   assert.deepEqual(observed.map((item) => item.message), ["first", "second"]);
   assert.equal(observed[1]?.startLeaf, `${first.run.runId}-answer`);
   assert.deepEqual((await run.feature.queries.getConversation(first.conversation.conversationId))?.turns.map((turn) => turn.content), ["first", "answer:first", "second", "answer:second"]);
+});
+
+test("failed first submission removes an uncommitted conversation birth so the same submission can retry", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-conversation-birth-cleanup-"));
+  const sessions = new SessionHarness();
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  let failInitialSave = true;
+  const repository: OrdinaryRunRepository = {
+    ...durableRepository,
+    async save(state, expectedRevision) {
+      if (failInitialSave && expectedRevision === 0) {
+        failInitialSave = false;
+        throw new Error("initial run snapshot unavailable");
+      }
+      return durableRepository.save(state, expectedRevision);
+    },
+  };
+  const conversationRepository = createFileSystemOrdinaryConversationControlRepository(root);
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  const request = {
+    submissionId: "birth-cleanup-retry",
+    input: { userMessage: "retry this submission" },
+    birth: ordinaryRunBirth(),
+  };
+  await assert.rejects(feature.commands.submitTurn(request), /initial run snapshot unavailable/u);
+  assert.equal(await conversationRepository.get("conversation:birth-cleanup-retry"), undefined);
+  assert.equal(sessions.deleted.length, 1);
+
+  const retried = await feature.commands.submitTurn(request);
+  const completed = await waitForStatus(feature, retried.run.runId, "completed");
+  assert.equal(completed.status.kind, "completed");
 });
 
 test("conversation projection reads completed Session answers in one batch", async (t) => {
@@ -167,6 +207,223 @@ test("rollback refuses to revive a cancelled queued turn that never entered the 
   assert.equal((await run.sessions.getActiveLeaf(first.run.sessionRef))?.entryId, `${first.run.runId}-answer`);
 });
 
+test("deleteConversation returns after tombstoning when execution ignores cancellation", async (t) => {
+  const started = createGate();
+  let finishExecution!: () => void;
+  const run = await fixture(t, {
+    async execute(input) {
+      run.sessions.ensure(input.sessionRef);
+      started.enter();
+      return new Promise<OrdinaryExecutionOutcome>((resolve) => {
+        finishExecution = () => resolve({
+          status: "cancelled",
+          reason: "late cancellation settlement",
+          toolCalls: [],
+          usage: {},
+        });
+      });
+    },
+  });
+  const submitted = await run.feature.commands.submitTurn({
+    input: { userMessage: "ignore cancellation" },
+    birth: ordinaryRunBirth(),
+  });
+  await started.entered;
+
+  const deletion = run.feature.commands.deleteConversation(submitted.conversation.conversationId);
+  let timeout: NodeJS.Timeout | undefined;
+  const returnedBeforeExecution = await Promise.race([
+    deletion.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timeout = setTimeout(() => resolve(false), 1_000);
+    }),
+  ]);
+  if (timeout !== undefined) clearTimeout(timeout);
+
+  assert.equal(returnedBeforeExecution, true);
+  assert.equal(await run.feature.queries.getConversation(submitted.conversation.conversationId), undefined);
+  assert.equal(await run.feature.queries.getRun(submitted.run.runId), undefined);
+  assert.equal(await run.feature.queries.getStableTerminalRunFacts(submitted.run.runId), undefined);
+  assert.equal(await run.feature.events.replay(submitted.run.runId), undefined);
+  assert.deepEqual(await run.feature.queries.listRuns(Number.MAX_SAFE_INTEGER), []);
+
+  finishExecution();
+  await deletion;
+  await waitForCondition(() => run.sessions.deleted.length === 1);
+});
+
+test("deleteConversation survives run enumeration failure after the tombstone commit", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-delete-enumeration-"));
+  const sessions = new SessionHarness();
+  const baseRepository = createFileSystemOrdinaryRunRepository(root);
+  const enumerationError = new Error("run enumeration unavailable");
+  let failRunEnumeration = false;
+  const repository = {
+    ...baseRepository,
+    async list(limit?: number) {
+      if (failRunEnumeration) throw enumerationError;
+      return baseRepository.list(limit);
+    },
+  };
+  const diagnostics: OrdinaryFeatureDiagnostic[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+    onDiagnostic: (diagnostic) => { diagnostics.push(diagnostic); },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+  const completed = await submitAndComplete(feature, undefined, "delete despite failed enumeration");
+  const conversationId = completed.conversation.conversationId;
+  const runId = completed.run.runId;
+
+  failRunEnumeration = true;
+  await feature.commands.deleteConversation(conversationId);
+
+  assert.equal(await feature.queries.getConversation(conversationId), undefined);
+  assert.equal(await feature.queries.getRun(runId), undefined);
+  assert.equal(await feature.events.replay(runId), undefined);
+  await waitForCondition(() => sessions.deleteAttempts.length === 1 && diagnostics.length === 1);
+  assert.equal(await baseRepository.get(runId), undefined);
+  assert.deepEqual(diagnostics, [{
+    kind: "conversation_cleanup_failed",
+    conversationId,
+    phase: "run_enumeration",
+    error: enumerationError,
+  }]);
+});
+
+test("conversation cleanup retries one transient evidence failure without restart", async (t) => {
+  let evidenceAttempts = 0;
+  const run = await fixture(t, immediateExecution, async () => {
+    evidenceAttempts += 1;
+    if (evidenceAttempts === 1) throw new Error("transient evidence failure");
+  });
+  const completed = await submitAndComplete(run.feature, undefined, "retry cleanup in process");
+  const conversationId = completed.conversation.conversationId;
+  const repository = createFileSystemOrdinaryRunRepository(run.root);
+
+  await run.feature.commands.deleteConversation(conversationId);
+  await waitForCondition(() => evidenceAttempts >= 2 && run.sessions.deleteAttempts.length >= 2);
+
+  assert.equal(await repository.get(completed.run.runId), undefined);
+  assert.equal(await run.feature.queries.getConversation(conversationId), undefined);
+  assert.equal(run.sessions.deleted.length, 1);
+});
+
+test("startup finalizes tombstoned conversations without recovering their runs", async (t) => {
+  const releasedEvidence: string[] = [];
+  const run = await fixture(t, {
+    execute: async (input) => complete(input, run.sessions, "done"),
+  }, (ownerId) => { releasedEvidence.push(ownerId); });
+  const first = await submitAndComplete(run.feature, undefined, "first deleted turn");
+  const second = await submitAndComplete(run.feature, first.conversation.conversationId, "second deleted turn");
+  const controls = createFileSystemOrdinaryConversationControlRepository(run.root);
+  const conversationId = first.conversation.conversationId;
+  const control = await controls.get(conversationId);
+  assert.ok(control !== undefined);
+
+  await run.feature.release();
+  await controls.save(
+    { ...control.state, deletedAt: "2026-08-02T01:00:00.000Z" },
+    control.revision,
+    "2026-08-02T01:00:00.000Z",
+  );
+
+  const diagnostics: string[] = [];
+  const restarted = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(run.root),
+    conversationRepository: controls,
+    execution: { async execute() { throw new Error("deleted runs must not execute"); } },
+    sessionRepository: run.sessions,
+    releaseToolEvidenceOwner: async (ownerId) => { releasedEvidence.push("restart:" + ownerId); },
+    onDiagnostic: (diagnostic) => { diagnostics.push(diagnostic.kind); },
+  });
+  assert.deepEqual(await restarted.queries.listConversations(), []);
+  assert.equal(await restarted.queries.getRun(first.run.runId), undefined);
+  assert.equal(await restarted.queries.getRun(second.run.runId), undefined);
+  assert.deepEqual(releasedEvidence.sort(), [
+    "restart:" + first.run.runId,
+    "restart:" + second.run.runId,
+  ].sort());
+  assert.deepEqual(run.sessions.deleted, [control.state.sessionRef.sessionId]);
+  assert.equal(diagnostics.includes("conversation_unavailable"), false);
+  await restarted.release();
+});
+
+test("startup retries cleanup that remained blocked by tool evidence release", async (t) => {
+  const evidenceFailure = new Error("tool evidence release failed once");
+  const evidenceAttempts: string[] = [];
+  const diagnostics: OrdinaryFeatureDiagnostic[] = [];
+  let allowEvidenceRelease = false;
+  const run = await fixture(t, immediateExecution, async (ownerId) => {
+    evidenceAttempts.push(ownerId);
+    if (!allowEvidenceRelease) throw evidenceFailure;
+  }, (diagnostic) => { diagnostics.push(diagnostic); });
+  const completed = await submitAndComplete(run.feature, undefined, "delete and retry cleanup");
+  const conversationId = completed.conversation.conversationId;
+  const runId = completed.run.runId;
+  const sessionId = completed.run.sessionRef.sessionId;
+  const repository = createFileSystemOrdinaryRunRepository(run.root);
+
+  await run.feature.commands.deleteConversation(conversationId);
+
+  assert.equal(await run.feature.queries.getConversation(conversationId), undefined);
+  assert.deepEqual(await run.feature.queries.listConversations(), []);
+  assert.equal(await run.feature.queries.getRun(runId), undefined);
+  assert.deepEqual(await run.feature.queries.listRuns(Number.MAX_SAFE_INTEGER), []);
+  assert.equal(await run.feature.queries.getStableTerminalRunFacts(runId), undefined);
+  assert.equal(await run.feature.events.replay(runId), undefined);
+  await waitForCondition(() => run.sessions.deleteAttempts.length >= 1);
+  assert.equal(evidenceAttempts.length >= 1, true);
+  assert.equal(evidenceAttempts.every((ownerId) => ownerId === runId), true);
+  assert.equal(diagnostics.every((diagnostic) => diagnostic.kind === "conversation_cleanup_failed" &&
+    diagnostic.conversationId === conversationId &&
+    diagnostic.phase === "tool_evidence" &&
+    diagnostic.runId === runId &&
+    diagnostic.error === evidenceFailure), true);
+  assert.notEqual(await repository.get(runId), undefined);
+
+  await run.feature.release();
+  const evidenceAttemptsBeforeRestart = evidenceAttempts.length;
+  const sessionAttemptsBeforeRestart = run.sessions.deleteAttempts.length;
+  let restartedExecutions = 0;
+  let restartedEvidenceAttempts = 0;
+  const restarted = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(run.root),
+    execution: {
+      async execute() {
+        restartedExecutions += 1;
+        throw new Error("tombstoned runs must not execute");
+      },
+    },
+    sessionRepository: run.sessions,
+    releaseToolEvidenceOwner: async (ownerId) => {
+      evidenceAttempts.push(ownerId);
+      restartedEvidenceAttempts += 1;
+      if (restartedEvidenceAttempts === 1) throw evidenceFailure;
+    },
+    onDiagnostic: (diagnostic) => { diagnostics.push(diagnostic); },
+  });
+
+  assert.deepEqual(await restarted.queries.listConversations(), []);
+  assert.equal(await restarted.queries.getRun(runId), undefined);
+  assert.equal(await restarted.events.replay(runId), undefined);
+  assert.equal(restartedExecutions, 0);
+  await waitForCondition(() => restartedEvidenceAttempts >= 2 &&
+    run.sessions.deleteAttempts.length >= sessionAttemptsBeforeRestart + 2);
+  assert.equal(evidenceAttempts.length, evidenceAttemptsBeforeRestart + 2);
+  assert.equal(await repository.get(runId), undefined);
+  assert.deepEqual(run.sessions.deleteAttempts, Array(sessionAttemptsBeforeRestart + 2).fill(sessionId));
+  assert.equal(diagnostics.length, evidenceAttemptsBeforeRestart + 1);
+  await restarted.release();
+});
+
+
 test("deleteConversation removes Session and tool evidence after writing a tombstone", async (t) => {
   const releasedEvidence: string[] = [];
   const run = await fixture(t, {
@@ -178,6 +435,7 @@ test("deleteConversation removes Session and tool evidence after writing a tombs
   const controlBeforeDelete = await createFileSystemOrdinaryConversationControlRepository(run.root).get(conversationId);
   await run.feature.commands.deleteConversation(conversationId);
   await run.feature.commands.deleteConversation(conversationId);
+  await waitForCondition(() => releasedEvidence.length === 2 && run.sessions.deleted.length === 1);
   assert.equal(await run.feature.queries.getConversation(conversationId), undefined);
   assert.deepEqual(await run.feature.queries.listConversations(), []);
   assert.equal(await run.feature.queries.getRun(first.run.runId), undefined);
@@ -188,11 +446,25 @@ test("deleteConversation removes Session and tool evidence after writing a tombs
   assert.equal(tombstone?.state.deletedAt !== undefined, true);
 });
 
-async function fixture(t: test.TestContext, executionFactory: ((sessions: SessionHarness) => OrdinaryExecutionPort | Promise<OrdinaryExecutionPort>) | OrdinaryExecutionPort, releaseToolEvidenceOwner?: (ownerId: string) => void) {
+async function fixture(
+  t: test.TestContext,
+  executionFactory: ((sessions: SessionHarness) => OrdinaryExecutionPort | Promise<OrdinaryExecutionPort>) | OrdinaryExecutionPort,
+  releaseToolEvidenceOwner?: (ownerId: string) => void | Promise<void>,
+  onDiagnostic?: (diagnostic: OrdinaryFeatureDiagnostic) => void,
+) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-conversation-"));
   const sessions = new SessionHarness();
   const execution = typeof executionFactory === "function" ? await executionFactory(sessions) : executionFactory;
-  const feature = createOrdinaryAgentFeature({ repository: createFileSystemOrdinaryRunRepository(root), conversationRepository: createFileSystemOrdinaryConversationControlRepository(root), execution, sessionRepository: sessions, releaseToolEvidenceOwner, now: clock(), idFactory: ids() });
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    execution,
+    sessionRepository: sessions,
+    releaseToolEvidenceOwner,
+    onDiagnostic,
+    now: clock(),
+    idFactory: ids(),
+  });
   t.after(async () => { await feature.release(); await removeTestDirectory(root); });
   return { root, feature, sessions };
 }
@@ -220,6 +492,15 @@ async function complete(input: Parameters<OrdinaryExecutionPort["execute"]>[0], 
   const assistantEntryRef = sessions.append(input.sessionRef, `${input.runId}-answer`, undefined, answer);
   await input.onSessionWriteCheckpoint?.({ kind: "assistant_response_entry_committed", sessionId: input.sessionRef.sessionId, assistantEntryRef });
   return { status: "completed", answer, session: { ...session, latestLeafRef: assistantEntryRef }, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+}
+
+async function waitForCondition(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Timed out waiting for Ordinary conversation cleanup");
 }
 
 async function waitForStatus(feature: ReturnType<typeof createOrdinaryAgentFeature>, runId: string, status: OrdinaryRunState["status"]["kind"]): Promise<OrdinaryRunState> {
@@ -254,6 +535,7 @@ async function removeTestDirectory(root: string): Promise<void> {
 type SessionNode = { readonly ref: AgentSessionEntryRef; readonly parent: AgentSessionEntryRef | null; readonly text: string };
 class SessionHarness implements AgentSessionRepository {
   readonly deleted: string[] = [];
+  readonly deleteAttempts: string[] = [];
   readonly assistantEntryReadBatches: string[][] = [];
   private readonly nodes = new Map<string, Map<string, SessionNode>>();
   private readonly active = new Map<string, AgentSessionEntryRef | null>();
@@ -270,5 +552,5 @@ class SessionHarness implements AgentSessionRepository {
   }
   async readToolCalls(_input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef }): Promise<readonly ToolCallRequest[]> { return []; }
   async reconcileToolResultEntries(input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef; readonly orderedResults: readonly ToolCallResult[] }): Promise<AgentSessionEntryRef> { return this.append(input.sessionRef, `${input.assistantEntryRef.entryId}-results`); }
-  async delete(ref: AgentSessionRef): Promise<void> { if (this.refs.has(ref.sessionId)) this.deleted.push(ref.sessionId); this.nodes.delete(ref.sessionId); this.active.delete(ref.sessionId); this.refs.delete(ref.sessionId); }
+  async delete(ref: AgentSessionRef): Promise<void> { this.deleteAttempts.push(ref.sessionId); if (this.refs.has(ref.sessionId)) this.deleted.push(ref.sessionId); this.nodes.delete(ref.sessionId); this.active.delete(ref.sessionId); this.refs.delete(ref.sessionId); }
 }

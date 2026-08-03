@@ -90,6 +90,8 @@ export type AgentLoopInput = {
   readonly onReasoningCompleted?: (content: string) => Promise<void>;
   /** Emitted once when an exact tool request enters its execution boundary. */
   readonly onToolRequested?: (request: ToolCallRequest) => void;
+  /** Resolves after the owner atomically accepts one provider-emitted nested tool batch. */
+  readonly onNestedToolRequestsAccepted?: (requests: readonly ToolCallRequest[]) => Promise<void>;
   /** Live-only bounded progress emitted by the active tool executor. */
   readonly onToolProgress?: (progress: ToolCallProgress) => void;
   /** Resolves only after the owning feature has durably accepted the executed tool fact. */

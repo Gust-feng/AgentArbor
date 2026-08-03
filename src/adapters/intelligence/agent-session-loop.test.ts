@@ -26,7 +26,7 @@ import type {
   ToolExecutor,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
-import { withToolModelAttachments } from "../../domain/tools/index.js";
+import { toolCallFactId, withToolModelAttachments } from "../../domain/tools/index.js";
 import { createAgentSessionLoop } from "./agent-session-loop.js";
 import { ToolCenter } from "../../app/tool-center/tool-center.js";
 import { createReadToolOutputTool } from "../../app/tool-center/adapters/tool-output-read-tool.js";
@@ -2180,11 +2180,13 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   ]);
   const accepted: ToolCallResult[] = [];
   const delivered: ToolCallResult[] = [];
+  const order: string[] = [];
   let observedCallerAgentId: string | undefined;
   let observedAllowedTools: readonly string[] | undefined;
   const gateway = gatewayFor({
     definition: toolDefinition("read", "read-only"),
     execute: async (request, context, permission) => {
+      order.push("execute");
       observedCallerAgentId = context.callerAgentId;
       observedAllowedTools = permission.allowedTools;
       return { ...request, output: "contents", status: "completed", durationMs: 1 };
@@ -2204,6 +2206,12 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
 
   const result = await loop.execute(loopInput(gateway, {
     agentTools: [delegatedAgentTool(["read"])],
+    onNestedToolRequestsAccepted: async (requests) => {
+      assert.deepEqual(requests.map((request) => request.factId), [
+        "agent-tool:11:shared-call/tool:shared-call",
+      ]);
+      order.push("accepted");
+    },
     onToolResult: async (toolResult) => { accepted.push(toolResult); },
   }));
 
@@ -2222,6 +2230,7 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   assert.equal(accepted[1]?.delegatedExecution?.toolCallCount, 1);
   assert.equal(accepted[1]?.delegatedExecution?.usage.requestCount, 2);
   assert.equal(result.usage.requestCount, 4);
+  assert.deepEqual(order, ["accepted", "execute"]);
   assert.equal(observedCallerAgentId, "sub-agent:reviewer");
   assert.deepEqual(observedAllowedTools, ["read"]);
   assert.deepEqual(delivered.map((item) => item.toolName), ["agent_call"]);
@@ -2232,6 +2241,129 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   assert.equal(rootMessages.filter((message) => message.role === "toolResult").length, 1);
   assert.equal(rootMessages.find((message) => message.role === "toolResult")?.toolCallId, "shared-call");
   assert.match(JSON.stringify(rootMessages.find((message) => message.role === "toolResult")?.content), /tool-output:\/\/delegated-result/u);
+  await loop.release();
+});
+
+test("delegated tools accept one provider message as a single nested write-ahead batch", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect both" }, { id: "batch-parent" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage([
+      fauxToolCall("read", { path: "a.txt" }, { id: "nested-a" }),
+      fauxToolCall("read", { path: "b.txt" }, { id: "nested-b" }),
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage("delegated batch complete"),
+    fauxAssistantMessage("parent synthesis"),
+  ]);
+  const acceptedBatches: string[][] = [];
+  let executeCalls = 0;
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    execute: async (request) => {
+      assert.equal(acceptedBatches.length, 1, "the whole nested batch must be accepted before execution");
+      executeCalls += 1;
+      return { ...request, output: "contents", status: "completed", durationMs: 1 };
+    },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool(["read"])],
+    async onNestedToolRequestsAccepted(requests) {
+      acceptedBatches.push(requests.map((request) => toolCallFactId(request)));
+    },
+  }));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(acceptedBatches, [[
+    "agent-tool:12:batch-parent/tool:nested-a",
+    "agent-tool:12:batch-parent/tool:nested-b",
+  ]]);
+  assert.equal(executeCalls, 2);
+  await loop.release();
+});
+
+test("delegated tools never reach preflight when nested request acceptance fails", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "delegate-wal-failure" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "nested-wal-failure" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("child must not continue"),
+    fauxAssistantMessage("parent must not continue"),
+  ]);
+  let preflightCalls = 0;
+  let executeCalls = 0;
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    preflight: (request) => {
+      preflightCalls += 1;
+      return { status: "ready", request };
+    },
+    execute: async (request) => {
+      executeCalls += 1;
+      return { ...request, output: "contents", status: "completed", durationMs: 1 };
+    },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool(["read"])],
+    async onNestedToolRequestsAccepted() {
+      throw new Error("nested request persistence failed");
+    },
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "tool_request_acceptance_failed");
+  assert.match(result.status === "failed" ? result.error : "", /nested request persistence failed/u);
+  assert.equal(preflightCalls, 0);
+  assert.equal(executeCalls, 0);
+  assert.equal(fixture.faux.state.callCount, 2);
+  await loop.release();
+});
+
+test("delegated tools reject a reused scoped call identity before a second side effect", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect twice" }, { id: "delegate-reuse" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("read", { path: "a.txt" }, { id: "nested-reuse" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("read", { path: "b.txt" }, { id: "nested-reuse" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("child must not continue"),
+    fauxAssistantMessage("parent must not continue"),
+  ]);
+  let executeCalls = 0;
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    execute: async (request) => {
+      executeCalls += 1;
+      return { ...request, output: "contents", status: "completed", durationMs: 1 };
+    },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool(["read"])],
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "session_tool_request_duplicate");
+  assert.equal(executeCalls, 1);
+  assert.equal(fixture.faux.state.callCount, 3);
   await loop.release();
 });
 

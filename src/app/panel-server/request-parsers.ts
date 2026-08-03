@@ -40,6 +40,7 @@ import { PanelHttpError } from "./http-utils.js";
 
 export type PanelRunInput = {
   readonly goal: string;
+  readonly submissionId?: string;
   readonly aiMode?: ModelRuntimeMode;
   readonly requestedRunMode?: PanelRunMode;
   readonly reasoningEffort?: ModelRunReasoningEffort;
@@ -124,6 +125,7 @@ const configuredAiModeSchema = z.enum(["none", "openai-compatible", "openai-resp
 
 const ordinaryRunRequestSchema = z.preprocess(normalizeRequestObject, z.object({
   goal: optionalTrimmedStringSchema,
+  submissionId: optionalTrimmedStringSchema,
   aiMode: z.unknown().optional(),
   runMode: z.unknown().optional(),
   reasoningEffort: z.unknown().optional(),
@@ -469,8 +471,12 @@ export function parseRunInput(raw: unknown): PanelRunInput {
   if (goal === undefined) {
     throw new PanelHttpError(400, "missing_goal", "运行需要填写目标。");
   }
+  if (request.submissionId !== undefined && request.submissionId.length > 200) {
+    throw new PanelHttpError(400, "invalid_submission_id", "提交标识无效。");
+  }
   return {
     goal,
+    submissionId: request.submissionId,
     aiMode: parseOptionalAiMode(request.aiMode, "AI 模式无效。"),
     requestedRunMode: parseOptionalRunMode(request.runMode),
     reasoningEffort: parseOptionalRunReasoningEffort(request.reasoningEffort),

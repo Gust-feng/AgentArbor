@@ -60,6 +60,7 @@ export function createInspectContextAttachmentArchiveTool(
         requestedPath: stringOrUndefined(record.path),
         requireFile: true,
         projectPathRequired: true,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment archive target could not be read.");
       if (!stat.isFile()) {

@@ -270,18 +270,24 @@ export class FileSystemAgentSessionRepository implements AgentSessionRepository 
           "Agent session active branch advanced beyond the pending tool-result group.",
         );
       }
+      let matchingSuffixLength = suffix.length;
       for (let index = 0; index < suffix.length; index += 1) {
         const entry = suffix[index];
         const expected = input.orderedResults[index];
+        const expectedMessage = expected === undefined ? undefined : canonicalToolResultMessage(expected);
+        const content = entry?.type === "message" && entry.message.role === "toolResult"
+          ? entry.message.content
+          : [];
+        const text = content.length === 1 && content[0]?.type === "text" ? content[0].text : undefined;
         if (entry?.type !== "message" || entry.message.role !== "toolResult" || expected === undefined ||
-            entry.message.toolCallId !== expected.callId || entry.message.toolName !== expected.toolName) {
-          throw new AgentSessionRepositoryError(
-            "agent_session_ref_invalid",
-            "Agent session contains an out-of-order tool-result entry.",
-          );
+            entry.message.toolCallId !== expected.callId || entry.message.toolName !== expected.toolName ||
+            entry.message.isError !== (expected.status !== "completed") || text !== expectedMessage?.content) {
+          await lease.session.moveTo(input.assistantEntryRef.entryId);
+          matchingSuffixLength = 0;
+          break;
         }
       }
-      for (const result of input.orderedResults.slice(suffix.length)) {
+      for (const result of input.orderedResults.slice(matchingSuffixLength)) {
         const modelMessage = canonicalToolResultMessage(result);
         await lease.session.appendMessage({
           role: "toolResult",

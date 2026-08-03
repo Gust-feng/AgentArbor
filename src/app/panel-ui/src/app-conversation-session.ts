@@ -1,7 +1,7 @@
 import type React from "react";
 import { ApiError, getJson } from "./api";
 import { transcriptNodesFrom } from "./app-run-projection";
-import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
+import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import { liveRunForObservedReplay } from "./app-task-submit-flow";
 import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
@@ -28,6 +28,7 @@ export type ConversationSessionControllerOptions = {
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly pollTimer: React.MutableRefObject<number | undefined>;
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
+  readonly fallbackPollRef: React.MutableRefObject<AbortController | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
   readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
@@ -58,8 +59,7 @@ export async function loadConversationSession(
   }
   const epoch = options.viewEpochRef.current + 1;
   options.viewEpochRef.current = epoch;
-  stopPolling(options.pollTimer);
-  stopStream(options.streamRef);
+  stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
   let response: { readonly conversation: Conversation };
   try {
     response = await getJson<{ readonly conversation: Conversation }>(
@@ -194,7 +194,7 @@ export function resetConversationSession(options: ConversationSessionControllerO
   options.conversationLoadAbortRef.current?.abort();
   options.conversationLoadAbortRef.current = undefined;
   options.viewEpochRef.current += 1;
-  stopLiveUpdates(options.pollTimer, options.streamRef);
+  stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
   options.activeRunIdRef.current = undefined;
   options.setScreen("chat-empty");
   options.setGoal("");

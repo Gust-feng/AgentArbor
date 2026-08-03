@@ -240,6 +240,9 @@ function isAuthorizedContextRef(ref: string, kind: DesktopTaskSoilContextRefInpu
   if (kind === "file" && normalized.startsWith("local-file:")) {
     return true;
   }
+  if (kind === "file" && normalized.startsWith("uploaded-attachment:")) {
+    return true;
+  }
   if (kind === "project" && normalized.startsWith("local-project:")) {
     return true;
   }

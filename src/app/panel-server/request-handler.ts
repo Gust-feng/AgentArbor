@@ -488,6 +488,8 @@ function ordinaryFeatureHttpError(error: OrdinaryFeatureError): PanelHttpError {
     case "ordinary_conversation_busy":
     case "ordinary_confirmation_in_progress":
     case "ordinary_tool_result_conflict":
+    case "ordinary_submission_conflict":
+    case "ordinary_managed_attachment_unavailable":
       return new PanelHttpError(409, error.code, error.message);
   }
 }

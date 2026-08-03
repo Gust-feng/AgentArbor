@@ -728,6 +728,50 @@ test("context attachment tools reject refs outside current Task Soil permissions
   }
 });
 
+test("context attachment tools resolve managed uploads without exposing their storage path", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-managed-workspace-"));
+  const managedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-managed-storage-"));
+  const managedFile = path.join(managedRoot, "content");
+  await fs.writeFile(managedFile, "managed attachment body", "utf8");
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [{
+        attachmentId: "managed-text",
+        ref: "uploaded-attachment:managed-text",
+        kind: "file",
+        title: "notes.txt",
+        metadata: { available: true, mimeType: "text/plain", byteLength: 23 },
+      }],
+      permissionBoundaryRefs: ["read:uploaded-attachment:managed-text"],
+    });
+    const resolvedIds: string[] = [];
+    const center = contextAttachmentToolCenter({
+      taskSoil,
+      workspaceRoot: workspace,
+      resolveManagedAttachmentPath: async (attachmentId) => {
+        resolvedIds.push(attachmentId);
+        return managedFile;
+      },
+    });
+
+    const result = await center.execute(
+      { callId: "call:read-managed-text", toolName: "AttachmentRead", input: { attachmentId: "managed-text" } },
+      TOOL_CONTEXT,
+      { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["AttachmentRead"] },
+    );
+    const serialized = JSON.stringify(result);
+
+    assert.equal(result.status, "completed");
+    assert.deepEqual(resolvedIds, ["managed-text"]);
+    assert.equal(serialized.includes("managed attachment body"), true);
+    assert.equal(serialized.includes(managedRoot), false);
+    assert.equal(serialized.includes("uploaded-attachment:"), false);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(managedRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 function assertDirectAttachmentFacts(value: unknown): void {
   const output = asRecord(value);
   for (const legacyField of ["action", "status", "summary", "result"]) {

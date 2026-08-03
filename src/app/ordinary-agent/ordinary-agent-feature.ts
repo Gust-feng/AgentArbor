@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ConfirmationDecision } from "../../domain/confirmation/index.js";
 import {
   toolCallFactId,
@@ -23,15 +24,17 @@ import type {
   OrdinaryRunActivityReplay,
   OrdinaryRunEvent,
   OrdinaryRunRepository,
+  OrdinaryRunRecoveryInventory,
   OrdinaryRunSnapshotDocument,
   OrdinaryRunState,
+  OrdinaryRunInput,
   StartOrdinaryRunInput,
   SubmitOrdinaryTurnInput,
   SubmitOrdinaryTurnResult,
 } from "./contracts.js";
 import { OrdinaryFeatureError } from "./contracts.js";
 import { executionErrorFacts } from "../execution-errors/index.js";
-import type { AgentSessionEntryRef, AgentSessionRepository } from "../model-runtime/agent-session.js";
+import type { AgentSessionEntryRef, AgentSessionRef, AgentSessionRepository } from "../model-runtime/agent-session.js";
 import {
   normalizeOrdinaryConversationTitle,
   projectOrdinaryConversation,
@@ -42,11 +45,22 @@ import {
   createInitialOrdinaryRunState,
   interruptedOrdinaryApprovalResult,
   ordinaryToolResultKey,
+  recordOrdinaryNestedToolRequests,
   recordOrdinaryToolResult,
+  reconcileInterruptedOrdinaryNestedToolCalls,
   reconcileInterruptedOrdinaryToolRound,
   transitionOrdinaryRun,
   type OrdinaryRunTransition,
 } from "./state.js";
+import {
+  OrdinaryManagedAttachmentRepositoryError,
+  type OrdinaryManagedAttachmentRecord,
+  type OrdinaryManagedAttachmentRepository,
+} from "./managed-attachment-repository.js";
+import {
+  managedUploadAttachmentId,
+  managedUploadAttachmentRef,
+} from "../task-soil/context-attachments.js";
 
 export function createOrdinaryAgentFeature(input: {
   readonly repository: OrdinaryRunRepository;
@@ -56,6 +70,8 @@ export function createOrdinaryAgentFeature(input: {
   /** Test-only seam for injected executions that can emit refs but cannot write a real Session. */
   readonly testOnlyAllowSessionlessExecution?: boolean;
   readonly releaseToolEvidenceOwner?: (ownerId: string) => void | Promise<void>;
+  readonly managedAttachmentRepository?: OrdinaryManagedAttachmentRepository;
+  readonly managedAttachmentInstanceId?: string;
   /**
    * Observability hook for failures that never rewrite committed run facts but
    * would otherwise be invisible: Session finalization failures that keep the
@@ -69,6 +85,9 @@ export function createOrdinaryAgentFeature(input: {
   const visibleAssistantCheckpointIntervalMs = 250;
   const now = input.now ?? nowIso;
   const idFactory = input.idFactory ?? createId;
+  if ((input.managedAttachmentRepository === undefined) !== (input.managedAttachmentInstanceId === undefined)) {
+    throw new Error("Ordinary managed attachment repository and instance identity must be configured together.");
+  }
   const documents = new Map<string, OrdinaryRunSnapshotDocument>();
   const conversationDocuments = new Map<string, OrdinaryConversationControlDocument>();
   const unavailableConversationIds = new Set<string>();
@@ -88,9 +107,26 @@ export function createOrdinaryAgentFeature(input: {
   const sessionFinalizationPending = new Set<string>();
   const sessionFinalizationFailures = new Map<string, unknown>();
   const sessionFinalizationRetries = new Map<string, Promise<void>>();
-  const successorActivationAttempts = new Map<string, Promise<void>>();
+  const successorActivationPumps = new Map<string, {
+    diagnosticRunId: string;
+    inFlight?: Promise<void>;
+    retryTimer?: NodeJS.Timeout;
+    consecutiveFailures: number;
+  }>();
+  const cancellationCleanupTasks = new Map<string, Promise<void>>();
+  const cancellationCleanupContinuations = new Map<string, OrdinaryExecutionContinuation>();
+  const cancellationCleanupRetryTimers = new Map<string, NodeJS.Timeout>();
+  const cancellationCleanupFailureCounts = new Map<string, number>();
+  const conversationCleanupTasks = new Map<string, Promise<void>>();
+  const conversationCleanupRetryTimers = new Map<string, NodeJS.Timeout>();
+  const conversationCleanupFailureCounts = new Map<string, number>();
+  const managedAttachmentClaimRollbacks = new Map<string, ManagedAttachmentClaimRollback>();
+  const managedAttachmentClaimRollbackTasks = new Map<string, Promise<void>>();
+  const managedAttachmentClaimRollbackRetryTimers = new Map<string, NodeJS.Timeout>();
+  const managedAttachmentClaimRollbackFailureCounts = new Map<string, number>();
   const visibleAssistantBuffers = new Map<string, string>();
   const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
+  let startupRunEnumerationFailed = false;
   let released = false;
   let releasePromise: Promise<void> | undefined;
   /**
@@ -101,9 +137,13 @@ export function createOrdinaryAgentFeature(input: {
    */
   const streamEpoch = idFactory("ordinary-activity-stream");
 
-  const readyPromise = recoverPersistedRuns();
+  const readyPromise = recoverFeatureState();
   // Observe eager recovery immediately; public calls still await the original rejected promise.
   void readyPromise.catch(() => undefined);
+
+  async function recoverFeatureState(): Promise<void> {
+    await recoverPersistedRuns();
+  }
 
   async function recoverPersistedRuns(): Promise<void> {
     let conversationSummaries: readonly Awaited<ReturnType<OrdinaryConversationControlRepository["list"]>>[number][] = [];
@@ -120,14 +160,45 @@ export function createOrdinaryAgentFeature(input: {
         markConversationUnavailable(summary.conversationId, error);
       }
     }
-    let runSummaries: readonly Awaited<ReturnType<OrdinaryRunRepository["list"]>>[number][] = [];
+    let runSummaries: OrdinaryRunRecoveryInventory["summaries"] = [];
     try {
-      runSummaries = await input.repository.list(Number.MAX_SAFE_INTEGER);
+      const inventory = await input.repository.inspectRecoveryInventory();
+      runSummaries = inventory.summaries;
+      if (inventory.issues.length > 0) {
+        startupRunEnumerationFailed = true;
+        emitDiagnostic({
+          kind: "startup_recovery_failed",
+          source: "run_repository",
+          error: new AggregateError(
+            inventory.issues.map((issue) => issue.error),
+            `Ordinary run recovery inventory is incomplete: ${inventory.issues.map((issue) => issue.runId).join(", ")}`,
+          ),
+        });
+      }
     } catch (error) {
+      startupRunEnumerationFailed = true;
       emitDiagnostic({ kind: "startup_recovery_failed", source: "run_repository", error });
     }
     for (const summary of runSummaries) {
+      if (conversationDocuments.has(summary.conversationId)) continue;
+      markConversationUnavailable(
+        summary.conversationId,
+        new Error("Conversation control document is missing; the run was isolated from recovery."),
+      );
+    }
+    const deletedConversationIds = new Set<string>();
+    for (const control of conversationDocuments.values()) {
+      if (control.state.deletedAt === undefined) continue;
+      deletedConversationIds.add(control.state.conversationId);
+      const runIds = runSummaries
+        .filter((summary) => summary.conversationId === control.state.conversationId)
+        .map((summary) => summary.runId);
+      await scheduleConversationCleanup(control.state.conversationId, control, runIds);
+    }
+
+    for (const summary of runSummaries) {
       if (unavailableConversationIds.has(summary.conversationId)) continue;
+      if (deletedConversationIds.has(summary.conversationId)) continue;
       try {
         let document = await input.repository.get(summary.runId);
         if (document === undefined) continue;
@@ -151,7 +222,8 @@ export function createOrdinaryAgentFeature(input: {
           });
           continue;
         }
-        if (document.state.pendingToolRound !== undefined) {
+        if (document.state.pendingToolRound !== undefined ||
+            document.state.pendingNestedToolCalls !== undefined) {
           await reconcilePendingToolRound(summary.runId);
           document = await load(summary.runId);
           if (document === undefined) continue;
@@ -179,7 +251,10 @@ export function createOrdinaryAgentFeature(input: {
         markConversationUnavailable(summary.conversationId, error);
       }
     }
+    await reconcileRecoveredSessionBranches();
+    await recoverManagedAttachments();
     for (const [conversationId, control] of conversationDocuments) {
+      if (control.state.deletedAt !== undefined) continue;
       try {
         if (await conversationView(control) === undefined) {
           markConversationUnavailable(conversationId);
@@ -218,6 +293,71 @@ export function createOrdinaryAgentFeature(input: {
     }
   }
 
+  async function reconcileRecoveredSessionBranches(): Promise<void> {
+    for (const [conversationId, control] of conversationDocuments) {
+      if (control.state.deletedAt !== undefined || unavailableConversationIds.has(conversationId)) continue;
+      const runs = [...documents.values()]
+        .map((document) => document.state)
+        .filter((run) => run.turn.conversationId === conversationId);
+      if (runs.length === 0) continue;
+      try {
+        const activeBranch = await input.sessionRepository.getActiveBranchEntryRefs(control.state.sessionRef);
+        const target = recoveredSessionLeaf(runs, activeBranch, conversationId);
+        const activeLeaf = activeBranch.at(-1) ?? null;
+        if (sameSessionEntryRef(activeLeaf, target)) continue;
+        const restored = await input.sessionRepository.moveActiveLeaf(control.state.sessionRef, target);
+        if (!sameSessionEntryRef(restored, target)) {
+          throw new OrdinaryFeatureError(
+            "ordinary_run_state_conflict",
+            `Ordinary conversation ${conversationId} Session did not restore its persisted safe leaf`,
+          );
+        }
+      } catch (error) {
+        markConversationUnavailable(conversationId, error);
+      }
+    }
+  }
+
+  async function recoverManagedAttachments(): Promise<void> {
+    if (input.managedAttachmentRepository === undefined || input.managedAttachmentInstanceId === undefined) return;
+    const attachmentIdsByConversation = new Map<string, Set<string>>();
+    const preserveConversationIds = new Set(unavailableConversationIds);
+    if (startupRunEnumerationFailed) {
+      for (const conversationId of conversationDocuments.keys()) preserveConversationIds.add(conversationId);
+    }
+    for (const document of documents.values()) {
+      const conversationId = document.state.turn.conversationId;
+      const control = conversationDocuments.get(conversationId);
+      if (control === undefined) {
+        preserveConversationIds.add(conversationId);
+        continue;
+      }
+      if (control.state.deletedAt !== undefined) continue;
+      const ids = attachmentIdsByConversation.get(conversationId) ?? new Set<string>();
+      for (const attachmentId of managedAttachmentIds(document.state.input)) ids.add(attachmentId);
+      attachmentIdsByConversation.set(conversationId, ids);
+    }
+    try {
+      const recovered = await input.managedAttachmentRepository.recoverAtStartup({
+        activeInstanceId: input.managedAttachmentInstanceId,
+        durableClaims: [...attachmentIdsByConversation].map(([conversationId, attachmentIds]) => ({
+          conversationId,
+          attachmentIds: [...attachmentIds],
+        })),
+        preserveConversationIds: [...preserveConversationIds],
+      });
+      for (const issue of recovered.issues) {
+        emitDiagnostic({
+          kind: "managed_attachment_recovery_issue",
+          identity: issue.identity,
+          error: issue.error,
+        });
+      }
+    } catch (error) {
+      emitDiagnostic({ kind: "managed_attachment_recovery_issue", error });
+    }
+  }
+
   function markConversationUnavailable(conversationId: string, error?: unknown): void {
     conversationDocuments.delete(conversationId);
     if (unavailableConversationIds.has(conversationId)) return;
@@ -237,6 +377,7 @@ export function createOrdinaryAgentFeature(input: {
   async function load(runId: string): Promise<OrdinaryRunSnapshotDocument | undefined> {
     const cached = documents.get(runId);
     if (cached !== undefined) return cached;
+    if (startupRunEnumerationFailed) return undefined;
     const document = await input.repository.get(runId);
     if (document !== undefined) {
       // Settled terminal runs get their stream lazily from replay; runs that may
@@ -253,6 +394,7 @@ export function createOrdinaryAgentFeature(input: {
   function needsLiveActivityStream(state: OrdinaryRunState): boolean {
     return !isTerminal(state) ||
       state.pendingToolRound !== undefined ||
+      state.pendingNestedToolCalls !== undefined ||
       state.toolCalls.some((result) => result.status === "approval_required");
   }
 
@@ -683,6 +825,27 @@ export function createOrdinaryAgentFeature(input: {
     });
   }
 
+  async function persistNestedToolRequests(
+    runId: string,
+    requests: readonly ToolCallRequest[],
+  ): Promise<void> {
+    if (requests.length === 0) return;
+    await enqueue(runId, async () => {
+      const current = await load(runId);
+      if (current === undefined) {
+        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
+      }
+      const state = recordOrdinaryNestedToolRequests({
+        state: current.state,
+        requests,
+        recordedAt: now(),
+      });
+      if (state === current.state) return;
+      const saved = await input.repository.save(state, current.revision);
+      documents.set(runId, saved);
+    });
+  }
+
   async function reconcilePendingToolRound(
     runId: string,
     options: { readonly persistState?: boolean } = {},
@@ -690,21 +853,27 @@ export function createOrdinaryAgentFeature(input: {
     const persistState = options.persistState ?? true;
     return enqueue(runId, async () => {
       const current = await load(runId);
-      if (current === undefined || current.state.pendingToolRound === undefined) {
-        return current === undefined ? undefined : clone(current.state);
-      }
-      const pending = current.state.pendingToolRound;
-      const orderedToolCalls = await input.sessionRepository.readToolCalls({
-        sessionRef: current.state.sessionRef,
-        assistantEntryRef: pending.assistantEntryRef,
-      });
+      if (current === undefined) return undefined;
       const recordedAt = now();
-      let state = reconcileInterruptedOrdinaryToolRound({
+      let state = reconcileInterruptedOrdinaryNestedToolCalls({
         state: current.state,
-        orderedToolCalls,
         recordedAt,
       });
+      const pending = state.pendingToolRound;
       let document = current;
+      if (pending === undefined) {
+        if (persistState && state !== current.state) {
+          document = await input.repository.save(state, current.revision);
+          documents.set(runId, document);
+          syncDurableToolResults(state);
+        }
+        return clone(state);
+      }
+      const orderedToolCalls = await input.sessionRepository.readToolCalls({
+        sessionRef: state.sessionRef,
+        assistantEntryRef: pending.assistantEntryRef,
+      });
+      state = reconcileInterruptedOrdinaryToolRound({ state, orderedToolCalls, recordedAt });
       if (persistState && state !== current.state) {
         document = await input.repository.save(state, current.revision);
         documents.set(runId, document);
@@ -805,7 +974,7 @@ export function createOrdinaryAgentFeature(input: {
       recordTransition(state.timeline.at(-1)!);
       return clone(state);
     });
-    if (blocked.pendingToolRound === undefined) return blocked;
+    if (blocked.pendingToolRound === undefined && blocked.pendingNestedToolCalls === undefined) return blocked;
     return await reconcilePendingToolRound(runId) ?? blocked;
   }
 
@@ -964,6 +1133,7 @@ export function createOrdinaryAgentFeature(input: {
         onReasoningDelta: (delta) => recordReasoningDelta(runId, delta),
         onReasoningCompleted: (content) => completeReasoning(runId, content),
         onToolRequested: (request) => recordToolRequested(runId, request),
+        onNestedToolRequestsAccepted: (requests) => persistNestedToolRequests(runId, requests),
         onToolProgress: (progress) => recordToolProgress(runId, progress),
         onSessionWriteCheckpoint: async (checkpoint) => {
           let assistantText: string | undefined;
@@ -1054,10 +1224,12 @@ export function createOrdinaryAgentFeature(input: {
     let current = await load(runId);
     if (current === undefined) return;
     if (current.state.status.kind === "awaiting_approval") {
-      if (current.state.pendingToolRound === undefined) acceptedToolResults.delete(runId);
+      if (current.state.pendingToolRound === undefined &&
+          current.state.pendingNestedToolCalls === undefined) acceptedToolResults.delete(runId);
       return;
     }
-    if (current.state.pendingToolRound !== undefined) {
+    if (current.state.pendingToolRound !== undefined ||
+        current.state.pendingNestedToolCalls !== undefined) {
       try {
         await reconcilePendingToolRound(runId);
       } catch (error) {
@@ -1071,14 +1243,16 @@ export function createOrdinaryAgentFeature(input: {
       current = await load(runId) ?? current;
       // The durable reconciliation now owns every call in the closed round.
       // Buffered results that failed its identity contract must not block the successor.
-      if (current.state.pendingToolRound === undefined) acceptedToolResults.delete(runId);
+      if (current.state.pendingToolRound === undefined &&
+          current.state.pendingNestedToolCalls === undefined) acceptedToolResults.delete(runId);
       resultPersistenceFailure = undefined;
     }
     if (isTerminal(current.state) && current.state.toolCalls.some((result) => result.status === "approval_required")) {
       await reconcileLostApprovalResults(runId);
       current = await load(runId) ?? current;
     }
-    if (current.state.pendingToolRound === undefined) acceptedToolResults.delete(runId);
+    if (current.state.pendingToolRound === undefined &&
+        current.state.pendingNestedToolCalls === undefined) acceptedToolResults.delete(runId);
     if (resultPersistenceFailure !== undefined) throw resultPersistenceFailure;
   }
 
@@ -1091,17 +1265,19 @@ export function createOrdinaryAgentFeature(input: {
   function isStableTerminalState(state: OrdinaryRunState): boolean {
     return isTerminal(state) &&
       state.pendingToolRound === undefined &&
+      state.pendingNestedToolCalls === undefined &&
       !state.toolCalls.some((result) => result.status === "approval_required") &&
       !acceptedToolResults.has(state.runId) &&
       !approvalReservations.has(state.runId) &&
       !continuations.has(state.runId) &&
+      !cancellationCleanupContinuations.has(state.runId) &&
       !controllers.has(state.runId) &&
       !executions.has(state.runId);
   }
 
   function notifyStableTerminal(runId: string): void {
     const document = documents.get(runId);
-    if (document === undefined || !isStableTerminalState(document.state)) return;
+    if (document === undefined || isHiddenRun(document.state) || !isStableTerminalState(document.state)) return;
     for (const listener of [...stableTerminalListeners]) {
       try {
         listener(runId);
@@ -1124,7 +1300,7 @@ export function createOrdinaryAgentFeature(input: {
   function maybeReleaseTerminalStream(runId: string): void {
     if ((listeners.get(runId)?.size ?? 0) > 0) return;
     const document = documents.get(runId);
-    if (document === undefined || !isStableTerminalState(document.state)) return;
+    if (document === undefined || isHiddenRun(document.state) || !isStableTerminalState(document.state)) return;
     activityStreams.delete(runId);
   }
 
@@ -1174,8 +1350,10 @@ export function createOrdinaryAgentFeature(input: {
 
   function isSchedulingBarrierCleared(state: OrdinaryRunState): boolean {
     if (!isTerminal(state) || state.pendingToolRound !== undefined ||
+        state.pendingNestedToolCalls !== undefined ||
         approvalReservations.has(state.runId) || continuations.has(state.runId) ||
-        acceptedToolResults.has(state.runId) || sessionFinalizationPending.has(state.runId)) {
+        cancellationCleanupContinuations.has(state.runId) || acceptedToolResults.has(state.runId) ||
+        sessionFinalizationPending.has(state.runId)) {
       return false;
     }
     // Cancellation stops admission before it commits. A pure model call that
@@ -1230,49 +1408,110 @@ export function createOrdinaryAgentFeature(input: {
 
   async function activateSuccessor(predecessorRunId: string): Promise<void> {
     if (released) return;
-    const existing = successorActivationAttempts.get(predecessorRunId);
-    if (existing !== undefined) {
-      await existing;
+    const predecessor = await load(predecessorRunId);
+    if (predecessor === undefined) return;
+    await requestConversationActivation(predecessor.state.turn.conversationId, predecessorRunId);
+  }
+
+  async function requestConversationActivation(conversationId: string, diagnosticRunId: string): Promise<void> {
+    if (released) return;
+    const pump = successorActivationPumps.get(conversationId) ?? { diagnosticRunId, consecutiveFailures: 0 };
+    pump.diagnosticRunId = diagnosticRunId;
+    successorActivationPumps.set(conversationId, pump);
+    if (pump.retryTimer !== undefined) {
+      clearTimeout(pump.retryTimer);
+      pump.retryTimer = undefined;
+    }
+    if (pump.inFlight !== undefined) {
+      await pump.inFlight;
       return;
     }
+    let activationFailure: { readonly error: unknown } | undefined;
     const attempt = (async () => {
-      let lastError: unknown;
-      for (let retry = 0; retry < 2; retry += 1) {
-        try {
-          await activateSuccessorOnce(predecessorRunId);
-          return;
-        } catch (error) {
-          lastError = error;
-        }
+      try {
+        await activateConversationOnce(conversationId, pump);
+      } catch (error) {
+        activationFailure = { error };
       }
-      emitDiagnostic({ kind: "successor_activation_failed", predecessorRunId, error: lastError });
     })();
-    successorActivationAttempts.set(predecessorRunId, attempt);
+    pump.inFlight = attempt;
     try {
       await attempt;
     } finally {
-      if (successorActivationAttempts.get(predecessorRunId) === attempt) {
-        successorActivationAttempts.delete(predecessorRunId);
-      }
+      if (pump.inFlight === attempt) pump.inFlight = undefined;
     }
+    if (activationFailure === undefined) {
+      pump.consecutiveFailures = 0;
+      if (successorActivationPumps.get(conversationId) === pump &&
+          pump.retryTimer === undefined && pump.inFlight === undefined) {
+        successorActivationPumps.delete(conversationId);
+      }
+      return;
+    }
+    if (released || successorActivationPumps.get(conversationId) !== pump) return;
+    pump.consecutiveFailures += 1;
+    const retryDelayMs = successorActivationRetryDelayMs(pump.consecutiveFailures);
+    emitDiagnostic({
+      kind: "successor_activation_failed",
+      conversationId,
+      predecessorRunId: pump.diagnosticRunId,
+      consecutiveFailures: pump.consecutiveFailures,
+      retryDelayMs,
+      error: activationFailure.error,
+    });
+    const retryTimer = setTimeout(() => {
+      if (pump.retryTimer !== retryTimer) return;
+      pump.retryTimer = undefined;
+      const retry = requestConversationActivation(conversationId, pump.diagnosticRunId);
+      trackPostExecutionTask(retry);
+    }, retryDelayMs);
+    retryTimer.unref?.();
+    pump.retryTimer = retryTimer;
   }
 
-  async function activateSuccessorOnce(predecessorRunId: string): Promise<void> {
-    await retryFailedSessionFinalization(predecessorRunId);
-    const predecessor = await load(predecessorRunId);
-    if (predecessor === undefined || !isSchedulingBarrierCleared(predecessor.state)) return;
-    const control = await loadConversationControl(predecessor.state.turn.conversationId);
+  async function activateConversationOnce(
+    conversationId: string,
+    pump: { diagnosticRunId: string },
+  ): Promise<void> {
+    const control = await loadConversationControl(conversationId);
     if (control?.state.deletedAt !== undefined) return;
-    const candidate = nextEligibleQueuedRun(await schedulingRuns(predecessor.state.turn.conversationId, control));
+    let runs = await schedulingRuns(conversationId, control);
+    let candidate = nextEligibleQueuedRun(runs);
+    if (candidate === undefined) {
+      const finalizationBlocker = runs.find((run) =>
+        isTerminal(run) && !isSchedulingBarrierCleared(run) &&
+        sessionFinalizationPending.has(run.runId) && sessionFinalizationFailures.has(run.runId));
+      if (finalizationBlocker === undefined) return;
+      pump.diagnosticRunId = finalizationBlocker.runId;
+      await retryFailedSessionFinalization(finalizationBlocker.runId);
+      if (sessionFinalizationPending.has(finalizationBlocker.runId) && sessionFinalizationFailures.has(finalizationBlocker.runId)) {
+        throw sessionFinalizationFailures.get(finalizationBlocker.runId);
+      }
+      runs = await schedulingRuns(conversationId, await loadConversationControl(conversationId));
+      candidate = nextEligibleQueuedRun(runs);
+    }
     if (candidate === undefined) return;
+    const predecessorRunId = candidate.turn.predecessorRunId;
+    if (predecessorRunId !== undefined) {
+      const predecessor = runs.find((run) => run.runId === predecessorRunId);
+      if (predecessor === undefined || !isSchedulingBarrierCleared(predecessor)) return;
+      pump.diagnosticRunId = predecessorRunId;
+    } else {
+      pump.diagnosticRunId = candidate.runId;
+    }
     const activated = await enqueue(candidate.runId, async () => {
+      if (released) return undefined;
       const current = await load(candidate.runId);
       if (current === undefined || current.state.status.kind !== "queued") return undefined;
       const latestControl = await loadConversationControl(current.state.turn.conversationId);
       if (latestControl?.state.deletedAt !== undefined) return undefined;
       const latestRuns = await schedulingRuns(current.state.turn.conversationId, latestControl);
       const latestCandidate = nextEligibleQueuedRun(latestRuns);
-      if (latestCandidate?.runId !== current.state.runId) return undefined;
+      if (released || latestCandidate?.runId !== current.state.runId) return undefined;
+      if (current.state.turn.predecessorRunId !== undefined) {
+        const latestPredecessor = latestRuns.find((run) => run.runId === current.state.turn.predecessorRunId);
+        if (latestPredecessor === undefined || !isSchedulingBarrierCleared(latestPredecessor)) return undefined;
+      }
       return commitTransition(current.state.runId, { type: "start" });
     });
     if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
@@ -1300,22 +1539,192 @@ export function createOrdinaryAgentFeature(input: {
 
   async function activateRootQueued(runId: string): Promise<void> {
     if (released) return;
-    const activated = await enqueue(runId, async () => {
-      const current = await load(runId);
-      if (current === undefined || current.state.status.kind !== "queued" || current.state.turn.predecessorRunId !== undefined) {
-        return undefined;
+    const queued = await load(runId);
+    if (queued === undefined || queued.state.status.kind !== "queued" || queued.state.turn.predecessorRunId !== undefined) return;
+    await requestConversationActivation(queued.state.turn.conversationId, runId);
+  }
+
+  async function claimRunManagedAttachments(
+    runInput: OrdinaryRunInput,
+    conversationId: string,
+    runId: string,
+  ): Promise<{
+    readonly runInput: OrdinaryRunInput;
+    readonly newlyClaimedAttachmentIds: readonly string[];
+    readonly claimReservations: readonly ManagedAttachmentClaimReservation[];
+  }> {
+    const attachmentIds = managedAttachmentIds(runInput);
+    if (attachmentIds.length === 0) return { runInput, newlyClaimedAttachmentIds: [], claimReservations: [] };
+    const claimReservations = reserveManagedAttachmentClaimRollbacks(conversationId, runId, attachmentIds);
+    try {
+      const claimed = await requireManagedAttachmentRepository().claimForConversation({
+        attachmentIds,
+        instanceId: input.managedAttachmentInstanceId!,
+        conversationId,
+        claimedAt: now(),
+      });
+      return {
+        runInput: canonicalManagedAttachmentInput(runInput, claimed.records),
+        newlyClaimedAttachmentIds: claimed.newlyClaimedAttachmentIds,
+        claimReservations,
+      };
+    } catch (error) {
+      releaseManagedAttachmentClaimReservations(claimReservations, runId);
+      if (error instanceof OrdinaryManagedAttachmentRepositoryError && error.partialClaim !== undefined) {
+        await releaseRunManagedAttachmentClaims(runId, conversationId, error.partialClaim.attachmentIds);
       }
-      const conversationId = current.state.turn.conversationId;
-      if (unavailableConversationIds.has(conversationId)) return undefined;
-      const control = await loadConversationControl(conversationId);
-      if (control?.state.deletedAt !== undefined) return undefined;
-      if (control !== undefined) {
-        const candidate = nextEligibleQueuedRun(await visibleRuns(control));
-        if (candidate?.runId !== runId) return undefined;
+      if (error instanceof OrdinaryManagedAttachmentRepositoryError && (
+        error.code === "ordinary_managed_attachment_not_found" ||
+        error.code === "ordinary_managed_attachment_ownership_conflict" ||
+        error.code === "ordinary_managed_attachment_invalid_id" ||
+        error.code === "ordinary_managed_attachment_invalid_input"
+      )) {
+        throw new OrdinaryFeatureError(
+          "ordinary_managed_attachment_unavailable",
+          "One or more uploaded attachments are unavailable or owned by another conversation.",
+          { cause: error },
+        );
       }
-      return commitTransition(runId, { type: "start" });
-    });
-    if (activated?.status.kind === "running") track(activated.runId, runExecution(activated.runId));
+      throw error;
+    }
+  }
+
+  function reserveManagedAttachmentClaimRollbacks(
+    conversationId: string,
+    runId: string,
+    attachmentIds: readonly string[],
+  ): readonly ManagedAttachmentClaimReservation[] {
+    // A failed birth can leave a conversation-owned claim awaiting rollback.
+    // Protect overlapping claims until this birth either persists or fails;
+    // retries and the rollback itself are serialized by the same conversation key.
+    const requested = new Set(attachmentIds);
+    const reservations: ManagedAttachmentClaimReservation[] = [];
+    for (const rollback of managedAttachmentClaimRollbacks.values()) {
+      if (rollback.conversationId !== conversationId || rollback.protectedByRunId !== undefined) continue;
+      const protectedAttachmentIds = rollback.attachmentIds.filter((attachmentId) => requested.has(attachmentId));
+      if (protectedAttachmentIds.length === 0) continue;
+      managedAttachmentClaimRollbacks.set(rollback.runId, { ...rollback, protectedByRunId: runId });
+      reservations.push({ rollbackRunId: rollback.runId, protectedAttachmentIds });
+    }
+    return reservations;
+  }
+
+  function releaseManagedAttachmentClaimReservations(
+    reservations: readonly ManagedAttachmentClaimReservation[],
+    runId: string,
+  ): void {
+    for (const reservation of reservations) {
+      const rollback = managedAttachmentClaimRollbacks.get(reservation.rollbackRunId);
+      if (rollback?.protectedByRunId !== runId) continue;
+      managedAttachmentClaimRollbacks.set(rollback.runId, { ...rollback, protectedByRunId: undefined });
+    }
+  }
+
+  function commitManagedAttachmentClaimReservations(
+    reservations: readonly ManagedAttachmentClaimReservation[],
+    runId: string,
+  ): void {
+    for (const reservation of reservations) {
+      const rollback = managedAttachmentClaimRollbacks.get(reservation.rollbackRunId);
+      if (rollback?.protectedByRunId !== runId) continue;
+      const protectedIds = new Set(reservation.protectedAttachmentIds);
+      const remainingAttachmentIds = rollback.attachmentIds.filter((attachmentId) => !protectedIds.has(attachmentId));
+      if (remainingAttachmentIds.length === 0) {
+        managedAttachmentClaimRollbacks.delete(rollback.runId);
+        const retryTimer = managedAttachmentClaimRollbackRetryTimers.get(rollback.runId);
+        if (retryTimer !== undefined) clearTimeout(retryTimer);
+        managedAttachmentClaimRollbackRetryTimers.delete(rollback.runId);
+        managedAttachmentClaimRollbackFailureCounts.delete(rollback.runId);
+      } else {
+        managedAttachmentClaimRollbacks.set(rollback.runId, {
+          ...rollback,
+          attachmentIds: remainingAttachmentIds,
+          protectedByRunId: undefined,
+        });
+      }
+    }
+  }
+
+  async function releaseRunManagedAttachmentClaims(
+    runId: string,
+    conversationId: string,
+    attachmentIds: readonly string[],
+  ): Promise<void> {
+    if (attachmentIds.length === 0) return;
+    const rollback = { runId, conversationId, attachmentIds: [...attachmentIds] } satisfies ManagedAttachmentClaimRollback;
+    managedAttachmentClaimRollbacks.set(runId, rollback);
+    const succeeded = await attemptManagedAttachmentClaimRollback(runId);
+    if (!succeeded) {
+      const current = managedAttachmentClaimRollbacks.get(runId);
+      if (current !== undefined) scheduleManagedAttachmentClaimRollback(current);
+    }
+  }
+
+  async function attemptManagedAttachmentClaimRollback(rollbackRunId: string): Promise<boolean> {
+    const rollback = managedAttachmentClaimRollbacks.get(rollbackRunId);
+    if (rollback === undefined || rollback.protectedByRunId !== undefined) return true;
+    try {
+      await requireManagedAttachmentRepository().releaseConversationClaim({
+        attachmentIds: rollback.attachmentIds,
+        instanceId: input.managedAttachmentInstanceId!,
+        conversationId: rollback.conversationId,
+        releasedAt: now(),
+      });
+      if (managedAttachmentClaimRollbacks.get(rollback.runId) === rollback) {
+        managedAttachmentClaimRollbacks.delete(rollback.runId);
+      }
+      managedAttachmentClaimRollbackFailureCounts.delete(rollback.runId);
+      return true;
+    } catch (error) {
+      emitDiagnostic({
+        kind: "managed_attachment_claim_rollback_failed",
+        runId: rollback.runId,
+        conversationId: rollback.conversationId,
+        attachmentIds: rollback.attachmentIds,
+        error,
+      });
+      return false;
+    }
+  }
+
+  function scheduleManagedAttachmentClaimRollback(rollback: ManagedAttachmentClaimRollback): void {
+    const current = managedAttachmentClaimRollbacks.get(rollback.runId);
+    if (current === undefined || current.protectedByRunId !== undefined || released ||
+        managedAttachmentClaimRollbackTasks.has(rollback.runId) ||
+        managedAttachmentClaimRollbackRetryTimers.has(rollback.runId)) return;
+    const consecutiveFailures = (managedAttachmentClaimRollbackFailureCounts.get(rollback.runId) ?? 0) + 1;
+    managedAttachmentClaimRollbackFailureCounts.set(rollback.runId, consecutiveFailures);
+    const retryDelayMs = managedAttachmentClaimRollbackRetryDelayMs(consecutiveFailures);
+    const retryTimer = setTimeout(() => {
+      if (managedAttachmentClaimRollbackRetryTimers.get(rollback.runId) !== retryTimer) return;
+      managedAttachmentClaimRollbackRetryTimers.delete(rollback.runId);
+      let task!: Promise<void>;
+      task = enqueue(`conversation:${rollback.conversationId}`, async () => {
+        const succeeded = await attemptManagedAttachmentClaimRollback(rollback.runId);
+        if (!succeeded) {
+          if (managedAttachmentClaimRollbackTasks.get(rollback.runId) === task) {
+            managedAttachmentClaimRollbackTasks.delete(rollback.runId);
+          }
+          const currentRollback = managedAttachmentClaimRollbacks.get(rollback.runId);
+          if (currentRollback !== undefined) scheduleManagedAttachmentClaimRollback(currentRollback);
+        }
+      });
+      managedAttachmentClaimRollbackTasks.set(rollback.runId, task);
+      void task.then(
+        () => {
+          if (managedAttachmentClaimRollbackTasks.get(rollback.runId) === task) {
+            managedAttachmentClaimRollbackTasks.delete(rollback.runId);
+          }
+        },
+        () => {
+          if (managedAttachmentClaimRollbackTasks.get(rollback.runId) === task) {
+            managedAttachmentClaimRollbackTasks.delete(rollback.runId);
+          }
+        },
+      );
+    }, retryDelayMs);
+    retryTimer.unref?.();
+    managedAttachmentClaimRollbackRetryTimers.set(rollback.runId, retryTimer);
   }
 
   async function startWithinConversation(startInput: StartOrdinaryRunInput): Promise<OrdinaryRunState> {
@@ -1353,22 +1762,45 @@ export function createOrdinaryAgentFeature(input: {
         `Ordinary predecessor run ${predecessor.state.runId} already has a queued successor`,
       );
     }
+    const claim = await claimRunManagedAttachments(
+      startInput.input,
+      startInput.turn.conversationId,
+      startInput.runId,
+    );
     const initial = createInitialOrdinaryRunState({
       runId: startInput.runId,
       sessionRef: startInput.sessionRef,
       turn: startInput.turn,
-      runInput: startInput.input,
+      runInput: claim.runInput,
       birth: startInput.birth,
       recordedAt: now(),
       eventId: idFactory("ordinary-event"),
     });
-    const created = await input.repository.save(initial, 0);
+    let created: OrdinaryRunSnapshotDocument;
+    try {
+      created = await input.repository.save(initial, 0);
+    } catch (error) {
+      releaseManagedAttachmentClaimReservations(claim.claimReservations, startInput.runId);
+      await releaseRunManagedAttachmentClaims(
+        startInput.runId,
+        startInput.turn.conversationId,
+        claim.newlyClaimedAttachmentIds,
+      );
+      throw error;
+    }
+    commitManagedAttachmentClaimReservations(claim.claimReservations, startInput.runId);
     documents.set(initial.runId, created);
     recordTransition(initial.timeline[0]);
     if (predecessor === undefined) {
-      const running = await mutate(initial.runId, { type: "start" });
-      track(initial.runId, runExecution(initial.runId));
-      return running;
+      try {
+        const running = await mutate(initial.runId, { type: "start" });
+        track(initial.runId, runExecution(initial.runId));
+        return running;
+      } catch (error) {
+        const retry = requestConversationActivation(initial.turn.conversationId, initial.runId);
+        trackPostExecutionTask(retry);
+        throw error;
+      }
     }
 
     // The predecessor may have committed its terminal state while this run's
@@ -1392,8 +1824,43 @@ export function createOrdinaryAgentFeature(input: {
   async function submitTurn(submitInput: SubmitOrdinaryTurnInput): Promise<SubmitOrdinaryTurnResult> {
     assertLive();
     await readyPromise;
-    const conversationId = submitInput.conversationId ?? idFactory("conversation");
+    const submissionId = normalizedSubmissionId(submitInput.submissionId);
+    const submissionTurnId = submissionId === undefined ? undefined : `submission:${submissionId}`;
+    const conversationId = submitInput.conversationId ?? (
+      submissionId === undefined ? idFactory("conversation") : `conversation:${submissionId}`
+    );
     return enqueue(`conversation:${conversationId}`, async () => {
+      let createdConversation = false;
+      let createdConversationSession: AgentSessionRef | undefined;
+      if (submissionTurnId !== undefined) {
+        const existing = [...documents.values()].find((document) =>
+          document.state.turn.userTurnId === submissionTurnId);
+        if (existing !== undefined) {
+          if (existing.state.turn.conversationId !== conversationId ||
+            !sameSubmissionInput(existing.state.input, submitInput.input)) {
+            throw new OrdinaryFeatureError(
+              "ordinary_submission_conflict",
+              `Ordinary submission ${submissionId} was already used for different input.`,
+            );
+          }
+          const existingControl = await loadConversationControl(conversationId);
+          if (existingControl === undefined) {
+            throw new OrdinaryFeatureError(
+              "ordinary_conversation_not_found",
+              `Ordinary conversation ${conversationId} was not found`,
+            );
+          }
+          assertConversationWritable(existingControl);
+          const existingConversation = await conversationView(existingControl);
+          if (existingConversation === undefined) {
+            throw new OrdinaryFeatureError(
+              "ordinary_conversation_not_found",
+              `Ordinary conversation ${conversationId} has no visible submission`,
+            );
+          }
+          return { conversation: existingConversation, run: clone(existing.state) };
+        }
+      }
       let control = await loadConversationControl(conversationId);
       if (control === undefined) {
         if (submitInput.conversationId !== undefined) {
@@ -1407,6 +1874,7 @@ export function createOrdinaryAgentFeature(input: {
           sessionId: idFactory("agent-session"),
           sessionCwd: submitInput.birth.capabilitySnapshot.workspace.workspaceDirectory,
         });
+        createdConversationSession = sessionRef;
         const state: OrdinaryConversationControlState = {
           conversationId,
           createdAt,
@@ -1419,28 +1887,90 @@ export function createOrdinaryAgentFeature(input: {
           throw error;
         }
         conversationDocuments.set(conversationId, control);
+        createdConversation = true;
       }
       assertConversationWritable(control);
       const runs = await visibleRuns(control);
       const predecessor = runs.at(-1);
       const runId = idFactory("ordinary-run");
-      const run = await startWithinConversation({
-        runId,
-        sessionRef: control.state.sessionRef,
-        turn: {
-          conversationId,
-          ordinal: (predecessor?.turn.ordinal ?? 0) + 1,
-          userTurnId: idFactory("ordinary-user-turn"),
-          assistantTurnId: idFactory("ordinary-assistant-turn"),
-          ...(predecessor === undefined ? {} : { predecessorRunId: predecessor.runId }),
-        },
-        input: submitInput.input,
-        birth: submitInput.birth,
-      });
-      const conversation = await conversationView(control);
-      if (conversation === undefined) throw new Error(`Ordinary conversation ${conversationId} has no visible run after submission`);
-      return { conversation, run };
+      try {
+        const run = await startWithinConversation({
+          runId,
+          sessionRef: control.state.sessionRef,
+          turn: {
+            conversationId,
+            ordinal: (predecessor?.turn.ordinal ?? 0) + 1,
+            userTurnId: submissionTurnId ?? idFactory("ordinary-user-turn"),
+            assistantTurnId: idFactory("ordinary-assistant-turn"),
+            ...(predecessor === undefined ? {} : { predecessorRunId: predecessor.runId }),
+          },
+          input: submitInput.input,
+          birth: submitInput.birth,
+        });
+        const conversation = await conversationView(control);
+        if (conversation === undefined) throw new Error(`Ordinary conversation ${conversationId} has no visible run after submission`);
+        return { conversation, run };
+      } catch (error) {
+        if (createdConversation && createdConversationSession !== undefined) {
+          await cleanupFailedInitialConversationBirth({
+            conversationId,
+            sessionRef: createdConversationSession,
+            runId,
+          });
+        }
+        throw error;
+      }
     });
+  }
+
+  async function cleanupFailedInitialConversationBirth(inputValue: {
+    readonly conversationId: string;
+    readonly sessionRef: AgentSessionRef;
+    readonly runId: string;
+  }): Promise<void> {
+    // A save can fail after the snapshot reached durable storage. Read the
+    // repository directly so startup enumeration failures cannot mistake an
+    // unknown run for an uncommitted birth.
+    let persistedRun: OrdinaryRunSnapshotDocument | undefined;
+    try {
+      persistedRun = await input.repository.get(inputValue.runId);
+    } catch (error) {
+      emitDiagnostic({
+        kind: "conversation_cleanup_failed",
+        conversationId: inputValue.conversationId,
+        phase: "run_snapshot",
+        runId: inputValue.runId,
+        error,
+      });
+      return;
+    }
+    if (persistedRun !== undefined) return;
+
+    const control = conversationDocuments.get(inputValue.conversationId);
+    if (control === undefined || control.state.deletedAt !== undefined ||
+        control.state.sessionRef.sessionId !== inputValue.sessionRef.sessionId) return;
+    try {
+      await input.conversationRepository.delete(inputValue.conversationId, control.revision);
+      conversationDocuments.delete(inputValue.conversationId);
+    } catch (error) {
+      emitDiagnostic({
+        kind: "conversation_cleanup_failed",
+        conversationId: inputValue.conversationId,
+        phase: "conversation_control",
+        error,
+      });
+      return;
+    }
+    try {
+      await input.sessionRepository.delete(inputValue.sessionRef);
+    } catch (error) {
+      emitDiagnostic({
+        kind: "conversation_cleanup_failed",
+        conversationId: inputValue.conversationId,
+        phase: "session",
+        error,
+      });
+    }
   }
 
   async function mutateConversation(
@@ -1520,6 +2050,10 @@ export function createOrdinaryAgentFeature(input: {
   async function deleteConversation(conversationId: string): Promise<void> {
     assertLive();
     await readyPromise;
+    let cleanup: {
+      readonly tombstone: OrdinaryConversationControlDocument;
+      readonly runIds: readonly string[];
+    } | undefined;
     await enqueue(`conversation:${conversationId}`, async () => {
       const current = await loadConversationControl(conversationId);
       if (current === undefined) return;
@@ -1532,18 +2066,179 @@ export function createOrdinaryAgentFeature(input: {
       const owned = [...documents.values()].filter((document) => document.state.turn.conversationId === conversationId);
       for (const document of owned) {
         if (!isTerminal(document.state)) await cancel(document.state.runId, "conversation_deleted");
-        const execution = executions.get(document.state.runId);
-        if (execution !== undefined) await execution.catch(() => undefined);
-        await settleExecution(document.state.runId);
-        await input.releaseToolEvidenceOwner?.(document.state.runId);
-        await input.repository.delete(document.state.runId);
-        documents.delete(document.state.runId);
-        acceptedToolResults.delete(document.state.runId);
-        activityStreams.delete(document.state.runId);
-        listeners.delete(document.state.runId);
       }
-      await input.sessionRepository.delete(tombstone.state.sessionRef);
+      cleanup = {
+        tombstone,
+        runIds: [...new Set(owned.map((document) => document.state.runId))],
+      };
     });
+    if (cleanup !== undefined) {
+      void scheduleConversationCleanup(conversationId, cleanup.tombstone, cleanup.runIds);
+    }
+  }
+
+  function scheduleConversationCleanup(
+    conversationId: string,
+    tombstone: OrdinaryConversationControlDocument,
+    runIds: readonly string[],
+  ): Promise<void> | undefined {
+    if (released) return undefined;
+    const pendingRetry = conversationCleanupRetryTimers.get(conversationId);
+    if (pendingRetry !== undefined) {
+      clearTimeout(pendingRetry);
+      conversationCleanupRetryTimers.delete(conversationId);
+    }
+    const activeCleanup = conversationCleanupTasks.get(conversationId);
+    if (activeCleanup !== undefined) return activeCleanup;
+    let retryNeeded = false;
+    const cleanup = (async () => {
+      const cleanupRunIds = new Set(runIds);
+      try {
+        const persisted = await input.repository.list(Number.MAX_SAFE_INTEGER);
+        for (const summary of persisted) {
+          if (summary.conversationId === conversationId) cleanupRunIds.add(summary.runId);
+        }
+      } catch (error) {
+        retryNeeded = true;
+        emitDiagnostic({
+          kind: "conversation_cleanup_failed",
+          conversationId,
+          phase: "run_enumeration",
+          error,
+        });
+      }
+      for (const runId of cleanupRunIds) {
+        const execution = executions.get(runId);
+        if (execution !== undefined) await execution.catch(() => undefined);
+        const cancellationCleanup = cancellationCleanupTasks.get(runId);
+        if (cancellationCleanup !== undefined) await cancellationCleanup.catch(() => undefined);
+        try {
+          await settleExecution(runId);
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "terminal_settlement", runId, error });
+          continue;
+        }
+        if (input.releaseToolEvidenceOwner !== undefined) {
+          try {
+            await input.releaseToolEvidenceOwner(runId);
+          } catch (error) {
+            retryNeeded = true;
+            emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "tool_evidence", runId, error });
+            continue;
+          }
+        }
+        try {
+          await input.repository.delete(runId);
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "run_snapshot", runId, error });
+          continue;
+        }
+        documents.delete(runId);
+        acceptedToolResults.delete(runId);
+        activityStreams.delete(runId);
+        listeners.delete(runId);
+      }
+      if (input.managedAttachmentRepository !== undefined) {
+        try {
+          await input.managedAttachmentRepository.deleteConversation(conversationId);
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "managed_attachment_cleanup_failed", conversationId, error });
+        }
+      }
+      try {
+        await input.sessionRepository.delete(tombstone.state.sessionRef);
+      } catch (error) {
+        retryNeeded = true;
+        emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "session", error });
+      }
+    })();
+    const tracked = cleanup.finally(() => {
+      if (conversationCleanupTasks.get(conversationId) === tracked) conversationCleanupTasks.delete(conversationId);
+      if (!retryNeeded) {
+        conversationCleanupFailureCounts.delete(conversationId);
+        return;
+      }
+      if (released) return;
+      const consecutiveFailures = (conversationCleanupFailureCounts.get(conversationId) ?? 0) + 1;
+      conversationCleanupFailureCounts.set(conversationId, consecutiveFailures);
+      const retryDelayMs = conversationCleanupRetryDelayMs(consecutiveFailures);
+      const retryTimer = setTimeout(() => {
+        if (conversationCleanupRetryTimers.get(conversationId) !== retryTimer) return;
+        conversationCleanupRetryTimers.delete(conversationId);
+        void scheduleConversationCleanup(conversationId, tombstone, runIds);
+      }, retryDelayMs);
+      retryTimer.unref?.();
+      conversationCleanupRetryTimers.set(conversationId, retryTimer);
+    });
+    conversationCleanupTasks.set(conversationId, tracked);
+    return tracked;
+  }
+
+  async function createManagedAttachmentDraft(draftInput: {
+    readonly originalName: string;
+    readonly mimeType?: string;
+    readonly content: Uint8Array;
+    readonly uploadRequestId?: string;
+    readonly uploadFileIndex?: number;
+  }) {
+    assertLive();
+    await readyPromise;
+    const repository = requireManagedAttachmentRepository();
+    const attachmentId = managedAttachmentDraftId(
+      draftInput.uploadRequestId,
+      draftInput.uploadFileIndex,
+      idFactory,
+    );
+    try {
+      return await repository.createDraft({
+        attachmentId,
+        instanceId: input.managedAttachmentInstanceId!,
+        originalName: draftInput.originalName,
+        ...(draftInput.mimeType === undefined ? {} : { mimeType: draftInput.mimeType }),
+        content: draftInput.content,
+        createdAt: now(),
+      });
+    } catch (error) {
+      if (error instanceof OrdinaryManagedAttachmentRepositoryError && (
+        error.code === "ordinary_managed_attachment_ownership_conflict" ||
+        error.code === "ordinary_managed_attachment_invalid_id" ||
+        error.code === "ordinary_managed_attachment_invalid_input"
+      )) {
+        throw new OrdinaryFeatureError(
+          "ordinary_managed_attachment_unavailable",
+          error.message,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
+
+  async function discardManagedAttachmentDraft(attachmentId: string): Promise<void> {
+    assertLive();
+    await readyPromise;
+    try {
+      await requireManagedAttachmentRepository().discardDraft({
+        attachmentId,
+        instanceId: input.managedAttachmentInstanceId!,
+      });
+    } catch (error) {
+      if (error instanceof OrdinaryManagedAttachmentRepositoryError && (
+        error.code === "ordinary_managed_attachment_ownership_conflict" ||
+        error.code === "ordinary_managed_attachment_invalid_id" ||
+        error.code === "ordinary_managed_attachment_invalid_input"
+      )) {
+        throw new OrdinaryFeatureError(
+          "ordinary_managed_attachment_unavailable",
+          error.message,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
   }
 
   async function visibleRuns(control: OrdinaryConversationControlDocument): Promise<readonly OrdinaryRunState[]> {
@@ -1589,54 +2284,106 @@ export function createOrdinaryAgentFeature(input: {
   async function cancel(runId: string, reason = "cancelled_by_user"): Promise<OrdinaryRunState> {
     assertLive();
     await readyPromise;
-    const document = await load(runId);
-    if (document === undefined) {
-      throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
-    }
-    if (isTerminal(document.state)) {
-      if (sessionFinalizationPending.has(runId)) {
-        await finalizeExecutionSession(runId, document.state, document.state.status.kind !== "completed");
-        await activateSuccessor(runId);
-        notifyStableTerminal(runId);
-      }
-      return clone(document.state);
-    }
-    controllers.get(runId)?.abort(reason);
     const cancellation = await enqueue(runId, async () => {
       const current = await load(runId);
       if (current === undefined) {
         throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${runId} was not found`);
       }
+      const wasTerminal = isTerminal(current.state);
+      // Persisting the terminal fact is the cancellation linearization point.
+      // A failed save must leave both the durable run and live execution active.
+      const state = wasTerminal
+        ? clone(current.state)
+        : await commitTransition(runId, { type: "cancel", reason }, { keepTerminal: true });
       controllers.get(runId)?.abort(reason);
       const continuation = continuations.get(runId);
       continuations.delete(runId);
-      if (isTerminal(current.state)) {
-        return { state: clone(current.state), continuation, wasTerminal: true };
-      }
-      try {
-        const state = await commitTransition(runId, { type: "cancel", reason }, { keepTerminal: true });
-        return { state, continuation, wasTerminal: false };
-      } catch (error) {
-        if (continuation !== undefined) continuations.set(runId, continuation);
-        throw error;
-      }
+      return {
+        state,
+        continuation,
+        finalizeSession: !wasTerminal || sessionFinalizationPending.has(runId),
+      };
     });
-    if (cancellation.wasTerminal) {
-      if (cancellation.continuation !== undefined) {
-        trackPostExecutionTask(cancellation.continuation.release().catch(() => undefined));
+    scheduleCancellationCleanup(runId, cancellation.state, cancellation.finalizeSession, cancellation.continuation);
+    return clone(cancellation.state);
+  }
+
+  function scheduleCancellationCleanup(
+    runId: string,
+    state: OrdinaryRunState,
+    finalizeSession: boolean,
+    continuation: OrdinaryExecutionContinuation | undefined,
+  ): void {
+    if (continuation !== undefined) cancellationCleanupContinuations.set(runId, continuation);
+    if (released) return;
+    const pendingRetry = cancellationCleanupRetryTimers.get(runId);
+    if (pendingRetry !== undefined) {
+      clearTimeout(pendingRetry);
+      cancellationCleanupRetryTimers.delete(runId);
+    }
+    if (cancellationCleanupTasks.has(runId)) return;
+    let retryNeeded = false;
+    const cleanup = (async () => {
+      const pendingContinuation = cancellationCleanupContinuations.get(runId);
+      if (pendingContinuation !== undefined) {
+        try {
+          await pendingContinuation.release();
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "cancellation_cleanup_failed", runId, phase: "continuation_release", error });
+          return;
+        }
+        if (cancellationCleanupContinuations.get(runId) === pendingContinuation) {
+          cancellationCleanupContinuations.delete(runId);
+        }
       }
-      return cancellation.state;
-    }
-    await finalizeExecutionSession(runId, cancellation.state, true);
-    if (cancellation.continuation !== undefined) {
-      trackPostExecutionTask(cancellation.continuation.release().catch(() => undefined));
-    }
-    const stillHasLiveExecution = controllers.has(runId) || executions.has(runId) || approvalReservations.has(runId);
-    if (!stillHasLiveExecution) await settleExecution(runId);
-    await activateSuccessor(runId);
-    notifyStableTerminal(runId);
-    const settled = await load(runId);
-    return settled === undefined ? cancellation.state : clone(settled.state);
+      if (!executions.has(runId) && !approvalReservations.has(runId) && !continuations.has(runId)) {
+        controllers.delete(runId);
+      }
+      if (finalizeSession) {
+        try {
+          await finalizeExecutionSession(runId, state, state.status.kind !== "completed");
+        } catch {
+          // Keep owning the post-commit cleanup even when no new scheduling
+          // event arrives to trigger the Session finalization retry path.
+          retryNeeded = true;
+          return;
+        }
+      }
+      const stillHasLiveExecution = executions.has(runId) || approvalReservations.has(runId) ||
+        controllers.has(runId);
+      if (!stillHasLiveExecution) {
+        try {
+          await settleExecution(runId);
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "cancellation_cleanup_failed", runId, phase: "terminal_settlement", error });
+          return;
+        }
+      }
+      await activateSuccessor(runId);
+      notifyStableTerminal(runId);
+    })();
+    const tracked = cleanup.finally(() => {
+      if (cancellationCleanupTasks.get(runId) === tracked) cancellationCleanupTasks.delete(runId);
+      if (!retryNeeded) {
+        cancellationCleanupFailureCounts.delete(runId);
+        return;
+      }
+      if (released) return;
+      const consecutiveFailures = (cancellationCleanupFailureCounts.get(runId) ?? 0) + 1;
+      cancellationCleanupFailureCounts.set(runId, consecutiveFailures);
+      const retryDelayMs = cancellationCleanupRetryDelayMs(consecutiveFailures);
+      const retryTimer = setTimeout(() => {
+        if (cancellationCleanupRetryTimers.get(runId) !== retryTimer) return;
+        cancellationCleanupRetryTimers.delete(runId);
+        scheduleCancellationCleanup(runId, state, finalizeSession, undefined);
+      }, retryDelayMs);
+      retryTimer.unref?.();
+      cancellationCleanupRetryTimers.set(runId, retryTimer);
+    });
+    cancellationCleanupTasks.set(runId, tracked);
+    trackPostExecutionTask(tracked);
   }
 
   async function decideApproval(input: DecideOrdinaryApprovalInput): Promise<OrdinaryRunState> {
@@ -1726,7 +2473,7 @@ export function createOrdinaryAgentFeature(input: {
         }
         const latest = await load(ownerRunId);
         if (latest !== undefined && !isTerminal(latest.state)) {
-          await mutate(ownerRunId, {
+          const terminal = await mutate(ownerRunId, {
             type: controller!.signal.aborted ? "cancel" : "fail",
             ...(controller!.signal.aborted
               ? { reason: cancellationReason(controller!.signal.reason) }
@@ -1740,6 +2487,7 @@ export function createOrdinaryAgentFeature(input: {
                   capabilityResolution: outcome.capabilityResolution,
                 }),
           } as OrdinaryRunTransition, { keepTerminal: controller!.signal.aborted });
+          await finalizeExecutionSession(ownerRunId, terminal, true);
         }
       } finally {
         try {
@@ -1771,20 +2519,60 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   function assertLive(): void {
+
     if (released) {
       throw new OrdinaryFeatureError("ordinary_feature_released", "Ordinary Agent is shutting down");
     }
   }
 
+  function isDeletedConversation(conversationId: string): boolean {
+    return conversationDocuments.get(conversationId)?.state.deletedAt !== undefined;
+  }
+
+  function isHiddenConversation(conversationId: string): boolean {
+    return isDeletedConversation(conversationId) || unavailableConversationIds.has(conversationId);
+  }
+
+  function isHiddenRun(state: OrdinaryRunState): boolean {
+    return isHiddenConversation(state.turn.conversationId);
+  }
+
+  function requireManagedAttachmentRepository(): OrdinaryManagedAttachmentRepository {
+    if (input.managedAttachmentRepository === undefined || input.managedAttachmentInstanceId === undefined) {
+      throw new OrdinaryFeatureError(
+        "ordinary_managed_attachment_unavailable",
+        "Ordinary managed attachment storage is unavailable.",
+      );
+    }
+    return input.managedAttachmentRepository;
+  }
+
   return {
-    commands: { start, submitTurn, renameConversation, setConversationPinned, rollbackConversation, deleteConversation, cancel, decideApproval },
+    commands: {
+      start,
+      submitTurn,
+      renameConversation,
+      setConversationPinned,
+      rollbackConversation,
+      deleteConversation,
+      createManagedAttachmentDraft,
+      discardManagedAttachmentDraft,
+      cancel,
+      decideApproval,
+    },
     queries: {
       async getRun(runId) {
         await readyPromise;
         const document = await load(runId);
-        return document === undefined ? undefined : clone(document.state);
+        return document === undefined || isHiddenRun(document.state) ? undefined : clone(document.state);
       },
-      async listRuns(limit) { await readyPromise; return input.repository.list(limit); },
+      async listRuns(limit) {
+        await readyPromise;
+        const summaries = await input.repository.list(Number.MAX_SAFE_INTEGER);
+        const visible = summaries.filter((summary) =>
+          (!startupRunEnumerationFailed || documents.has(summary.runId)) && !isHiddenConversation(summary.conversationId));
+        return limit === undefined ? visible : visible.slice(0, Math.max(0, Math.floor(limit)));
+      },
       async getConversation(conversationId) {
         await readyPromise;
         const control = await loadConversationControl(conversationId);
@@ -1799,12 +2587,21 @@ export function createOrdinaryAgentFeature(input: {
         });
         return clone(views.slice(0, Math.max(0, Math.floor(limit))));
       },
+      async getManagedAttachment(attachmentId) {
+        await readyPromise;
+        try {
+          return clone(await requireManagedAttachmentRepository().get(attachmentId));
+        } catch (error) {
+          if (isManagedAttachmentNotFound(error)) return undefined;
+          throw error;
+        }
+      },
       async getStableTerminalRunFacts(runId) {
         // Startup reconciliation must finish first so recovered runs already
         // closed their lost continuations, pending tool rounds and approvals.
         await readyPromise;
         const document = await load(runId);
-        if (document === undefined || !isStableTerminalState(document.state)) return undefined;
+        if (document === undefined || isHiddenRun(document.state) || !isStableTerminalState(document.state)) return undefined;
         return projectStableTerminalRunFacts(document);
       },
     },
@@ -1812,7 +2609,7 @@ export function createOrdinaryAgentFeature(input: {
       async replay(runId, cursor) {
         await readyPromise;
         const document = await load(runId);
-        if (document === undefined) return undefined;
+        if (document === undefined || isHiddenRun(document.state)) return undefined;
         // Live runs use the cached mutable stream. Settled terminal runs whose
         // stream was already released rebuild an ephemeral projection instead of
         // re-pinning it: the stream is a pure function of the persisted document,
@@ -1878,15 +2675,35 @@ export function createOrdinaryAgentFeature(input: {
     await readyPromise.catch(() => undefined);
     for (const timer of visibleAssistantCheckpointTimers.values()) clearTimeout(timer);
     visibleAssistantCheckpointTimers.clear();
+    for (const pump of successorActivationPumps.values()) {
+      if (pump.retryTimer !== undefined) clearTimeout(pump.retryTimer);
+    }
+    successorActivationPumps.clear();
+    for (const timer of conversationCleanupRetryTimers.values()) clearTimeout(timer);
+    conversationCleanupRetryTimers.clear();
+    conversationCleanupFailureCounts.clear();
+    for (const timer of cancellationCleanupRetryTimers.values()) clearTimeout(timer);
+    cancellationCleanupRetryTimers.clear();
+    cancellationCleanupFailureCounts.clear();
+    for (const timer of managedAttachmentClaimRollbackRetryTimers.values()) clearTimeout(timer);
+    managedAttachmentClaimRollbackRetryTimers.clear();
     await Promise.allSettled([...visibleAssistantBuffers.keys()].map(persistVisibleAssistantCheckpoint));
     for (const controller of controllers.values()) controller.abort("ordinary_feature_released");
     await releaseContinuations();
     await Promise.allSettled(executions.values());
+    await Promise.allSettled(conversationCleanupTasks.values());
     await Promise.allSettled(postExecutionTasks);
     await Promise.allSettled(mutationQueues.values());
+    await Promise.allSettled(managedAttachmentClaimRollbackTasks.values());
+    await Promise.allSettled([...managedAttachmentClaimRollbacks.values()].map(async (rollback) => {
+      await attemptManagedAttachmentClaimRollback(rollback.runId);
+    }));
     // An abort-ignoring execution may have returned an approval while release awaited it.
     await releaseContinuations();
     await finalizeRemainingSessions();
+    if (input.managedAttachmentRepository !== undefined && input.managedAttachmentInstanceId !== undefined) {
+      await input.managedAttachmentRepository.removeDraftsOwnedBy(input.managedAttachmentInstanceId);
+    }
     listeners.clear();
     stableTerminalListeners.clear();
     activityStreams.clear();
@@ -1896,6 +2713,12 @@ export function createOrdinaryAgentFeature(input: {
     sessionFinalizationPending.clear();
     sessionFinalizationFailures.clear();
     sessionFinalizationRetries.clear();
+    cancellationCleanupTasks.clear();
+    cancellationCleanupContinuations.clear();
+    conversationCleanupTasks.clear();
+    managedAttachmentClaimRollbackTasks.clear();
+    managedAttachmentClaimRollbacks.clear();
+    managedAttachmentClaimRollbackFailureCounts.clear();
     visibleAssistantBuffers.clear();
     visibleAssistantCheckpointTimers.clear();
     approvalReservations.clear();
@@ -1905,9 +2728,28 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   async function releaseContinuations(): Promise<void> {
-    const pending = [...continuations.values()];
-    continuations.clear();
-    await Promise.allSettled(pending.map((continuation) => continuation.release()));
+    const failures: unknown[] = [];
+    for (const [runId, continuation] of continuations) {
+      try {
+        await continuation.release();
+        if (continuations.get(runId) === continuation) continuations.delete(runId);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    for (const [runId, continuation] of cancellationCleanupContinuations) {
+      try {
+        await continuation.release();
+        if (cancellationCleanupContinuations.get(runId) === continuation) {
+          cancellationCleanupContinuations.delete(runId);
+        }
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Failed to release one or more Ordinary live continuations.");
+    }
   }
 
   async function finalizeRemainingSessions(): Promise<void> {
@@ -2067,6 +2909,7 @@ function assertConversationWritable(document: OrdinaryConversationControlDocumen
     );
   }
 }
+
 function rollbackLeafRef(state: OrdinaryRunState): AgentSessionEntryRef | null {
   switch (state.session.phase) {
     case "not_started": return null;
@@ -2074,6 +2917,34 @@ function rollbackLeafRef(state: OrdinaryRunState): AgentSessionEntryRef | null {
     case "rollbackable": return state.session.endLeafRef;
     case "completion_candidate": return state.session.rollbackLeafRef;
   }
+}
+function recoveredSessionLeaf(
+  runs: readonly OrdinaryRunState[],
+  activeBranch: readonly AgentSessionEntryRef[],
+  conversationId: string,
+): AgentSessionEntryRef | null {
+  const branchIndex = new Map(activeBranch.map((entry, index) => [sessionEntryKey(entry), index]));
+  const durableLeaves = runs
+    .map(rollbackLeafRef)
+    .filter((entry): entry is AgentSessionEntryRef => entry !== null);
+  let target: { readonly entry: AgentSessionEntryRef; readonly index: number } | undefined;
+  for (const entry of durableLeaves) {
+    const index = branchIndex.get(sessionEntryKey(entry));
+    if (index !== undefined && (target === undefined || index > target.index)) target = { entry, index };
+  }
+  if (target !== undefined) return target.entry;
+  if (durableLeaves.length > 0) {
+    throw new OrdinaryFeatureError(
+      "ordinary_run_state_conflict",
+      `Ordinary conversation ${conversationId} has no persisted safe leaf on its active Session branch`,
+    );
+  }
+  return null;
+}
+function sameSessionEntryRef(left: AgentSessionEntryRef | null, right: AgentSessionEntryRef | null): boolean {
+  return left === null || right === null
+    ? left === right
+    : left.sessionId === right.sessionId && left.entryId === right.entryId;
 }
 function snapshotBranchRefsForSessionlessTestExecution(
   runs: readonly OrdinaryRunState[],
@@ -2092,12 +2963,131 @@ function snapshotBranchRefsForSessionlessTestExecution(
       }
     });
 }
+type ManagedAttachmentClaimRollback = {
+  readonly runId: string;
+  readonly conversationId: string;
+  readonly attachmentIds: readonly string[];
+  readonly protectedByRunId?: string;
+};
+type ManagedAttachmentClaimReservation = {
+  readonly rollbackRunId: string;
+  readonly protectedAttachmentIds: readonly string[];
+};
+function conversationCleanupRetryDelayMs(consecutiveFailures: number): number {
+  return Math.min(30_000, 250 * (2 ** Math.min(7, Math.max(0, consecutiveFailures - 1))));
+}
+function cancellationCleanupRetryDelayMs(consecutiveFailures: number): number {
+  return Math.min(30_000, 250 * (2 ** Math.min(7, Math.max(0, consecutiveFailures - 1))));
+}
+function managedAttachmentClaimRollbackRetryDelayMs(consecutiveFailures: number): number {
+  return Math.min(30_000, 250 * (2 ** Math.min(7, Math.max(0, consecutiveFailures - 1))));
+}
 function cancellationReason(value: unknown): string { return typeof value === "string" ? value : "cancelled"; }
+function successorActivationRetryDelayMs(consecutiveFailures: number): number {
+  return Math.min(2_000, 25 * (2 ** Math.min(6, Math.max(0, consecutiveFailures - 1))));
+}
 function ordinaryExecutionFailureFacts(value: unknown): { readonly code: string; readonly message: string } {
   const explicit = executionErrorFacts(value);
   if (explicit !== undefined) return explicit;
   if (value instanceof OrdinaryFeatureError) return { code: value.code, message: value.message };
   return { code: "ordinary_execution_failed", message: errorMessage(value) };
+}
+function isManagedAttachmentNotFound(value: unknown): boolean {
+  return value instanceof OrdinaryManagedAttachmentRepositoryError &&
+    value.code === "ordinary_managed_attachment_not_found";
+}
+function managedAttachmentIds(input: OrdinaryRunInput): readonly string[] {
+  return [...new Set((input.taskSoil?.contextRefs ?? []).flatMap((ref) => {
+    const attachmentId = managedUploadAttachmentId(ref.ref);
+    return ref.kind === "file" && attachmentId !== undefined ? [attachmentId] : [];
+  }))];
+}
+function canonicalManagedAttachmentInput(
+  input: OrdinaryRunInput,
+  records: readonly OrdinaryManagedAttachmentRecord[],
+): OrdinaryRunInput {
+  if (input.taskSoil === undefined || records.length === 0) return input;
+  const byId = new Map(records.map((record) => [record.attachmentId, record] as const));
+  const contextRefs = (input.taskSoil.contextRefs ?? []).map((ref) => {
+    const attachmentId = managedUploadAttachmentId(ref.ref);
+    if (attachmentId === undefined) return ref;
+    const record = byId.get(attachmentId);
+    if (record === undefined) {
+      throw new OrdinaryFeatureError(
+        "ordinary_managed_attachment_unavailable",
+        `Managed attachment ${attachmentId} was not claimed for this run.`,
+      );
+    }
+    return {
+      attachmentId: record.attachmentId,
+      ref: managedUploadAttachmentRef(record.attachmentId),
+      kind: "file" as const,
+      title: record.originalName,
+      summary: `上传附件：${record.originalName} · ${record.byteLength} bytes`,
+      metadata: {
+        byteLength: record.byteLength,
+        ...(record.mimeType === undefined ? {} : { mimeType: record.mimeType }),
+        available: true,
+        truncated: false,
+      },
+    };
+  });
+  const permissionBoundaryRefs = [
+    ...(input.taskSoil.permissionBoundaryRefs ?? []).filter((ref) =>
+      !ref.startsWith("read:uploaded-attachment:")),
+    ...records.map((record) => `read:uploaded-attachment:${record.attachmentId}`),
+  ];
+  return {
+    ...input,
+    taskSoil: {
+      ...input.taskSoil,
+      contextRefs,
+      permissionBoundaryRefs: [...new Set(permissionBoundaryRefs)],
+    },
+  };
+}
+function normalizedSubmissionId(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (value.trim().length === 0 || value.length > 200 || value.includes("\0")) {
+    throw new OrdinaryFeatureError("ordinary_submission_conflict", "Ordinary submission id is invalid.");
+  }
+  return value;
+}
+function managedAttachmentDraftId(
+  uploadRequestId: string | undefined,
+  uploadFileIndex: number | undefined,
+  idFactory: IdFactory,
+): string {
+  if (uploadRequestId === undefined && uploadFileIndex === undefined) {
+    return idFactory("ordinary-managed-attachment");
+  }
+  if (uploadRequestId === undefined || uploadFileIndex === undefined ||
+    uploadRequestId.trim().length === 0 || uploadRequestId.length > 200 || uploadRequestId.includes("\0") ||
+    !Number.isSafeInteger(uploadFileIndex) || uploadFileIndex < 0 || uploadFileIndex > 10_000) {
+    throw new OrdinaryFeatureError(
+      "ordinary_managed_attachment_unavailable",
+      "Managed attachment upload identity is invalid.",
+    );
+  }
+  const digest = createHash("sha256")
+    .update("ordinary-managed-upload/v2\0")
+    .update(uploadRequestId)
+    .update("\0")
+    .update(String(uploadFileIndex))
+    .digest("base64url")
+    .slice(0, 32);
+  return `ordinary-managed-attachment-${digest}`;
+}
+function sameSubmissionInput(left: OrdinaryRunInput, right: OrdinaryRunInput): boolean {
+  const identity = (value: OrdinaryRunInput) => ({
+    userMessage: value.userMessage,
+    contextRefs: (value.taskSoil?.contextRefs ?? []).map((ref) => ({
+      attachmentId: ref.attachmentId,
+      ref: ref.ref,
+      kind: ref.kind,
+    })),
+  });
+  return JSON.stringify(identity(left)) === JSON.stringify(identity(right));
 }
 function errorMessage(value: unknown): string { return value instanceof Error ? value.message : String(value); }
 function clone<T>(value: T): T { return globalThis.structuredClone(value); }

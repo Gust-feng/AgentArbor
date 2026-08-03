@@ -63,6 +63,7 @@ export type CreateAgentToolRegistryOptions = {
   readonly outputTokenCounter?: ToolOutputTokenCounter;
   readonly metricsSink?: ToolExecutionMetricsSink;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 };
 
 export type ToolRegistryFetchLike = (
@@ -156,6 +157,7 @@ function contextAttachmentExecutors(
     taskSoil: options.taskSoil,
     workspaceRoot,
     supportsVisionInput: options.modelCapabilities?.supportsVisionInput,
+    resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
   });
 }
 

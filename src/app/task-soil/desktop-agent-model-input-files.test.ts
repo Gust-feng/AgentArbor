@@ -103,3 +103,48 @@ test("Desktop Agent does not attach image payloads for non-vision models", async
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+test("Desktop Agent resolves authorized managed images without persisting their storage path", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-managed-image-"));
+  const imagePath = path.join(root, "content");
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await fs.writeFile(imagePath, bytes);
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the managed image",
+      goalId: "goal-managed-image",
+      traceId: "trace-managed-image",
+      contextRefs: [{
+        attachmentId: "managed-image",
+        ref: "uploaded-attachment:managed-image",
+        kind: "file",
+        title: "screen.png",
+        metadata: { byteLength: bytes.length, mimeType: "image/png", available: true },
+      }],
+      permissionBoundaryRefs: ["read:uploaded-attachment:managed-image"],
+    });
+    const messages: readonly ModelMessage[] = [{ role: "user", content: "Describe it." }];
+    const resolvedIds: string[] = [];
+
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages,
+      taskSoil,
+      modelCapabilities: VISION_CAPABILITIES,
+      resolveManagedAttachmentPath: async (attachmentId) => {
+        resolvedIds.push(attachmentId);
+        return imagePath;
+      },
+    });
+
+    assert.deepEqual(resolvedIds, ["managed-image"]);
+    assert.equal(resolved[0]?.attachments?.[0]?.inputRef, "uploaded-attachment:managed-image");
+    assert.deepEqual(resolved[0]?.attachments?.[0]?.source, {
+      kind: "data",
+      mimeType: "image/png",
+      data: bytes.toString("base64"),
+    });
+    assert.equal(JSON.stringify(taskSoil).includes(imagePath), false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});

@@ -147,6 +147,7 @@ type AgentSessionExecutionState = {
   readonly abortSignalCleanups: Set<() => void>;
   readonly pendingRootToolRequests: Map<string, PendingToolRequest>;
   readonly preparedRootToolCallIds: Set<string>;
+  readonly acceptedNestedToolRequests: Map<string, ToolCallRequest>;
   readonly now: () => number;
   readonly timing: ProviderTimingAccumulator;
   inputEntryId?: string;
@@ -156,6 +157,7 @@ type AgentSessionExecutionState = {
   abortRun?: () => Promise<void>;
   usage: ModelUsage;
   maintenanceFailure?: { readonly code: string; readonly error: string };
+  toolRequestAcceptanceFailure?: unknown;
   toolAcceptanceFailure?: unknown;
 };
 
@@ -210,6 +212,7 @@ export function createAgentSessionLoop(options: AgentSessionLoopOptions): AgentL
         abortSignalCleanups: new Set(),
         pendingRootToolRequests: new Map(),
         preparedRootToolCallIds: new Set(),
+        acceptedNestedToolRequests: new Map(),
         now: options.now ?? (() => Date.now()),
         timing: emptyProviderTimingAccumulator(),
         latestLeafEntryId: startEntryId,
@@ -270,9 +273,12 @@ export function createAgentSessionLoop(options: AgentSessionLoopOptions): AgentL
       released = true;
       const currentExecution = activeExecution;
       if (currentExecution !== undefined) {
-        await currentExecution.cancel();
-        await currentExecution.run.catch(() => undefined);
-        if (activeExecution === currentExecution) activeExecution = undefined;
+        try {
+          await currentExecution.cancel();
+        } finally {
+          await currentExecution.run.catch(() => undefined);
+          if (activeExecution === currentExecution) activeExecution = undefined;
+        }
       }
     },
   };
@@ -877,6 +883,7 @@ function createHarnessTool(
       };
       const request = requestScope?.(unscopedRequest) ?? unscopedRequest;
       emitToolRequested(input, request);
+      assertNestedToolRequestAccepted(state, request);
       onToolInvoked?.();
       let context = toolExecutionContext(input, boundary, request, signal, onUpdate);
       const preflight = boundary.gateway.preflight(request, context, boundary.permission);
@@ -987,7 +994,10 @@ function createDelegatedAgentTool(
       const acceptanceFailure = await acceptToolResultForDelivery(input, state, delivered);
       return acceptanceFailure ?? harnessToolResult(
         delivered,
-        state.toolAcceptanceFailure !== undefined || delivered.status === "cancelled",
+        state.toolRequestAcceptanceFailure !== undefined ||
+          state.toolAcceptanceFailure !== undefined ||
+          state.maintenanceFailure !== undefined ||
+          delivered.status === "cancelled",
       );
     },
   };
@@ -1133,8 +1143,19 @@ function attachDelegatedHarnessHooks(
       return;
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
-      for (const request of modelMessageFromAssistant(event.message).toolCalls ?? []) {
-        const scoped = scopedDelegatedToolRequest(parentFactId, request);
+      const requests = (modelMessageFromAssistant(event.message).toolCalls ?? [])
+        .map((request) => scopedDelegatedToolRequest(parentFactId, request));
+      const batchFactIds = new Set<string>();
+      for (const scoped of requests) {
+        const factId = toolCallFactId(scoped);
+        if (batchFactIds.has(factId) || state.acceptedNestedToolRequests.has(factId)) {
+          throwHarnessMaintenanceFailure(
+            state,
+            "session_tool_request_duplicate",
+            `Pi reused delegated tool fact ${factId}.`,
+          );
+        }
+        batchFactIds.add(factId);
         if (pendingRequests.has(scoped.callId)) {
           throwHarnessMaintenanceFailure(
             state,
@@ -1142,6 +1163,19 @@ function attachDelegatedHarnessHooks(
             `Pi emitted duplicate delegated tool call id ${scoped.callId}.`,
           );
         }
+      }
+      if (requests.length > 0) {
+        try {
+          await loopInput.onNestedToolRequestsAccepted?.(
+            requests.map((request) => globalThis.structuredClone(request)),
+          );
+        } catch (error) {
+          state.toolRequestAcceptanceFailure ??= error;
+          throw error;
+        }
+      }
+      for (const scoped of requests) {
+        state.acceptedNestedToolRequests.set(toolCallFactId(scoped), globalThis.structuredClone(scoped));
         pendingRequests.set(scoped.callId, {
           request: scoped,
           modelVisibleAtRequest: harness.getActiveTools().some((tool) => tool.name === scoped.toolName),
@@ -1612,6 +1646,14 @@ function finalResult(
       errorCode: state.maintenanceFailure.code,
     };
   }
+  if (state.toolRequestAcceptanceFailure !== undefined) {
+    return {
+      ...facts,
+      status: "failed",
+      error: errorMessage(state.toolRequestAcceptanceFailure),
+      errorCode: "tool_request_acceptance_failed",
+    };
+  }
   if (state.toolAcceptanceFailure !== undefined) {
     return { ...facts, status: "failed", error: errorMessage(state.toolAcceptanceFailure), errorCode: "tool_result_acceptance_failed" };
   }
@@ -1688,6 +1730,9 @@ function failedRunResult(error: unknown, input: AgentLoopInput, state: AgentSess
   }
   if (state.maintenanceFailure !== undefined) {
     return failedResult(state, state.maintenanceFailure.error, state.maintenanceFailure.code);
+  }
+  if (state.toolRequestAcceptanceFailure !== undefined) {
+    return failedResult(state, errorMessage(state.toolRequestAcceptanceFailure), "tool_request_acceptance_failed");
   }
   if (state.toolAcceptanceFailure !== undefined) {
     return failedResult(state, errorMessage(state.toolAcceptanceFailure), "tool_result_acceptance_failed");
@@ -1862,6 +1907,20 @@ async function acceptToolResult(
     state.toolAcceptanceFailure ??= error;
     throw error;
   }
+}
+
+function assertNestedToolRequestAccepted(
+  state: AgentSessionExecutionState,
+  request: ToolCallRequest,
+): void {
+  if (request.parentToolCallFactId === undefined) return;
+  const accepted = state.acceptedNestedToolRequests.get(toolCallFactId(request));
+  if (accepted !== undefined && JSON.stringify(accepted) === JSON.stringify(request)) return;
+  throwHarnessMaintenanceFailure(
+    state,
+    "nested_tool_request_not_accepted",
+    `Nested tool request ${toolCallFactId(request)} reached execution without owner acceptance.`,
+  );
 }
 
 async function acceptToolResultForDelivery(

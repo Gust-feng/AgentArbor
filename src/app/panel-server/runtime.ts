@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +46,8 @@ import {
 } from "../ordinary-agent/agent-loop-execution.js";
 import {
   createOrdinaryAgentFeature,
+  createFileSystemOrdinaryManagedAttachmentRepository,
+  OrdinaryManagedAttachmentRepositoryError,
   type OrdinaryAgentFeature,
   type OrdinaryRunBirth,
 } from "../ordinary-agent/index.js";
@@ -153,6 +155,7 @@ export type PanelRuntime = {
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
+  readonly resolveManagedAttachmentPath: (attachmentId: string) => Promise<string | undefined>;
   readonly agentNotesFeature: AgentNotesFeature;
   readonly spaceFeature: SpaceFeature;
   readonly personalKnowledgeFeature: PersonalKnowledgeFeature<import("../panel-api-contracts.js").DocumentPreview>;
@@ -374,6 +377,19 @@ function assemblePanelRuntime(input: {
     path.join(runtimeHome, "space-reference-deletions"),
   );
   const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
+  const managedAttachmentInstanceId = randomUUID();
+  const managedAttachmentRepository = createFileSystemOrdinaryManagedAttachmentRepository(
+    path.join(ordinaryRuntimeRoot, "managed-attachments"),
+  );
+  const resolveManagedAttachmentPath = async (attachmentId: string): Promise<string | undefined> => {
+    try {
+      return await managedAttachmentRepository.resolveContentPath(attachmentId);
+    } catch (error) {
+      if (error instanceof OrdinaryManagedAttachmentRepositoryError &&
+        error.code === "ordinary_managed_attachment_not_found") return undefined;
+      throw error;
+    }
+  };
   const agentNotesFeature = createAgentNotesFeature({
     repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
   });
@@ -473,6 +489,7 @@ function assemblePanelRuntime(input: {
       processTerminator,
       toolOutputStore,
       fileMutationCoordinator,
+      resolveManagedAttachmentPath,
       testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
     },
     sessionRepository: agentSessionRepository,
@@ -506,13 +523,27 @@ function assemblePanelRuntime(input: {
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(ordinaryRuntimeRoot),
     sessionRepository: agentSessionRepository,
     releaseToolEvidenceOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
+    managedAttachmentRepository,
+    managedAttachmentInstanceId,
     onDiagnostic: (diagnostic) => {
       if (diagnostic.kind === "session_finalization_failed") {
         console.error(`[panel-server] Ordinary run ${diagnostic.runId} Session finalization failed; the conversation queue stays paused until a retry succeeds`, diagnostic.error);
       } else if (diagnostic.kind === "conversation_unavailable") {
         console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} is unavailable after startup recovery; its data remains on disk for diagnosis`, diagnostic.error);
       } else if (diagnostic.kind === "successor_activation_failed") {
-        console.error(`[panel-server] Ordinary successor activation failed after bounded retry for ${diagnostic.predecessorRunId}; the successor remains queued`, diagnostic.error);
+        const activationOwner = diagnostic.predecessorRunId ?? diagnostic.conversationId;
+        console.error(`[panel-server] Ordinary successor activation attempt ${diagnostic.consecutiveFailures} failed for ${activationOwner}; retrying in ${diagnostic.retryDelayMs}ms`, diagnostic.error);
+      } else if (diagnostic.kind === "cancellation_cleanup_failed") {
+        console.error(`[panel-server] Ordinary run ${diagnostic.runId} cancellation cleanup failed during ${diagnostic.phase}; its durable cancelled fact remains authoritative`, diagnostic.error);
+      } else if (diagnostic.kind === "conversation_cleanup_failed") {
+        const resourceOwner = diagnostic.runId ?? diagnostic.conversationId;
+        console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} cleanup failed during ${diagnostic.phase} for ${resourceOwner}; the durable state remains available for diagnosis or retry`, diagnostic.error);
+      } else if (diagnostic.kind === "managed_attachment_cleanup_failed") {
+        console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} managed attachment cleanup failed; startup will retry`, diagnostic.error);
+      } else if (diagnostic.kind === "managed_attachment_recovery_issue") {
+        console.error(`[panel-server] Ordinary managed attachment ${diagnostic.identity ?? "storage"} recovery was isolated`, diagnostic.error);
+      } else if (diagnostic.kind === "managed_attachment_claim_rollback_failed") {
+        console.error(`[panel-server] Ordinary run ${diagnostic.runId} could not roll back managed attachment claims; the feature will retry and startup reconciliation remains the final fallback`, diagnostic.error);
       } else {
         console.error(`[panel-server] Ordinary startup recovery could not enumerate ${diagnostic.source}; new live conversations remain available`, diagnostic.error);
       }
@@ -596,6 +627,7 @@ function assemblePanelRuntime(input: {
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
     ordinaryAgentFeature,
+    resolveManagedAttachmentPath,
     agentNotesFeature,
     spaceFeature,
     personalKnowledgeFeature,
@@ -838,11 +870,11 @@ async function prepareOrdinaryRunBirth(
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
   const workspaceRoot = capabilitySnapshot.workspace.workspaceDirectory;
-  const noteInjection = await runtime.agentNotesFeature.queries.startupInjection(workspaceRoot);
+  const noteSnapshot = await runtime.agentNotesFeature.queries.startupSnapshot(workspaceRoot);
   // The injected note is frozen with this run's definition. This preserves the
   // existing definition/hash invariant: a restarted run uses exactly the notes
   // it saw at birth, while the next run sees any later model-written revision.
-  const definition = definitionWithAgentNotes(configuredDefinition, noteInjection);
+  const definition = definitionWithAgentNotes(configuredDefinition, noteSnapshot.injection);
   const agentDefinitionRef = runAgentDefinitionRef(definition);
   runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), definition);
   return {
@@ -852,6 +884,7 @@ async function prepareOrdinaryRunBirth(
     reasoningEffort: input.reasoningEffort,
     agentDefinitionRef,
     capabilitySnapshot,
+    agentNoteVersions: noteSnapshot.versions,
     workspaceSelection: input.workspaceDirectory === undefined ? "default" : "explicit",
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,

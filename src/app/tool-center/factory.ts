@@ -52,6 +52,7 @@ export type CreateAgentToolCenterOptions = {
   readonly outputTokenCounter?: ToolOutputTokenCounter;
   readonly metricsSink?: ToolExecutionMetricsSink;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 };
 
 export function createDefaultToolCenter(

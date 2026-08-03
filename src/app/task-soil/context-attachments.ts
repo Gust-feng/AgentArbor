@@ -7,6 +7,18 @@ const MAX_FILE_PREVIEW_BYTES = 96_000;
 const MAX_FILE_PREVIEW_CHARS = 8_000;
 const MAX_DIRECTORY_PREVIEW_ENTRIES = 80;
 
+export const MANAGED_UPLOAD_ATTACHMENT_REF_PREFIX = "uploaded-attachment:";
+
+export function managedUploadAttachmentRef(attachmentId: string): string {
+  return `${MANAGED_UPLOAD_ATTACHMENT_REF_PREFIX}${attachmentId}`;
+}
+
+export function managedUploadAttachmentId(ref: string): string | undefined {
+  return ref.startsWith(MANAGED_UPLOAD_ATTACHMENT_REF_PREFIX)
+    ? ref.slice(MANAGED_UPLOAD_ATTACHMENT_REF_PREFIX.length) || undefined
+    : undefined;
+}
+
 const MIME_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".csv": "text/csv",
   ".gif": "image/gif",
@@ -53,6 +65,7 @@ export type LocalContextAttachmentSelection = {
 };
 
 export type UploadedContextAttachmentInput = {
+  readonly attachmentId: string;
   readonly path: string;
   readonly originalName: string;
   readonly mimeType?: string;
@@ -130,13 +143,13 @@ export async function createUploadedContextAttachment(
   const mimeType = safeText(input.mimeType ?? mimeTypeForPath(title) ?? mimeTypeForPath(absolutePath) ?? "application/octet-stream", 160);
   const preview = await fileReadonlyPreview(absolutePath, title, stat.size, mimeType);
   return {
-    attachmentId: createId("ctx"),
+    attachmentId: input.attachmentId,
     kind: "file",
-    ref: `local-file:${absolutePath}`,
+    ref: managedUploadAttachmentRef(input.attachmentId),
     title,
     summary: safeText(`上传附件：${title} · ${stat.size} bytes${preview?.truncated === true ? " · 预览已截断" : ""}`, 280),
     readonlyPreview: preview,
-    permissionRefs: [`read:local-file:${absolutePath}`],
+    permissionRefs: [`read:uploaded-attachment:${input.attachmentId}`],
     readonlyPreviewMeta: {
       available: true,
       title,

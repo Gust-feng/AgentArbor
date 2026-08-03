@@ -71,6 +71,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   let hostReleases = 0;
   let loopReleases = 0;
   let loopConfig: AgentSessionLoopOptions | undefined;
+  let resolvedAgentNoteVersions: OrdinaryRunBirth["agentNoteVersions"];
   const countedToolContracts: string[] = [];
   const routingProvider = fauxProvider();
   routingProvider.setResponses([
@@ -110,6 +111,10 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
         triggerReason: "Explicit review request.",
       }];
     },
+    resolveFeatureToolContributions(input) {
+      resolvedAgentNoteVersions = input.agentNoteVersions;
+      return [];
+    },
     resolveSubAgentRoots: () => [subAgentRoot],
   }, {
     async prepareHostResources() {
@@ -122,7 +127,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     createProviderBinding: () => providerBinding,
     createTokenCounter: () => observingTokenCounter(countedToolContracts),
   });
-  const execution = executionInput(snapshot, {
+  const baseExecution = executionInput(snapshot, {
     contextRefs: [{
       attachmentId: "screen",
       ref: `local-file:${imagePath}`,
@@ -133,6 +138,16 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     }],
     permissionBoundaryRefs: [`read:local-file:${imagePath}`],
   });
+  const execution: OrdinaryExecutionInput = {
+    ...baseExecution,
+    birth: {
+      ...baseExecution.birth,
+      agentNoteVersions: {
+        global: `sha256:${"a".repeat(64)}`,
+        workspace: `sha256:${"b".repeat(64)}`,
+      },
+    },
+  };
 
   const acquired = await acquirer.acquire(execution);
 
@@ -156,6 +171,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     "AgentSpawn",
   ]);
   assert.equal(acquired.capabilityResolution?.runMode, "agent");
+  assert.deepEqual(resolvedAgentNoteVersions, execution.birth.agentNoteVersions);
   assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
   assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["Agent", "AgentSpawn"]);
   assert.equal(loopConfig?.toolDefinitionTokenCounter?.("visible definition"), "visible definition".length);
@@ -574,10 +590,11 @@ test("Ordinary resources classify tool-boundary failures without parsing message
   assert.equal(boundaryReleases, 1);
 });
 
-test("Ordinary run release cleans run resources without discarding retained output", async () => {
+test("Ordinary run release retries only failed cleanup without discarding retained output", async () => {
   const base = ordinaryRunBirth();
   const calls: string[] = [];
   const cleanupFailure = new Error("process cleanup failed");
+  let processCleanupAttempts = 0;
   const outputStore = new InMemoryToolOutputStore();
   const retained = await outputStore.retain({
     mediaType: "text/plain",
@@ -591,7 +608,8 @@ test("Ordinary run release cleans run resources without discarding retained outp
       register() { return undefined; },
       async cleanupByRun(runId: string) {
         calls.push(`process:${runId}`);
-        throw cleanupFailure;
+        processCleanupAttempts += 1;
+        if (processCleanupAttempts === 1) throw cleanupFailure;
       },
     },
     processTerminator: { killTree: async () => ({ status: "killed" as const }) },
@@ -620,8 +638,9 @@ test("Ordinary run release cleans run resources without discarding retained outp
   });
 
   await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
-  await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
-  assert.deepEqual(calls, ["loop", "host", "process:run-cleanup"]);
+  await acquired.release();
+  await acquired.release();
+  assert.deepEqual(calls, ["loop", "host", "process:run-cleanup", "process:run-cleanup"]);
   assert.equal(
     (await outputStore.read(retained.ref, { startChar: 0, maxChars: 64 }))?.content,
     "continue reading this result",

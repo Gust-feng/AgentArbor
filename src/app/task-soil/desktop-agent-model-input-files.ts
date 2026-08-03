@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelInputAttachment, ModelMessage } from "../../domain/intelligence/index.js";
 import type { TaskSoil, TaskSoilContextRef } from "../../domain/soil/index.js";
+import { managedUploadAttachmentId } from "./context-attachments.js";
 
 const MAX_IMAGE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
@@ -19,6 +20,7 @@ export async function attachDesktopFileInputsToModelMessages(input: {
   readonly taskSoil: TaskSoil;
   readonly modelCapabilities?: ModelCapabilities;
   readonly workspaceRoot?: string;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 }): Promise<readonly ModelMessage[]> {
   if (input.modelCapabilities?.supportsVisionInput !== true) {
     return input.messages;
@@ -26,6 +28,7 @@ export async function attachDesktopFileInputsToModelMessages(input: {
   const attachments = await resolveImageAttachments({
     taskSoil: input.taskSoil,
     workspaceRoot: input.workspaceRoot ?? process.cwd(),
+    resolveManagedAttachmentPath: input.resolveManagedAttachmentPath,
   });
   if (attachments.length === 0) {
     return input.messages;
@@ -36,10 +39,16 @@ export async function attachDesktopFileInputsToModelMessages(input: {
 async function resolveImageAttachments(input: {
   readonly taskSoil: TaskSoil;
   readonly workspaceRoot: string;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 }): Promise<readonly ModelInputAttachment[]> {
   const attachments: ModelInputAttachment[] = [];
   for (const ref of input.taskSoil.contextRefs) {
-    const resolved = resolveReadableFileRef(ref, input.workspaceRoot, input.taskSoil.permissionBoundaryRefs);
+    const resolved = await resolveReadableFileRef(
+      ref,
+      input.workspaceRoot,
+      input.taskSoil.permissionBoundaryRefs,
+      input.resolveManagedAttachmentPath,
+    );
     if (resolved === undefined) {
       continue;
     }
@@ -80,13 +89,22 @@ function imageMimeTypeFor(ref: TaskSoilContextRef, absolutePath: string): string
   return IMAGE_MIME_BY_EXTENSION[path.extname(absolutePath).toLowerCase()];
 }
 
-function resolveReadableFileRef(
+async function resolveReadableFileRef(
   ref: TaskSoilContextRef,
   workspaceRoot: string,
-  permissionRefs: readonly string[]
-): { readonly absolutePath: string } | undefined {
+  permissionRefs: readonly string[],
+  resolveManagedAttachmentPath: ((attachmentId: string) => Promise<string | undefined>) | undefined,
+): Promise<{ readonly absolutePath: string } | undefined> {
   if (ref.kind !== "file") {
     return undefined;
+  }
+  const managedAttachmentId = managedUploadAttachmentId(ref.ref);
+  if (managedAttachmentId !== undefined) {
+    if (!permissionRefs.includes(`read:uploaded-attachment:${managedAttachmentId}`)) return undefined;
+    const absolutePath = await resolveManagedAttachmentPath?.(managedAttachmentId);
+    return absolutePath !== undefined && path.isAbsolute(absolutePath)
+      ? { absolutePath: path.resolve(absolutePath) }
+      : undefined;
   }
   if (ref.ref.startsWith("local-file:")) {
     const absolutePath = ref.ref.slice("local-file:".length);

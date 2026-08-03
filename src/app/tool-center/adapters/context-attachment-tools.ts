@@ -149,6 +149,7 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
         requestedPath: stringOrUndefined(record.path),
         requireFile: true,
         projectPathRequired: true,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment text target could not be read.");
       if (!stat.isFile()) {
@@ -283,6 +284,7 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
         requestedPath: stringOrUndefined(record.path),
         requireFile: true,
         projectPathRequired: true,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment PDF target could not be read.");
       if (!stat.isFile()) {
@@ -421,6 +423,7 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
         requestedPath: stringOrUndefined(record.path) ?? ".",
         requireFile: false,
         projectPathRequired: false,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
       });
       if (target.rootKind !== "project") {
         throw new Error("attachment_list_files expects a project or workspace attachment.");
@@ -545,6 +548,7 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
         requestedPath: stringOrUndefined(record.path) ?? ".",
         requireFile: false,
         projectPathRequired: false,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
       });
       await statAttachmentTarget(target.targetAbsolutePath, "Attachment search target could not be read.");
       const limit = Math.min(MAX_SEARCH_MATCHES, positiveInteger(record.limit) ?? MAX_SEARCH_MATCHES);

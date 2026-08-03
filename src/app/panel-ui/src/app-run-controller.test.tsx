@@ -69,8 +69,10 @@ describe("ordinary run cancellation", () => {
       mountedRef: { current: true },
       pollTimer: { current: undefined },
       streamRef: { current: stream as EventSource },
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: running.runId },
       viewEpochRef: { current: 1 },
+      submissionAttemptRef: { current: undefined },
       conversationLoadAbortRef: { current: undefined },
       setCancellingRunId: dispatch<string | undefined>(
         (next) => { cancellingRunId = next; },
@@ -208,8 +210,10 @@ describe("conversation switching", () => {
       mountedRef: { current: true },
       pollTimer: { current: undefined },
       streamRef: { current: undefined },
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: undefined },
       viewEpochRef: { current: 0 },
+      submissionAttemptRef: { current: undefined },
       conversationLoadAbortRef: { current: undefined },
       setCancellingRunId: () => undefined,
     });
@@ -336,6 +340,71 @@ describe("new conversation submission", () => {
     expect(attachments.map((attachment) => attachment.attachmentId)).toEqual(["attachment-1"]);
     expect(screen).toBe("chat-empty");
   });
+
+  it("reuses the submission identity when the create response is lost", async () => {
+    const completed = run("completed");
+    const freshRun = {
+      ...completed,
+      runId: "run-retry",
+      conversationId: "conversation-retry",
+      title: "Retry run",
+      goalSummary: "Retry goal",
+    };
+    const freshConversation = {
+      ...conversation(runView(freshRun)),
+      conversationId: "conversation-retry",
+      title: "Retry goal",
+      latestRunId: freshRun.runId,
+    };
+    let submissionPosts = 0;
+    const submissionIds: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/conversations" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { readonly submissionId: string };
+        submissionIds.push(body.submissionId);
+        submissionPosts += 1;
+        if (submissionPosts === 1) throw new Error("response lost");
+        return jsonResponse({ conversation: freshConversation, run: freshRun });
+      }
+      if (path === "/api/conversations/conversation-retry") {
+        return jsonResponse({ conversation: freshConversation });
+      }
+      if (path === "/api/conversations") {
+        return jsonResponse({ conversations: [{ conversationId: "conversation-retry", title: "Retry goal" }] });
+      }
+      return jsonResponse({}, 404);
+    }));
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: conversation(runView(completed)),
+      run: completed,
+      workView: runView(completed).workView,
+    };
+    let goal = "Retry goal";
+    let attachments: readonly ContextAttachment[] = [];
+    let screen: "chat-empty" | "chat-active" = "chat-empty";
+    const submissionAttemptRef = { current: undefined as { readonly key: string; readonly id: string } | undefined };
+    const controller = submissionController({
+      readApp: () => app,
+      writeApp: (next) => { app = next; },
+      readGoal: () => goal,
+      writeGoal: (next) => { goal = next; },
+      readAttachments: () => attachments,
+      writeAttachments: (next) => { attachments = next; },
+      writeScreen: (next) => { screen = next; },
+      activeRunIdRef: { current: completed.runId },
+      submissionAttemptRef,
+    });
+
+    await expect(controller.startNewConversation()).resolves.toBe(false);
+    await expect(controller.startNewConversation()).resolves.toBe(true);
+
+    expect(submissionIds).toHaveLength(2);
+    expect(submissionIds[1]).toBe(submissionIds[0]);
+    expect(submissionAttemptRef.current).toBeUndefined();
+    expect(app.conversation?.conversationId).toBe("conversation-retry");
+  });
 });
 
 function dispatch<T>(
@@ -386,6 +455,7 @@ function submissionController(input: {
   readonly writeAttachments: (attachments: readonly ContextAttachment[]) => void;
   readonly writeScreen: (screen: "chat-empty" | "chat-active") => void;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
+  readonly submissionAttemptRef?: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
 }) {
   return createAppRunController({
     app: input.readApp(),
@@ -405,8 +475,10 @@ function submissionController(input: {
     mountedRef: { current: true },
     pollTimer: { current: undefined },
     streamRef: { current: undefined },
+    fallbackPollRef: { current: undefined },
     activeRunIdRef: input.activeRunIdRef,
     viewEpochRef: { current: 0 },
+    submissionAttemptRef: input.submissionAttemptRef ?? { current: undefined },
     conversationLoadAbortRef: { current: undefined },
     setCancellingRunId: () => undefined,
   });

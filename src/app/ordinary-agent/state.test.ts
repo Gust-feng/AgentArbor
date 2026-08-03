@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   acceptOrdinaryToolRound,
   createInitialOrdinaryRunState,
+  reconcileInterruptedOrdinaryNestedToolCalls,
   reconcileInterruptedOrdinaryToolRound,
+  recordOrdinaryNestedToolRequests,
   recordOrdinaryToolResult,
   transitionOrdinaryRun,
 } from "./state.js";
@@ -510,6 +512,176 @@ test("Ordinary pending root rounds freeze the Session assistant ref and provider
     orderedToolCalls: [{ callId: "second-call", toolName: "list", input: { path: "." } }],
     recordedAt: "2026-01-01T00:00:04.000Z",
   }), /does not match its provider-ordered Session tool calls/u);
+});
+
+test("Ordinary nested write-ahead atomically closes terminal facts and recovers exact unknowns", () => {
+  const queued = createInitialOrdinaryRunState({
+    runId: "nested-write-ahead",
+    sessionRef: ordinaryAgentSessionRef(),
+    turn: ordinaryRunTurn("nested-write-ahead"),
+    runInput: { userMessage: "delegate" },
+    birth: ordinaryRunBirth(),
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "created",
+  });
+  const running = transitionOrdinaryRun({
+    state: queued,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "started",
+  });
+  const rootPending = acceptOrdinaryToolRound({
+    state: withRollbackableSession(running),
+    assistantEntryRef: entryRef("assistant-entry"),
+    toolCallIds: ["parent-a", "parent-b"],
+  });
+  const nestedRequests = ["parent-a", "parent-b"].map((parentToolCallFactId) => ({
+    callId: "shared-provider-call",
+    factId: `agent-tool:${parentToolCallFactId.length}:${parentToolCallFactId}/tool:shared-provider-call`,
+    parentToolCallFactId,
+    toolName: "write",
+    input: { path: `${parentToolCallFactId}.txt` },
+  }));
+  const accepted = recordOrdinaryNestedToolRequests({
+    state: rootPending,
+    requests: nestedRequests,
+    recordedAt: "2026-01-01T00:00:02.000Z",
+  });
+  assert.equal(accepted.pendingNestedToolCalls?.length, 2);
+
+  const firstResult = {
+    ...nestedRequests[0]!,
+    output: { written: true },
+    status: "completed" as const,
+    durationMs: 1,
+  };
+  const firstClosed = recordOrdinaryToolResult({
+    state: accepted,
+    result: firstResult,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+  });
+  assert.deepEqual(firstClosed.pendingNestedToolCalls, [nestedRequests[1]]);
+  assert.equal(recordOrdinaryToolResult({
+    state: firstClosed,
+    result: firstResult,
+    recordedAt: "2026-01-01T00:00:04.000Z",
+  }), firstClosed);
+
+  const recovered = reconcileInterruptedOrdinaryNestedToolCalls({
+    state: firstClosed,
+    recordedAt: "2026-01-01T00:00:05.000Z",
+  });
+  const unknown = recovered.toolCalls.find((result) => result.factId === nestedRequests[1]?.factId);
+  assert.equal(recovered.pendingNestedToolCalls, undefined);
+  assert.equal(unknown?.status, "failed");
+  assert.equal(unknown?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.equal(unknown?.parentToolCallFactId, "parent-b");
+  assert.deepEqual(unknown?.input, { path: "parent-b.txt" });
+});
+
+test("Ordinary nested approval recovery distinguishes unexecuted from approved unknown outcomes", () => {
+  const queued = createInitialOrdinaryRunState({
+    runId: "nested-approval-recovery",
+    sessionRef: ordinaryAgentSessionRef(),
+    turn: ordinaryRunTurn("nested-approval-recovery"),
+    runInput: { userMessage: "delegate a write" },
+    birth: ordinaryRunBirth(),
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "created",
+  });
+  const running = transitionOrdinaryRun({
+    state: queued,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "started",
+  });
+  const withRootPending = acceptOrdinaryToolRound({
+    state: withRollbackableSession(running),
+    assistantEntryRef: entryRef("approval-assistant-entry"),
+    toolCallIds: ["parent-approval"],
+  });
+  const confirmationRequest = {
+    confirmationId: "nested-write-confirmation",
+    toolCallFactId: "agent-tool:15:parent-approval/tool:nested-write",
+    title: "Confirm write",
+    actionSummary: "Write a file",
+    affectedResources: ["workspace"],
+    riskLevel: "medium" as const,
+    resumeAvailability: "live" as const,
+    requestedAt: "2026-01-01T00:00:02.000Z",
+    sourceRefs: [],
+  };
+  const nestedRequest = {
+    callId: "nested-write",
+    factId: confirmationRequest.toolCallFactId,
+    parentToolCallFactId: "parent-approval",
+    toolName: "write",
+    input: { path: "result.txt", content: "updated" },
+  };
+  const accepted = recordOrdinaryNestedToolRequests({
+    state: withRootPending,
+    requests: [nestedRequest],
+    recordedAt: "2026-01-01T00:00:02.000Z",
+  });
+  const approvalResult = {
+    ...nestedRequest,
+    output: undefined,
+    status: "approval_required" as const,
+    durationMs: 0,
+    confirmationRequest,
+  };
+  const withApprovalFact = recordOrdinaryToolResult({
+    state: accepted,
+    result: approvalResult,
+    recordedAt: "2026-01-01T00:00:03.000Z",
+  });
+  const paused = transitionOrdinaryRun({
+    state: withApprovalFact,
+    transition: {
+      type: "request_approval",
+      status: {
+        kind: "awaiting_approval",
+        confirmationRequests: [confirmationRequest],
+        continuationAvailability: "live_only",
+      },
+      toolCalls: [approvalResult],
+      usage: {},
+    },
+    recordedAt: "2026-01-01T00:00:04.000Z",
+    eventId: "approval-requested",
+  });
+
+  const unexecuted = reconcileInterruptedOrdinaryNestedToolCalls({
+    state: paused,
+    recordedAt: "2026-01-01T00:00:05.000Z",
+  });
+  const unexecutedResult = unexecuted.toolCalls.find((result) => result.factId === nestedRequest.factId);
+  assert.equal(unexecuted.pendingNestedToolCalls, undefined);
+  assert.equal(unexecutedResult?.status, "cancelled");
+  assert.equal(unexecutedResult?.errorFacts?.code, "confirmation_continuation_lost");
+
+  const approved = transitionOrdinaryRun({
+    state: paused,
+    transition: {
+      type: "approval_decided",
+      decision: {
+        confirmationId: confirmationRequest.confirmationId,
+        decision: "approve_once",
+        decidedAt: "2026-01-01T00:00:05.000Z",
+      },
+    },
+    recordedAt: "2026-01-01T00:00:05.000Z",
+    eventId: "approval-decided",
+  });
+  const outcomeUnknown = reconcileInterruptedOrdinaryNestedToolCalls({
+    state: approved,
+    recordedAt: "2026-01-01T00:00:06.000Z",
+  });
+  const unknownResult = outcomeUnknown.toolCalls.find((result) => result.factId === nestedRequest.factId);
+  assert.equal(outcomeUnknown.pendingNestedToolCalls, undefined);
+  assert.equal(unknownResult?.status, "failed");
+  assert.equal(unknownResult?.errorFacts?.code, "tool_execution_outcome_unknown");
+  assert.equal(unknownResult?.errorFacts?.doNotBlindlyRetry, true);
 });
 
 test("Ordinary completion rejects a Session that has no rollbackable answer leaf", () => {

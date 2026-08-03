@@ -16,6 +16,10 @@ import {
 import { releasePanelRuntimeResources } from "./request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
 import { spaceReferenceAttachmentId } from "../spaces/space-file-access.js";
+import {
+  type AgentNoteScope,
+  agentNoteContentVersion,
+} from "../agent-notes/index.js";
 
 test("Panel composition closes failed Workbench storage before Space recovery starts", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-startup-failure-"));
@@ -276,19 +280,29 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
   try {
     runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const workspace = path.join(directory, "project");
-    await runtime.agentNotesFeature.commands.write({ kind: "global" }, "- Reply in Chinese.");
-    await runtime.agentNotesFeature.commands.write(
+    await fs.mkdir(workspace, { recursive: true });
+    await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
+    runtime.capabilityCenter.invalidate();
+    await replaceAgentNote(runtime, { kind: "global" }, "- Reply in Chinese.");
+    await replaceAgentNote(
+      runtime,
       { kind: "workspace", workspaceRoot: workspace },
       "- Build this project with pnpm build.",
     );
 
-    const birth = await runtime.prepareOrdinaryRunBirth({ goal: "check notes", workspaceDirectory: workspace });
+    const birth = await runtime.prepareOrdinaryRunBirth({ goal: "check notes" });
 
     assert.match(birth.instructions, /<agent_notes>/u);
     assert.match(birth.instructions, /Reply in Chinese/u);
     assert.match(birth.instructions, /Build this project with pnpm build/u);
     assert.match(birth.agentDefinitionRef.promptRef, /agent-notes/u);
     assert.match(birth.agentDefinitionRef.promptVersion, /notes-/u);
+    assert.equal(birth.workspaceSelection, "default");
+    assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory, path.resolve(workspace));
+    assert.deepEqual(birth.agentNoteVersions, {
+      global: agentNoteContentVersion("- Reply in Chinese."),
+      workspace: agentNoteContentVersion("- Build this project with pnpm build."),
+    });
 
     // Notes are scoped: a different workspace sees only the global notebook.
     const otherBirth = await runtime.prepareOrdinaryRunBirth({
@@ -301,6 +315,20 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
     await cleanupRuntime(runtime, directory);
   }
 });
+
+async function replaceAgentNote(
+  runtime: PanelRuntime,
+  scope: AgentNoteScope,
+  content: string,
+): Promise<void> {
+  const current = await runtime.agentNotesFeature.queries.get(scope);
+  const result = await runtime.agentNotesFeature.commands.write({
+    scope,
+    content,
+    expectedVersion: current.version,
+  });
+  assert.equal(result.status, "saved");
+}
 
 async function cleanupRuntime(runtime: PanelRuntime | undefined, directory: string): Promise<void> {
   if (runtime !== undefined) await releasePanelRuntimeResources(runtime);

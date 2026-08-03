@@ -126,7 +126,10 @@ export async function selectLocalContextAttachment(): Promise<ContextAttachment 
   return response.status === "cancelled" ? undefined : response.attachment;
 }
 
-export async function uploadContextAttachmentFiles(files: readonly File[]): Promise<readonly ContextAttachment[]> {
+export async function uploadContextAttachmentFiles(
+  files: readonly File[],
+  uploadRequestId: string,
+): Promise<readonly ContextAttachment[]> {
   if (files.length === 0) {
     return [];
   }
@@ -136,6 +139,7 @@ export async function uploadContextAttachmentFiles(files: readonly File[]): Prom
   }
   const response = await fetch("/api/context/attachments/upload", {
     method: "POST",
+    headers: { "idempotency-key": uploadRequestId },
     body,
   });
   const text = await response.text();
@@ -152,6 +156,20 @@ export async function uploadContextAttachmentFiles(files: readonly File[]): Prom
     throw new ApiError(response.status, "invalid_attachment_upload_response", "附件上传响应无效。");
   }
   return attachments;
+}
+
+export function isManagedUploadAttachment(attachment: Pick<ContextAttachment, "ref">): boolean {
+  return attachment.ref.startsWith("uploaded-attachment:");
+}
+
+export async function discardManagedUploadAttachment(attachmentId: string): Promise<void> {
+  const response = await fetch(`/api/context/attachments/${encodeURIComponent(attachmentId)}`, {
+    method: "DELETE",
+  });
+  if (response.ok) return;
+  const text = await response.text();
+  const parsed = text.length > 0 ? (JSON.parse(text) as unknown) : {};
+  throw new ApiError(response.status, errorCode(parsed), errorMessage(parsed) ?? `请求失败：${response.status}`);
 }
 
 export function blockedContextAttachment(input: {

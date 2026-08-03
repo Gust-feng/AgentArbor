@@ -68,7 +68,9 @@ function LoadingScreen() {
 }
 
 function PairingScreen({ client, state }: { readonly client: RemoteMobileClient; readonly state: MobileRemoteState }) {
-  const [relayUrl, setRelayUrl] = useState(() => window.location.port === "4311" ? "http://127.0.0.1:4310" : window.location.origin);
+  const [relayUrl, setRelayUrl] = useState(() =>
+    (globalThis as typeof globalThis & { __AGENTARBOR_RELAY_URL__?: string }).__AGENTARBOR_RELAY_URL__
+      ?? window.location.origin);
   const [code, setCode] = useState("");
   const [deviceName, setDeviceName] = useState("我的手机");
   const [busy, setBusy] = useState(false);
@@ -141,12 +143,20 @@ function PairingScreen({ client, state }: { readonly client: RemoteMobileClient;
 }
 
 function Header({ state }: { readonly state: MobileRemoteState }) {
+  const label = state.connection === "connecting"
+    ? "正在连接"
+    : state.connection !== "connected"
+      ? "中继离线"
+      : state.peerOnline
+        ? "电脑在线"
+        : "电脑离线";
+  const indicator = state.connection === "connected" && state.peerOnline ? "connected" : state.connection;
   return (
     <header className="mobile-header">
       <Brand compact />
       <div className="connection-state" title={state.error}>
-        <span className={`connection-dot ${state.connection}`} />
-        {state.connection === "connected" ? "电脑在线" : state.connection === "connecting" ? "正在连接" : "离线排队"}
+        <span className={`connection-dot ${indicator}`} />
+        {label}
       </div>
     </header>
   );
@@ -156,6 +166,7 @@ function ChatScreen({ client, state }: ScreenProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(state.conversations[0]?.conversationId);
   const [message, setMessage] = useState("");
   const selected = state.conversations.find((conversation) => conversation.conversationId === selectedId);
+  const activeRun = state.runs.find((run) => run.runId === selected?.activeRunId);
   const send = async (event: FormEvent) => {
     event.preventDefault();
     const content = message.trim();
@@ -184,17 +195,19 @@ function ChatScreen({ client, state }: ScreenProps) {
       )}
       <div className="transcript">
         {selected === undefined ? (
-          <EmptyState icon={<MessageCircle />} title="从手机开始一段对话" detail="消息由电脑上的 Agent 执行；手机离线时会先排队。" />
+          <EmptyState icon={<MessageCircle />} title="从手机开始一段对话" detail="消息由电脑上的 Agent 执行；电脑离线时，消息保存在这台手机。" />
         ) : selected.turns.map((turn) => (
           <article className={`message ${turn.role}`} key={turn.turnId}>
             <div className="message-meta">{turn.role === "user" ? "你" : "AgentArbor"}<span>{statusText(turn.status)}</span></div>
-            <p>{turn.content || (turn.role === "assistant" ? "正在思考…" : "")}</p>
+            <p>{turn.role === "assistant" && turn.runId === activeRun?.runId
+              ? activeRun.visibleAssistantText || turn.content || "正在思考…"
+              : turn.content || (turn.role === "assistant" ? "正在思考…" : "")}</p>
           </article>
         ))}
       </div>
       {state.pendingCommandIds.length > 0 && <p className="pending-line"><LoaderCircle className="spin" />{state.pendingCommandIds.length} 条操作等待电脑确认接收</p>}
       <form className="composer" onSubmit={send}>
-        <textarea value={message} rows={1} placeholder={state.connection === "connected" ? "发送消息给电脑上的 Agent…" : "离线消息将在重连后发送…"} onChange={(event) => setMessage(event.target.value)} />
+        <textarea value={message} rows={1} placeholder={state.peerOnline ? "发送消息给电脑上的 Agent…" : "消息将保存在本机，电脑上线后发送…"} onChange={(event) => setMessage(event.target.value)} />
         <button aria-label="发送" disabled={message.trim().length === 0}><ArrowUp /></button>
       </form>
     </section>
@@ -280,8 +293,8 @@ function NotesScreen({ client, state }: ScreenProps) {
         {state.assets.map((asset) => <button className="settings-row" key={asset.assetId} onClick={() => setEditingAsset(asset)}><span><strong>{asset.title}</strong><small>{asset.kind === "markdown" ? "Markdown 资产" : `${asset.language} 代码资产`}</small></span><ChevronRight /></button>)}
       </div>
       <div className="screen-heading device-heading"><p className="eyebrow">信任边界</p><h1>设备</h1></div>
-      <div className="device-panel"><div><strong>{state.binding?.peerDeviceName ?? "已配对电脑"}</strong><p>配对后完全互信；危险命令仍会请求确认。</p></div><span className={`status-pill ${state.connection === "connected" ? "ok" : ""}`}>{state.connection === "connected" ? "在线" : "离线"}</span></div>
-      <button className="danger-button" onClick={() => { if (window.confirm("忘记这台电脑并清除手机上的连接凭据？")) void client.forgetDevice(); }}><Unplug />忘记此设备</button>
+      <div className="device-panel"><div><strong>{state.binding?.peerDeviceName ?? "已配对电脑"}</strong><p>配对后完全互信；危险命令仍会请求确认。</p></div><span className={`status-pill ${state.peerOnline ? "ok" : ""}`}>{state.peerOnline ? "在线" : "离线"}</span></div>
+      <button className="danger-button" onClick={() => { if (window.confirm("忘记这台电脑并清除本机的协同数据？")) void client.forgetDevice(); }}><Unplug />忘记此设备</button>
       {editingNote && <EditorSheet title={editingNote.label} value={editingNote.content} onClose={() => setEditingNote(undefined)} onSave={(content) => { void client.sendCommand({ kind: "note.replace", notebookId: editingNote.notebookId, expectedVersion: editingNote.version, content }); setEditingNote(undefined); }} />}
       {editingAsset && <EditorSheet title={editingAsset.title} value={editingAsset.text} onClose={() => setEditingAsset(undefined)} onSave={(text) => { void client.sendCommand({ kind: "asset.replace_text", assetId: editingAsset.assetId, expectedFingerprint: editingAsset.fingerprint, text }); setEditingAsset(undefined); }} />}
     </section>

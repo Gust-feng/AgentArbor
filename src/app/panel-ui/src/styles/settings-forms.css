@@ -64,7 +64,7 @@
 
 .remote-pairing-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   align-items: end;
   gap: 10px;
 }
@@ -122,7 +122,7 @@
 .remote-code-panel > strong {
   font-size: 32px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: .08em;
+  letter-spacing: 0;
 }
 
 .remote-code-panel > div,

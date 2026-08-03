@@ -7,9 +7,10 @@ type RemoteStatus = {
   readonly deviceId?: string;
   readonly peerDeviceId?: string;
   readonly peerDeviceName?: string;
+  readonly peerOnline: boolean;
+  readonly suggestedRelayUrl?: string;
   readonly pairingCode?: string;
   readonly pairingExpiresAt?: string;
-  readonly lastInboxSequence: number;
   readonly error?: { readonly code: string; readonly message: string };
 };
 
@@ -17,8 +18,9 @@ type ConversationSummary = { readonly conversationId: string; readonly title: st
 
 export function RemoteCollaborationSettings(): React.ReactElement {
   const [remote, setRemote] = useState<RemoteStatus>();
-  const [relayUrl, setRelayUrl] = useState("http://127.0.0.1:4310");
+  const [relayUrl, setRelayUrl] = useState("");
   const [deviceName, setDeviceName] = useState("我的电脑");
+  const [invitationCode, setInvitationCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [conversations, setConversations] = useState<readonly ConversationSummary[]>([]);
@@ -33,6 +35,7 @@ export function RemoteCollaborationSettings(): React.ReactElement {
     if (statusResponse.ok && statusBody.remote !== undefined) {
       setRemote(statusBody.remote);
       if (statusBody.remote.relayUrl) setRelayUrl(statusBody.remote.relayUrl);
+      else if (statusBody.remote.suggestedRelayUrl) setRelayUrl(statusBody.remote.suggestedRelayUrl);
     }
     if (conversationsResponse.ok) setConversations(conversationsBody.conversations ?? []);
   };
@@ -73,14 +76,19 @@ export function RemoteCollaborationSettings(): React.ReactElement {
         <div className="remote-settings-title">
           <span className="remote-settings-icon"><Smartphone size={19} /></span>
           <div><h3>手机与电脑</h3><p>配对后作为同一个用户互相信任，直到撤销设备。</p></div>
-          <span className={`remote-connection-badge ${remote.state}`}>{statusLabel(remote.state)}</span>
+          <span className={`remote-connection-badge ${remote.state}`}>{statusLabel(remote)}</span>
         </div>
 
         {remote.state === "unpaired" && (
           <div className="remote-pairing-form">
-            <label>Relay 地址<input value={relayUrl} onChange={(event) => setRelayUrl(event.target.value)} /></label>
+            <label>Relay 地址<input value={relayUrl} placeholder="https://relay.example.com" onChange={(event) => setRelayUrl(event.target.value)} /></label>
             <label>电脑名称<input value={deviceName} maxLength={160} onChange={(event) => setDeviceName(event.target.value)} /></label>
-            <button className="settings-primary-action" disabled={busy} onClick={() => void action("/api/remote-collaboration/pairings", true, { relayUrl, deviceName })}>
+            <label>邀请码<input value={invitationCode} maxLength={128} autoComplete="off" onChange={(event) => setInvitationCode(event.target.value)} /></label>
+            <button className="settings-primary-action" disabled={busy || relayUrl.trim().length === 0} onClick={() => void action("/api/remote-collaboration/pairings", true, {
+              relayUrl,
+              deviceName,
+              ...(invitationCode.trim().length === 0 ? {} : { invitationCode: invitationCode.trim() }),
+            })}>
               {busy ? <LoaderCircle className="spin" size={15} /> : <Link2 size={15} />}创建配对
             </button>
           </div>
@@ -99,7 +107,7 @@ export function RemoteCollaborationSettings(): React.ReactElement {
 
         {(remote.state === "connected" || remote.state === "offline" || remote.state === "connecting") && (
           <div className="remote-device-row">
-            <div><strong>{remote.peerDeviceName ?? "已配对手机"}</strong><span>{remote.relayUrl}</span></div>
+            <div><strong>{remote.peerDeviceName ?? "已配对手机"}</strong><span>{remote.peerOnline ? "手机在线" : "手机离线"} · {remote.relayUrl}</span></div>
             <div>
               {remote.state === "connected"
                 ? <button onClick={() => void action("/api/remote-collaboration/disconnect")}><Unplug size={14} />断开</button>
@@ -112,7 +120,7 @@ export function RemoteCollaborationSettings(): React.ReactElement {
         )}
         {remote.error && <p className="remote-settings-error">{remote.error.message}</p>}
         {error && <p className="remote-settings-error">{error}</p>}
-        <p className="remote-security-note">当前同步正文不使用端到端加密；公网部署必须使用 HTTPS/WSS。</p>
+        <p className="remote-security-note">对话和命令只在两端在线时转发，不保存在 Relay；同步正文暂不使用端到端加密，公网部署必须使用 HTTPS/WSS。</p>
       </section>
 
       <section className="settings-card remote-settings-card">
@@ -127,6 +135,12 @@ export function RemoteCollaborationSettings(): React.ReactElement {
   );
 }
 
-function statusLabel(status: RemoteStatus["state"]): string {
-  return status === "connected" ? "已连接" : status === "connecting" ? "连接中" : status === "offline" ? "已配对 · 离线" : status === "pairing" ? "配对中" : "未配对";
+function statusLabel(remote: RemoteStatus): string {
+  return remote.state === "connected"
+    ? remote.peerOnline ? "手机在线" : "中继在线"
+    : remote.state === "connecting"
+      ? "连接中"
+      : remote.state === "offline"
+        ? "已配对 · 离线"
+        : remote.state === "pairing" ? "配对中" : "未配对";
 }

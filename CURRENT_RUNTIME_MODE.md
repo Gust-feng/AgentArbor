@@ -17,7 +17,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 当前 AgentArbor 以桌面普通 `agent` 作为唯一默认运行方式。
 
 - 用户入口：`Desktop Shell / Panel`；Workbench 首页是唯一的空白新对话入口，侧栏“首页”只负责返回这一完整空态，不提前重置已有会话或输入。用户在首页提交内容时才创建新 conversation；对话页只展示正在执行或从历史打开的 conversation，并在提交时继续当前 conversation
-- 可选远程入口：Android 9+ React PWA；通过独立 Linux Relay 与桌面 connector 双向配对后，可提交 Ordinary 消息、取消、处理确认，并同步白名单内的 Space、受管文件、Workbench Assets 和 Agent Notes。对话、AI 增量、命令与确认正文只经 WSS 在线转发，不在 Relay 落盘；目标电脑离线时命令只留在手机 IndexedDB。Relay 只长期保存账户、设备及四类白名单同步快照，并执行 `150 MiB` 账户配额和 `20 MiB` 单文档上限
+- 可选远程入口：Android 9+ Capacitor APK；手机通过六位码或二维码加入，桌面点击一次批准后可提交 Ordinary 消息、取消、处理确认，并同步白名单内的 Space、受管文件、Workbench Assets 和 Agent Notes。对话索引、按需正文、AI 增量、命令、确认和同步内容只经 WSS 在线转发并保存在用户设备，不在 Relay 落盘；目标电脑离线时命令只留在手机 IndexedDB。Relay 只长期保存账户、邀请码哈希、设备、配对、撤销和最后在线时间
 - 默认运行模式：`agent`
 - 默认执行主线：`用户消息 -> OrdinaryAgentFeature -> Pi AgentHarness/Session -> ToolCenter/命令确认 -> ordinary-run/v5 -> 事实 read-model`
 - 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断

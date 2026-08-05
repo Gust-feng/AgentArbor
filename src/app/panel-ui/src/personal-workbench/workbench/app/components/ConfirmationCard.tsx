@@ -12,23 +12,38 @@ export type ConfirmationProjection =
   | NonNullable<DesktopWorkView["pendingConfirmation"]>
   | TranscriptConfirmation;
 
+// 风险分级的强调色：高风险走 error 红，中风险走 wait 琥珀，低风险走默认 accent 蓝。
+const RISK_ACCENT: Record<"low" | "medium" | "high", string> = {
+  low: "var(--aa-accent)",
+  medium: "var(--aa-status-wait)",
+  high: "var(--aa-status-error)",
+};
+
 export function ConfirmationCard(props: {
   readonly confirmation?: ConfirmationProjection;
   readonly busy: boolean;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
 }): React.ReactElement {
   const view = projectConfirmationDisplay(props.confirmation);
+  const accent = RISK_ACCENT[view.riskLevel];
+  const isHighRisk = view.riskLevel === "high";
   return (
     <div
       className="space-y-3 py-3"
       data-risk={view.riskLevel}
-      style={{ color: "var(--aa-text-1)" }}
+      style={{
+        color: "var(--aa-text-1)",
+        borderLeft: `3px solid ${accent}`,
+        background: `color-mix(in srgb, ${accent} 7%, transparent)`,
+        borderRadius: "6px",
+        paddingLeft: "12px",
+      }}
     >
       <div className="flex min-w-0 items-start gap-2.5">
         <ShieldCheck
           size={15}
           className="mt-0.5 shrink-0"
-          style={{ color: view.riskLevel === "high" ? "var(--aa-status-wait)" : "var(--aa-accent)" }}
+          style={{ color: accent }}
           aria-hidden="true"
         />
         <div className="min-w-0 space-y-1">
@@ -70,7 +85,7 @@ export function ConfirmationCard(props: {
           <button
             type="button"
             className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ background: "var(--aa-accent)", color: "#fff" }}
+            style={{ background: isHighRisk ? "var(--aa-status-error)" : accent, color: "#fff" }}
             onClick={() => props.onDecision?.("approve_once")}
             disabled={props.busy || view.resumeLost}
           >

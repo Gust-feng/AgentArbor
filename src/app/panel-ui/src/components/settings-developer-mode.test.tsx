@@ -51,34 +51,98 @@ test("system prompt editor is only mounted in developer mode", async () => {
     JSON.stringify({ message: "not available in this test" }),
     { status: 503, headers: { "content-type": "application/json" } },
   )));
-  const hidden = renderSettingsDialog(false);
+  const hidden = renderSettingsDialog(false, "basicCapabilities");
 
-  expect(await screen.findByRole("heading", { name: "关于" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "基础能力" })).toBeTruthy();
   expect(screen.queryByLabelText("Desktop Agent")).toBeNull();
   expect(screen.queryByRole("button", { name: "开发者选项" })).toBeNull();
 
   hidden.unmount();
-  renderSettingsDialog(true);
+  renderSettingsDialog(true, "developer");
 
   const promptEditor = await screen.findByLabelText("Desktop Agent");
   expect(promptEditor).toBeTruthy();
   expect((promptEditor as HTMLTextAreaElement).value).toBe("You are the configured agent.");
 });
 
-function renderSettingsDialog(developerModeEnabled: boolean): ReturnType<typeof render> {
+test("disabling developer mode removes the prompt editor from an open settings dialog", async () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  function ControlledSettings(): React.ReactElement {
+    const [enabled, setEnabled] = useState(true);
+    return (
+      <>
+        <QueryClientProvider client={queryClient}>
+          <SettingsDialog
+            {...settingsDialogProps(enabled, "developer")}
+            onDeveloperModeChange={setEnabled}
+          />
+        </QueryClientProvider>
+        <button type="button" onClick={() => setEnabled(false)}>关闭开发者模式</button>
+      </>
+    );
+  }
+
+  render(<ControlledSettings />);
+
+  expect(await screen.findByLabelText("Desktop Agent")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "关闭开发者模式" }));
+  expect(await screen.findByRole("heading", { name: "关于" })).toBeTruthy();
+  expect(screen.queryByLabelText("Desktop Agent")).toBeNull();
+});
+
+test("about settings renders release notes instead of exposing raw HTML", () => {
+  render(
+    <AboutSettings
+      config={{ product: { name: "AgentArbor", version: "0.4.0" } }}
+      appUpdate={{
+        ok: true,
+        status: "up_to_date",
+        runtime: "manifest",
+        currentVersion: "0.4.0",
+        manifestUrlConfigured: true,
+        canCheck: true,
+        canInstall: false,
+        latest: {
+          version: "0.4.0",
+          notes: "<h1>AgentArbor v0.4.0</h1><p>本版本包含更新。</p><ul><li>渲染更新说明</li></ul>",
+        },
+      }}
+      agentClusterEnabled={false}
+      onAgentClusterEnabledChange={() => undefined}
+      developerModeEnabled={false}
+      onDeveloperModeChange={() => undefined}
+      onCheckAppUpdate={() => undefined}
+      onInstallAppUpdate={() => undefined}
+    />,
+  );
+
+  expect(screen.getByRole("heading", { name: "AgentArbor v0.4.0" })).toBeTruthy();
+  expect(screen.getByText("本版本包含更新。")).toBeTruthy();
+  expect(screen.getByText("渲染更新说明")).toBeTruthy();
+  expect(screen.queryByText("<h1>AgentArbor v0.4.0</h1>")).toBeNull();
+});
+
+function renderSettingsDialog(
+  developerModeEnabled: boolean,
+  initialGroup: React.ComponentProps<typeof SettingsDialog>["initialGroup"] = "developer",
+): ReturnType<typeof render> {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <SettingsDialog {...settingsDialogProps(developerModeEnabled)} />
+      <SettingsDialog {...settingsDialogProps(developerModeEnabled, initialGroup)} />
     </QueryClientProvider>,
   );
 }
 
-function settingsDialogProps(developerModeEnabled: boolean): React.ComponentProps<typeof SettingsDialog> {
+function settingsDialogProps(
+  developerModeEnabled: boolean,
+  initialGroup: React.ComponentProps<typeof SettingsDialog>["initialGroup"],
+): React.ComponentProps<typeof SettingsDialog> {
   return {
     open: true,
     onClose: () => undefined,
-    initialGroup: "developer",
+    initialGroup,
     config: {
       desktopAgent: {
         systemPrompt: "You are the configured agent.",

@@ -45,6 +45,7 @@ import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistic
 import { ResponsivenessDiagnostics } from "./responsiveness-diagnostics";
 import { PathMemorySettings } from "./path-memory-settings";
 import { WorkspaceSettings } from "./workspace-settings";
+import { ReleaseNotes } from "./release-notes";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 
@@ -213,13 +214,8 @@ export function SettingsDialog(props: {
                 onSaveModelCapabilities={props.onSaveModelCapabilities}
                 modelUsageDisplayEnabled={props.modelUsageDisplayEnabled}
                 onModelUsageDisplayChange={props.onModelUsageDisplayChange}
-                desktopAgentSystemPrompt={props.desktopAgentSystemPrompt}
-                setDesktopAgentSystemPrompt={props.setDesktopAgentSystemPrompt}
                 conversationFollowUpMode={props.conversationFollowUpMode ?? "queue"}
                 onConversationFollowUpModeChange={props.onConversationFollowUpModeChange ?? (() => undefined)}
-                savingDesktopAgent={props.savingDesktopAgent}
-                onSaveDesktopAgentSystemPrompt={props.onSaveDesktopAgentSystemPrompt}
-                onResetDesktopAgentSystemPrompt={props.onResetDesktopAgentSystemPrompt}
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}
@@ -445,8 +441,13 @@ export function AboutSettings(props: {
           </div>
           {releaseNotes !== undefined && (
             <div className="about-update-notes" aria-label="更新说明">
-              <strong>更新说明</strong>
-              <p>{releaseNotes}</p>
+              <div className="about-update-notes-header">
+                <strong>更新说明</strong>
+                {props.appUpdate?.latest?.version !== undefined && (
+                  <span>v{props.appUpdate.latest.version}</span>
+                )}
+              </div>
+              <ReleaseNotes text={releaseNotes} />
             </div>
           )}
           {props.appUpdate?.progress !== undefined && updateStatus === "downloading" && (

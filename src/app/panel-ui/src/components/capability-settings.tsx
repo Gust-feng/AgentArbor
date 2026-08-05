@@ -43,15 +43,10 @@ export function BasicCapabilitiesSettings(props: {
     readonly model: string;
     readonly capabilities: ModelCapabilities;
   }) => Promise<void>;
-  readonly desktopAgentSystemPrompt: string;
-  readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly modelUsageDisplayEnabled: boolean;
   readonly onModelUsageDisplayChange: (enabled: boolean) => void;
   readonly conversationFollowUpMode: ConversationFollowUpMode;
   readonly onConversationFollowUpModeChange: (mode: ConversationFollowUpMode) => void;
-  readonly savingDesktopAgent?: boolean;
-  readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
-  readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
@@ -67,14 +62,6 @@ export function BasicCapabilitiesSettings(props: {
         setToolForm={props.setToolForm}
         saving={props.savingTools}
         onSaveTools={props.onSaveTools}
-      />
-      <DesktopAgentPromptSettings
-        config={props.config}
-        systemPrompt={props.desktopAgentSystemPrompt}
-        setSystemPrompt={props.setDesktopAgentSystemPrompt}
-        saving={props.savingDesktopAgent}
-        onSave={props.onSaveDesktopAgentSystemPrompt}
-        onReset={props.onResetDesktopAgentSystemPrompt}
       />
       <CapabilityGroup
         icon={<SlidersHorizontal size={16} />}

@@ -176,6 +176,62 @@ test("Ordinary turns inherit only the local references from their owning Space",
   }
 });
 
+test("deleting an Ordinary conversation only unlinks its Space conversation reference", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-space-delete-boundary-"));
+  const localFile = path.join(directory, "keep.md");
+  await fs.writeFile(localFile, "keep this file", "utf8");
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    ordinaryAgentExecution: completedExecution(directory, "done", {}),
+  });
+  try {
+    const submitted = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "start" },
+    });
+    const conversationId = submitted.body.conversation.conversationId as string;
+    await waitForView(server.url, submitted.body.run.runId, "completed");
+    const createdSpace = await requestJson(server.url, "/api/spaces", {
+      method: "POST",
+      body: { title: "保留内容" },
+    });
+    const spaceId = createdSpace.body.space.id as string;
+    const conversation = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "当前对话", reference: { kind: "conversation", conversationId } },
+    });
+    const file = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "本地文件", reference: { kind: "local_file", path: localFile } },
+    });
+    const managed = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
+      method: "POST",
+      body: { title: "托管文件夹" },
+    });
+
+    const deleted = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+    });
+    assert.equal(deleted.status, 200);
+    assert.equal((await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`)).status, 404);
+    assert.equal((await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`, {
+      method: "DELETE",
+    })).status, 200);
+
+    const tree = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    const retainedIds = tree.body.tree.entries.map((entry: { item: { id: string } }) => entry.item.id);
+    assert.equal(retainedIds.includes(conversation.body.item.id as string), false);
+    assert.equal(retainedIds.includes(file.body.item.id as string), true);
+    assert.equal(retainedIds.includes(managed.body.item.id as string), true);
+    assert.equal(await fs.readFile(localFile, "utf8"), "keep this file");
+    assert.equal((await fs.stat(managed.body.item.reference.path as string)).isDirectory(), true);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Ordinary HTTP boundary returns stable validation errors before feature execution", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-panel-validation-"));
   const server = await startLocalPanelServer({

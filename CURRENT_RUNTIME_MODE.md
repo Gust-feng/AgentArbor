@@ -6,6 +6,8 @@
 
 当前产品架构以一个 Workbench 和 Ordinary Agent 为主线；Sub-Agent 是 Ordinary Agent 的工具能力。Multi-Agent 的现有源码保留为延期重构参考，不属于当前生产功能。当前事实源是 ADR-0028，延期边界见《Multi-Agent 延期模块边界》。
 
+删除普通会话后，Host 只通过 Space 公开命令取消对应的 `conversation_reference`；该动作只删除 Space 元数据链接，不删除该 Space 的本地文件、工作区文件夹、托管文件夹、托管文档或其他引用。
+
 Multi-Agent 的 Panel UI、Deep DTO 和实现源码暂时保留，以便未来重构复用其中可验证的局部机制；当前 Panel 不装配其 feature、不加载 Deep 历史，也不接受 `/api/deep/*` 请求。该路径统一返回 `410 multi_agent_deferred`，不会创建 provider、ToolCenter、store 或后台运行。
 
 后端只有一个生产组合根：`createPanelRuntime()`。它当前创建 `OrdinaryAgentFeature`、`AgentNotesFeature`、`PathMemoryFeature`、`SpaceFeature`、后者与 Ordinary 之间的 `OrdinaryPathMemoryConnector` 以及所需的中性资源；`ordinary-routes` 只做 HTTP/SSE 适配。Multi-Agent 的 feature、store、control registry 和资源装配不进入当前生产运行时，也不参与关闭流程。

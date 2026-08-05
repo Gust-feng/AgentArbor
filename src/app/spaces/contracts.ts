@@ -95,6 +95,8 @@ export type SpaceFeature = {
     move(input: { readonly target: SpaceMovableTarget; readonly destinationSpaceId: string }): Promise<SpaceMovableTarget>;
     /** Removes only the Space metadata link and never deletes source content. */
     unlinkReference(itemId: string): Promise<void>;
+    /** Removes all conversation links for this conversation without touching other references or source content. */
+    unlinkConversationReference(conversationId: string): Promise<void>;
     /** Removes the reference and any Space-owned source content through the durable deletion lifecycle. */
     removeReference(itemId: string): Promise<void>;
   };

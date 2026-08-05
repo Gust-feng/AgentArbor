@@ -104,6 +104,7 @@ export async function handlePanelOrdinaryRoute(
   if (request.method === "DELETE" && conversation !== null) {
     const conversationId = decode(conversation[1]);
     await runtime.ordinaryAgentFeature.commands.deleteConversation(conversationId);
+    await runtime.spaceFeature.commands.unlinkConversationReference(conversationId);
     writeJson(response, 200, {
       ok: true,
       deletedConversationId: conversationId,

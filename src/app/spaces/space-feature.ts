@@ -119,6 +119,31 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       });
     });
   };
+  const unlinkConversationReference = (conversationId: string): Promise<void> => {
+    assertUsable("unlink a conversation reference");
+    return serialize(async () => {
+      const snapshot = await input.repository.read();
+      const removedItems = snapshot.referenceItems.filter((item) =>
+        item.reference.kind === "conversation" && item.reference.conversationId === conversationId,
+      );
+      if (removedItems.length === 0) return;
+      const at = now();
+      const removedItemIds = new Set(removedItems.map((item) => item.id));
+      await input.repository.write({
+        ...snapshot,
+        referenceItems: snapshot.referenceItems.filter((item) => !removedItemIds.has(item.id)),
+        spaces: touchSpaces(snapshot.spaces, [...new Set(removedItems.map((item) => item.spaceId))], at),
+      });
+      for (const item of removedItems) {
+        publish({
+          type: "space.reference_removed",
+          itemId: item.id,
+          removedItemIds: [item.id],
+          spaceId: item.spaceId,
+        });
+      }
+    });
+  };
   const newId = (snapshot: SpaceTreeSnapshot): string => {
     const id = createId().trim();
     if (id.length === 0) throw new SpaceFeatureError("space_invalid_input", "Space ids must not be empty");
@@ -203,6 +228,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         });
       },
       unlinkReference: (itemId) => removeReferenceWithPolicy(itemId, false),
+      unlinkConversationReference,
       removeReference: (itemId) => removeReferenceWithPolicy(itemId, true),
     },
     queries: {

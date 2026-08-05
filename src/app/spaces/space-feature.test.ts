@@ -113,6 +113,54 @@ test("Space unlinks a local file without running its ownership deletion lifecycl
   assert.equal(await feature.queries.getReference(file.id), undefined);
 });
 
+test("Space unlinks a conversation without changing its files, folders, or managed content", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  const lifecycle: string[] = [];
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    referenceDeletion: referenceDeletionFixture(lifecycle),
+  });
+  const space = await feature.commands.createSpace({ title: "项目" });
+  const conversation = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "讨论",
+    reference: { kind: "conversation", conversationId: "conversation-1" },
+  });
+  const file = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "本地文件",
+    reference: { kind: "local_file", path: "C:/keep.md" },
+  });
+  const managed = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "托管文件夹",
+    reference: { kind: "managed_folder", path: "C:/managed" },
+  });
+  const assetFolder = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "托管文档",
+    reference: { kind: "asset_folder" },
+  });
+  const asset = await feature.commands.addReference({
+    spaceId: space.id,
+    parentId: assetFolder.id,
+    title: "文档",
+    reference: { kind: "workbench_asset", assetId: "asset-1" },
+  });
+
+  await feature.commands.unlinkConversationReference("conversation-1");
+  await feature.commands.unlinkConversationReference("conversation-1");
+
+  assert.deepEqual(lifecycle, []);
+  assert.equal(await feature.queries.getReference(conversation.id), undefined);
+  assert.deepEqual(
+    (await feature.queries.getTree(space.id))?.entries.map((entry) => entry.item.id),
+    [asset.id, assetFolder.id, managed.id, file.id],
+  );
+});
+
 test("Space startup recovery failure keeps commands and queries fail closed", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
   const recoveryError = new SpaceFeatureError("space_deletion_recovery_failed", "journal is inconsistent");

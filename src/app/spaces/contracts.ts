@@ -18,6 +18,12 @@ export type Space = {
   readonly updatedAt: string;
 };
 
+/**
+ * `unavailable` 表示引用的来源当前找不到或不可访问。它只是提醒状态，不是删除：
+ * 用户确认移除后引用记录才离开资源树，历史 Conversation、Run 和工具事实都不受影响。
+ */
+export type SpaceReferenceStatus = "available" | "unavailable";
+
 export type SpaceReferenceItem = {
   readonly id: string;
   readonly spaceId: string;
@@ -26,6 +32,9 @@ export type SpaceReferenceItem = {
   readonly reference: SpaceReference;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** 省略等价于 `available`，使既有快照无需回填即可读取。 */
+  readonly status?: SpaceReferenceStatus;
+  readonly unavailableAt?: string;
 };
 
 export type SpaceTreeSnapshot = {
@@ -80,19 +89,28 @@ export class SpaceFeatureError extends Error {
 
 export type SpaceEvent =
   | { readonly type: "space.created"; readonly space: Space }
+  | { readonly type: "space.deleted"; readonly spaceId: string; readonly removedReferenceIds: readonly string[] }
   | { readonly type: "space.reference_added"; readonly item: SpaceReferenceItem }
   | { readonly type: "space.renamed"; readonly target: SpaceTarget; readonly spaceId: string }
   | { readonly type: "space.moved"; readonly target: SpaceMovableTarget; readonly sourceSpaceId: string; readonly destinationSpaceId: string }
-  | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string };
+  | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string }
+  | { readonly type: "space.reference_status_changed"; readonly itemId: string; readonly spaceId: string; readonly status: SpaceReferenceStatus };
 
 export type SpaceFeature = {
   /** Startup deletion reconciliation must settle before the Host accepts requests. */
   ready(): Promise<void>;
   readonly commands: {
     createSpace(input: { readonly id?: string; readonly title: string }): Promise<Space>;
+    /** Deletes the Space container and its links without deleting referenced source content. */
+    deleteSpace(spaceId: string): Promise<void>;
     addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceReference }): Promise<SpaceReferenceItem>;
     rename(input: { readonly target: SpaceTarget; readonly title: string }): Promise<SpaceTarget>;
     move(input: { readonly target: SpaceMovableTarget; readonly destinationSpaceId: string }): Promise<SpaceMovableTarget>;
+    /**
+     * Records whether a reference source is currently reachable. Reporting `unavailable` only
+     * raises a prompt; it never rebinds a moved path and never deletes derived history.
+     */
+    markReferenceStatus(input: { readonly itemId: string; readonly status: SpaceReferenceStatus }): Promise<SpaceReferenceItem>;
     /** Removes only the Space metadata link and never deletes source content. */
     unlinkReference(itemId: string): Promise<void>;
     /** Removes all conversation links for this conversation without touching other references or source content. */
@@ -105,7 +123,6 @@ export type SpaceFeature = {
     getTree(spaceId: string): Promise<SpaceTree | undefined>;
     getReference(itemId: string): Promise<SpaceReferenceItem | undefined>;
     findConversationOwner(conversationId: string): Promise<SpaceConversationOwner | undefined>;
-    hasWorkspaceMountConflict(itemId: string): Promise<boolean>;
   };
   readonly events: { subscribe(listener: (event: SpaceEvent) => void): () => void };
   /** Stops admission, drains accepted commands, and leaves no formal deletion journal on success. */

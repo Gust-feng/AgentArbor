@@ -45,8 +45,10 @@ export {
   createSpaceRenameTool,
   createSpaceWriteTool,
   createSpaceEditTool,
+  createSpaceRevocationOverlay,
   createSpaceToolRegistryContribution,
   createSpaceTools,
+  type SpaceRevocationOverlay,
   type SpaceToolOptions,
 } from "./space-tools.js";
 export {

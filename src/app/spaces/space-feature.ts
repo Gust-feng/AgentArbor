@@ -171,13 +171,29 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           return space;
         });
       },
+      deleteSpace(spaceId) {
+        assertUsable("delete a Space");
+        return serialize(async () => {
+          const snapshot = await input.repository.read();
+          requireSpace(snapshot, spaceId);
+          const removedReferenceIds = snapshot.referenceItems
+            .filter((item) => item.spaceId === spaceId)
+            .map((item) => item.id);
+          await input.repository.write({
+            ...snapshot,
+            spaces: snapshot.spaces.filter((space) => space.id !== spaceId),
+            referenceItems: snapshot.referenceItems.filter((item) => item.spaceId !== spaceId),
+          });
+          publish({ type: "space.deleted", spaceId, removedReferenceIds });
+        });
+      },
       addReference({ id, spaceId, title, parentId, reference }) {
         assertUsable("add a reference");
         return serialize(async () => {
           const snapshot = await input.repository.read();
           requireSpace(snapshot, spaceId);
           if (parentId !== undefined) requireParent(snapshot, spaceId, parentId);
-          await assertWorkspaceMountUnique(snapshot, reference, input.workspaceMountIdentity);
+          await assertWorkspaceMountUnique(snapshot, spaceId, reference, input.workspaceMountIdentity);
           assertConversationOwnerUnique(snapshot, reference);
           const at = now();
           const item: SpaceReferenceItem = {
@@ -227,6 +243,29 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           return target;
         });
       },
+      markReferenceStatus({ itemId, status }) {
+        assertUsable("mark a reference status");
+        return serialize(async () => {
+          const snapshot = await input.repository.read();
+          const item = requireReference(snapshot, itemId);
+          if (item.status === status) return item;
+          const at = now();
+          const { unavailableAt: _discarded, ...base } = item;
+          const updated: SpaceReferenceItem = {
+            ...base,
+            status,
+            ...(status === "unavailable" ? { unavailableAt: at } : {}),
+            updatedAt: at,
+          };
+          await input.repository.write({
+            ...snapshot,
+            referenceItems: snapshot.referenceItems.map((entry) => entry.id === itemId ? updated : entry),
+            spaces: touchSpaces(snapshot.spaces, [item.spaceId], at),
+          });
+          publish({ type: "space.reference_status_changed", itemId, spaceId: item.spaceId, status });
+          return updated;
+        });
+      },
       unlinkReference: (itemId) => removeReferenceWithPolicy(itemId, false),
       unlinkConversationReference,
       removeReference: (itemId) => removeReferenceWithPolicy(itemId, true),
@@ -271,19 +310,6 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         }
         const item = matches[0];
         return item === undefined ? undefined : { spaceId: item.spaceId, referenceItemId: item.id };
-      },
-      async hasWorkspaceMountConflict(itemId) {
-        assertUsable("check a workspace mount");
-        await waitUntilUsable();
-        const snapshot = await input.repository.read();
-        const item = requireReference(snapshot, itemId);
-        if (item.reference.kind !== "workspace_folder") return false;
-        const identity = await workspaceMountIdentity(item.reference.path, input.workspaceMountIdentity);
-        for (const candidate of snapshot.referenceItems) {
-          if (candidate.id === item.id || candidate.reference.kind !== "workspace_folder") continue;
-          if (await workspaceMountIdentity(candidate.reference.path, input.workspaceMountIdentity) === identity) return true;
-        }
-        return false;
       },
     },
     events: {
@@ -369,14 +395,34 @@ function touchSpaces(spaces: readonly Space[], ids: readonly string[], at: strin
   const targets = new Set(ids);
   return spaces.map((space) => targets.has(space.id) ? { ...space, updatedAt: at } : space);
 }
-async function assertWorkspaceMountUnique(snapshot: SpaceTreeSnapshot, reference: SpaceReferenceItem["reference"], identify: CreateSpaceFeatureInput["workspaceMountIdentity"]): Promise<void> {
+/**
+ * Workspace 引用只在同一个 Space 内互斥：重复挂载和父子重叠都会让路径解析出现多个候选根。
+ * 跨 Space 的重叠引用允许，因为引用不转移所有权，也不改变对方的引用关系。
+ */
+async function assertWorkspaceMountUnique(
+  snapshot: SpaceTreeSnapshot,
+  spaceId: string,
+  reference: SpaceReferenceItem["reference"],
+  identify: CreateSpaceFeatureInput["workspaceMountIdentity"],
+): Promise<void> {
   if (reference.kind !== "workspace_folder") return;
   const identity = await workspaceMountIdentity(reference.path, identify);
   for (const item of snapshot.referenceItems) {
-    if (item.reference.kind === "workspace_folder" && await workspaceMountIdentity(item.reference.path, identify) === identity) {
-      throw new SpaceFeatureError("space_workspace_mount_conflict", "This workspace folder is already linked to another Space");
+    if (item.spaceId !== spaceId || item.reference.kind !== "workspace_folder") continue;
+    const existing = await workspaceMountIdentity(item.reference.path, identify);
+    if (existing === identity) {
+      throw new SpaceFeatureError("space_workspace_mount_conflict", "This workspace folder is already linked to this Space");
+    }
+    if (isMountAncestor(existing, identity) || isMountAncestor(identity, existing)) {
+      throw new SpaceFeatureError("space_workspace_mount_conflict", "This workspace folder overlaps another workspace folder in this Space");
     }
   }
+}
+
+/** 判断 `ancestor` 是否为 `candidate` 的严格祖先目录，按已规范化的挂载身份做段边界比较。 */
+function isMountAncestor(ancestor: string, candidate: string): boolean {
+  const prefix = ancestor.endsWith("/") ? ancestor : `${ancestor}/`;
+  return candidate.length > prefix.length && candidate.startsWith(prefix);
 }
 
 function assertConversationOwnerUnique(

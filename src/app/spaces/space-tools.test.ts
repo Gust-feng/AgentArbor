@@ -8,7 +8,7 @@ import { createTaskSoil } from "../../domain/soil/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
 import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import { createSpaceFeature } from "./space-feature.js";
-import { createSpaceToolRegistryContribution, createSpaceTools } from "./space-tools.js";
+import { createSpaceRevocationOverlay, createSpaceToolRegistryContribution, createSpaceTools } from "./space-tools.js";
 import type { SpaceReference, SpaceRepository, SpaceTreeSnapshot } from "./contracts.js";
 
 function toolsFixture() {
@@ -201,6 +201,63 @@ test("Space file tools write only references frozen into the current Task Soil",
     /not writable in this run/u,
   );
   assert.equal(await fs.readFile(deniedFile, "utf8"), "private");
+});
+
+test("Space file tools stop writing a reference revoked while the run is in flight", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-revoked-"));
+  t.after(() => removeTestDirectory(root));
+  const file = path.join(root, "live.md");
+  await fs.writeFile(file, "old", "utf8");
+  const { spaces } = toolsFixture();
+  const space = await spaces.commands.createSpace({ title: "Space" });
+  const item = await spaces.commands.addReference({
+    spaceId: space.id,
+    title: "live.md",
+    reference: { kind: "local_file", path: file },
+  });
+  const overlay = createSpaceRevocationOverlay(spaces.events);
+  t.after(() => overlay.dispose());
+  const taskSoil = createTaskSoil({
+    rawGoal: "write through a Space reference",
+    contextRefs: [{ attachmentId: `space-reference:${item.id}`, ref: `local-file:${file}`, kind: "file" }],
+    permissionBoundaryRefs: [`write:space-reference:${item.id}`],
+  });
+  const tools = new Map(
+    createSpaceTools({ spaces, workspaceRoot: root, taskSoil, revocationOverlay: overlay })
+      .map((entry) => [entry.definition.name, entry]),
+  );
+
+  const written = await execute(tools.get("SpaceWrite")!, { referenceId: item.id, content: "new" }) as { changed: boolean };
+  assert.equal(written.changed, true);
+
+  await spaces.commands.unlinkReference(item.id);
+  await assert.rejects(
+    execute(tools.get("SpaceWrite")!, { referenceId: item.id, content: "after revocation" }),
+    /was revoked from its Space/u,
+  );
+  assert.equal(await fs.readFile(file, "utf8"), "new");
+});
+
+test("Space revocation overlay leaves references it never observed being revoked writable", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-overlay-scope-"));
+  t.after(() => removeTestDirectory(root));
+  const file = path.join(root, "outside.md");
+  await fs.writeFile(file, "old", "utf8");
+  const { spaces } = toolsFixture();
+  const overlay = createSpaceRevocationOverlay(spaces.events);
+  t.after(() => overlay.dispose());
+  const taskSoil = createTaskSoil({
+    rawGoal: "write a reference this Space never held",
+    contextRefs: [{ attachmentId: "space-reference:external", ref: `local-file:${file}`, kind: "file" }],
+    permissionBoundaryRefs: ["write:space-reference:external"],
+  });
+  const tools = new Map(
+    createSpaceTools({ spaces, workspaceRoot: root, taskSoil, revocationOverlay: overlay })
+      .map((entry) => [entry.definition.name, entry]),
+  );
+
+  const written = await execute(tools.get("SpaceWrite")!, { referenceId: "external", content: "new" }) as { changed: boolean };
+  assert.equal(written.changed, true);
 });
 
 test("Space folder grants keep edits relative to their frozen root", async (t) => {

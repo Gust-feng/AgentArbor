@@ -22,6 +22,8 @@ export type SpaceToolOptions = {
   readonly workspaceRoot: string;
   readonly taskSoil?: TaskSoil;
   readonly mutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  /** Revocations observed since this run froze its grants. */
+  readonly revocationOverlay?: SpaceRevocationOverlay;
 };
 
 /** All Agent-visible operations on the reference-only SpaceTree feature. */
@@ -190,7 +192,7 @@ export function createSpaceWriteTool(options: SpaceToolOptions): ToolExecutor {
       if (referenceId === undefined || typeof record.content !== "string") {
         return invalid("referenceId and string content are required.");
       }
-      const target = resolveSpaceFileTarget(options.taskSoil, referenceId, optionalString(record.path));
+      const target = resolveSpaceFileTarget(options, referenceId, optionalString(record.path));
       const result = await createLocalWriteFileTool(target.rootPath, {
         mutationCoordinator: options.mutationCoordinator,
       }).execute({ path: target.relativePath, content: record.content }, context);
@@ -229,7 +231,7 @@ export function createSpaceEditTool(options: SpaceToolOptions): ToolExecutor {
       if (referenceId === undefined || !Array.isArray(record.edits)) {
         return invalid("referenceId and edits are required.");
       }
-      const target = resolveSpaceFileTarget(options.taskSoil, referenceId, optionalString(record.path));
+      const target = resolveSpaceFileTarget(options, referenceId, optionalString(record.path));
       const result = await createLocalEditFileTool(target.rootPath, {
         mutationCoordinator: options.mutationCoordinator,
       }).execute({ path: target.relativePath, edits: record.edits }, context);
@@ -288,13 +290,19 @@ function invalid(message: string) { return { status: "invalid_input", message };
 function optionalString(value: unknown): string | undefined | null { return value === undefined ? undefined : stringOrUndefined(value) ?? null; }
 
 function resolveSpaceFileTarget(
-  taskSoil: TaskSoil | undefined,
+  options: SpaceToolOptions,
   referenceId: string,
   requestedPath: string | undefined | null,
 ): { readonly rootPath: string; readonly relativePath: string } {
+  const taskSoil = options.taskSoil;
   if (requestedPath === null) throw new Error("path must be a string when provided.");
   if (taskSoil === undefined || !taskSoil.permissionBoundaryRefs.includes(spaceReferenceWritePermission(referenceId))) {
     throw new Error(`Space reference ${referenceId} is not writable in this run.`);
+  }
+  // The grant above is frozen at birth, so without this an in-flight run would
+  // keep writing through a reference the user has since revoked.
+  if (options.revocationOverlay?.has(referenceId) === true) {
+    throw new Error(`Space reference ${referenceId} was revoked from its Space and is no longer writable.`);
   }
   const contextRef = taskSoil.contextRefs.find((ref) => ref.attachmentId === spaceReferenceAttachmentId(referenceId));
   if (contextRef?.kind === "file" && contextRef.ref.startsWith("local-file:")) {
@@ -314,6 +322,30 @@ function resolveSpaceFileTarget(
     };
   }
   throw new Error(`Space reference ${referenceId} has no frozen local file grant.`);
+}
+
+/**
+ * Deny set layered over the run's frozen grants. It records only references
+ * observed being revoked, because "absent from this Space" cannot distinguish a
+ * revoked reference from one that was never there, and denying on absence alone
+ * would reject legitimate writes.
+ */
+export type SpaceRevocationOverlay = { has(referenceId: string): boolean };
+
+/** Accumulates revocations from the live Space so in-flight runs stop writing them. */
+export function createSpaceRevocationOverlay(
+  events: Pick<SpaceFeature, "events">["events"],
+): SpaceRevocationOverlay & { dispose(): void } {
+  const revoked = new Set<string>();
+  const unsubscribe = events.subscribe((event) => {
+    if (event.type === "space.reference_removed") {
+      revoked.add(event.itemId);
+      for (const id of event.removedItemIds) revoked.add(id);
+    } else if (event.type === "space.deleted") {
+      for (const id of event.removedReferenceIds) revoked.add(id);
+    }
+  });
+  return { has: (referenceId) => revoked.has(referenceId), dispose: unsubscribe };
 }
 
 function absoluteLocalReferencePath(ref: string, prefix: "local-file:" | "local-project:"): string {

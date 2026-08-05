@@ -22,7 +22,13 @@ const referenceItemSchema = z.object({
   reference: spaceReferenceSchema,
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
-}).strict();
+  status: z.enum(["available", "unavailable"]).optional(),
+  unavailableAt: z.string().min(1).optional(),
+}).strict().superRefine((item, context) => {
+  if (item.status !== "unavailable" && item.unavailableAt !== undefined) {
+    context.addIssue({ code: "custom", path: ["unavailableAt"], message: "unavailableAt only belongs to an unavailable reference" });
+  }
+});
 
 const snapshotSchema = z.object({
   schemaVersion: z.literal(SPACE_TREE_SCHEMA_VERSION),

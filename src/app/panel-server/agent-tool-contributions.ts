@@ -4,7 +4,7 @@ import {
   type AgentNotesFeature,
   type AgentNoteVersions,
 } from "../agent-notes/index.js";
-import { createSpaceToolRegistryContribution, type SpaceFeature } from "../spaces/index.js";
+import { createSpaceRevocationOverlay, createSpaceToolRegistryContribution, type SpaceFeature } from "../spaces/index.js";
 import {
   createPersonalKnowledgeToolRegistryContribution,
   type PersonalKnowledgeFeature,
@@ -27,10 +27,15 @@ export type HostFeatureAgentToolContributionResolver = (input: {
 /** Selects feature-owned tool contributions once at the Host composition boundary. */
 export function createHostFeatureAgentToolContributionResolver(input: {
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
-  readonly spaces?: Pick<SpaceFeature, "commands" | "queries">;
+  readonly spaces?: Pick<SpaceFeature, "commands" | "queries" | "events">;
   readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
 }): HostFeatureAgentToolContributionResolver {
+  // Shared across runs on purpose: a revocation is permanent, since re-adding a
+  // reference mints a new id rather than reviving the revoked one.
+  const revocationOverlay = input.spaces === undefined
+    ? undefined
+    : createSpaceRevocationOverlay(input.spaces.events);
   return ({ workspaceRoot, taskSoil, agentNoteVersions }) => [
     ...(input.agentNotes === undefined
       ? []
@@ -46,6 +51,7 @@ export function createHostFeatureAgentToolContributionResolver(input: {
           workspaceRoot,
           taskSoil,
           mutationCoordinator: input.fileMutationCoordinator,
+          revocationOverlay,
         })]),
     ...(input.personalKnowledge === undefined
       ? []

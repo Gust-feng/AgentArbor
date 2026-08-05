@@ -66,6 +66,8 @@ const referenceItemSchema: z.ZodType<SpaceReferenceItem> = z.object({
   title: z.string().min(1),
   parentId: z.string().min(1).optional(),
   reference: spaceReferenceSchema,
+  status: z.enum(["available", "unavailable"]).optional(),
+  unavailableAt: z.string().min(1).optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 }).strict();

@@ -48,3 +48,38 @@ test("SpaceTree persists its current SQLite snapshot without inferring demo data
     title: "新标题",
   });
 });
+
+test("SpaceTree keeps an unavailable reference status across a SQLite round trip", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-spaces-sqlite-status-"));
+  const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
+  const repository = createSqliteSpaceRepository(database);
+  t.after(async () => {
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const snapshot: SpaceTreeSnapshot = {
+    schemaVersion: "space-tree/v3" as const,
+    spaces: [{ id: "space-one", title: "项目", createdAt: "2026-08-06", updatedAt: "2026-08-06" }],
+    referenceItems: [{
+      id: "reference-missing",
+      spaceId: "space-one",
+      title: "已失联工作区",
+      reference: { kind: "workspace_folder", path: "C:/gone" },
+      status: "unavailable",
+      unavailableAt: "2026-08-06T01:00:00.000Z",
+      createdAt: "2026-08-06",
+      updatedAt: "2026-08-06",
+    }, {
+      id: "reference-plain",
+      spaceId: "space-one",
+      title: "无状态旧记录",
+      reference: { kind: "asset_folder" },
+      createdAt: "2026-08-06",
+      updatedAt: "2026-08-06",
+    }],
+  };
+
+  await repository.write(snapshot);
+
+  assert.deepEqual((await repository.read()).referenceItems, snapshot.referenceItems);
+});

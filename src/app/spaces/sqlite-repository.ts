@@ -37,6 +37,12 @@ const MIGRATIONS = [{
 }, {
   version: 3,
   sql: `ALTER TABLE space_references ADD COLUMN parent_id TEXT REFERENCES space_references(id) ON DELETE CASCADE;`,
+}, {
+  version: 4,
+  sql: `
+    ALTER TABLE space_references ADD COLUMN status TEXT CHECK(status IN ('available', 'unavailable'));
+    ALTER TABLE space_references ADD COLUMN unavailable_at TEXT;
+  `,
 }] as const;
 
 export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): SpaceRepository {
@@ -49,6 +55,7 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
         ).all();
         const referenceItems = database.connection.prepare(`
           SELECT id, space_id AS spaceId, title, parent_id AS parentId, reference_json AS referenceJson,
+                 status, unavailable_at AS unavailableAt,
                  created_at AS createdAt, updated_at AS updatedAt
            FROM space_references ORDER BY rowid
         `).all().map((row) => {
@@ -59,6 +66,8 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
             title: item.title,
             ...(item.parentId === null ? {} : { parentId: item.parentId }),
             reference: JSON.parse(String(item.referenceJson)) as unknown,
+            ...(item.status === null ? {} : { status: item.status }),
+            ...(item.unavailableAt === null ? {} : { unavailableAt: item.unavailableAt }),
             createdAt: item.createdAt,
             updatedAt: item.updatedAt,
           };
@@ -88,11 +97,21 @@ function writeSnapshot(database: SqliteRuntimeDatabase, value: SpaceTreeSnapshot
     );
     for (const space of value.spaces) insertSpace.run(space.id, space.title, space.createdAt, space.updatedAt);
     const insertReference = database.connection.prepare(`
-      INSERT INTO space_references(id, space_id, title, parent_id, reference_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO space_references(id, space_id, title, parent_id, reference_json, status, unavailable_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const item of value.referenceItems) {
-      insertReference.run(item.id, item.spaceId, item.title, item.parentId ?? null, JSON.stringify(item.reference), item.createdAt, item.updatedAt);
+      insertReference.run(
+        item.id,
+        item.spaceId,
+        item.title,
+        item.parentId ?? null,
+        JSON.stringify(item.reference),
+        item.status ?? null,
+        item.unavailableAt ?? null,
+        item.createdAt,
+        item.updatedAt,
+      );
     }
   });
 }

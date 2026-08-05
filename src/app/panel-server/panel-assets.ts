@@ -7,7 +7,7 @@ export type PanelStaticAsset = {
   readonly body: Buffer;
 };
 
-export const PANEL_BRAND_LOGO_PATHNAME = "/favicon.svg";
+export const PANEL_BRAND_LOGO_PATHNAME = "/favicon.png";
 export const PANEL_BRAND_LEGACY_ICON_PATHNAME = "/favicon.ico";
 
 export function createPanelHtml(): string {
@@ -16,7 +16,7 @@ export function createPanelHtml(): string {
 
 export function readPanelBrandLogoAsset(): PanelStaticAsset {
   return {
-    contentType: "image/svg+xml",
+    contentType: "image/png",
     body: readFileSync(resolvePanelBrandLogoPath()),
   };
 }
@@ -30,10 +30,10 @@ export function readPanelBrandIconAsset(): PanelStaticAsset {
 
 export function resolvePanelBrandLogoPath(): string {
   const candidates = panelAssetRoots().flatMap((root) => [
-    path.join(root, "favicon.svg"),
-    path.join(root, "public", "favicon.svg"),
+    path.join(root, "favicon.png"),
+    path.join(root, "public", "favicon.png"),
   ]);
-  return resolveFirstExistingFile(candidates, "Panel brand logo asset not found: favicon.svg");
+  return resolveFirstExistingFile(candidates, "Panel brand logo asset not found: favicon.png");
 }
 
 export function resolvePanelBrandIconPath(): string {

@@ -379,7 +379,7 @@ export function AboutSettings(props: {
       <section className="settings-card about-product-card">
         <div className="about-product-main">
           <span className="about-product-mark" aria-hidden="true">
-            <img src="/favicon.svg" alt="" />
+            <img src="/favicon.png" alt="" />
           </span>
           <div>
             <h3>{productName}</h3>

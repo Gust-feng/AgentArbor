@@ -51,14 +51,14 @@ test("panel server serves real brand favicon assets", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-favicon-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
-    const svg = await requestBuffer(server.url, "/favicon.svg");
+    const png = await requestBuffer(server.url, "/favicon.png");
     const ico = await requestBuffer(server.url, "/favicon.ico");
 
-    assert.equal(svg.status, 200);
+    assert.equal(png.status, 200);
     assert.equal(ico.status, 200);
-    assert.match(String(svg.headers["content-type"]), /image\/svg\+xml/);
+    assert.match(String(png.headers["content-type"]), /image\/png/);
     assert.match(String(ico.headers["content-type"]), /image\/x-icon/);
-    assert.equal(svg.body.toString("utf8").includes("<svg"), true);
+    assert.deepEqual([...png.body.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
     assert.deepEqual([...ico.body.subarray(0, 4)], [0, 0, 1, 0]);
     assert.equal(ico.body.readUInt16LE(4) > 0, true);
   } finally {

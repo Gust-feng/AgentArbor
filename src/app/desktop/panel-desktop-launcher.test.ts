@@ -595,7 +595,7 @@ function createFakePanelDesktopWindow(): FakePanelDesktopWindow {
 
 function isPanelBrandLogoPath(value: string): boolean {
   return (
-    value.endsWith(path.join("src", "app", "panel-ui", "public", "favicon.svg")) ||
-    value.endsWith(path.join("dist", "app", "panel-ui", "favicon.svg"))
+    value.endsWith(path.join("src", "app", "panel-ui", "public", "favicon.png")) ||
+    value.endsWith(path.join("dist", "app", "panel-ui", "favicon.png"))
   );
 }

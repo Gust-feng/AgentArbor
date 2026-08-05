@@ -55,5 +55,11 @@ desktop-agent-infra-analysis*.md
 figma
 images/
 
+# Local generated audit artifacts.
+.qoder/
+
+# Local brand source assets; runtime copies live under src/app/panel-ui/public.
+AgentArbor_logo_assets/
+
 docs/研究资料/参考资料/模型信息
 docs/研究资料/参考资料/外部项目分析

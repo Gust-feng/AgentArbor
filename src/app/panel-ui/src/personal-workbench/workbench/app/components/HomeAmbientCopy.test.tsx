@@ -1,12 +1,20 @@
 import React from 'react'
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { shouldUseMotion } from '../../../../app-motion'
 import { HomeAmbientCopy } from './HomeAmbientCopy'
+import type { HomeAmbientCopyPair } from './home-ambient-copy'
+import { HOME_AMBIENT_COPY_INPUT_DELAY_MS } from './HomeAmbientCopy'
 
 vi.mock('../../../../app-motion', () => ({
   shouldUseMotion: vi.fn(),
 }))
+
+const copy: HomeAmbientCopyPair = {
+  lead: '一天正在慢慢展开，',
+  idleTail: '今天想把什么向前推进？',
+  activeTail: '你写下的事情，正从这里开始。',
+}
 
 beforeEach(() => {
   window.sessionStorage.clear()
@@ -14,56 +22,89 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   window.sessionStorage.clear()
 })
 
-test('reveals the sentence in semantic segments without changing its reserved layout', () => {
-  const copy = '夜深了，不必急着结束，也不必急着开始。'
-  const { container } = render(<HomeAmbientCopy copy={copy} />)
-  const reserve = container.querySelector('.aa-agent-home__ambient-reserve')
-  const visibleCopy = container.querySelector('.aa-agent-home__ambient-copy')
-  const segments = visibleCopy?.querySelectorAll('.aa-agent-home__ambient-segment') ?? []
+test('keeps both copy variants in the same reserved layout', () => {
+  const { container } = render(<HomeAmbientCopy copy={copy} hasDraft={false} />)
+  const ambient = container.querySelector('.aa-agent-home__ambient')
+  const reserveVariants = container.querySelectorAll('.aa-agent-home__ambient-reserve-variant')
 
-  expect(reserve?.textContent).toBe(copy)
-  expect(visibleCopy?.textContent).toBe(copy)
-  expect(visibleCopy?.classList.contains('aa-agent-home__ambient-copy--entering')).toBe(true)
-  expect(reserve?.querySelectorAll('.aa-agent-home__ambient-segment')).toHaveLength(3)
-  expect(Array.from(segments, (segment) => segment.textContent)).toEqual([
-    '夜深了，',
-    '不必急着结束，',
-    '也不必急着开始。',
+  expect(ambient?.getAttribute('data-state')).toBe('idle')
+  expect(Array.from(reserveVariants, (variant) => variant.textContent)).toEqual([
+    `${copy.lead}${copy.idleTail}`,
+    `${copy.lead}${copy.activeTail}`,
   ])
+  expect(container.querySelectorAll('.aa-agent-home__ambient-lead')).toHaveLength(1)
+  expect(container.querySelector('.aa-agent-home__ambient-lead')?.textContent).toBe(copy.lead)
+  const visibleTail = container.querySelector('.aa-agent-home__ambient-tail')
+  expect(visibleTail?.textContent).toBe(copy.idleTail)
+  expect(visibleTail?.childElementCount).toBe(0)
 })
 
-test('shows the full sentence immediately on later visits in the same session', () => {
-  const copy = '这个夜晚还很长，答案可以晚一点到来。'
-  const first = render(<HomeAmbientCopy copy={copy} />)
+test('uses the entrance reveal only once in the same session', () => {
+  const first = render(<HomeAmbientCopy copy={copy} hasDraft={false} />)
+  expect(first.container.querySelector('.aa-agent-home__ambient-copy')?.classList.contains(
+    'aa-agent-home__ambient-copy--entering',
+  )).toBe(true)
   first.unmount()
 
-  const second = render(<HomeAmbientCopy copy={copy} />)
-  const visibleCopy = second.container.querySelector('.aa-agent-home__ambient-copy')
-  expect(visibleCopy?.textContent).toBe(copy)
-  expect(visibleCopy?.classList.contains('aa-agent-home__ambient-copy--entering')).toBe(false)
+  const second = render(<HomeAmbientCopy copy={copy} hasDraft={false} />)
+  expect(second.container.querySelector('.aa-agent-home__ambient-copy')?.classList.contains(
+    'aa-agent-home__ambient-copy--entering',
+  )).toBe(false)
 })
 
-test('shows the full sentence immediately when motion is reduced', () => {
+test('switches once after non-whitespace input has settled briefly', () => {
+  vi.useFakeTimers()
+  const { container, rerender } = render(<HomeAmbientCopy copy={copy} hasDraft={false} />)
+
+  rerender(<HomeAmbientCopy copy={copy} hasDraft />)
+  expect(container.querySelector('.aa-agent-home__ambient')?.getAttribute('data-state')).toBe('idle')
+
+  act(() => vi.advanceTimersByTime(HOME_AMBIENT_COPY_INPUT_DELAY_MS - 1))
+  expect(container.querySelector('.aa-agent-home__ambient')?.getAttribute('data-state')).toBe('idle')
+
+  act(() => vi.advanceTimersByTime(1))
+  const ambient = container.querySelector('.aa-agent-home__ambient')
+  expect(ambient?.getAttribute('data-state')).toBe('active')
+  expect(ambient?.getAttribute('aria-label')).toBe(`${copy.lead}${copy.activeTail}`)
+  expect(container.querySelector('.aa-agent-home__ambient-tail')?.textContent).toBe(copy.idleTail)
+
+  rerender(<HomeAmbientCopy copy={{ ...copy, activeTail: '你写下的事情，正在继续向前。' }} hasDraft />)
+  act(() => vi.advanceTimersByTime(HOME_AMBIENT_COPY_INPUT_DELAY_MS))
+  expect(container.querySelector('.aa-agent-home__ambient')?.getAttribute('data-state')).toBe('active')
+})
+
+test('cancels the pending switch when the draft is cleared', () => {
+  vi.useFakeTimers()
+  const { container, rerender } = render(<HomeAmbientCopy copy={copy} hasDraft={false} />)
+
+  rerender(<HomeAmbientCopy copy={copy} hasDraft />)
+  rerender(<HomeAmbientCopy copy={copy} hasDraft={false} />)
+  act(() => vi.advanceTimersByTime(HOME_AMBIENT_COPY_INPUT_DELAY_MS))
+
+  expect(container.querySelector('.aa-agent-home__ambient')?.getAttribute('data-state')).toBe('idle')
+})
+
+test('returns to the idle copy after an active draft is cleared', () => {
+  vi.useFakeTimers()
+  const { container, rerender } = render(<HomeAmbientCopy copy={copy} hasDraft />)
+
+  act(() => vi.advanceTimersByTime(HOME_AMBIENT_COPY_INPUT_DELAY_MS))
+  expect(container.querySelector('.aa-agent-home__ambient')?.getAttribute('data-state')).toBe('active')
+
+  rerender(<HomeAmbientCopy copy={copy} hasDraft={false} />)
+  expect(container.querySelector('.aa-agent-home__ambient')?.getAttribute('data-state')).toBe('idle')
+})
+
+test('switches immediately when motion is reduced', () => {
   vi.mocked(shouldUseMotion).mockReturnValue(false)
-  const copy = '有些答案需要寻找，有些只需要给它一点时间。'
-  const { container } = render(<HomeAmbientCopy copy={copy} />)
+  const { container } = render(<HomeAmbientCopy copy={copy} hasDraft />)
 
-  const visibleCopy = container.querySelector('.aa-agent-home__ambient-copy')
-  expect(visibleCopy?.textContent).toBe(copy)
-  expect(visibleCopy?.classList.contains('aa-agent-home__ambient-copy--entering')).toBe(false)
-})
-
-test('preserves consecutive punctuation exactly as provided', () => {
-  const copy = '真的想清楚了吗？！也许还可以再等等……'
-  const { container } = render(<HomeAmbientCopy copy={copy} />)
-  const visibleCopy = container.querySelector('.aa-agent-home__ambient-copy')
-
-  expect(visibleCopy?.textContent).toBe(copy)
-  expect(Array.from(
-    visibleCopy?.querySelectorAll('.aa-agent-home__ambient-segment') ?? [],
-    (segment) => segment.textContent,
-  )).toEqual(['真的想清楚了吗？！', '也许还可以再等等……'])
+  const ambient = container.querySelector('.aa-agent-home__ambient')
+  expect(ambient?.getAttribute('data-state')).toBe('active')
+  expect(ambient?.getAttribute('aria-label')).toBe(`${copy.lead}${copy.activeTail}`)
+  expect(container.querySelector('.aa-agent-home__ambient-tail')?.textContent).toBe(copy.activeTail)
 })

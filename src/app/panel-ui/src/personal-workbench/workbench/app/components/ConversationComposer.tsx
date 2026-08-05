@@ -5,7 +5,12 @@ import { ModelOptionPicker } from '../../../../components/model-option-picker'
 import { RADII, composerSurface } from './tokens'
 import { QueuedMessageList } from './QueuedMessageList'
 
-export function ConversationComposer({ input }: { readonly input: ChatInputProps }) {
+interface ConversationComposerProps {
+  readonly input: ChatInputProps
+  readonly onCompositionChange?: (composing: boolean) => void
+}
+
+export function ConversationComposer({ input, onCompositionChange }: ConversationComposerProps) {
   const [focused, setFocused] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const canEdit = !input.busy || input.allowInputWhileBusy === true
@@ -64,7 +69,10 @@ export function ConversationComposer({ input }: { readonly input: ChatInputProps
         onChange={(event) => input.onChange(event.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        onCompositionStart={() => onCompositionChange?.(true)}
+        onCompositionEnd={() => onCompositionChange?.(false)}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
             submit()

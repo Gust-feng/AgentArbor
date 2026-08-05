@@ -71,6 +71,30 @@ test('does not repeat conversation history on the task entry surface', () => {
   expect(screen.queryByText('更新模型配置')).toBeNull()
 })
 
+test('hides context usage until the task entry becomes a conversation', () => {
+  render(
+    <HomePage
+      onNavigate={vi.fn()}
+      onOpenConversation={vi.fn()}
+      conversations={[]}
+      input={inputProps({
+        contextUsage: {
+          source: 'provider_usage',
+          usedTokens: 1,
+          maxTokens: 100,
+          percent: 1,
+          ringPercent: 1,
+          tone: 'normal',
+          label: '上下文已用 1%',
+        },
+      })}
+      focusRequest={0}
+    />,
+  )
+
+  expect(screen.queryByRole('progressbar', { name: '上下文已用 1%' })).toBeNull()
+})
+
 test('enters the working state only after non-whitespace input', () => {
   vi.useFakeTimers()
   const props = {

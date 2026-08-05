@@ -35,7 +35,7 @@ import { useThemes, type Theme } from './themesStore'
 import { ImageWithFallback } from './ImageWithFallback'
 import { ReferencePreview } from './ReferencePreview'
 import { getCachedReferencePreview } from './referencePreviewClient'
-import { prefetchOfficePreview } from './officePreviewRuntime'
+import { prefetchDocumentSurface } from './documentPreviewWarmup'
 
 /**
  * 知识库 —— 顶层场所(见 docs/概念与设计.md §5)。
@@ -1778,7 +1778,9 @@ function prefetchPageOfficePreview(page: ResolvedPage): void {
   const target = page.documentTarget
   if (target === undefined) return
   const preview = getCachedReferencePreview(target.itemId, '', target.apiBase)
-  if (preview !== undefined) prefetchOfficePreview(preview)
+  if (preview !== undefined) {
+    prefetchDocumentSurface(preview)
+  }
 }
 
 function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) {

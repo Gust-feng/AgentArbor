@@ -6,6 +6,7 @@ import type {
 import { refreshDocumentPreview } from './referencePreviewClient'
 import { invalidateDocumentPreviews } from './referencePreviewClient'
 import { subscribeWorkbenchProjectionChanges } from '../../../../app-workbench-projection-changes'
+import { warmReferenceDirectoryPreviews } from './space-reference-preview-warmup'
 
 /**
  * 挂载树状态收口 —— 把「引用目录的加载 / 缓存 / 展开」从 SpacePage 的分散状态
@@ -295,6 +296,7 @@ export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeRe
       const preview = await refreshDocumentPreview(referenceId, relativePath)
       if (activeSpaceIdRef.current !== requestSpaceId) return
       if (preview.content.kind !== 'directory') throw new Error('目标路径不再是文件夹。')
+      warmReferenceDirectoryPreviews(referenceId, preview.content.entries)
       const entries = projectReferenceChildren(referenceId, sourceKind, preview.content.entries)
       setDirectories((prev) => {
         const current = prev.get(key)

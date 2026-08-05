@@ -1,5 +1,6 @@
 import { ApiError, requestJson } from '../../../../api'
 import { fetchDocumentPreview, getCachedReferencePreview, invalidateDocumentPreviews, primeReferencePreviewCache } from './referencePreviewClient'
+import { prefetchVideoPreview } from './videoPreviewRuntime'
 import type { PersonalNoteRevision, DocumentPreview } from '../../../../../../panel-api-contracts'
 import type { Assignment, BrainLink, BrainPage, Note, Theme } from './personalKnowledgeTypes'
 import { subscribeWorkbenchProjectionChanges } from '../../../../app-workbench-projection-changes'
@@ -424,6 +425,7 @@ async function fetchPersonalKnowledgeSnapshot(): Promise<Snapshot> {
   if (response.snapshot === undefined) throw new Error('个人知识响应缺少 snapshot。')
   if (response.materialPreviews !== undefined) {
     primeReferencePreviewCache(response.materialPreviews, '/api/workbench-assets')
+    response.materialPreviews.forEach(prefetchVideoPreview)
   }
   response.snapshot.pages.filter((page) => page.asset?.status === 'managed').forEach(warmManagedAssetPreview)
   response.snapshot.pages
@@ -434,6 +436,7 @@ async function fetchPersonalKnowledgeSnapshot(): Promise<Snapshot> {
 
 function warmWorkbenchAssetPreview(page: BrainPage): void {
   void fetchDocumentPreview(page.refId, '', undefined, '/api/workbench-assets')
+    .then(prefetchVideoPreview)
     .catch(() => undefined)
 }
 
@@ -441,6 +444,7 @@ function warmManagedAssetPreview(page: BrainPage): void {
   // Preview data only enriches the card. The persisted asset must remain
   // immediately visible while a local file read is slow or unavailable.
   void fetchDocumentPreview(page.refId, '', undefined, '/api/personal-knowledge/assets')
+    .then(prefetchVideoPreview)
     .catch(() => undefined)
 }
 

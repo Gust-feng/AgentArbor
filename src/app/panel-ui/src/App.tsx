@@ -296,6 +296,7 @@ export function App(): React.ReactElement {
       onOpenSpaceItem={spaceProjection.openReference}
       onCreateSpace={spaceProjection.createSpace}
       spaceActions={{
+        deleteSpace: spaceProjection.deleteSpace,
         createManagedFolder: spaceProjection.createManagedFolder,
         addLocalFile: spaceProjection.addLocalFile,
         addWorkspaceFolder: spaceProjection.addWorkspaceFolder,

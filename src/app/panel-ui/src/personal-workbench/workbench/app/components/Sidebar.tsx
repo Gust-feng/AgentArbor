@@ -20,7 +20,7 @@ import {
   SidebarNavRow,
   SidebarSectionLabel,
 } from './SidebarRows'
-import { SpaceManagerDialog } from './SpaceManagerDialog'
+import { ActionConfirmationDialog } from './ActionConfirmationDialog'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
 
@@ -50,6 +50,7 @@ interface SidebarProps {
   onActiveSpaceChange: (spaceId: string) => void
   onCreateSpace?: (title: string) => void | Promise<void>
   onRenameSpace?: (spaceId: string, title: string) => void | Promise<void>
+  onDeleteSpace?: (spaceId: string) => void | Promise<void>
 }
 
 const SIDEBAR_W           = 236
@@ -78,6 +79,7 @@ export function Sidebar({
   onActiveSpaceChange,
   onCreateSpace,
   onRenameSpace,
+  onDeleteSpace,
 }: SidebarProps) {
   // Structural state changes are intentionally atomic. The previous staged
   // label/width timers left the sidebar in a visible in-between geometry, which
@@ -96,8 +98,8 @@ export function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameSelectAll, setRenameSelectAll] = useState(false)
   const pendingSpaceIdsRef = useRef<Set<string> | null>(null)
-  const [showManager, setShowManager] = useState(false)
   const [openingConversationId, setOpeningConversationId] = useState<string | null>(null)
+  const [pendingSpaceDeletion, setPendingSpaceDeletion] = useState<{ readonly id: string; readonly label: string } | null>(null)
 
   async function openConversation(conversationId: string) {
     if (openingConversationId === conversationId || pendingConversationIds.has(conversationId)) return
@@ -141,6 +143,18 @@ export function Sidebar({
     void Promise.resolve().then(() => onCreateSpace('新空间')).catch(() => {
       pendingSpaceIdsRef.current = null
     })
+  }
+
+  function confirmSpaceDeletion(): void {
+    const pending = pendingSpaceDeletion
+    if (pending === null || onDeleteSpace === undefined) return
+    setPendingSpaceDeletion(null)
+    try {
+      const result = onDeleteSpace(pending.id)
+      void Promise.resolve(result).catch(() => undefined)
+    } catch {
+      // The owner projects the mutation error; the sidebar only closes its confirmation surface.
+    }
   }
 
   return (
@@ -216,13 +230,16 @@ export function Sidebar({
         <SidebarSectionLabel
           label="空间"
           labelsVisible={labelsVisible}
+          leadingIcon={<Layers size={12}/>}
           action={
             <button
+              type="button"
               onClick={addSpace}
               disabled={onCreateSpace === undefined || spaceLoadState?.mutationPending === true}
               aria-label="新建空间"
+              title="新建空间"
               className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/spaces:opacity-50 hover:!opacity-100"
-              style={{ width: 16, height: 16, color: 'var(--aa-text-3)', marginRight: -3 }}
+              style={{ width: 18, height: 18, color: 'var(--aa-text-3)', marginRight: -3 }}
             >
               <Plus size={12}/>
             </button>
@@ -242,29 +259,22 @@ export function Sidebar({
               onRename={(t) => { renameSpace(s.id, t); finishRename() }}
               onCancelRename={finishRename}
               meta={<ChevronRight size={11} style={{ color: 'var(--aa-text-3)' }}/>}
-              actions={onRenameSpace === undefined ? [] : [
-                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => { setRenameSelectAll(false); setRenamingId(s.id) } },
-              ]}
+              actions={[
+                ...(onRenameSpace === undefined ? [] : [
+                  { label: '重命名', icon: <Pencil size={12}/>, onClick: () => { setRenameSelectAll(false); setRenamingId(s.id) } },
+                ]),
+                 ...(onDeleteSpace === undefined ? [] : [{
+                   label: '删除',
+                   icon: <Trash2 size={12}/>,
+                   danger: true,
+                   onClick: () => setPendingSpaceDeletion({ id: s.id, label: s.label }),
+                 }]),
+               ]}
             />
           ))}
           {spaceLoadState?.error !== undefined && (
             <SpaceLoadFailure message={spaceLoadState.error} onRetry={spaceLoadState.onRetry} />
           )}
-          <div style={{
-            opacity: labelsVisible ? 1 : 0,
-            transition: 'opacity 140ms ease',
-            pointerEvents: labelsVisible ? 'auto' : 'none',
-          }}>
-            {/* 管理空间:打开管理面板(集中重命名/删除/统览所有空间)。 */}
-            <button
-              onClick={() => setShowManager(true)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs hover:bg-black/5"
-              style={{ color: 'var(--aa-text-3)' }}
-            >
-              <Layers size={11}/>
-              <span>管理空间</span>
-            </button>
-          </div>
         </div>
         </div>
 
@@ -365,14 +375,18 @@ export function Sidebar({
       </footer>
       </div>
 
-      {showManager && (
-        <SpaceManagerDialog
-          spaces={projectedSpaces}
-          onClose={() => setShowManager(false)}
-          onRename={renameSpace}
-          onAdd={addSpace}
-        />
-      )}
+      <ActionConfirmationDialog
+        request={pendingSpaceDeletion === null ? undefined : {
+          eyebrow: '空间操作',
+          title: `删除空间“${pendingSpaceDeletion.label}”`,
+          description: '空间内的引用将被移除。',
+          consequence: '原文件、文件夹和对话不会被删除。',
+          confirmLabel: '删除空间',
+        }}
+        onCancel={() => setPendingSpaceDeletion(null)}
+        onConfirm={confirmSpaceDeletion}
+      />
+
     </aside>
   )
 }
@@ -408,8 +422,6 @@ function SpaceLoadFailure(props: {
   )
 }
 
-// ── SpaceManagerDialog ───────────────────────────────────────────────────────
-// 「管理空间」入口打开的面板:集中查看 / 重命名 / 删除 / 新建所有空间。
 function compareConversations(left: ConversationSummary, right: ConversationSummary): number {
   const leftPinned = left.pinnedAt !== undefined
   const rightPinned = right.pinnedAt !== undefined

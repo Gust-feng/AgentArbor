@@ -16,6 +16,7 @@
 
 .aa-focus-header[data-desktop-shell='true'] {
   padding-right: 8px;
+  app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
@@ -25,11 +26,13 @@
 .aa-focus-header[data-desktop-shell='true'] select,
 .aa-focus-header[data-desktop-shell='true'] textarea,
 .aa-focus-header[data-desktop-shell='true'] [role='button'] {
+  app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
 .aa-focus-header[data-desktop-shell='true'] .aa-focus-drag-region {
   min-width: 24px;
+  app-region: drag;
   -webkit-app-region: drag;
 }
 

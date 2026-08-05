@@ -644,7 +644,6 @@ test("routes Space rename, unlink, and physical deletion through distinct action
   const rename = vi.fn().mockResolvedValue(undefined);
   const unlinkReference = vi.fn().mockResolvedValue(undefined);
   const removeReference = vi.fn().mockResolvedValue(undefined);
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   renderWorkbench({
     spaces: [{
       spaceId: "space-reading",
@@ -674,12 +673,13 @@ test("routes Space rename, unlink, and physical deletion through distinct action
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
   await user.click(screen.getByRole("button", { name: "取消链接" }));
   expect(unlinkReference).toHaveBeenCalledWith("reference-material");
-  expect(confirm).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
   await user.click(screen.getByRole("button", { name: "删除文件" }));
+  expect(screen.getByRole("alertdialog", { name: "删除“阅读摘要.md”" })).toBeTruthy();
+  expect(removeReference).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "删除文件" }));
   expect(removeReference).toHaveBeenCalledWith("reference-material");
-  expect(confirm).toHaveBeenLastCalledWith("确定要删除“阅读摘要.md”吗？此操作会从磁盘上删除该文件。");
 
   await user.click(screen.getByRole("button", { name: "项目目录操作" }));
   expect(screen.getByRole("button", { name: "取消链接" })).toBeTruthy();
@@ -689,8 +689,10 @@ test("routes Space rename, unlink, and physical deletion through distinct action
 
   await user.click(screen.getByRole("button", { name: "资料组操作" }));
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
+  expect(screen.getByRole("alertdialog", { name: "删除“资料组”及其所有子项" })).toBeTruthy();
+  expect(removeReference).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "删除文件夹" }));
   expect(removeReference).toHaveBeenCalledWith("reference-group");
-  expect(confirm).toHaveBeenLastCalledWith("确定删除“资料组”及其所有子项吗？其中本地文件和软件自建文件夹会从磁盘删除，其他内容仅取消链接。");
 });
 
 test("deletes app-owned folders and creates files from a linked workspace folder", async () => {
@@ -742,7 +744,6 @@ test("deletes app-owned folders and creates files from a linked workspace folder
     return jsonResponse({ ok: true });
   });
   vi.stubGlobal("fetch", fetchMock);
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   renderWorkbench({
     spaces: [{
       spaceId: "space-files",
@@ -765,6 +766,9 @@ test("deletes app-owned folders and creates files from a linked workspace folder
   ));
 
   await user.click(screen.getByRole("button", { name: "软件资料操作" }));
+  await user.click(screen.getByRole("button", { name: "删除文件夹" }));
+  expect(screen.getByRole("alertdialog", { name: "删除“软件资料”及其中的所有文件" })).toBeTruthy();
+  expect(removeReference).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
   expect(removeReference).toHaveBeenCalledWith("managed-folder");
 
@@ -1152,7 +1156,7 @@ test("keeps a long conversation history inside the workbench scroll section", ()
   expect(within(scrollArea!).getAllByText(/^对话 \d+$/u)).toHaveLength(12);
 });
 
-test("routes sidebar conversation actions to backend commands", async () => {
+test("routes sidebar conversation pin actions to backend commands", async () => {
   const user = userEvent.setup();
   const onToggleConversationPinned = vi.fn();
   renderWorkbench({
@@ -1172,6 +1176,23 @@ test("exposes model, context usage, and reasoning controls in the workbench comp
   const onModelSelect = vi.fn();
   const onReasoningEffortChange = vi.fn();
   renderWorkbench({
+    conversation: { conversationId: "conversation-context", title: "上下文测试", turns: [] },
+    currentRun: {
+      events: [],
+      transcriptNodes: [],
+      run: {
+        runId: "run-context",
+        conversationId: "conversation-context",
+        title: "上下文测试",
+        goalSummary: "上下文测试",
+        status: "running",
+        runMode: "agent",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        requiresUserAction: false,
+        eventCursor: { lastSequence: 0, eventCount: 0 },
+      },
+    },
     inputProps: inputProps({
       models: [
         { id: "model-1", name: "Model 1", label: "模型一", providerLabel: "OpenAI", providerIdentity: "openai", profileId: "profile-1", modelId: "model-1" },

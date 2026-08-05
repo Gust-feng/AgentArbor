@@ -21,6 +21,7 @@ type SpaceReferenceKind = SpaceReference["kind"];
 export function useSpaceProjection(enabled = true): {
   readonly spaces: readonly PersonalSpaceProjection[];
   readonly createSpace: (title: string) => Promise<void>;
+  readonly deleteSpace: (spaceId: string) => Promise<void>;
   readonly createManagedFolder: (spaceId: string, title: string) => Promise<void>;
   readonly addLocalFile: (spaceId: string) => Promise<void>;
   readonly addWorkspaceFolder: (spaceId: string) => Promise<void>;
@@ -179,6 +180,10 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`create-space:${title.trim()}`, () => postJson("/api/spaces", { title }));
   }, [runMutation]);
 
+  const deleteSpace = useCallback(async (spaceId: string): Promise<void> => {
+    await runMutation(`delete-space:${spaceId}`, () => deleteJson(`/api/spaces/${encodeURIComponent(spaceId)}`));
+  }, [runMutation]);
+
   const createManagedFolder = useCallback(async (spaceId: string, title: string): Promise<void> => {
     await runMutation(`create-managed-folder:${spaceId}:${title.trim()}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
       title,
@@ -263,6 +268,7 @@ export function useSpaceProjection(enabled = true): {
   return {
     spaces,
     createSpace,
+    deleteSpace,
     createManagedFolder,
     addLocalFile,
     addWorkspaceFolder,

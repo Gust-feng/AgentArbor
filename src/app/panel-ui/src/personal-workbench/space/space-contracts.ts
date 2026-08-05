@@ -36,6 +36,7 @@ export type PersonalSpaceProjection = {
 };
 
 export type PersonalSpaceActions = {
+  readonly deleteSpace?: (spaceId: string) => void | Promise<void>;
   readonly createManagedFolder?: (spaceId: string, title: string) => void | Promise<void>;
   readonly addLocalFile?: (spaceId: string) => void | Promise<void>;
   readonly addWorkspaceFolder?: (spaceId: string) => void | Promise<void>;

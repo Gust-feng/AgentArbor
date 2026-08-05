@@ -21,6 +21,9 @@ export function HomePage({ input, focusRequest }: HomePageProps) {
   const [compositionBaseValue, setCompositionBaseValue] = useState<string | null>(null)
   const ambientDraftValue = compositionBaseValue ?? input.value
   const hasDraft = ambientDraftValue.trim().length > 0
+  const homeInput = input.contextUsage === undefined
+    ? input
+    : { ...input, contextUsage: undefined }
 
   const handleCompositionChange = (composing: boolean): void => {
     setCompositionBaseValue(composing ? input.value : null)
@@ -36,7 +39,7 @@ export function HomePage({ input, focusRequest }: HomePageProps) {
           <div className="aa-agent-home__composer">
             <ConversationComposer
               key={focusRequest}
-              input={input}
+              input={homeInput}
               onCompositionChange={handleCompositionChange}
             />
           </div>

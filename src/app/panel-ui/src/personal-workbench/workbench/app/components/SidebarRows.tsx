@@ -220,7 +220,17 @@ function SidebarRowMenu({ actions, visible }: { readonly actions: readonly Sideb
   )
 }
 
-export function SidebarSectionLabel({ label, labelsVisible, action }: { readonly label: string; readonly labelsVisible: boolean; readonly action?: ReactNode }) {
+export function SidebarSectionLabel({
+  label,
+  labelsVisible,
+  leadingIcon,
+  action,
+}: {
+  readonly label: string
+  readonly labelsVisible: boolean
+  readonly leadingIcon?: ReactNode
+  readonly action?: ReactNode
+}) {
   return (
     <div
       className="flex items-center justify-between pl-3 pr-2 pt-4 pb-1"
@@ -230,8 +240,11 @@ export function SidebarSectionLabel({ label, labelsVisible, action }: { readonly
         pointerEvents: labelsVisible ? 'auto' : 'none',
       }}
     >
-      <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: 'var(--aa-text-3)' }}>
-        {label}
+      <span className="flex items-center gap-1.5" style={{ color: 'var(--aa-text-3)' }}>
+        {leadingIcon !== undefined && <span aria-hidden="true" className="flex items-center justify-center">{leadingIcon}</span>}
+        <span className="text-[10px] font-semibold tracking-widest uppercase">
+          {label}
+        </span>
       </span>
       {action}
     </div>

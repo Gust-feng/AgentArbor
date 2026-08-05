@@ -31,7 +31,7 @@ import type {
 import { ReferencePreview, type ReferencePreviewHandle } from './ReferencePreview'
 import { NoteEditor } from './NoteEditor'
 import { createSpaceReferenceEntry, deleteSpaceReferenceEntry, fetchDocumentPreview, getCachedReferencePreview, renameSpaceReferenceEntry } from './referencePreviewClient'
-import { prefetchOfficePreview } from './officePreviewRuntime'
+import { prefetchDocumentSurface } from './documentPreviewWarmup'
 import { DeferredSurfaceBoundary } from './DeferredSurfaceBoundary'
 import {
   useMountedTree,
@@ -43,6 +43,10 @@ import {
 } from './useMountedTree'
 import { useNotes } from './notesStore'
 import { useBrain, type PageKind } from './brainStore'
+import {
+  ActionConfirmationDialog,
+  type ActionConfirmationRequest,
+} from './ActionConfirmationDialog'
 
 /**
  * 学习空间 —— VS Code 式分栏:左侧资源管理器(我的笔记 + 资料),右侧书写/查看。
@@ -54,6 +58,17 @@ import { useBrain, type PageKind } from './brainStore'
  * (「我写的笔记」是另一类可写对象,来自 notesStore,不在这棵树里。)
  * 所有条目都来自 SpaceFeature 的真实投影；初始内容由后端首次启动初始化。
  */
+
+function prefetchReferencePreview(referenceId: string, relativePath: string): Promise<void> {
+  const cached = getCachedReferencePreview(referenceId, relativePath)
+  if (cached !== undefined) {
+    prefetchDocumentSurface(cached)
+    return Promise.resolve()
+  }
+  return fetchDocumentPreview(referenceId, relativePath).then((preview) => {
+    prefetchDocumentSurface(preview)
+  })
+}
 function fileIcon(name: string, size: number) {
   const extension = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'heic'].includes(extension)) {
@@ -273,6 +288,11 @@ interface SpaceViewMemory {
   scrollTop: number
 }
 
+type PendingSpaceConfirmation = {
+  readonly request: ActionConfirmationRequest
+  readonly action: () => void | Promise<void>
+}
+
 const spaceViewMemory = new Map<string, SpaceViewMemory>()
 
 export function SpacePage({
@@ -325,6 +345,7 @@ export function SpacePage({
   const [actionError, setActionError] = useState<string | null>(null)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
+  const [pendingSpaceConfirmation, setPendingSpaceConfirmation] = useState<PendingSpaceConfirmation | null>(null)
   const explorerRef = useRef<HTMLDivElement>(null)
   const referencePreviewRef = useRef<ReferencePreviewHandle>(null)
   const memoryKey = spaceId ?? 'prototype-space'
@@ -355,12 +376,7 @@ export function SpacePage({
     }
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
-    const cached = getCachedReferencePreview(referenceId, relativePath)
-    if (cached !== undefined) {
-      prefetchOfficePreview(cached)
-      return
-    }
-    void fetchDocumentPreview(referenceId, relativePath).then(prefetchOfficePreview, () => undefined)
+    void prefetchReferencePreview(referenceId, relativePath).catch(() => undefined)
   }
 
   function selectTreeItem(id: string) {
@@ -371,12 +387,7 @@ export function SpacePage({
     }
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
-    const cached = getCachedReferencePreview(referenceId, relativePath)
-    if (cached === undefined) {
-      void fetchDocumentPreview(referenceId, relativePath).then(prefetchOfficePreview, (error: unknown) => setActionError(actionErrorMessage(error)))
-    } else {
-      prefetchOfficePreview(cached)
-    }
+    void prefetchReferencePreview(referenceId, relativePath).catch((error: unknown) => setActionError(actionErrorMessage(error)))
     selectItem(id)
   }
 
@@ -473,47 +484,79 @@ export function SpacePage({
       setActionError(actionErrorMessage(error))
     }
   }
-  async function handleDeleteItem(item: SpaceItem) {
+  function requestSpaceConfirmation(request: ActionConfirmationRequest, action: () => void | Promise<void>): void {
+    setPendingSpaceConfirmation({ request, action })
+  }
+
+  function confirmPendingSpaceAction(): void {
+    const pending = pendingSpaceConfirmation
+    if (pending === null) return
+    setPendingSpaceConfirmation(null)
+    void runSpaceAction(pending.action)
+  }
+
+  function handleDeleteItem(item: SpaceItem) {
     if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
-      if (selectedId === item.id) referencePreviewRef.current?.discard()
-      if (!window.confirm(`确定要删除“${item.name}”吗？此操作会删除磁盘上的${item.type === 'folder' ? '文件夹及其内容' : '文件'}。`)) return
-      setActionError(null)
-      try {
-        await deleteSpaceReferenceEntry(item.referenceId, item.relativePath)
-        await mountedTree.refreshParentOf(item.referenceId, item.relativePath)
+      const referenceId = item.referenceId
+      const relativePath = item.relativePath
+      requestSpaceConfirmation({
+        eyebrow: item.type === 'folder' ? '文件夹操作' : '文件操作',
+        title: `删除“${item.name}”`,
+        description: `这会删除磁盘上的${item.type === 'folder' ? '文件夹及其内容' : '文件'}。`,
+        consequence: '此操作不可撤销。',
+        confirmLabel: item.type === 'folder' ? '删除文件夹' : '删除文件',
+      }, async () => {
+        if (selectedId === item.id) referencePreviewRef.current?.discard()
+        await deleteSpaceReferenceEntry(referenceId, relativePath)
+        await mountedTree.refreshParentOf(referenceId, relativePath)
         setSelectedId((current) => current === item.id ? null : current)
-      } catch (error) {
-        setActionError(actionErrorMessage(error))
-      }
+      })
       return
     }
     if (item.domainKind === 'managed_folder') {
-      if (actions?.removeReference === undefined) return
-      if (!window.confirm(`确定删除“${item.name}”及其中的所有文件吗？此操作会从软件存储中物理删除。`)) return
-      setActionError(null)
-      try {
-        await actions.removeReference(item.id)
+      const removeReference = actions?.removeReference
+      if (removeReference === undefined) return
+      requestSpaceConfirmation({
+        eyebrow: '软件存储',
+        title: `删除“${item.name}”及其中的所有文件`,
+        description: '这会从软件存储中物理删除整个文件夹。',
+        consequence: '此操作不可撤销。',
+        confirmLabel: '删除文件夹',
+      }, async () => {
+        await removeReference(item.id)
         setSelectedId((prev) => (prev === item.id ? null : prev))
-      } catch (error) {
-        setActionError(actionErrorMessage(error))
-      }
+      })
       return
     }
-    if (actions?.removeReference === undefined) return
+    const removeReference = actions?.removeReference
+    if (removeReference === undefined) return
     const deletesLocalFile = item.domainKind === 'local_file'
     const deletesOwnedSubtree = item.domainKind === 'folder'
-    if (!window.confirm(deletesLocalFile
-      ? `确定要删除“${item.name}”吗？此操作会从磁盘上删除该文件。`
-      : deletesOwnedSubtree
-        ? `确定删除“${item.name}”及其所有子项吗？其中本地文件和软件自建文件夹会从磁盘删除，其他内容仅取消链接。`
-        : `取消“${item.name}”与当前空间的链接吗？磁盘内容不会被删除。`)) return
-    setActionError(null)
-    try {
-      await actions.removeReference(item.id)
+    requestSpaceConfirmation({
+      eyebrow: deletesLocalFile || deletesOwnedSubtree ? '空间资料' : '空间链接',
+      title: deletesLocalFile
+        ? `删除“${item.name}”`
+        : deletesOwnedSubtree
+          ? `删除“${item.name}”及其所有子项`
+          : `取消“${item.name}”与当前空间的链接`,
+      description: deletesLocalFile
+        ? '这会从磁盘上删除该文件。'
+        : deletesOwnedSubtree
+          ? '其中本地文件和软件自建文件夹会从磁盘删除，其他内容仅取消链接。'
+          : '空间将不再引用此内容。',
+      consequence: deletesLocalFile || deletesOwnedSubtree
+        ? '请确认你了解这项操作对空间内容的影响。'
+        : '磁盘内容不会被删除。',
+      confirmLabel: deletesLocalFile
+        ? '删除文件'
+        : deletesOwnedSubtree
+          ? '删除文件夹'
+          : '取消链接',
+     destructive: !deletesLocalFile && !deletesOwnedSubtree ? false : undefined,
+    }, async () => {
+      await removeReference(item.id)
       setSelectedId((prev) => (prev === item.id ? null : prev))
-    } catch (error) {
-      setActionError(actionErrorMessage(error))
-    }
+    })
   }
 
   async function handleUnlinkItem(item: SpaceItem) {
@@ -831,6 +874,11 @@ export function SpacePage({
         </div>
       )}
     </section>
+    <ActionConfirmationDialog
+      request={pendingSpaceConfirmation?.request}
+      onCancel={() => setPendingSpaceConfirmation(null)}
+      onConfirm={confirmPendingSpaceAction}
+    />
     </DndProvider>
   )
 }

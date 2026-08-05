@@ -6,6 +6,7 @@
 
 .topbar-shell[data-desktop-shell='true'] {
   padding-right: 8px;
+  app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
@@ -15,11 +16,13 @@
 .topbar-shell[data-desktop-shell='true'] select,
 .topbar-shell[data-desktop-shell='true'] textarea,
 .topbar-shell[data-desktop-shell='true'] [role='button'] {
+  app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
 .topbar-shell[data-desktop-shell='true'] .topbar-drag-region {
   min-width: 24px;
+  app-region: drag;
   -webkit-app-region: drag;
 }
 
@@ -202,12 +205,17 @@
 
 .topbar-window-controls {
   display: inline-flex;
+  position: relative;
   height: 100%;
   align-self: stretch;
   align-items: center;
+  flex: 0 0 auto;
   gap: 2px;
   margin-left: auto;
   padding-left: 10px;
+  pointer-events: auto;
+  z-index: 2;
+  app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
@@ -221,6 +229,7 @@
 
 .topbar-window-control {
   display: inline-flex;
+  position: relative;
   width: 30px;
   min-width: 30px;
   height: 28px;
@@ -231,6 +240,7 @@
   background: transparent;
   color: var(--aa-text-3);
   cursor: pointer;
+  app-region: no-drag;
   transition:
     background-color 150ms ease,
     color 150ms ease;

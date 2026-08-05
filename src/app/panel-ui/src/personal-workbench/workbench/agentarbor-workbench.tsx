@@ -23,6 +23,7 @@ import { TopBar } from "./app/components/TopBar";
 import type { LiveConversationState } from "./app/components/conversation-surface-state";
 import { runFocusModeTransition, type FocusModeTransitionHandle } from "./app/components/focus-mode-transition";
 import { resolveById } from "./app/components/brainStore";
+import { warmStartupReferencePreviews } from "./app/components/space-reference-preview-warmup";
 import { applyPrefs, loadPrefs } from "../../reading-preferences";
 import {
   initializePersonalKnowledge,
@@ -129,6 +130,11 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
       void initializePersonalKnowledge(firstSpaceId).catch(() => undefined);
     }
   }, [props.personalKnowledgePersistenceEnabled, props.spaceLoadState?.loading, props.spaces]);
+
+  useEffect(() => {
+    if (props.spaceLoadState?.loading === true) return undefined;
+    return warmStartupReferencePreviews(props.spaces ?? []);
+  }, [props.spaceLoadState?.loading, props.spaces]);
 
   useEffect(() => {
     if (activeSpaceId !== null) setActivePersonalKnowledgeSpace(activeSpaceId);
@@ -267,6 +273,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
         onRenameSpace={props.spaceActions?.rename === undefined
           ? undefined
           : (spaceId, title) => props.spaceActions?.rename?.({ kind: "space", id: spaceId }, title)}
+        onDeleteSpace={props.spaceActions?.deleteSpace}
         onOpenSettings={props.onOpenSettings}
       />
 

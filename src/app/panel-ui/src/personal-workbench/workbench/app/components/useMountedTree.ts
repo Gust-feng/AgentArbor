@@ -38,6 +38,7 @@ export interface SpaceItem {
   assetId?: string
   relativePath?: string
   externalChild?: boolean
+  status?: PersonalSpaceItemProjection['status']
 }
 
 /** 可挂载文件系统（工作区文件夹 / 受管文件夹）的来源种类。 */
@@ -81,6 +82,7 @@ export function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
     openable: item.openable,
     referenceId: item.referenceId,
     assetId: item.assetId,
+    status: item.status,
   }
 }
 

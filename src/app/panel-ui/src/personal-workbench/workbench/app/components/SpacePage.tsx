@@ -201,8 +201,17 @@ function TreeNode({
             onCancel={() => setEditing(false)}
           />
         ) : (
-          <span className="flex-1 text-sm truncate" style={{ color: 'var(--aa-text-1, #292722)' }}>
+          <span
+            className="flex-1 text-sm truncate"
+            style={{ color: item.status === 'unavailable' ? 'var(--aa-text-3, #aba39b)' : 'var(--aa-text-1, #292722)' }}
+            title={item.status === 'unavailable' ? '来源已找不到' : undefined}
+          >
             {item.name}
+            {item.status === 'unavailable' && (
+              <span className="ml-1.5 text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
+                已找不到
+              </span>
+            )}
           </span>
         )}
 

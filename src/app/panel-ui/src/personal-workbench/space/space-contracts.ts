@@ -23,6 +23,8 @@ export type PersonalSpaceItemProjection = {
   readonly openUrl?: string;
   readonly referenceId?: string;
   readonly assetId?: string;
+  /** 省略等价于可用；`unavailable` 表示来源当前找不到,需要提示用户而不是静默照常显示。 */
+  readonly status?: "available" | "unavailable";
   readonly children?: readonly PersonalSpaceItemProjection[];
 };
 

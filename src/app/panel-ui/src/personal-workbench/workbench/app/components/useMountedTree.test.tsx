@@ -86,6 +86,23 @@ describe('useMountedTree', () => {
 
     expect(result.current.tree[0]?.children?.[0]?.children?.[0]?.domainKind).toBe('managed_folder')
   })
+
+  test('carries the unavailable status through to the rendered tree', () => {
+    const space: PersonalSpaceProjection = {
+      spaceId: 'space-a',
+      title: 'space-a',
+      itemCount: 2,
+      items: [
+        { itemId: 'here', referenceId: 'here', title: '在的文件', kind: 'local_file' },
+        { itemId: 'gone', referenceId: 'gone', title: '失联文件', kind: 'local_file', status: 'unavailable' },
+      ],
+    }
+
+    const { result } = renderHook(() => useMountedTree({ spaceId: 'space-a', space }))
+
+    expect(result.current.tree[0]?.status).toBeUndefined()
+    expect(result.current.tree[1]?.status).toBe('unavailable')
+  })
 })
 
 function mountedSpace(spaceId: string): PersonalSpaceProjection {

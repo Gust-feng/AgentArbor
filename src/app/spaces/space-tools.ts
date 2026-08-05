@@ -178,25 +178,23 @@ export function createSpaceWriteTool(options: SpaceToolOptions): ToolExecutor {
   return {
     definition: {
       name: "SpaceWrite",
-      description: "Create or completely rewrite a UTF-8 text file inside a local file or folder reference frozen for the current conversation Space. Select the resource by referenceId; raw absolute paths are not accepted.",
+      description: "Create or completely rewrite a UTF-8 text file inside a Space reference frozen for this run. Pass the absolute file path shown in SpaceList.",
       metadata: fileWriteMetadata,
       inputSchema: requiredSchema({
-        referenceId: { type: "string", minLength: 1, description: "SpaceList reference id or the full space-reference attachment id." },
-        path: { type: "string", minLength: 1, description: "Folder-relative file path. Omit for a single-file reference." },
+        path: { type: "string", minLength: 1, description: "Absolute path to the target file. Must be inside a Space reference frozen for this run." },
         content: { type: "string", description: "Complete UTF-8 text content." },
-      }, ["referenceId", "content"]),
+      }, ["path", "content"]),
     },
     execute: async (input, context) => {
       const record = asRecord(input);
-      const referenceId = normalizedReferenceId(record.referenceId);
-      if (referenceId === undefined || typeof record.content !== "string") {
-        return invalid("referenceId and string content are required.");
+      const absolutePath = stringOrUndefined(record.path);
+      if (absolutePath === undefined || typeof record.content !== "string") {
+        return invalid("path (absolute) and string content are required.");
       }
-      const target = resolveSpaceFileTarget(options, referenceId, optionalString(record.path));
-      const result = await createLocalWriteFileTool(target.rootPath, {
+      const target = resolveSpaceFileTargetByPath(options, absolutePath);
+      return createLocalWriteFileTool(target.rootPath, {
         mutationCoordinator: options.mutationCoordinator,
       }).execute({ path: target.relativePath, content: record.content }, context);
-      return result;
     },
   };
 }
@@ -205,11 +203,10 @@ export function createSpaceEditTool(options: SpaceToolOptions): ToolExecutor {
   return {
     definition: {
       name: "SpaceEdit",
-      description: "Replace exact text in one UTF-8 file inside a local file or folder reference frozen for the current conversation Space. Every oldText must match exactly once.",
+      description: "Replace exact text in one UTF-8 file inside a Space reference frozen for this run. Pass the absolute file path shown in SpaceList. Every oldText must match exactly once.",
       metadata: fileWriteMetadata,
       inputSchema: requiredSchema({
-        referenceId: { type: "string", minLength: 1, description: "SpaceList reference id or the full space-reference attachment id." },
-        path: { type: "string", minLength: 1, description: "Folder-relative file path. Omit for a single-file reference." },
+        path: { type: "string", minLength: 1, description: "Absolute path to the target file. Must be inside a Space reference frozen for this run." },
         edits: {
           type: "array",
           minItems: 1,
@@ -223,19 +220,18 @@ export function createSpaceEditTool(options: SpaceToolOptions): ToolExecutor {
             additionalProperties: false,
           },
         },
-      }, ["referenceId", "edits"]),
+      }, ["path", "edits"]),
     },
     execute: async (input, context) => {
       const record = asRecord(input);
-      const referenceId = normalizedReferenceId(record.referenceId);
-      if (referenceId === undefined || !Array.isArray(record.edits)) {
-        return invalid("referenceId and edits are required.");
+      const absolutePath = stringOrUndefined(record.path);
+      if (absolutePath === undefined || !Array.isArray(record.edits)) {
+        return invalid("path (absolute) and edits are required.");
       }
-      const target = resolveSpaceFileTarget(options, referenceId, optionalString(record.path));
-      const result = await createLocalEditFileTool(target.rootPath, {
+      const target = resolveSpaceFileTargetByPath(options, absolutePath);
+      return createLocalEditFileTool(target.rootPath, {
         mutationCoordinator: options.mutationCoordinator,
       }).execute({ path: target.relativePath, edits: record.edits }, context);
-      return result;
     },
   };
 }
@@ -289,39 +285,69 @@ const referenceSchema: ToolJsonSchema = {
 function invalid(message: string) { return { status: "invalid_input", message }; }
 function optionalString(value: unknown): string | undefined | null { return value === undefined ? undefined : stringOrUndefined(value) ?? null; }
 
-function resolveSpaceFileTarget(
+/**
+ * 把模型给出的真实绝对路径解析回本轮冻结的引用授权。
+ * 模型只看真实路径，referenceId 留在后端：既不让模型编 ID，也不放宽边界——
+ * 路径必须落在某个冻结授权内，且该引用未被撤销。
+ */
+function resolveSpaceFileTargetByPath(
   options: SpaceToolOptions,
-  referenceId: string,
-  requestedPath: string | undefined | null,
+  requestedPath: string,
 ): { readonly rootPath: string; readonly relativePath: string } {
   const taskSoil = options.taskSoil;
-  if (requestedPath === null) throw new Error("path must be a string when provided.");
-  if (taskSoil === undefined || !taskSoil.permissionBoundaryRefs.includes(spaceReferenceWritePermission(referenceId))) {
-    throw new Error(`Space reference ${referenceId} is not writable in this run.`);
+  if (taskSoil === undefined) throw new Error("This run froze no Space write grant.");
+  if (!path.isAbsolute(requestedPath)) {
+    throw new Error(`path must be absolute; received ${requestedPath}.`);
   }
-  // The grant above is frozen at birth, so without this an in-flight run would
-  // keep writing through a reference the user has since revoked.
-  if (options.revocationOverlay?.has(referenceId) === true) {
-    throw new Error(`Space reference ${referenceId} was revoked from its Space and is no longer writable.`);
-  }
-  const contextRef = taskSoil.contextRefs.find((ref) => ref.attachmentId === spaceReferenceAttachmentId(referenceId));
-  if (contextRef?.kind === "file" && contextRef.ref.startsWith("local-file:")) {
-    if (requestedPath !== undefined && requestedPath !== ".") {
-      throw new Error("A single-file Space reference does not accept a nested path.");
+  const target = path.resolve(requestedPath);
+
+  for (const contextRef of taskSoil.contextRefs) {
+    const grant = frozenLocalGrant(contextRef);
+    if (grant === undefined) continue;
+    const attachmentId = contextRef.attachmentId;
+    const referenceId = attachmentId === undefined ? undefined : spaceReferenceIdFromAttachmentId(attachmentId);
+    if (referenceId === undefined) continue;
+    if (!taskSoil.permissionBoundaryRefs.includes(spaceReferenceWritePermission(referenceId))) continue;
+
+    const relativePath = grant.kind === "file"
+      ? (samePath(grant.absolutePath, target) ? path.basename(grant.absolutePath) : undefined)
+      : relativeInsideRoot(grant.absolutePath, target);
+    if (relativePath === undefined) continue;
+
+    // 授权在 Run 出生时冻结，没有这层 overlay，用户已撤销的引用仍会被在途 Run 继续写入。
+    if (options.revocationOverlay?.has(referenceId) === true) {
+      throw new Error(`Space reference ${referenceId} was revoked from its Space and is no longer writable.`);
     }
-    const absolutePath = absoluteLocalReferencePath(contextRef.ref, "local-file:");
-    return { rootPath: path.dirname(absolutePath), relativePath: path.basename(absolutePath) };
+    const rootPath = grant.kind === "file" ? path.dirname(grant.absolutePath) : grant.absolutePath;
+    return { rootPath, relativePath };
   }
-  if (contextRef?.kind === "project" && contextRef.ref.startsWith("local-project:")) {
-    if (requestedPath === undefined || requestedPath === ".") {
-      throw new Error("A folder Space reference requires a relative file path.");
-    }
-    return {
-      rootPath: absoluteLocalReferencePath(contextRef.ref, "local-project:"),
-      relativePath: requestedPath,
-    };
+  throw new Error(`${target} is not inside any Space reference writable in this run.`);
+}
+
+function frozenLocalGrant(
+  contextRef: TaskSoil["contextRefs"][number],
+): { readonly kind: "file" | "folder"; readonly absolutePath: string } | undefined {
+  if (contextRef.kind === "file" && contextRef.ref.startsWith("local-file:")) {
+    return { kind: "file", absolutePath: absoluteLocalReferencePath(contextRef.ref, "local-file:") };
   }
-  throw new Error(`Space reference ${referenceId} has no frozen local file grant.`);
+  if (contextRef.kind === "project" && contextRef.ref.startsWith("local-project:")) {
+    return { kind: "folder", absolutePath: absoluteLocalReferencePath(contextRef.ref, "local-project:") };
+  }
+  return undefined;
+}
+
+/** Windows 大小写不敏感，Unix 保留大小写语义。 */
+function samePath(left: string, right: string): boolean {
+  return process.platform === "win32"
+    ? left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US")
+    : left === right;
+}
+
+/** 按段边界判断 target 是否在 root 内，拒绝 `..` 逃逸与 `root-2` 式前缀误命中。 */
+function relativeInsideRoot(root: string, target: string): string | undefined {
+  const relative = path.relative(root, target);
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
+  return relative.replaceAll("\\", "/");
 }
 
 /**

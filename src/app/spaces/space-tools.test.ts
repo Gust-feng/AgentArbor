@@ -193,12 +193,12 @@ test("Space file tools write only references frozen into the current Task Soil",
   });
   const tools = new Map(createSpaceTools({ spaces, workspaceRoot: root, taskSoil }).map((entry) => [entry.definition.name, entry]));
 
-  const written = await execute(tools.get("SpaceWrite")!, { referenceId: "space-reference:allowed", content: "new" }) as { changed: boolean };
+  const written = await execute(tools.get("SpaceWrite")!, { path: allowedFile, content: "new" }) as { changed: boolean };
   assert.equal(written.changed, true);
   assert.equal(await fs.readFile(allowedFile, "utf8"), "new");
   await assert.rejects(
-    execute(tools.get("SpaceWrite")!, { referenceId: "denied", content: "changed" }),
-    /not writable in this run/u,
+    execute(tools.get("SpaceWrite")!, { path: deniedFile, content: "changed" }),
+    /not inside any Space reference writable in this run/u,
   );
   assert.equal(await fs.readFile(deniedFile, "utf8"), "private");
 });
@@ -227,12 +227,12 @@ test("Space file tools stop writing a reference revoked while the run is in flig
       .map((entry) => [entry.definition.name, entry]),
   );
 
-  const written = await execute(tools.get("SpaceWrite")!, { referenceId: item.id, content: "new" }) as { changed: boolean };
+  const written = await execute(tools.get("SpaceWrite")!, { path: file, content: "new" }) as { changed: boolean };
   assert.equal(written.changed, true);
 
   await spaces.commands.unlinkReference(item.id);
   await assert.rejects(
-    execute(tools.get("SpaceWrite")!, { referenceId: item.id, content: "after revocation" }),
+    execute(tools.get("SpaceWrite")!, { path: file, content: "after revocation" }),
     /was revoked from its Space/u,
   );
   assert.equal(await fs.readFile(file, "utf8"), "new");
@@ -256,7 +256,7 @@ test("Space revocation overlay leaves references it never observed being revoked
       .map((entry) => [entry.definition.name, entry]),
   );
 
-  const written = await execute(tools.get("SpaceWrite")!, { referenceId: "external", content: "new" }) as { changed: boolean };
+  const written = await execute(tools.get("SpaceWrite")!, { path: file, content: "new" }) as { changed: boolean };
   assert.equal(written.changed, true);
 });
 
@@ -274,18 +274,17 @@ test("Space folder grants keep edits relative to their frozen root", async (t) =
   const tools = new Map(createSpaceTools({ spaces, workspaceRoot: root, taskSoil }).map((entry) => [entry.definition.name, entry]));
 
   await execute(tools.get("SpaceEdit")!, {
-    referenceId: "folder",
-    path: "note.md",
+    path: note,
     edits: [{ oldText: "before", newText: "after" }],
   });
   assert.equal(await fs.readFile(note, "utf8"), "after");
   await assert.rejects(
-    execute(tools.get("SpaceWrite")!, { referenceId: "folder", path: "../outside.md", content: "no" }),
-    /outside the workspace boundary/u,
+    execute(tools.get("SpaceWrite")!, { path: path.join(root, "..", "outside.md"), content: "no" }),
+    /not inside any Space reference writable in this run/u,
   );
 });
 
-test("Space file tools reject relative frozen local references instead of resolving them from CWD", async () => {
+test("Space file tools reject relative paths instead of resolving them from CWD", async () => {
   const { spaces } = toolsFixture();
   const taskSoil = createTaskSoil({
     rawGoal: "reject an ambiguous Space path",
@@ -295,7 +294,7 @@ test("Space file tools reject relative frozen local references instead of resolv
   const tools = new Map(createSpaceTools({ spaces, workspaceRoot: path.resolve("."), taskSoil }).map((entry) => [entry.definition.name, entry]));
 
   await assert.rejects(
-    execute(tools.get("SpaceEdit")!, { referenceId: "relative", edits: [{ oldText: "old", newText: "new" }] }),
-    /absolute path/u,
+    execute(tools.get("SpaceEdit")!, { path: "relative.md", edits: [{ oldText: "old", newText: "new" }] }),
+    /absolute/u,
   );
 });

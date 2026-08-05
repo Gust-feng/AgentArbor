@@ -1,4 +1,4 @@
-import { postJson } from "./api";
+import { ApiError, postJson } from "./api";
 import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import { createRunReadModelPatch } from "./app-run-projection";
 import { shouldKeepRefreshing } from "./app-runtime-controls";
@@ -165,6 +165,5 @@ async function refreshRunAfterConfirmationSettled(input: {
 }
 
 function isStaleConfirmationError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return /没有等待确认|没有等待你判断|已经处理过|没有找到仍可处理的确认请求|没有找到仍可处理的操作/.test(error.message);
+  return error instanceof ApiError && error.code === "ordinary_confirmation_not_found";
 }

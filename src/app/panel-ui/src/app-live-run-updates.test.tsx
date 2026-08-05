@@ -291,6 +291,56 @@ describe("live Ordinary run updates", () => {
     ]);
 
   });
+
+  it("retries a terminal projection after a transient read failure", async () => {
+    let state: AppState = {
+      ...createInitialAppState(),
+      conversation: { conversationId: "conversation-1" } as AppState["conversation"],
+      run: { runId: "run-1", status: "running" } as AppState["run"],
+    };
+    const pollTimer = { current: undefined as number | undefined };
+    const fallbackPollRef = { current: undefined as AbortController | undefined };
+    const refreshConversations = vi.fn(async () => undefined);
+    const controller = createLiveRunUpdateController({
+      setApp: ((next) => {
+        state = typeof next === "function" ? next(state) : next;
+      }) as React.Dispatch<React.SetStateAction<AppState>>,
+      mountedRef: { current: true },
+      pollTimer,
+      streamRef: { current: undefined },
+      fallbackPollRef,
+      activeRunIdRef: { current: "run-1" },
+      viewEpochRef: { current: 1 },
+      refreshConversations,
+    });
+
+    controller.startLiveUpdates({
+      runId: "run-1",
+      conversationId: "conversation-1",
+      epoch: 1,
+    });
+    await flushPromises();
+
+    runtimeMocks.safeBasicRunView.mockReset();
+    runtimeMocks.safeBasicRunView.mockResolvedValue(completedView("cursor-3"));
+    runtimeMocks.safeConversation
+      .mockRejectedValueOnce(new Error("投影读取暂时失败"))
+      .mockResolvedValue(undefined);
+
+    const stream = runtimeMocks.streamInput as {
+      readonly onEvent: (event: RunEvent, cursor: string) => void;
+    };
+    stream.onEvent(runEvent("final.result", 3), "cursor-3");
+    await flushPromises();
+    await flushPromises();
+
+    expect(runtimeMocks.safeConversation).toHaveBeenCalledTimes(2);
+    expect(state.run?.status).toBe("completed");
+    expect(pollTimer.current).toBeUndefined();
+    expect(fallbackPollRef.current).toBeUndefined();
+    expect(refreshConversations).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.stream.close).toHaveBeenCalledTimes(1);
+  });
 });
 
 function runningView(cursor: string, events: readonly RunEvent[] = []): BasicAgentRunView {

@@ -172,9 +172,10 @@ export function createLiveRunUpdateController(
       const capabilityResolution = runView.capabilityResolution;
       const detail = runView.detail;
       if (run !== undefined && !shouldKeepRefreshing(run.status)) {
+        const settled = await loadSettledRunProjection({ runId, run, workView, capabilityResolution });
+        if (!subscriptionIsCurrent(subscription)) return;
         liveRunSettled = true;
         stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
-        const settled = await loadSettledRunProjection({ runId, run, workView, capabilityResolution });
         commitSettledProjection(subscription, settled, (previous) => appStateWithObservedRunEvent(previous, {
           runId,
           run,
@@ -342,13 +343,14 @@ export function createLiveRunUpdateController(
       }
       return;
     }
-    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
     const settled = await loadSettledRunProjection({
       runId,
       run: runView.run,
       workView: ordinaryWorkViewFromRunView(runView),
       capabilityResolution: runView.capabilityResolution,
     });
+    if (!subscriptionIsCurrent(subscription)) return;
+    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
     commitSettledProjection(subscription, settled, (previous) => appStateWithObservedRunProjection(previous, {
       runId,
       run: runView.run,

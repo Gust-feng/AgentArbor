@@ -43,6 +43,22 @@ test("transcript cache keeps same-tool results isolated by run and fact identity
   expect(results["run-2"]?.[0]?.output).toBe("second output");
 });
 
+test("transcript cache releases one conversation without touching another", () => {
+  const listener = vi.fn();
+  const unsubscribe = subscribeTranscriptCache("conversation-1", listener);
+  const nodes = [transcriptNode("run-1", "node-1", "tool-fact-1")];
+  updateTranscriptRunCache("conversation-1", { nodesByRunId: { "run-1": nodes } });
+  updateTranscriptRunCache("conversation-2", { nodesByRunId: { "run-2": nodes } });
+
+  resetTranscriptCache("conversation-1");
+
+  const snapshot = getTranscriptCache();
+  expect(transcriptNodesCacheForConversation(snapshot, "conversation-1")).toEqual({});
+  expect(transcriptNodesCacheForConversation(snapshot, "conversation-2")["run-2"]).toBe(nodes);
+  expect(listener).toHaveBeenCalledTimes(2);
+  unsubscribe();
+});
+
 function transcriptNode(runId: string, nodeId: string, factId: string): TranscriptNode {
   return {
     nodeId,

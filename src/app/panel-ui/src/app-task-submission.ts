@@ -12,7 +12,7 @@ import {
   createRunReadModelPatch,
 } from "./app-run-projection";
 import { runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
-import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
+import { resetTranscriptCache, updateTranscriptRunCache } from "./panel-ui-transcript-store";
 import type { ToolCallResult } from "../../../domain/tools";
 import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
@@ -142,165 +142,15 @@ export async function submitPanelTask(
       workView: likelyQueuesBehindActiveRun ? previous.workView : undefined,
     };
   });
+  let response: {
+    readonly conversation: Conversation;
+    readonly run: StartedConversationRun;
+  };
   try {
-    const response = await postJson<{
+    response = await postJson<{
       readonly conversation: Conversation;
       readonly run: StartedConversationRun;
     }>(path, { ...requestBody, submissionId });
-    const immediateObservedRunId = runIdToObserveAfterStart({
-      conversation: response.conversation,
-      responseRunId: response.run.runId,
-      responseStatus: response.run.status,
-      fetchedStatus: undefined,
-      previousObservedRunId,
-    });
-    const immediateRun = immediateRunForStartedConversation({
-      previousRun: runForSubmit,
-      responseRun: response.run,
-      observedRunId: immediateObservedRunId,
-      goal: trimmed,
-    });
-    const immediateLiveRunId = immediateRun !== undefined && shouldKeepRefreshing(immediateRun.status)
-      ? immediateRun.runId
-      : undefined;
-    const shouldSwitchLiveStream = immediateLiveRunId !== undefined &&
-      (!likelyQueuesBehindActiveRun || immediateLiveRunId !== previousObservedRunId);
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
-    options.activeRunIdRef.current = immediateObservedRunId;
-    options.setApp((previous) => {
-      const capabilityState = immediateRun === undefined
-        ? { capabilityResolution: undefined, capabilityResolutionRunId: undefined }
-        : nextRunCapabilityState(previous, { runId: immediateRun.runId });
-      return {
-        ...previous,
-        ...capabilityState,
-        busy: false,
-        conversation: response.conversation,
-        run: immediateRun ?? (startsNewConversation ? undefined : previous.run),
-        events: immediateRun?.runId === previous.run?.runId ? previous.events : [],
-        live: immediateLiveRunId === undefined
-          ? previous.live
-          : previous.live?.runId === immediateLiveRunId
-            ? previous.live
-            : emptyLiveRun(immediateLiveRunId),
-        error: undefined,
-      };
-    });
-    if (shouldSwitchLiveStream) {
-      options.startLiveUpdates({
-        runId: immediateLiveRunId,
-        conversationId: response.conversation.conversationId,
-        epoch,
-      });
-    }
-    const refreshedConversation = response.conversation.conversationId === undefined
-      ? undefined
-      : await safeConversation(response.conversation.conversationId);
-    const effectiveConversation = refreshedConversation ?? response.conversation;
-    const observedRunId = effectiveConversation.currentRun?.run.runId ?? runIdToObserveAfterStart({
-      conversation: effectiveConversation,
-      responseRunId: response.run.runId,
-      responseStatus: response.run.status,
-      fetchedStatus: undefined,
-      previousObservedRunId,
-    });
-    const observed = observedRunId === undefined
-      ? undefined
-      : await loadObservedRunReadModel({
-          runId: observedRunId,
-          conversationId: effectiveConversation.conversationId,
-          preferredConversation: effectiveConversation,
-        });
-    const observedRun = observed?.run ??
-      (observedRunId === undefined
-        ? undefined
-        : observedRunId === response.run.runId
-          ? immediateRun
-          : runForSubmit?.runId === observedRunId
-            ? runForSubmit
-            : undefined);
-    const workView = observed?.workView;
-    const detail = observed?.detail;
-    const replay = observed?.replay;
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
-    options.activeRunIdRef.current = observedRunId;
-    options.setApp((previous) => {
-      const capabilityState =
-        observed?.capabilityResolution !== undefined && observedRunId !== undefined
-          ? nextRunCapabilityState(previous, {
-              runId: observedRunId,
-              capabilityResolution: observed.capabilityResolution,
-            })
-          : observedRun !== undefined
-            ? nextRunCapabilityState(previous, { runId: observedRun.runId })
-            : { capabilityResolution: undefined, capabilityResolutionRunId: undefined };
-      return {
-        ...previous,
-        ...capabilityState,
-        busy: false,
-        conversation: observed?.conversation ?? effectiveConversation,
-        run: observedRun ?? previous.run,
-        events: mergeObservedRunEvents({
-          previousRunId: previous.run?.runId,
-          observedRunId,
-          previousEvents: previous.events,
-          replayEvents: replay?.events ?? [],
-        }),
-        live: liveRunForObservedReplay({
-          observedRunId,
-          observedRun,
-          previousLive: previous.live,
-          replayEvents: replay?.events ?? [],
-        }),
-        ...createRunReadModelPatch(previous, {
-          runId: observedRunId ?? response.run.runId,
-          workView,
-          detail,
-        }),
-      };
-    });
-    const shouldStartObservedLive =
-      observedRunId !== undefined &&
-      observedRun !== undefined &&
-      shouldKeepRefreshing(observedRun.status) &&
-      observedRunId !== immediateLiveRunId &&
-      (!likelyQueuesBehindActiveRun || observedRunId !== previousObservedRunId);
-    if (shouldStartObservedLive) {
-      options.startLiveUpdates({
-        runId: observedRunId,
-        cursor: replay?.cursor.token,
-        conversationId: effectiveConversation.conversationId,
-        epoch,
-      });
-    }
-    void options.refreshConversations();
-    try {
-      // Parallel-load historical run transcript nodes into the external cache
-      // (same pattern as loadConversationSession — no onPartial setApp calls).
-      const historicalRunIds = runIdsForConversation(effectiveConversation.turns)
-        .filter((id) => id !== observedRunId);
-      if (historicalRunIds.length > 0) {
-        const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds);
-        if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
-        const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
-        const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
-        for (const entry of entries) {
-          nodesByRunId[entry.runId] = entry.nodes;
-          toolResultsByRunId[entry.runId] = entry.toolResults;
-        }
-        updateTranscriptRunCache(effectiveConversation.conversationId, { nodesByRunId, toolResultsByRunId });
-      }
-    } catch (error) {
-      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
-      options.setApp((previous) => ({
-        ...previous,
-        error: error instanceof Error ? error.message : "历史会话记录加载失败。",
-      }));
-    }
-    if (options.submissionAttemptRef.current?.id === submissionId) {
-      options.submissionAttemptRef.current = undefined;
-    }
-    return true;
   } catch (error) {
     if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
     options.setGoal(trimmed);
@@ -326,6 +176,179 @@ export async function submitPanelTask(
     }));
     return false;
   }
+
+  const immediateObservedRunId = runIdToObserveAfterStart({
+    conversation: response.conversation,
+    responseRunId: response.run.runId,
+    responseStatus: response.run.status,
+    fetchedStatus: undefined,
+    previousObservedRunId,
+  });
+  const immediateRun = immediateRunForStartedConversation({
+    previousRun: runForSubmit,
+    responseRun: response.run,
+    observedRunId: immediateObservedRunId,
+    goal: trimmed,
+  });
+  const immediateLiveRunId = immediateRun !== undefined && shouldKeepRefreshing(immediateRun.status)
+    ? immediateRun.runId
+    : undefined;
+  const shouldSwitchLiveStream = immediateLiveRunId !== undefined &&
+    (!likelyQueuesBehindActiveRun || immediateLiveRunId !== previousObservedRunId);
+  if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
+  const previousConversationId = appBeforeSubmit.conversation?.conversationId;
+  if (previousConversationId !== undefined && previousConversationId !== response.conversation.conversationId) {
+    resetTranscriptCache(previousConversationId);
+  }
+  options.activeRunIdRef.current = immediateObservedRunId;
+  options.setApp((previous) => {
+    const capabilityState = immediateRun === undefined
+      ? { capabilityResolution: undefined, capabilityResolutionRunId: undefined }
+      : nextRunCapabilityState(previous, { runId: immediateRun.runId });
+    return {
+      ...previous,
+      ...capabilityState,
+      busy: false,
+      conversation: response.conversation,
+      run: immediateRun ?? (startsNewConversation ? undefined : previous.run),
+      events: immediateRun?.runId === previous.run?.runId ? previous.events : [],
+      live: immediateLiveRunId === undefined
+        ? previous.live
+        : previous.live?.runId === immediateLiveRunId
+          ? previous.live
+          : emptyLiveRun(immediateLiveRunId),
+      error: undefined,
+    };
+  });
+  if (shouldSwitchLiveStream) {
+    options.startLiveUpdates({
+      runId: immediateLiveRunId,
+      conversationId: response.conversation.conversationId,
+      epoch,
+    });
+  }
+
+  // POST is the creation boundary. Reads below reconcile state only; a
+  // temporary read failure must not turn an already-created run into a failed
+  // submission in the UI.
+  let effectiveConversation = response.conversation;
+  try {
+    const refreshedConversation = response.conversation.conversationId === undefined
+      ? undefined
+      : await safeConversation(response.conversation.conversationId);
+    effectiveConversation = refreshedConversation ?? response.conversation;
+  } catch {
+    effectiveConversation = response.conversation;
+  }
+  const observedRunId = effectiveConversation.currentRun?.run.runId ?? runIdToObserveAfterStart({
+    conversation: effectiveConversation,
+    responseRunId: response.run.runId,
+    responseStatus: response.run.status,
+    fetchedStatus: undefined,
+    previousObservedRunId,
+  });
+  let observed: Awaited<ReturnType<typeof loadObservedRunReadModel>> | undefined;
+  if (observedRunId !== undefined) {
+    try {
+      observed = await loadObservedRunReadModel({
+        runId: observedRunId,
+        conversationId: effectiveConversation.conversationId,
+        preferredConversation: effectiveConversation,
+      });
+    } catch {
+      observed = undefined;
+    }
+  }
+  const observedRun = observed?.run ??
+    (observedRunId === undefined
+      ? undefined
+      : observedRunId === response.run.runId
+        ? immediateRun
+        : runForSubmit?.runId === observedRunId
+          ? runForSubmit
+          : undefined);
+  const workView = observed?.workView;
+  const detail = observed?.detail;
+  const replay = observed?.replay;
+  if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
+  options.activeRunIdRef.current = observedRunId;
+  options.setApp((previous) => {
+    const capabilityState =
+      observed?.capabilityResolution !== undefined && observedRunId !== undefined
+        ? nextRunCapabilityState(previous, {
+            runId: observedRunId,
+            capabilityResolution: observed.capabilityResolution,
+          })
+        : observedRun !== undefined
+          ? nextRunCapabilityState(previous, { runId: observedRun.runId })
+          : { capabilityResolution: undefined, capabilityResolutionRunId: undefined };
+    return {
+      ...previous,
+      ...capabilityState,
+      busy: false,
+      conversation: observed?.conversation ?? effectiveConversation,
+      run: observedRun ?? previous.run,
+      events: mergeObservedRunEvents({
+        previousRunId: previous.run?.runId,
+        observedRunId,
+        previousEvents: previous.events,
+        replayEvents: replay?.events ?? [],
+      }),
+      live: liveRunForObservedReplay({
+        observedRunId,
+        observedRun,
+        previousLive: previous.live,
+        replayEvents: replay?.events ?? [],
+      }),
+      ...createRunReadModelPatch(previous, {
+        runId: observedRunId ?? response.run.runId,
+        workView,
+        detail,
+      }),
+    };
+  });
+  const shouldStartObservedLive =
+    observedRunId !== undefined &&
+    observedRun !== undefined &&
+    shouldKeepRefreshing(observedRun.status) &&
+    observedRunId !== immediateLiveRunId &&
+    (!likelyQueuesBehindActiveRun || observedRunId !== previousObservedRunId);
+  if (shouldStartObservedLive) {
+    options.startLiveUpdates({
+      runId: observedRunId,
+      cursor: replay?.cursor.token,
+      conversationId: effectiveConversation.conversationId,
+      epoch,
+    });
+  }
+  void options.refreshConversations().catch(() => undefined);
+  try {
+    // Parallel-load historical run transcript nodes into the external cache
+    // (same pattern as loadConversationSession — no onPartial setApp calls).
+    const historicalRunIds = runIdsForConversation(effectiveConversation.turns)
+      .filter((id) => id !== observedRunId);
+    if (historicalRunIds.length > 0) {
+      const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds);
+      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
+      const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
+      const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
+      for (const entry of entries) {
+        nodesByRunId[entry.runId] = entry.nodes;
+        toolResultsByRunId[entry.runId] = entry.toolResults;
+      }
+      updateTranscriptRunCache(effectiveConversation.conversationId, { nodesByRunId, toolResultsByRunId });
+    }
+  } catch (error) {
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
+    options.setApp((previous) => ({
+      ...previous,
+      error: error instanceof Error ? error.message : "历史会话记录加载失败。",
+    }));
+  }
+  if (options.submissionAttemptRef.current?.id === submissionId) {
+    options.submissionAttemptRef.current = undefined;
+  }
+  return true;
 }
 
 function modelOverrideFromSelectedOption(

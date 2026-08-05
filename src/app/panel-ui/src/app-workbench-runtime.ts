@@ -12,6 +12,7 @@ import { createAppSettingsController, type AppSettingsController } from "./app-s
 import { createAppComposerController } from "./app-composer-controller";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
+import { resetTranscriptCache } from "./panel-ui-transcript-store";
 import {
   contextWindowUsageFrom,
   contextWindowTokensForActiveRun,
@@ -192,6 +193,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
       conversationLoadAbortRef.current?.abort();
       conversationLoadAbortRef.current = undefined;
       stopLiveUpdates(pollTimer, streamRef, fallbackPollRef);
+      resetTranscriptCache();
 
     };
   }, [loadBootstrap]);

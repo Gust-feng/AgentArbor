@@ -6,7 +6,7 @@ import type { AppState } from "./app-state";
 import type { LegacyConversationScreen } from "./app-screen";
 import { liveRunForObservedReplay } from "./app-task-submit-flow";
 import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
-import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
+import { resetTranscriptCache, updateTranscriptRunCache } from "./panel-ui-transcript-store";
 import type { ToolCallResult } from "../../../domain/tools";
 import type { Conversation } from "./contracts/conversation";
 import type { TranscriptNode } from "./contracts/run";
@@ -68,6 +68,9 @@ export async function loadConversationSession(
       { signal: abortController.signal }
     );
   } catch (error) {
+    if (options.conversationLoadAbortRef.current === abortController) {
+      options.conversationLoadAbortRef.current = undefined;
+    }
     if (abortController.signal.aborted) return false;
     if (isMissingConversationError(error)) {
       resetConversationSession(options);
@@ -96,6 +99,10 @@ export async function loadConversationSession(
   const capabilityResolution = currentRun?.capabilityResolution;
   const transcriptNodes = transcriptNodesFrom(workView);
   if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
+  const previousConversationId = options.app.conversation?.conversationId;
+  if (previousConversationId !== undefined && previousConversationId !== response.conversation.conversationId) {
+    resetTranscriptCache(previousConversationId);
+  }
 
   // ── Phase 1: Switch to the new conversation immediately ──────────────
   //
@@ -165,18 +172,21 @@ export async function loadConversationSession(
   const historicalRunIds = runIdsForTurnWindow(response.conversation.turns, initialVisibleWindow.startIndex)
     .filter((id) => id !== latestRunId);
   if (historicalRunIds.length > 0) {
-    const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds, abortController.signal);
-    if (options.conversationLoadAbortRef.current === abortController) {
-      options.conversationLoadAbortRef.current = undefined;
+    try {
+      const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds, abortController.signal);
+      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return false;
+      const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
+      const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
+      for (const entry of entries) {
+        nodesByRunId[entry.runId] = entry.nodes;
+        toolResultsByRunId[entry.runId] = entry.toolResults;
+      }
+      updateTranscriptRunCache(response.conversation.conversationId, { nodesByRunId, toolResultsByRunId });
+    } finally {
+      if (options.conversationLoadAbortRef.current === abortController) {
+        options.conversationLoadAbortRef.current = undefined;
+      }
     }
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return false;
-    const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
-    const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
-    for (const entry of entries) {
-      nodesByRunId[entry.runId] = entry.nodes;
-      toolResultsByRunId[entry.runId] = entry.toolResults;
-    }
-    updateTranscriptRunCache(response.conversation.conversationId, { nodesByRunId, toolResultsByRunId });
   } else {
     if (options.conversationLoadAbortRef.current === abortController) {
       options.conversationLoadAbortRef.current = undefined;
@@ -192,6 +202,10 @@ function isMissingConversationError(error: unknown): boolean {
 }
 
 export function resetConversationSession(options: ConversationSessionControllerOptions): void {
+  const conversationId = options.app.conversation?.conversationId;
+  if (conversationId !== undefined) {
+    resetTranscriptCache(conversationId);
+  }
   options.conversationLoadAbortRef.current?.abort();
   options.conversationLoadAbortRef.current = undefined;
   options.viewEpochRef.current += 1;

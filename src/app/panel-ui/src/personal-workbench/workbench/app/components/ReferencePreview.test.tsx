@@ -58,6 +58,26 @@ test('refreshes an opened preview when an Agent-side change invalidates its cach
   expect(fetchMock).toHaveBeenCalledTimes(2)
 })
 
+test('does not let a dirty desktop preview block the custom window close control', async () => {
+  Object.defineProperty(window, 'agentarborDesktop', { configurable: true, value: {} })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ preview: textPreview('1:4', '原始内容') }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })))
+
+  try {
+    render(<ReferencePreview itemId="reference-desktop-close" fallbackTitle="note.txt" canOpen={false} onOpen={() => undefined} />)
+    const editor = await screen.findByDisplayValue('原始内容')
+    fireEvent.change(editor, { target: { value: '尚未保存的草稿' } })
+
+    const beforeUnload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(beforeUnload)
+    expect(beforeUnload.defaultPrevented).toBe(false)
+  } finally {
+    Object.defineProperty(window, 'agentarborDesktop', { configurable: true, value: undefined })
+  }
+})
+
 test('renders structured and file PDFs through the same application surface', async () => {
   const previews: Record<string, DocumentPreview> = {
     structured: previewWithPresentation('structured', 'pdf', { kind: 'pages', pages: ['第一页'] }),
@@ -135,7 +155,6 @@ test('uses the backend presentation as the renderer authority for text surfaces'
 
 test('keeps image, video, audio, and web content inside application-owned surfaces', async () => {
   const drawImage = vi.fn()
-  let firstFrameCallback: (() => void) | undefined
   const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     clearRect: vi.fn(),
     drawImage,
@@ -162,8 +181,9 @@ test('keeps image, video, audio, and web content inside application-owned surfac
   expect(video).not.toBeNull()
   expect(video!.closest('.aa-video-document')).not.toBeNull()
   expect(video!.closest('.aa-reference-preview__media')).toBeNull()
-  expect(screen.getByRole('status', { name: '正在加载视频' })).toBeTruthy()
-  expect(rendered.container.querySelector('.aa-video-document__placeholder img')?.getAttribute('src')).toBe('/poster.jpg')
+  expect(screen.queryByRole('status', { name: '正在加载视频' })).toBeNull()
+  expect(rendered.container.querySelector('.aa-video-document')?.getAttribute('data-state')).toBe('poster')
+  expect(rendered.container.querySelector('.aa-video-document__poster')?.getAttribute('src')).toBe('/poster.jpg')
   expect(video!.getAttribute('preload')).toBe('auto')
   expect(video!.hasAttribute('playsinline')).toBe(true)
   expect(video!.hasAttribute('controls')).toBe(false)
@@ -174,12 +194,8 @@ test('keeps image, video, audio, and web content inside application-owned surfac
   Object.defineProperties(video!, {
     videoWidth: { configurable: true, value: 2560 },
     videoHeight: { configurable: true, value: 1440 },
-    requestVideoFrameCallback: { configurable: true, value: vi.fn((callback: () => void) => { firstFrameCallback = callback; return 1 }) },
-    cancelVideoFrameCallback: { configurable: true, value: vi.fn() },
   })
   fireEvent.loadedData(video!)
-  expect(video!.closest('.aa-video-document')?.getAttribute('data-state')).toBe('loading')
-  act(() => firstFrameCallback?.())
   expect(video!.closest('.aa-video-document')?.getAttribute('data-state')).toBe('ready')
   expect(screen.queryByRole('status', { name: '正在加载视频' })).toBeNull()
   expect(getContext).toHaveBeenCalledWith('2d', expect.objectContaining({ alpha: false, colorSpace: 'srgb' }))
@@ -398,7 +414,7 @@ test('cancels one preview read without affecting another caller', async () => {
   await expect(first).rejects.toMatchObject({ name: 'AbortError' })
   resolvers.forEach((resolve) => resolve(new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } })))
   await expect(second).resolves.toEqual(preview)
-  expect(fetchMock).toHaveBeenCalledTimes(2)
+  expect(fetchMock).toHaveBeenCalledTimes(1)
   expect(getReferencePreviewError('reference-one')).toBeUndefined()
 })
 

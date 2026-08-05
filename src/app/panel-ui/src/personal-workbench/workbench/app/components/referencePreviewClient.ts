@@ -7,7 +7,7 @@ const MAX_CACHED_PREVIEWS = 64
 const previewCache = new Map<string, DocumentPreview>()
 const previewGeneration = new Map<string, number>()
 const previewMutationInFlight = new Map<string, Promise<DocumentPreview>>()
-const previewReadInFlight = new Map<string, Promise<DocumentPreview>>()
+const previewReadInFlight = new Map<string, { readonly generation: number; readonly request: Promise<DocumentPreview> }>()
 const previewErrors = new Map<string, string>()
 const previewListeners = new Map<string, Set<() => void>>()
 const previewCacheVersions = new Map<string, number>()
@@ -92,12 +92,14 @@ export async function fetchDocumentPreview(
   }
   if (!previewGeneration.has(key)) previewGeneration.set(key, 0)
   const generation = previewGeneration.get(key)!
+  const inFlight = previewReadInFlight.get(key)
+  if (inFlight?.generation === generation) return await withAbort(inFlight.request, signal)
   const query = relativePath.length === 0 ? '' : `?path=${encodeURIComponent(relativePath)}`
   let request!: Promise<DocumentPreview>
   request = (async () => {
     const response = await requestJson<{ preview: DocumentPreview }>(
       `${apiBase}/${encodeURIComponent(itemId)}/preview${query}`,
-      { headers: { accept: 'application/json' }, signal },
+      { headers: { accept: 'application/json' } },
     )
     if ((previewGeneration.get(key) ?? 0) !== generation) {
       const currentMutation = previewMutationInFlight.get(key)
@@ -105,7 +107,7 @@ export async function fetchDocumentPreview(
         try { return await currentMutation } catch { /* fall through */ }
       }
       const newerRead = previewReadInFlight.get(key)
-      if (newerRead !== undefined && newerRead !== request) return await newerRead
+      if (newerRead !== undefined && newerRead.request !== request) return await newerRead.request
       return getCachedReferencePreview(itemId, relativePath, apiBase)
         ?? await fetchDocumentPreview(itemId, relativePath, signal, apiBase)
     }
@@ -121,9 +123,9 @@ export async function fetchDocumentPreview(
     }
     throw error
   }).finally(() => {
-    if (previewReadInFlight.get(key) === request) previewReadInFlight.delete(key)
+    if (previewReadInFlight.get(key)?.request === request) previewReadInFlight.delete(key)
   })
-  previewReadInFlight.set(key, request)
+  previewReadInFlight.set(key, { generation, request })
   return await withAbort(request, signal)
 }
 

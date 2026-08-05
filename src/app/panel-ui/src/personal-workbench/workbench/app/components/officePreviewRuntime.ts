@@ -1,11 +1,31 @@
 import type { DocumentPreview } from '../../../../../../panel-api-contracts'
-import { loadDocxDocumentSurface, loadSpreadsheetDocumentSurface } from './officePreviewSurfaceLoader'
+import type { SpreadsheetSheet } from './spreadsheetPreviewTypes'
 
 const MAX_CACHED_DOCUMENT_BYTES = 8 * 1024 * 1024
 const MAX_DOCUMENT_CACHE_BYTES = 24 * 1024 * 1024
+const MAX_RENDERED_OFFICE_PREVIEWS = 8
+const DOCX_RENDER_OPTIONS = {
+  className: 'aa-docx',
+  inWrapper: true,
+  ignoreWidth: false,
+  ignoreHeight: false,
+  breakPages: true,
+  ignoreLastRenderedPageBreak: false,
+  renderHeaders: true,
+  renderFooters: true,
+  renderFootnotes: true,
+  renderEndnotes: true,
+  renderChanges: false,
+  renderComments: false,
+  renderAltChunks: false,
+  useBase64URL: true,
+  experimental: false,
+  debug: false,
+} as const
 
 type OfficeContent = Extract<DocumentPreview['content'], { readonly kind: 'office' }>
 type CachedDocument = { readonly byteLength: number; readonly promise: Promise<Blob> }
+export type DocxPreviewMarkup = { readonly bodyHtml: string; readonly styleHtml: string }
 type OfficeDocumentRequest = {
   readonly url: string
   readonly byteLength?: number
@@ -14,6 +34,10 @@ type OfficeDocumentRequest = {
 }
 
 const documentCache = new Map<string, CachedDocument>()
+const docxPreviewCache = new Map<string, Promise<DocxPreviewMarkup>>()
+const docxPreviewValues = new Map<string, DocxPreviewMarkup>()
+const spreadsheetPreviewCache = new Map<string, Promise<readonly SpreadsheetSheet[]>>()
+const spreadsheetPreviewValues = new Map<string, readonly SpreadsheetSheet[]>()
 let cachedDocumentBytes = 0
 let docxRendererPromise: Promise<typeof import('docx-preview')> | undefined
 let spreadsheetWorkerClientPromise: Promise<typeof import('./spreadsheetPreviewWorkerClient')> | undefined
@@ -51,20 +75,96 @@ export function prefetchOfficePreview(preview: DocumentPreview): void {
   if (preview.content.kind !== 'office') return
   warmOfficeRenderer(preview.content.officeKind)
   if (preview.byteLength !== undefined && preview.byteLength <= MAX_CACHED_DOCUMENT_BYTES) {
-    void loadOfficeDocument({
+    const request = {
       url: preview.content.url,
       byteLength: preview.byteLength,
       sourceVersion: preview.fingerprint,
       signal: new AbortController().signal,
-    }).catch(() => undefined)
+    }
+    if (preview.content.officeKind === 'docx') {
+      void loadDocxPreviewMarkup(request).catch(() => undefined)
+    } else {
+      void loadSpreadsheetPreview(request).catch(() => undefined)
+    }
   }
+}
+
+export function getCachedDocxPreviewMarkup(url: string, sourceVersion?: string): DocxPreviewMarkup | undefined {
+  return docxPreviewValues.get(officePreviewKey(url, sourceVersion))
+}
+
+export function loadDocxPreviewMarkup(request: OfficeDocumentRequest): Promise<DocxPreviewMarkup> {
+  const key = officePreviewKey(request.url, request.sourceVersion)
+  const cached = docxPreviewCache.get(key)
+  if (cached !== undefined) return waitForValue(cached, request.signal)
+  const promise = Promise.all([
+    loadOfficeDocument(request),
+    loadDocxRenderer(),
+  ]).then(async ([document, renderer]) => {
+    const host = documentNode('div')
+    const styles = documentNode('div')
+    const body = documentNode('div')
+    Object.assign(host.style, {
+      position: 'fixed',
+      width: '900px',
+      height: '1px',
+      left: '0',
+      bottom: '0',
+      overflow: 'hidden',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+    })
+    host.append(styles, body)
+    globalThis.document.body.append(host)
+    try {
+      await renderer.renderAsync(document, body, styles, DOCX_RENDER_OPTIONS)
+      return { bodyHtml: body.innerHTML, styleHtml: styles.innerHTML }
+    } finally {
+      host.remove()
+    }
+  }).catch((reason: unknown) => {
+    if (docxPreviewCache.get(key) === promise) docxPreviewCache.delete(key)
+    throw reason
+  })
+  rememberPreviewPromise(docxPreviewCache, docxPreviewValues, key, promise)
+  return waitForValue(promise, request.signal)
+}
+
+export function getCachedSpreadsheetPreview(url: string, sourceVersion?: string): readonly SpreadsheetSheet[] | undefined {
+  return spreadsheetPreviewValues.get(officePreviewKey(url, sourceVersion))
+}
+
+export function loadSpreadsheetPreview(request: OfficeDocumentRequest): Promise<readonly SpreadsheetSheet[]> {
+  const key = officePreviewKey(request.url, request.sourceVersion)
+  const cached = spreadsheetPreviewCache.get(key)
+  if (cached !== undefined) return waitForValue(cached, request.signal)
+  // Once the bytes are available, the bounded cache owns parsing; one surface abort only stops waiting for it.
+  const promise = Promise.all([
+    loadOfficeDocument(request),
+    loadSpreadsheetWorkerClient(),
+  ]).then(([document, workerClient]) => workerClient.parseSpreadsheetWorkbook(document, new AbortController().signal)).catch((reason: unknown) => {
+    if (spreadsheetPreviewCache.get(key) === promise) spreadsheetPreviewCache.delete(key)
+    throw reason
+  })
+  rememberPreviewPromise(spreadsheetPreviewCache, spreadsheetPreviewValues, key, promise)
+  return waitForValue(promise, request.signal)
+}
+
+export function clearOfficePreviewRuntimeForTesting(): void {
+  documentCache.clear()
+  docxPreviewCache.clear()
+  docxPreviewValues.clear()
+  spreadsheetPreviewCache.clear()
+  spreadsheetPreviewValues.clear()
+  cachedDocumentBytes = 0
+  docxRendererPromise = undefined
+  spreadsheetWorkerClientPromise = undefined
 }
 
 export function scheduleOfficePreviewWarmup(): void {
   scheduleIdle(async () => {
-    await Promise.all([loadDocxRenderer(), loadDocxDocumentSurface()]).catch(() => undefined)
+    await loadDocxRenderer().catch(() => undefined)
     scheduleIdle(async () => {
-      await loadSpreadsheetDocumentSurface().catch(() => undefined)
       const workerClient = await loadSpreadsheetWorkerClient().catch(() => undefined)
       workerClient?.warmSpreadsheetPreviewWorker()
     })
@@ -73,13 +173,12 @@ export function scheduleOfficePreviewWarmup(): void {
 
 function warmOfficeRenderer(kind: OfficeContent['officeKind']): void {
   if (kind === 'docx') {
-    void Promise.all([loadDocxRenderer(), loadDocxDocumentSurface()]).catch(() => undefined)
+    void loadDocxRenderer().catch(() => undefined)
     return
   }
-  void Promise.all([
-    loadSpreadsheetDocumentSurface(),
-    loadSpreadsheetWorkerClient().then((client) => client.warmSpreadsheetPreviewWorker()),
-  ]).catch(() => undefined)
+  void loadSpreadsheetWorkerClient()
+    .then((client) => client.warmSpreadsheetPreviewWorker())
+    .catch(() => undefined)
 }
 
 function loadSpreadsheetWorkerClient(): Promise<typeof import('./spreadsheetPreviewWorkerClient')> {
@@ -97,8 +196,12 @@ async function fetchOfficeDocument(url: string, signal?: AbortSignal): Promise<B
 }
 
 function waitForDocument(promise: Promise<Blob>, signal: AbortSignal): Promise<Blob> {
+  return waitForValue(promise, signal)
+}
+
+function waitForValue<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(abortError())
-  return new Promise((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(abortError())
     signal.addEventListener('abort', onAbort, { once: true })
     void promise.then((value) => {
@@ -109,6 +212,33 @@ function waitForDocument(promise: Promise<Blob>, signal: AbortSignal): Promise<B
       if (!signal.aborted) reject(reason)
     })
   })
+}
+
+function rememberPreviewPromise<T>(
+  promises: Map<string, Promise<T>>,
+  values: Map<string, T>,
+  key: string,
+  promise: Promise<T>,
+): void {
+  promises.delete(key)
+  promises.set(key, promise)
+  void promise.then((value) => {
+    if (promises.get(key) === promise) values.set(key, value)
+  }, () => undefined)
+  while (promises.size > MAX_RENDERED_OFFICE_PREVIEWS) {
+    const oldestKey = promises.keys().next().value
+    if (oldestKey === undefined) return
+    promises.delete(oldestKey)
+    values.delete(oldestKey)
+  }
+}
+
+function officePreviewKey(url: string, sourceVersion?: string): string {
+  return `${url}\u0000${sourceVersion ?? ''}`
+}
+
+function documentNode(tagName: 'div'): HTMLDivElement {
+  return globalThis.document.createElement(tagName)
 }
 
 function makeDocumentCacheRoom(byteLength: number): void {

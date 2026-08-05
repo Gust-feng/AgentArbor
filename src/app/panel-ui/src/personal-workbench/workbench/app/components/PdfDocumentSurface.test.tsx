@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { PdfDocumentSurface } from './PdfDocumentSurface'
+import { clearPdfPreviewRuntimeForTesting, PdfDocumentSurface, prefetchPdfPreview } from './PdfDocumentSurface'
+import type { DocumentPreview } from './referencePreviewClient'
 
 const getPdfDocumentMock = vi.hoisted(() => vi.fn())
 const pdfWorkerDestroy = vi.hoisted(() => vi.fn())
@@ -11,7 +12,8 @@ vi.mock('unpdf/pdfjs', () => ({
   PDFWorker: { create: createPdfWorkerMock },
 }))
 
-afterEach(() => {
+afterEach(async () => {
+  await clearPdfPreviewRuntimeForTesting()
   getPdfDocumentMock.mockReset()
   createPdfWorkerMock.mockClear()
   pdfWorkerDestroy.mockReset()
@@ -84,4 +86,42 @@ test('cancels a document load when the preview closes before parsing completes',
   await waitFor(() => expect(getPdfDocumentMock).toHaveBeenCalledOnce())
   rendered.unmount()
   await waitFor(() => expect(destroyLoadingTask).toHaveBeenCalledOnce())
+})
+
+test('uses a pre-rendered first page on the first commit without a loading state', async () => {
+  vi.stubGlobal('Worker', class {
+    terminate() {}
+  })
+  const drawImage = vi.fn()
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D)
+  const renderPage = vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() }))
+  const getPage = vi.fn(async () => ({
+    getViewport: ({ scale }: { readonly scale: number }) => ({ width: 600 * scale, height: 800 * scale }),
+    render: renderPage,
+    cleanup: vi.fn(),
+  }))
+  getPdfDocumentMock.mockReturnValue({
+    promise: Promise.resolve({ numPages: 1, getPage, destroy: vi.fn(async () => undefined) }),
+    destroy: vi.fn(async () => undefined),
+  })
+  const preview = {
+    itemId: 'pdf-one',
+    title: 'ready.pdf',
+    sourceKind: 'local_file',
+    source: 'C:/ready.pdf',
+    status: 'ready',
+    fingerprint: 'v1',
+    byteLength: 1024,
+    presentation: { kind: 'pdf', editable: false, sourceMode: false },
+    content: { kind: 'media', mediaKind: 'pdf', mimeType: 'application/pdf', url: '/ready.pdf' },
+  } satisfies DocumentPreview
+
+  prefetchPdfPreview(preview)
+  await waitFor(() => expect(renderPage).toHaveBeenCalledOnce())
+  await Promise.resolve()
+  const rendered = render(<PdfDocumentSurface source={{ kind: 'url', url: '/ready.pdf', byteLength: 1024, sourceVersion: 'v1' }} />)
+
+  expect(screen.queryByText('正在读取 PDF...')).toBeNull()
+  expect(rendered.container.querySelector('.aa-pdf-document__page')).not.toBeNull()
+  expect(drawImage).toHaveBeenCalled()
 })

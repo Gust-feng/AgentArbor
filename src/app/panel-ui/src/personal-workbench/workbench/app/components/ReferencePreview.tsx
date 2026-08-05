@@ -1,4 +1,4 @@
-import { Fragment, Suspense, forwardRef, lazy, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef, type ReactNode, type UIEvent } from 'react'
+import { Fragment, forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef, type ReactNode, type UIEvent } from 'react'
 import { diffLines, type Change } from 'diff'
 import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Folder, RefreshCw } from 'lucide-react'
 import { fetchDocumentPreview, getCachedReferencePreview, refreshDocumentPreview, saveDocumentText, subscribeReferencePreviewCache, type DocumentPreview } from './referencePreviewClient'
@@ -6,14 +6,14 @@ import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
 import { PdfDocumentSurface } from './PdfDocumentSurface'
 import { VideoDocumentSurface } from './VideoDocumentSurface'
+import { ImageDocumentSurface } from './ImageDocumentSurface'
+import { DocxDocumentSurface } from './DocxDocumentSurface'
+import { SpreadsheetDocumentSurface } from './SpreadsheetDocumentSurface'
 import { isMarkdownDocument } from './documentProjection'
-import { loadDocxDocumentSurface, loadSpreadsheetDocumentSurface } from './officePreviewSurfaceLoader'
 import './reference-preview.css'
 
 const AUTOSAVE_MS = 500
 const MAX_DOCUMENT_VIEW_MEMORY = 128
-const DocxDocumentSurface = lazy(loadDocxDocumentSurface)
-const SpreadsheetDocumentSurface = lazy(loadSpreadsheetDocumentSurface)
 type DocumentScrollSurface = 'content' | 'source' | 'diff'
 type DocumentViewMemory = {
   sourceMode: boolean
@@ -180,7 +180,10 @@ function ReferenceDocumentSessionView({
   }), [targetKey])
 
   useEffect(() => {
-    if (!dirty) return
+    // Electron owns the desktop close lifecycle. Browser beforeunload would
+    // silently cancel the custom window close button; autosave remains the
+    // desktop persistence path.
+    if (!dirty || window.agentarborDesktop !== undefined) return
     const warnBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
@@ -466,34 +469,30 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
         return <div className="aa-reference-preview__reader" data-document-scroll="content"><PdfDocumentSurface source={{ kind: 'pages', pages: content.pages }} /></div>
       }
       if (content.kind === 'media' && content.mediaKind === 'pdf') {
-        return <div className="aa-reference-preview__reader" data-document-scroll="content"><PdfDocumentSurface source={{ kind: 'url', url: content.url }} /></div>
+        return <div className="aa-reference-preview__reader" data-document-scroll="content"><PdfDocumentSurface source={{ kind: 'url', url: content.url, byteLength: preview.byteLength, sourceVersion: preview.fingerprint }} /></div>
       }
       return <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'docx':
       return content.kind === 'office' && content.officeKind === 'docx'
-        ? <Suspense fallback={<OfficeSurfaceLoading label="正在准备 Word 预览..." />}><DocxDocumentSurface url={content.url} byteLength={preview.byteLength} sourceVersion={preview.fingerprint} /></Suspense>
+        ? <DocxDocumentSurface url={content.url} byteLength={preview.byteLength} sourceVersion={preview.fingerprint} />
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'xlsx':
       return content.kind === 'office' && content.officeKind === 'xlsx'
-        ? <Suspense fallback={<OfficeSurfaceLoading label="正在准备 Excel 预览..." />}><SpreadsheetDocumentSurface url={content.url} byteLength={preview.byteLength} sourceVersion={preview.fingerprint} /></Suspense>
+        ? <SpreadsheetDocumentSurface url={content.url} byteLength={preview.byteLength} sourceVersion={preview.fingerprint} />
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'image':
       return content.kind === 'media' && content.mediaKind === 'image'
-        ? <div className={`aa-reference-preview__media${content.caption ? ' aa-reference-preview__media--described' : ''}`} data-document-scroll="content"><img src={content.url} alt={content.alt ?? preview.title} />{content.caption && <p>{content.caption}</p>}</div>
+        ? <ImageDocumentSurface url={content.url} sourceVersion={preview.fingerprint} alt={content.alt ?? preview.title} caption={content.caption} />
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'video':
       return content.kind === 'media' && content.mediaKind === 'video'
-        ? <VideoDocumentSurface url={content.url} title={preview.title} poster={content.poster} duration={content.duration} />
+        ? <VideoDocumentSurface url={content.url} title={preview.title} poster={content.poster} duration={content.duration} sourceVersion={preview.fingerprint} />
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'audio':
       return content.kind === 'media' && content.mediaKind === 'audio'
         ? <div className="aa-reference-preview__audio" data-document-scroll="content"><audio aria-label={preview.title} controls preload="metadata" src={content.url} />{content.duration && <span>{content.duration}</span>}{content.transcript && <p>{content.transcript}</p>}</div>
         : <InvalidPresentationState preview={preview} onReload={onReload} />
   }
-}
-
-function OfficeSurfaceLoading({ label }: { label: string }) {
-  return <div className="aa-reference-preview__state" role="status"><FileText size={22} /><span>{label}</span></div>
 }
 
 function InvalidPresentationState({ preview, onReload }: { preview: DocumentPreview; onReload: () => void }) {

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, LoaderCircle } from 'lucide-react'
-import { loadOfficeDocument } from './officePreviewRuntime'
-import { parseSpreadsheetWorkbook } from './spreadsheetPreviewWorkerClient'
+import { getCachedSpreadsheetPreview, loadSpreadsheetPreview } from './officePreviewRuntime'
 import type { SpreadsheetCellValue, SpreadsheetSheet } from './spreadsheetPreviewTypes'
 import './office-document.css'
 
@@ -15,7 +14,9 @@ export function SpreadsheetDocumentSurface({ url, byteLength, sourceVersion }: {
   byteLength?: number
   sourceVersion?: string
 }) {
-  const [sheets, setSheets] = useState<readonly SpreadsheetSheet[]>()
+  const [sheets, setSheets] = useState<readonly SpreadsheetSheet[] | undefined>(() => (
+    getCachedSpreadsheetPreview(url, sourceVersion)
+  ))
   const [activeSheet, setActiveSheet] = useState(0)
   const [visibleRows, setVisibleRows] = useState(INITIAL_ROW_COUNT)
   const [visibleColumns, setVisibleColumns] = useState(INITIAL_COLUMN_COUNT)
@@ -23,14 +24,17 @@ export function SpreadsheetDocumentSurface({ url, byteLength, sourceVersion }: {
 
   useEffect(() => {
     const controller = new AbortController()
-    setSheets(undefined)
     setActiveSheet(0)
     setVisibleRows(INITIAL_ROW_COUNT)
     setVisibleColumns(INITIAL_COLUMN_COUNT)
     setError(undefined)
-    void loadOfficeDocument({ url, byteLength, sourceVersion, signal: controller.signal }).then(
-      (source) => parseSpreadsheetWorkbook(source, controller.signal),
-    ).then((workbook) => {
+    const cached = getCachedSpreadsheetPreview(url, sourceVersion)
+    if (cached !== undefined) {
+      setSheets(cached)
+      return () => controller.abort()
+    }
+    setSheets(undefined)
+    void loadSpreadsheetPreview({ url, byteLength, sourceVersion, signal: controller.signal }).then((workbook) => {
       if (!controller.signal.aborted) setSheets(workbook)
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '无法读取这个 Excel 工作簿。')

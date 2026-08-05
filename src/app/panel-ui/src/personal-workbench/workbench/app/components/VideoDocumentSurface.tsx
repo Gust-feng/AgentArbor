@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Film, Maximize2, Minimize2, Pause, Play, Volume2, VolumeX } from 'lucide-react'
+import { getWarmedVideoPoster, subscribeVideoPreviewPoster, warmVideoPreview } from './videoPreviewRuntime'
 
 type VideoDocumentSurfaceProps = {
   readonly url: string
   readonly title: string
   readonly poster?: string
   readonly duration?: string
+  readonly sourceVersion?: string
 }
 
 type VideoSurfaceState = 'loading' | 'ready' | 'error'
+type VideoSurfaceSnapshot = {
+  readonly url: string
+  readonly state: VideoSurfaceState
+}
 
 type FrameCallbackVideo = HTMLVideoElement & {
   requestVideoFrameCallback?: (callback: () => void) => number
@@ -21,19 +27,34 @@ type PendingFirstFrame = {
   readonly handle: number
 }
 
-export function VideoDocumentSurface({ url, title, poster, duration: durationLabel }: VideoDocumentSurfaceProps) {
+export function VideoDocumentSurface({ url, title, poster, duration: durationLabel, sourceVersion }: VideoDocumentSurfaceProps) {
   const playerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const contextRef = useRef<CanvasRenderingContext2D | null>(null)
   const pendingFirstFrameRef = useRef<PendingFirstFrame | null>(null)
-  const [surfaceState, setSurfaceState] = useState<VideoSurfaceState>('loading')
+  const [surfaceSnapshot, setSurfaceSnapshot] = useState<VideoSurfaceSnapshot>({ url, state: 'loading' })
   const [playing, setPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [mediaDuration, setMediaDuration] = useState(0)
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
+  const warmedPoster = useSyncExternalStore(
+    subscribeVideoPreviewPoster,
+    () => getWarmedVideoPoster(url, sourceVersion),
+    () => undefined,
+  )
+  const visiblePoster = warmedPoster ?? poster
+  const surfaceState = surfaceSnapshot.url === url ? surfaceSnapshot.state : 'loading'
+  const visualState = surfaceState === 'loading' && visiblePoster !== undefined ? 'poster' : surfaceState
+  const setSurfaceState = useCallback((state: VideoSurfaceState) => {
+    setSurfaceSnapshot({ url, state })
+  }, [url])
+
+  useEffect(() => {
+    warmVideoPreview(url, poster, sourceVersion)
+  }, [poster, sourceVersion, url])
 
   const drawFrame = useCallback(() => {
     const video = videoRef.current
@@ -73,7 +94,7 @@ export function VideoDocumentSurface({ url, title, poster, duration: durationLab
     const context = contextRef.current
     if (canvas !== null && context !== null) context.clearRect(0, 0, canvas.width, canvas.height)
     contextRef.current = null
-  }, [cancelPendingFirstFrame, url])
+  }, [cancelPendingFirstFrame, setSurfaceState, url])
 
   useEffect(() => cancelPendingFirstFrame, [cancelPendingFirstFrame])
 
@@ -119,6 +140,10 @@ export function VideoDocumentSurface({ url, title, poster, duration: durationLab
   const queueFirstFrame = useCallback(() => {
     const video = videoRef.current as FrameCallbackVideo | null
     if (video === null || surfaceState === 'ready' || pendingFirstFrameRef.current !== null) return
+    if (drawFrame()) {
+      setSurfaceState('ready')
+      return
+    }
     let pending: PendingFirstFrame
     const reveal = () => {
       if (pendingFirstFrameRef.current !== pending) return
@@ -131,13 +156,13 @@ export function VideoDocumentSurface({ url, title, poster, duration: durationLab
       pending = { video, kind: 'animation', handle: window.requestAnimationFrame(reveal) }
     }
     pendingFirstFrameRef.current = pending
-  }, [drawFrame, surfaceState])
+  }, [drawFrame, setSurfaceState, surfaceState])
 
   const failPlayback = useCallback(() => {
     cancelPendingFirstFrame()
     setSurfaceState('error')
     setPlaying(false)
-  }, [cancelPendingFirstFrame])
+  }, [cancelPendingFirstFrame, setSurfaceState])
 
   const togglePlayback = useCallback(async () => {
     const video = videoRef.current
@@ -231,7 +256,7 @@ export function VideoDocumentSurface({ url, title, poster, duration: durationLab
   const volumeMuted = muted || volume === 0
 
   return (
-    <div className="aa-video-document" data-document-scroll="content" data-state={surfaceState}>
+    <div className="aa-video-document" data-document-scroll="content" data-state={visualState}>
       <div className="aa-video-document__stage">
         <div className="aa-video-document__player" ref={playerRef}>
           <div
@@ -264,16 +289,27 @@ export function VideoDocumentSurface({ url, title, poster, duration: durationLab
               onSeeked={() => { drawFrame(); setCurrentTime(videoRef.current?.currentTime ?? 0) }}
               onError={failPlayback}
             />
-            {surfaceState !== 'ready' && (
+            {visualState === 'poster' && (
+              <img className="aa-video-document__poster" src={visiblePoster} alt="" />
+            )}
+            {surfaceState !== 'ready' && visualState !== 'poster' && (
               <div
                 className="aa-video-document__placeholder"
                 role={surfaceState === 'error' ? 'alert' : 'status'}
                 aria-label={surfaceState === 'loading' ? '正在加载视频' : undefined}
               >
-                {surfaceState === 'loading' && poster
-                  ? <img src={poster} alt="" />
-                  : <Film size={24} aria-hidden="true" />}
-                {surfaceState === 'error' && <span>无法播放这个视频。</span>}
+                <div className="aa-video-document__placeholder-content">
+                  <span className="aa-video-document__placeholder-icon">
+                    <Film size={22} aria-hidden="true" />
+                  </span>
+                  <strong>{surfaceState === 'loading' ? '正在准备视频预览' : '无法播放这个视频。'}</strong>
+                  <span>{surfaceState === 'loading' ? title : '请检查视频文件后重新打开预览。'}</span>
+                  {surfaceState === 'loading' && (
+                    <span className="aa-video-document__placeholder-progress" aria-hidden="true">
+                      <span />
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { pushResponsivenessContext } from '../../../../app-responsiveness-diagnostics'
+import type { DocumentPreview } from '../../../../../../panel-api-contracts'
 
 type PdfDocumentSurfaceProps = {
   readonly source: { readonly kind: 'pages'; readonly pages: readonly string[] }
-    | { readonly kind: 'url'; readonly url: string }
+    | { readonly kind: 'url'; readonly url: string; readonly byteLength?: number; readonly sourceVersion?: string }
 }
 
 type PdfDocumentHandle = {
@@ -27,13 +28,60 @@ type PdfLoadSession = {
   destroy(): Promise<void>
 }
 
+type CachedPdfDocument = {
+  readonly key: string
+  readonly byteLength: number
+  promise: Promise<PdfDocumentHandle>
+  displayReadyPromise: Promise<PdfDocumentHandle>
+  session?: PdfLoadSession
+  document?: PdfDocumentHandle
+  firstPage?: CachedPdfPage
+  firstPageBytes: number
+  displayReady: boolean
+  consumers: number
+  evicted: boolean
+}
+
+type CachedPdfPage = {
+  readonly canvas: HTMLCanvasElement
+  readonly aspectRatio: number
+}
+
 const INITIAL_PAGE_COUNT = 8
 const PAGE_BATCH_SIZE = 8
 const MAX_CONCURRENT_PAGE_RENDERS = 2
+const MAX_CACHED_PDF_BYTES = 16 * 1024 * 1024
+const MAX_PDF_CACHE_BYTES = 40 * 1024 * 1024
+const MAX_CACHED_PDF_DOCUMENTS = 4
+const CACHED_FIRST_PAGE_WIDTH = 960
+const MAX_CACHED_FIRST_PAGE_PIXELS = 2_500_000
+
+const pdfDocumentCache = new Map<string, CachedPdfDocument>()
+let cachedPdfBytes = 0
 
 export function PdfDocumentSurface({ source }: PdfDocumentSurfaceProps) {
   if (source.kind === 'pages') return <StructuredPdfPages pages={source.pages} />
-  return <RenderedPdfDocument url={source.url} />
+  return <RenderedPdfDocument url={source.url} byteLength={source.byteLength} sourceVersion={source.sourceVersion} />
+}
+
+export function prefetchPdfPreview(preview: DocumentPreview): void {
+  if (preview.content.kind !== 'media' || preview.content.mediaKind !== 'pdf') return
+  if (preview.byteLength === undefined || preview.byteLength > MAX_CACHED_PDF_BYTES) return
+  void getOrCreateCachedPdfDocument(
+    preview.content.url,
+    preview.byteLength,
+    preview.fingerprint,
+  ).displayReadyPromise.catch(() => undefined)
+}
+
+export async function clearPdfPreviewRuntimeForTesting(): Promise<void> {
+  const cachedDocuments = [...pdfDocumentCache.values()]
+  pdfDocumentCache.clear()
+  cachedPdfBytes = 0
+  await Promise.all(cachedDocuments.map(async (cached) => {
+    cached.evicted = true
+    await cached.session?.destroy()
+  }))
 }
 
 function StructuredPdfPages({ pages }: { readonly pages: readonly string[] }) {
@@ -53,8 +101,12 @@ function StructuredPdfPages({ pages }: { readonly pages: readonly string[] }) {
   )
 }
 
-function RenderedPdfDocument({ url }: { readonly url: string }) {
-  const [document, setDocument] = useState<PdfDocumentHandle>()
+function RenderedPdfDocument({ url, byteLength, sourceVersion }: {
+  readonly url: string
+  readonly byteLength?: number
+  readonly sourceVersion?: string
+}) {
+  const [document, setDocument] = useState<PdfDocumentHandle | undefined>(() => getReadyCachedPdfDocument(url, byteLength, sourceVersion))
   const [error, setError] = useState<string>()
   const [reloadKey, setReloadKey] = useState(0)
   const pagination = useProgressivePages(document?.numPages ?? 0)
@@ -63,48 +115,63 @@ function RenderedPdfDocument({ url }: { readonly url: string }) {
   useEffect(() => {
     let disposed = false
     let session: PdfLoadSession | undefined
-    setDocument(undefined)
+    let cached: CachedPdfDocument | undefined
+    setDocument(getReadyCachedPdfDocument(url, byteLength, sourceVersion))
     setError(undefined)
-    void createPdfLoadSession(url).then((created) => {
+    const load = byteLength !== undefined && byteLength <= MAX_CACHED_PDF_BYTES
+      ? (cached = acquireCachedPdfDocument(url, byteLength, sourceVersion)).displayReadyPromise
+      : createPdfLoadSession(url).then((created) => {
+        session = created
+        return created.promise
+      })
+    void load.then((value) => {
       if (disposed) {
-        void created.destroy()
         return
       }
-      session = created
-      return created.promise.then((value) => {
-        if (!disposed) setDocument(value)
-      })
+      setDocument(value)
     }).catch(() => {
       if (!disposed) setError('无法在工作台中读取这个 PDF。')
     })
     return () => {
       disposed = true
+      if (cached !== undefined) releaseCachedPdfDocument(cached)
       if (session !== undefined) void session.destroy()
     }
-  }, [reloadKey, url])
+  }, [byteLength, reloadKey, sourceVersion, url])
 
   if (error !== undefined) return <PdfState message={error} onRetry={() => setReloadKey((value) => value + 1)} />
   if (document === undefined) return <PdfState message="正在读取 PDF..." />
+  const firstPage = getCachedPdfFirstPage(url, byteLength, sourceVersion)
   return (
     <div className="aa-pdf-document" data-pdf-source="file">
       {Array.from({ length: pagination.visibleCount }, (_, index) => (
-        <RenderedPdfPage document={document} pageNumber={index + 1} total={document.numPages} key={index} />
+        <RenderedPdfPage document={document} pageNumber={index + 1} total={document.numPages} initialPage={index === 0 ? firstPage : undefined} key={index} />
       ))}
       <PdfPageContinuation {...pagination} total={document.numPages} />
     </div>
   )
 }
 
-function RenderedPdfPage({ document, pageNumber, total }: {
+function RenderedPdfPage({ document, pageNumber, total, initialPage }: {
   readonly document: PdfDocumentHandle
   readonly pageNumber: number
   readonly total: number
+  readonly initialPage?: CachedPdfPage
 }) {
   const articleRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [visible, setVisible] = useState(() => pageNumber <= 2 || typeof IntersectionObserver === 'undefined')
-  const [aspectRatio, setAspectRatio] = useState(1 / Math.SQRT2)
+  const [aspectRatio, setAspectRatio] = useState(() => initialPage?.aspectRatio ?? 1 / Math.SQRT2)
   const [failed, setFailed] = useState(false)
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+    if (canvas === null || initialPage === undefined) return
+    canvas.width = initialPage.canvas.width
+    canvas.height = initialPage.canvas.height
+    const context = canvas.getContext('2d', { alpha: false })
+    context?.drawImage(initialPage.canvas, 0, 0)
+  }, [initialPage])
 
   useEffect(() => {
     const element = articleRef.current
@@ -137,14 +204,21 @@ function RenderedPdfPage({ document, pageNumber, total }: {
         setAspectRatio(baseViewport.width / baseViewport.height)
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5)
         const viewport = page.getViewport({ scale: cssWidth * pixelRatio / baseViewport.width })
-        canvas.width = Math.ceil(viewport.width)
-        canvas.height = Math.ceil(viewport.height)
-        const context = canvas.getContext('2d', { alpha: false })
-        if (context === null) throw new Error('Canvas 2D is unavailable.')
+        const renderCanvas = globalThis.document.createElement('canvas')
+        renderCanvas.width = Math.ceil(viewport.width)
+        renderCanvas.height = Math.ceil(viewport.height)
+        const renderContext = renderCanvas.getContext('2d', { alpha: false })
+        if (renderContext === null) throw new Error('Canvas 2D is unavailable.')
         renderTask?.cancel()
-        renderTask = page.render({ canvas, canvasContext: context, viewport })
+        renderTask = page.render({ canvas: renderCanvas, canvasContext: renderContext, viewport })
         await renderTask.promise
-        if (!abortController.signal.aborted) setFailed(false)
+        if (abortController.signal.aborted) return
+        canvas.width = renderCanvas.width
+        canvas.height = renderCanvas.height
+        const visibleContext = canvas.getContext('2d', { alpha: false })
+        if (visibleContext === null) throw new Error('Canvas 2D is unavailable.')
+        visibleContext.drawImage(renderCanvas, 0, 0)
+        setFailed(false)
       })
     }
 
@@ -274,6 +348,153 @@ class PdfPageRenderScheduler {
 }
 
 const pdfPageRenderScheduler = new PdfPageRenderScheduler()
+
+function getReadyCachedPdfDocument(
+  url: string,
+  byteLength?: number,
+  sourceVersion?: string,
+): PdfDocumentHandle | undefined {
+  if (byteLength === undefined || byteLength > MAX_CACHED_PDF_BYTES) return undefined
+  const key = pdfCacheKey(url, sourceVersion)
+  const cached = pdfDocumentCache.get(key)
+  if (cached === undefined) return undefined
+  touchCachedPdfDocument(key, cached)
+  return cached.displayReady ? cached.document : undefined
+}
+
+function getCachedPdfFirstPage(
+  url: string,
+  byteLength?: number,
+  sourceVersion?: string,
+): CachedPdfPage | undefined {
+  if (byteLength === undefined || byteLength > MAX_CACHED_PDF_BYTES) return undefined
+  const cached = pdfDocumentCache.get(pdfCacheKey(url, sourceVersion))
+  return cached?.displayReady ? cached.firstPage : undefined
+}
+
+function acquireCachedPdfDocument(
+  url: string,
+  byteLength: number,
+  sourceVersion?: string,
+): CachedPdfDocument {
+  const cached = getOrCreateCachedPdfDocument(url, byteLength, sourceVersion)
+  cached.consumers += 1
+  return cached
+}
+
+function releaseCachedPdfDocument(cached: CachedPdfDocument): void {
+  cached.consumers = Math.max(0, cached.consumers - 1)
+  trimPdfDocumentCache()
+}
+
+function getOrCreateCachedPdfDocument(
+  url: string,
+  byteLength: number,
+  sourceVersion?: string,
+): CachedPdfDocument {
+  const key = pdfCacheKey(url, sourceVersion)
+  const current = pdfDocumentCache.get(key)
+  if (current !== undefined) {
+    touchCachedPdfDocument(key, current)
+    return current
+  }
+
+  const cached: CachedPdfDocument = {
+    key,
+    byteLength,
+    promise: Promise.resolve(undefined as unknown as PdfDocumentHandle),
+    displayReadyPromise: Promise.resolve(undefined as unknown as PdfDocumentHandle),
+    firstPageBytes: 0,
+    displayReady: false,
+    consumers: 0,
+    evicted: false,
+  }
+  cached.promise = createPdfLoadSession(url).then(async (session) => {
+    cached.session = session
+    if (cached.evicted) {
+      await session.destroy()
+      throw new DOMException('The PDF cache entry was evicted.', 'AbortError')
+    }
+    return session.promise
+  }).then((document) => {
+    cached.document = document
+    return document
+  }).catch((reason: unknown) => {
+    if (pdfDocumentCache.get(key) === cached) removeCachedPdfDocument(cached)
+    throw reason
+  })
+  cached.displayReadyPromise = cached.promise.then(async (document) => {
+    try {
+      await cacheFirstPdfPage(cached, document)
+    } catch {
+      // Parsing is still useful when a background first-page render is unavailable.
+    } finally {
+      if (!cached.evicted) cached.displayReady = true
+    }
+    return document
+  })
+  pdfDocumentCache.set(key, cached)
+  cachedPdfBytes += byteLength
+  trimPdfDocumentCache()
+  return cached
+}
+
+function trimPdfDocumentCache(): void {
+  while (pdfDocumentCache.size > MAX_CACHED_PDF_DOCUMENTS || cachedPdfBytes > MAX_PDF_CACHE_BYTES) {
+    const candidate = [...pdfDocumentCache.values()].find((entry) => entry.consumers === 0)
+    if (candidate === undefined) return
+    removeCachedPdfDocument(candidate)
+  }
+}
+
+function removeCachedPdfDocument(cached: CachedPdfDocument): void {
+  if (pdfDocumentCache.get(cached.key) !== cached) return
+  pdfDocumentCache.delete(cached.key)
+  cachedPdfBytes -= cached.byteLength + cached.firstPageBytes
+  cached.evicted = true
+  if (cached.session !== undefined) void cached.session.destroy()
+}
+
+function touchCachedPdfDocument(key: string, cached: CachedPdfDocument): void {
+  pdfDocumentCache.delete(key)
+  pdfDocumentCache.set(key, cached)
+}
+
+function pdfCacheKey(url: string, sourceVersion?: string): string {
+  return `${url}\u0000${sourceVersion ?? ''}`
+}
+
+async function cacheFirstPdfPage(cached: CachedPdfDocument, document: PdfDocumentHandle): Promise<void> {
+  if (document.numPages === 0 || cached.evicted) return
+  const page = await document.getPage(1)
+  let renderTask: ReturnType<PdfPageHandle['render']> | undefined
+  try {
+    const baseViewport = page.getViewport({ scale: 1 })
+    let scale = CACHED_FIRST_PAGE_WIDTH / baseViewport.width
+    let viewport = page.getViewport({ scale })
+    const pixels = viewport.width * viewport.height
+    if (pixels > MAX_CACHED_FIRST_PAGE_PIXELS) {
+      scale *= Math.sqrt(MAX_CACHED_FIRST_PAGE_PIXELS / pixels)
+      viewport = page.getViewport({ scale })
+    }
+    const canvas = globalThis.document.createElement('canvas')
+    canvas.width = Math.max(1, Math.ceil(viewport.width))
+    canvas.height = Math.max(1, Math.ceil(viewport.height))
+    const context = canvas.getContext('2d', { alpha: false })
+    if (context === null) return
+    renderTask = page.render({ canvas, canvasContext: context, viewport })
+    await renderTask.promise
+    if (cached.evicted || pdfDocumentCache.get(cached.key) !== cached) return
+    const firstPageBytes = canvas.width * canvas.height * 4
+    cached.firstPage = { canvas, aspectRatio: baseViewport.width / baseViewport.height }
+    cached.firstPageBytes = firstPageBytes
+    cachedPdfBytes += firstPageBytes
+    trimPdfDocumentCache()
+  } finally {
+    if (cached.evicted) renderTask?.cancel()
+    page.cleanup()
+  }
+}
 
 async function createPdfLoadSession(url: string): Promise<PdfLoadSession> {
   if (typeof Worker === 'undefined') throw new Error('PDF worker is unavailable.')

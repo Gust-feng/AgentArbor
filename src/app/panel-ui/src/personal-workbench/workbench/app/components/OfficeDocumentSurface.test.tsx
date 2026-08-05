@@ -4,58 +4,49 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import { DocxDocumentSurface } from './DocxDocumentSurface'
 import { SpreadsheetDocumentSurface } from './SpreadsheetDocumentSurface'
-import { loadDocxRenderer, loadOfficeDocument } from './officePreviewRuntime'
-import { parseSpreadsheetWorkbook } from './spreadsheetPreviewWorkerClient'
+import {
+  getCachedDocxPreviewMarkup,
+  getCachedSpreadsheetPreview,
+  loadDocxPreviewMarkup,
+  loadSpreadsheetPreview,
+} from './officePreviewRuntime'
 
 vi.mock('./officePreviewRuntime', () => ({
-  loadDocxRenderer: vi.fn(),
-  loadOfficeDocument: vi.fn(),
-}))
-vi.mock('./spreadsheetPreviewWorkerClient', () => ({
-  parseSpreadsheetWorkbook: vi.fn(),
+  getCachedDocxPreviewMarkup: vi.fn(),
+  getCachedSpreadsheetPreview: vi.fn(),
+  loadDocxPreviewMarkup: vi.fn(),
+  loadSpreadsheetPreview: vi.fn(),
 }))
 
-const loadDocument = vi.mocked(loadOfficeDocument)
-const loadRenderer = vi.mocked(loadDocxRenderer)
-const parseWorkbook = vi.mocked(parseSpreadsheetWorkbook)
+const getCachedDocx = vi.mocked(getCachedDocxPreviewMarkup)
+const getCachedSpreadsheet = vi.mocked(getCachedSpreadsheetPreview)
+const loadDocx = vi.mocked(loadDocxPreviewMarkup)
+const loadSpreadsheet = vi.mocked(loadSpreadsheetPreview)
 
 afterEach(() => {
   vi.clearAllMocks()
 })
 
-test('renders DOCX with layout-preserving read-only options and clears it on unmount', async () => {
-  const renderAsync = vi.fn(async (_source: Blob, body: HTMLElement) => {
-    body.textContent = 'Rendered Word content'
+test('renders a cached DOCX on the first commit without a loading state', () => {
+  getCachedDocx.mockReturnValue({
+    bodyHtml: '<p>Rendered Word content</p>',
+    styleHtml: '<style>.aa-docx { color: black; }</style>',
   })
-  loadDocument.mockResolvedValue(new Blob(['docx']))
-  loadRenderer.mockResolvedValue({ renderAsync } as unknown as Awaited<ReturnType<typeof loadDocxRenderer>>)
 
   const rendered = render(<DocxDocumentSurface url="/document.docx" byteLength={4} sourceVersion="v1" />)
-  expect(await screen.findByText('Rendered Word content')).toBeTruthy()
-  expect(renderAsync).toHaveBeenCalledWith(
-    expect.any(Blob),
-    expect.any(HTMLElement),
-    expect.any(HTMLElement),
-    expect.objectContaining({
-      breakPages: true,
-      ignoreLastRenderedPageBreak: false,
-      renderHeaders: true,
-      renderFooters: true,
-      renderAltChunks: false,
-    }),
-  )
-  const body = rendered.container.querySelector('.aa-docx-document__body')
-  rendered.unmount()
-  expect(body?.childNodes).toHaveLength(0)
+  expect(screen.getByText('Rendered Word content')).toBeTruthy()
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(rendered.container.querySelectorAll('.aa-docx-document__styles')).toHaveLength(1)
+  expect(loadDocx).not.toHaveBeenCalled()
 })
 
 test('reports DOCX load failures and aborts the pending document request on unmount', async () => {
   let requestSignal: AbortSignal | undefined
-  loadDocument.mockImplementation(({ signal }) => {
+  getCachedDocx.mockReturnValue(undefined)
+  loadDocx.mockImplementation(({ signal }) => {
     requestSignal = signal
     return Promise.reject(new Error('文档损坏'))
   })
-  loadRenderer.mockResolvedValue({ renderAsync: vi.fn() } as unknown as Awaited<ReturnType<typeof loadDocxRenderer>>)
 
   const rendered = render(<DocxDocumentSurface url="/broken.docx" />)
   expect((await screen.findByRole('alert')).textContent).toContain('文档损坏')
@@ -65,8 +56,8 @@ test('reports DOCX load failures and aborts the pending document request on unmo
 
 test('switches XLSX sheets and expands rows in bounded batches', async () => {
   const firstSheet = Array.from({ length: 121 }, (_, index) => [`Row ${index + 1}`, index + 1])
-  loadDocument.mockResolvedValue(new Blob(['xlsx']))
-  parseWorkbook.mockResolvedValue([
+  getCachedSpreadsheet.mockReturnValue(undefined)
+  loadSpreadsheet.mockResolvedValue([
     { sheet: 'Overview', data: firstSheet },
     { sheet: 'Details', data: [['Name', 'Value'], ['Alpha', 42]] },
     { sheet: 'Wide', data: [Array.from({ length: 41 }, (_, index) => `Column ${index + 1}`)] },
@@ -91,15 +82,25 @@ test('switches XLSX sheets and expands rows in bounded batches', async () => {
 })
 
 test('aborts XLSX parsing when the preview closes', async () => {
-  let parseSignal: AbortSignal | undefined
-  loadDocument.mockResolvedValue(new Blob(['xlsx']))
-  parseWorkbook.mockImplementation((_source, signal) => {
-    parseSignal = signal
+  let requestSignal: AbortSignal | undefined
+  getCachedSpreadsheet.mockReturnValue(undefined)
+  loadSpreadsheet.mockImplementation(({ signal }) => {
+    requestSignal = signal
     return new Promise(() => undefined)
   })
 
   const rendered = render(<SpreadsheetDocumentSurface url="/workbook.xlsx" />)
-  await waitFor(() => expect(parseSignal).toBeDefined())
+  await waitFor(() => expect(requestSignal).toBeDefined())
   rendered.unmount()
-  expect(parseSignal?.aborted).toBe(true)
+  expect(requestSignal?.aborted).toBe(true)
+})
+
+test('renders a cached workbook on the first commit without a loading state', () => {
+  getCachedSpreadsheet.mockReturnValue([{ sheet: 'Ready', data: [['Warm workbook']] }])
+
+  render(<SpreadsheetDocumentSurface url="/ready.xlsx" byteLength={4} sourceVersion="v1" />)
+
+  expect(screen.getByText('Warm workbook')).toBeTruthy()
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(loadSpreadsheet).not.toHaveBeenCalled()
 })

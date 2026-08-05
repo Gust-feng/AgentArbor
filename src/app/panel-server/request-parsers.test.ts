@@ -83,6 +83,7 @@ test("parseRunInput accepts the canonical Panel payload and rejects missing or i
     },
   }), {
     goal: "inspect the project",
+    submissionId: undefined,
     aiMode: "openai-responses",
     requestedRunMode: undefined,
     reasoningEffort: "high",

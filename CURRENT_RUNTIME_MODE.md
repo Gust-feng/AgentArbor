@@ -6,6 +6,8 @@
 
 当前产品架构以一个 Workbench 和 Ordinary Agent 为主线；Sub-Agent 是 Ordinary Agent 的工具能力。Multi-Agent 的现有源码保留为延期重构参考，不属于当前生产功能。当前事实源是 ADR-0028，延期边界见《Multi-Agent 延期模块边界》。
 
+Space/Workspace 资源权限的稳定目标契约见 [ADR-0034](docs/架构设计/产品架构/ADR-0034-Space工作区引用与对话资源生命周期.md) 和 [工程指南](docs/开发指南/06-工程实现/18-Space工作区对话与资源权限开发指南.md)：Space 只引用外部 Workspace，Conversation 固定属于 Space，模型看到真实路径，后端保留 `referenceId`，普通 Shell 每次确认，`full_access` 同时覆盖 Shell 和文件路径。本文后续仍保留的旧 `workspaceRoot`/Task Soil 句子属于当前实现迁移差异；新代码不得继续扩张旧口径，迁移完成后应以 ADR-0034 为准。
+
 删除普通会话后，Host 只通过 Space 公开命令取消对应的 `conversation_reference`；该动作只删除 Space 元数据链接，不删除该 Space 的本地文件、工作区文件夹、托管文件夹、托管文档或其他引用。
 
 Multi-Agent 的 Panel UI、Deep DTO 和实现源码暂时保留，以便未来重构复用其中可验证的局部机制；当前 Panel 不装配其 feature、不加载 Deep 历史，也不接受 `/api/deep/*` 请求。该路径统一返回 `410 multi_agent_deferred`，不会创建 provider、ToolCenter、store 或后台运行。
@@ -33,7 +35,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - Multi-Agent 的入口、历史加载和生产 API 已全部停用；`/api/deep/*` 返回 `410 multi_agent_deferred`，保留源码不代表可触发 `deep` run
 - `/api/conversations` 是普通 `agent` 的唯一提交入口；旧 `/api/desktop/runs` 已删除
 - 当前 Ordinary 通过 Pi provider/model binding 使用冻结的模型协议能力；自定义 OpenAI-compatible endpoint 仍由 provider binding 接入，fake provider 仅供测试。Chat binding 把 DeepSeek、Kimi、GLM、MiniMax 的冻结请求方言映射到 Pi `compat` 与公开 payload hook，并按冻结能力声明视觉输入；未知模型默认关闭视觉输入，只有已核验定义或显式 capability override 才能开启。动态 API key 每次请求重新解析，清空后不会回退旧 key。普通 Agent 的语义 Skills 路由使用同一 Pi Models/provider binding 的窄无工具通道，并保留现有 JSON 校验与确定性 fallback。仓库通过 pnpm patch 固化 pi-ai 0.80.10 的必要上游补齐：Chat/Responses `stream:false`、refusal diagnostic、Responses hosted output continuation 与 `incomplete_details.reason`、MiniMax 累计 delta 和文本 `reasoning_details`；Responses provider-native Web Search 由冻结 binding 注入 hosted tool，并只在 provider/API/model 相同的 Session 后续轮次回放 opaque output item。provider error、refusal、content filter、输出截断与 context overflow 都形成 Ordinary 可观察失败。Pi 公共消息契约仍不能无损表达普通 file/audio 与 URL/file-id 附件，provider transport 也没有 Host 自定义 fetch 注入口；相关旧 Chat/Responses transport 只作为延期 Multi-Agent 的源码依赖保留，不进入当前生产组合根
-- Panel 普通输入栏可选择“当前工作区”作为本轮普通 `agent` 运行的工作根目录；该选择只作为前端会话内的显式覆盖，不写入设置。未选择当前工作区时，新 run 使用设置页保存的工作区作为默认工作区
+- Panel 首页负责选择 Space；“从 Workspace 开始”只是创建一个只引用该 Workspace 的新 Space 的快捷入口。Conversation 创建后固定属于该 Space，不能在对话中切换 Space 或 Workspace；Run 冻结当时资源快照，模型上下文展示真实绝对路径。
 - `/api/deep/*` 已停用；旧 `/api/underground/*` 已删除。Deep 及其 run-tree 契约仅作为未来重构的代码基础保留
 
 ## 当前真实工作方式
@@ -141,7 +143,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 普通 `agent` 的本轮模型能力事实来自 run 创建时冻结的 `capabilitySnapshot.modelCapabilities`；直接调用参数里的临时 `modelCapabilities` 只能服务没有冻结快照的测试或兼容调用，不能覆盖已创建 run 的上下文窗口、输出预算、工具调用能力或流式能力
 - 普通 `agent` 的附件读图工具只在本轮模型能力支持视觉输入时进入可用工具集合；支持的图片字节会进入 Ordinary durable Pi Session，并在后续轮次重新构建模型上下文，不进入事件、ordinary run snapshot 或 Panel read-model，工具 JSON 结果仍只保留图片元数据和本轮模型输入状态
 - 普通 `agent` 的本轮工作区事实来自 run 创建时冻结的 `capabilitySnapshot.workspace`；请求显式传入的当前工作区只影响该 run 的工作根目录，不能回写或覆盖设置页保存的默认工作区
-- 普通 `agent` 的 Space 文件权限来自对话唯一 `conversation_reference` 在本轮提交时生成的 Task Soil 快照；不同 Space 的引用不会合并，同一 run 启动后 Space 变更不能扩张或撤销该 run 的文件范围，未归属 Space 的对话保持原工作区权限
+- 普通 `agent` 的 Space 文件权限来自 Conversation 唯一 Space owner 在 Run 创建时生成的资源快照；不同 Space 的引用不会合并，新增引用只影响新 Run，撤销引用通过即时 deny overlay 阻止当前和后续 Run 的文件访问。模型看到真实绝对路径，后端仍保存 `referenceId` 作为权限与审计事实。
 - 普通 `agent` 在请求未显式指定 `aiMode` 时，默认 `aiMode` 也从本轮 `capabilitySnapshot.activeModel.defaultAiMode` 派生；入口层不得为了默认值提前读取当前全局模型配置
 - 普通 `agent` 执行阶段只能消费 run 创建时冻结的 `capabilitySnapshot`；执行资源不得在运行中重新向 `CapabilityCenter` 获取当前快照来替代本轮事实
 - 普通 `agent` 的本轮 ToolCenter 执行器全集也必须从 `capabilitySnapshot.toolCatalog.tools` 派生；当前代码新增、删除或启停工具只能影响新 run，不能扩张已创建 run 的可执行工具集合

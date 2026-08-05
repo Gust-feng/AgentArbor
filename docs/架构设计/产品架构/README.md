@@ -10,10 +10,10 @@ AgentArbor 是一个面向本地工作区的桌面通用 Agent Workbench。用�
 Workbench
   ├─ Ordinary Agent（默认）
   │    └─ Sub-Agent（工具能力）
-  └─ Multi-Agent（显式深入协作）
+  └─ Multi-Agent（延期源码，不属于当前生产入口）
 ```
 
-- Ordinary 与 Multi-Agent 分别拥有业务流程、状态、事件、仓储和 read-model；Sub-Agent 只贡献定义与 Pi AgentTool，调用事实归父 Ordinary run。
+- Ordinary 是当前唯一生产业务闭环；Multi-Agent 的 manager、child、TaskBoard、scheduler 和 synthesis 源码仅作为延期重构参考。Sub-Agent 只贡献定义与 Pi AgentTool，调用事实归父 Ordinary run。
 - Workbench 只组合入口、导航、历史和展示。
 - 模型、工具、确认、上下文机械算法和系统适配作为中性能力被 feature 调用。
 - 后端由唯一 Composition Root 装配，不建设 universal Run runtime 或全局业务状态。
@@ -21,7 +21,7 @@ Workbench
 
 ## 当前实现状态
 
-目标产品边界已经统一，入口实现仍处于迁移期：默认入口是普通 Agent；当前 release 暂时隐藏 Multi-Agent 的设置 beta 开关和侧栏 `Agent 集群` 按钮，后端 `/api/deep/*`、内部 surface、Deep DTO 与独立数据分区仍保留。详情以 [CURRENT_RUNTIME_MODE.md](../../../CURRENT_RUNTIME_MODE.md) 为准。
+当前生产入口是 Ordinary Agent；Multi-Agent 的入口、历史加载和 `/api/deep/*` 生产调用均停用，相关源码和 DTO 仅作为延期重构参考保留。Space、Workspace、Conversation、路径权限和后台进程的当前稳定语义见 [ADR-0034](ADR-0034-Space工作区引用与对话资源生命周期.md) 及其 [工程指南](../../开发指南/06-工程实现/18-Space工作区对话与资源权限开发指南.md)。实现状态以 [CURRENT_RUNTIME_MODE.md](../../../CURRENT_RUNTIME_MODE.md) 为准。
 
 ## 当前决策
 
@@ -34,6 +34,7 @@ Workbench
 - [ADR-0031-工具定义保真与渐进曝光边界](ADR-0031-工具定义保真与渐进曝光边界.md)：定义保真、曝光/执行授权/确认分离、MCP 成本门控与 Pi active set 边界。
 - [ADR-0032-路径记忆与长期记忆回流架构](ADR-0032-路径记忆与长期记忆回流架构.md)：定义 PathMemory 自动采集、记忆分层、写入触发、治理后召回与第一阶段边界。
 - [ADR-0033-模型自主笔记记忆架构](ADR-0033-模型自主笔记记忆架构.md)：修正记忆主线为模型主动撰写、启动时注入的透明 Markdown 笔记；PathMemory 降级为运行档案。
+- [ADR-0034-Space工作区引用与对话资源生命周期](ADR-0034-Space工作区引用与对话资源生命周期.md)：固化 Space/Workspace 引用关系、Conversation owner、路径权限、Shell 确认和后台进程生命周期。
 
 ## 历史或部分取代决策
 

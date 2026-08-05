@@ -11,10 +11,16 @@ import { PanelHttpError } from "./http-utils.js";
 
 const WINDOWS_UNSUPPORTED_DIRECTORY_FSYNC_CODES = new Set(["EINVAL", "EPERM", "ENOTSUP", "EISDIR"]);
 
+/**
+ * 路径类引用按规范化路径取互斥键，使不同 Space 指向同一目录的引用共享同一把锁。
+ * 跨 Space 重叠引用是合法状态，串行化是它的并发安全边界。
+ */
 export function spaceReferenceMutationKey(item: SpaceReferenceItem): string {
-  return item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder"
-    ? item.reference.path
-    : item.id;
+  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
+    return item.id;
+  }
+  const absolute = path.resolve(item.reference.path);
+  return process.platform === "win32" ? absolute.toLocaleLowerCase("en-US") : absolute;
 }
 
 export function createSpaceReferenceDeletionFilePort(

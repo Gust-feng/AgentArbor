@@ -6,6 +6,7 @@ import type { SpaceFeatureError, SpaceReference, SpaceTarget } from "../spaces/i
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
+import { reconcileSpaceReferenceAvailability } from "./space-reference-availability.js";
 import { spaceReferenceMutationKey } from "./space-reference-deletion.js";
 import { createPanelDocumentPreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
 import { getWorkbenchAssetPreview, updateWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
@@ -67,9 +68,17 @@ export async function handlePanelSpaceRoute(
   if (treeMatch !== null && request.method === "GET") {
     await runtime.ensureInitialWorkbenchData();
     const spaceId = decode(treeMatch[1]);
+    const known = await feature.queries.getTree(spaceId);
+    if (known === undefined) throw new PanelHttpError(404, "space_not_found", "未找到空间。");
+    await reconcileSpaceReferenceAvailability(feature, known.entries.map((entry) => entry.item));
     const tree = await feature.queries.getTree(spaceId);
-    if (tree === undefined) throw new PanelHttpError(404, "space_not_found", "未找到空间。");
     writeJson(response, 200, { ok: true, tree });
+    return true;
+  }
+  if (treeMatch !== null && request.method === "DELETE") {
+    await feature.commands.deleteSpace(decode(treeMatch[1]));
+    await runtime.flushSpaceKnowledgeSync();
+    writeJson(response, 200, { ok: true });
     return true;
   }
 
@@ -200,7 +209,6 @@ export async function handlePanelSpaceRoute(
       ) });
       return true;
     }
-    await assertWorkspaceMountWritable(feature, item.id);
     writeJson(response, 200, { ok: true, preview: await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => updatePanelSpaceReferenceText(item, input)) });
     return true;
   }
@@ -209,7 +217,6 @@ export async function handlePanelSpaceRoute(
   if (referenceEntry !== null && request.method === "POST") {
     const item = await feature.queries.getReference(decode(referenceEntry[1]));
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
-    await assertWorkspaceMountWritable(feature, item.id);
     const input = parse(createReferenceEntrySchema, await readJsonBody(request), "新建文件信息无效。");
     writeJson(response, 201, { ok: true, entry: await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => createPanelSpaceReferenceEntry(item, input)) });
     return true;
@@ -217,7 +224,6 @@ export async function handlePanelSpaceRoute(
   if (referenceEntry !== null && request.method === "PATCH") {
     const item = await feature.queries.getReference(decode(referenceEntry[1]));
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
-    await assertWorkspaceMountWritable(feature, item.id);
     const input = parse(renameReferenceEntrySchema, await readJsonBody(request), "文件重命名信息无效。");
     writeJson(response, 200, { ok: true, entry: await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => renamePanelSpaceReferenceEntry(item, input)) });
     return true;
@@ -225,7 +231,6 @@ export async function handlePanelSpaceRoute(
   if (referenceEntry !== null && request.method === "DELETE") {
     const item = await feature.queries.getReference(decode(referenceEntry[1]));
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
-    await assertWorkspaceMountWritable(feature, item.id);
     const input = parse(referenceEntrySchema, await readJsonBody(request), "文件删除信息无效。");
     await runtime.fileMutationCoordinator.run(spaceReferenceMutationKey(item), () => deletePanelSpaceReferenceEntry(item, input.relativePath));
     writeJson(response, 200, { ok: true });
@@ -233,12 +238,6 @@ export async function handlePanelSpaceRoute(
   }
 
   return false;
-}
-
-async function assertWorkspaceMountWritable(feature: PanelRuntime["spaceFeature"], itemId: string): Promise<void> {
-  if (await feature.queries.hasWorkspaceMountConflict(itemId)) {
-    throw new PanelHttpError(409, "space_workspace_mount_conflict", "同一个工作区文件夹已链接到多个空间。为避免交叉修改，请先取消其中一个链接。");
-  }
 }
 
 function absoluteLocalReference(reference: SpaceReference): SpaceReference {

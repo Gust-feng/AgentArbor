@@ -700,6 +700,12 @@ function projectionChangeFromSpace(event: SpaceEvent) {
   switch (event.type) {
     case "space.created":
       return { owners: ["spaces"] as const, spaceIds: [event.space.id] };
+    case "space.deleted":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.spaceId],
+        referenceIds: event.removedReferenceIds,
+      };
     case "space.reference_added":
       return {
         owners: ["spaces"] as const,
@@ -723,6 +729,12 @@ function projectionChangeFromSpace(event: SpaceEvent) {
         owners: ["spaces"] as const,
         spaceIds: [event.spaceId],
         referenceIds: event.removedItemIds,
+      };
+    case "space.reference_status_changed":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.spaceId],
+        referenceIds: [event.itemId],
       };
   }
 }
@@ -763,10 +775,15 @@ function managedKnowledgeAssetWriteError(error: unknown): unknown {
   }
 }
 
+/**
+ * 挂载身份统一使用斜杠分隔，使同 Space 的父子重叠检测可以按路径段边界比较。
+ * Windows 走不区分大小写的规范形式，Unix 保留大小写语义。
+ */
 async function canonicalWorkspaceMountIdentity(value: string): Promise<string> {
   const absolute = path.resolve(value);
   const canonical = await fs.realpath(absolute).catch(() => absolute);
-  return process.platform === "win32" ? canonical.toLocaleLowerCase("en-US") : canonical;
+  const slashed = canonical.replaceAll("\\", "/").replace(/(?<=[^/])\/+$/u, "");
+  return process.platform === "win32" ? slashed.toLocaleLowerCase("en-US") : slashed;
 }
 
 function resolveRuntimeHome(input: {

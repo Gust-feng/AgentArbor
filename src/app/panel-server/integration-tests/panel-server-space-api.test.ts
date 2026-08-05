@@ -105,6 +105,33 @@ test("Space API organizes reference metadata without altering the referenced con
   }
 });
 
+test("Space API deletes a Space and its links without deleting referenced sources", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-delete-api-"));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "临时空间" } });
+    const spaceId = created.body.space.id as string;
+    await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: {
+        title: "保留的讨论",
+        reference: { kind: "conversation", conversationId: "ordinary-conversation-delete", conversationTitle: "保留的讨论" },
+      },
+    });
+
+    const removed = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`, { method: "DELETE" });
+    assert.equal(removed.status, 200);
+    const spaces = await requestJson(baseUrl, "/api/spaces");
+    assert.equal((spaces.body.spaces as Array<{ id: string }>).some((space) => space.id === spaceId), false);
+    assert.equal((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`)).status, 404);
+    assert.equal((await runtime.ordinaryAgentFeature.queries.listConversations()).length, 0);
+    assert.equal((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`, { method: "DELETE" })).status, 404);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Space API rejects malformed references and reports missing entries", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-errors-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
@@ -768,8 +795,8 @@ test("Space API browses and edits text inside a referenced folder without escapi
   }
 });
 
-test("Space API blocks every disk mutation when historical Spaces share one workspace mount", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-conflicting-mounts-"));
+test("Space API keeps one workspace mount writable when several Spaces reference it", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-shared-mounts-"));
   const sourceRoot = path.join(directory, "source");
   await fs.mkdir(sourceRoot);
   await fs.writeFile(path.join(sourceRoot, "note.md"), "original", "utf8");
@@ -781,41 +808,31 @@ test("Space API blocks every disk mutation when historical Spaces share one work
       method: "POST",
       body: { title: "source", reference: { kind: "workspace_folder", path: sourceRoot } },
     });
-    const secondReferenceId = "historical-duplicate-reference";
-    runtime.workbenchDatabase.connection.prepare(`
-      INSERT INTO space_references(id, space_id, title, reference_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      secondReferenceId,
-      secondSpace.body.space.id,
-      "source duplicate",
-      JSON.stringify({ kind: "workspace_folder", path: sourceRoot }),
-      new Date().toISOString(),
-      new Date().toISOString(),
-    );
+    const secondReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(secondSpace.body.space.id as string)}/references`, {
+      method: "POST",
+      body: { title: "同一个 source", reference: { kind: "workspace_folder", path: sourceRoot } },
+    });
+    assert.equal(secondReference.status, 201);
 
     const itemId = firstReference.body.item.id as string;
-    const attempts = [
-      await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
-        method: "POST", body: { parentRelativePath: "", name: "new.md", kind: "file" },
-      }),
-      await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
-        method: "PATCH", body: { relativePath: "note.md", name: "renamed.md" },
-      }),
-      await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/content`, {
-        method: "PUT", body: { relativePath: "note.md", expectedFingerprint: "stale", text: "changed" },
-      }),
-      await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
-        method: "DELETE", body: { relativePath: "note.md" },
-      }),
-    ];
-    for (const attempt of attempts) {
-      assert.equal(attempt.status, 409);
-      assert.equal(attempt.body.error.code, "space_workspace_mount_conflict");
-    }
-    assert.equal(await fs.readFile(path.join(sourceRoot, "note.md"), "utf8"), "original");
-    assert.equal(await fs.stat(path.join(sourceRoot, "new.md")).then(() => true, () => false), false);
-    assert.equal(await fs.stat(path.join(sourceRoot, "renamed.md")).then(() => true, () => false), false);
+    const secondReferenceId = secondReference.body.item.id as string;
+    assert.notEqual(itemId, secondReferenceId);
+
+    const created = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
+      method: "POST", body: { parentRelativePath: "", name: "new.md", kind: "file" },
+    });
+    assert.equal(created.status, 201);
+
+    const preview = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(secondReferenceId)}/preview?path=note.md`);
+    assert.equal(preview.status, 200);
+    const written = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(secondReferenceId)}/content`, {
+      method: "PUT",
+      body: { relativePath: "note.md", expectedFingerprint: preview.body.preview.fingerprint, text: "changed" },
+    });
+    assert.equal(written.status, 200);
+
+    assert.equal(await fs.readFile(path.join(sourceRoot, "note.md"), "utf8"), "changed");
+    assert.equal(await fs.stat(path.join(sourceRoot, "new.md")).then(() => true, () => false), true);
 
     const unlinked = await requestJson(
       baseUrl,
@@ -823,7 +840,86 @@ test("Space API blocks every disk mutation when historical Spaces share one work
       { method: "POST", body: {} },
     );
     assert.equal(unlinked.status, 200);
-    assert.equal(await fs.readFile(path.join(sourceRoot, "note.md"), "utf8"), "original");
+    assert.equal(await fs.readFile(path.join(sourceRoot, "note.md"), "utf8"), "changed");
+
+    const survivor = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}/entry`, {
+      method: "PATCH", body: { relativePath: "note.md", name: "renamed.md" },
+    });
+    assert.equal(survivor.status, 200);
+    assert.equal(await fs.readFile(path.join(sourceRoot, "renamed.md"), "utf8"), "changed");
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Space API marks a vanished reference unavailable and restores it without losing the link", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-availability-"));
+  const sourceRoot = path.join(directory, "source");
+  const keptRoot = path.join(directory, "kept");
+  await fs.mkdir(sourceRoot, { recursive: true });
+  await fs.mkdir(keptRoot, { recursive: true });
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "对账" } });
+    const spaceId = created.body.space.id as string;
+    const referencesPath = `/api/spaces/${encodeURIComponent(spaceId)}/references`;
+    const vanishing = await requestJson(baseUrl, referencesPath, {
+      method: "POST", body: { title: "source", reference: { kind: "workspace_folder", path: sourceRoot } },
+    });
+    const kept = await requestJson(baseUrl, referencesPath, {
+      method: "POST", body: { title: "kept", reference: { kind: "workspace_folder", path: keptRoot } },
+    });
+    const vanishingId = vanishing.body.item.id as string;
+    const keptId = kept.body.item.id as string;
+    const treePath = `/api/spaces/${encodeURIComponent(spaceId)}`;
+    const statusOf = (tree: { body: { tree: { entries: readonly { item: { id: string; status?: string } }[] } } }, id: string) =>
+      tree.body.tree.entries.find((entry) => entry.item.id === id)?.item.status;
+
+    const initial = await requestJson(baseUrl, treePath);
+    assert.equal(statusOf(initial, vanishingId), "available");
+    assert.equal(statusOf(initial, keptId), "available");
+
+    await removeTemporaryTree(sourceRoot);
+    const afterLoss = await requestJson(baseUrl, treePath);
+
+    assert.equal(statusOf(afterLoss, vanishingId), "unavailable");
+    assert.equal(statusOf(afterLoss, keptId), "available");
+
+    await fs.mkdir(sourceRoot, { recursive: true });
+    const afterRestore = await requestJson(baseUrl, treePath);
+
+    assert.equal(statusOf(afterRestore, vanishingId), "available");
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Space API rejects overlapping workspace mounts inside one Space", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-overlapping-mounts-"));
+  const sourceRoot = path.join(directory, "source");
+  const nestedRoot = path.join(sourceRoot, "nested");
+  await fs.mkdir(nestedRoot, { recursive: true });
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const space = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "项目" } });
+    const referencesPath = `/api/spaces/${encodeURIComponent(space.body.space.id as string)}/references`;
+    await requestJson(baseUrl, referencesPath, {
+      method: "POST", body: { title: "source", reference: { kind: "workspace_folder", path: sourceRoot } },
+    });
+
+    const nested = await requestJson(baseUrl, referencesPath, {
+      method: "POST", body: { title: "nested", reference: { kind: "workspace_folder", path: nestedRoot } },
+    });
+    assert.equal(nested.status, 409);
+    assert.equal(nested.body.error.code, "space_workspace_mount_conflict");
+
+    const duplicate = await requestJson(baseUrl, referencesPath, {
+      method: "POST", body: { title: "duplicate", reference: { kind: "workspace_folder", path: sourceRoot } },
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.body.error.code, "space_workspace_mount_conflict");
   } finally {
     await closePanelServer(httpServer, runtime);
     await removeTemporaryTree(directory);

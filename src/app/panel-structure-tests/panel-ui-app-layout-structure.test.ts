@@ -5,9 +5,8 @@ import test from "node:test";
 import { readPanelUiSource } from "./panel-structure-test-utils.js";
 
 test("the personal workbench owns the active shell layout", async () => {
-  const [workbench, router, sidebar, topBar, spaceManager, renameField, sidebarRows] = await Promise.all([
+  const [workbench, sidebar, topBar, spaceManager, renameField, sidebarRows] = await Promise.all([
     readPanelUiSource(path.join("personal-workbench", "workbench", "agentarbor-workbench.tsx")),
-    readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "WorkbenchViewRouter.tsx")),
     readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "Sidebar.tsx")),
     readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "TopBar.tsx")),
     readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "SpaceManagerDialog.tsx")),
@@ -17,11 +16,12 @@ test("the personal workbench owns the active shell layout", async () => {
 
   assert.match(workbench, /<Sidebar/u);
   assert.match(workbench, /<TopBar/u);
-  assert.match(workbench, /<WorkbenchViewRouter/u);
-  assert.match(router, /<HomePage/u);
-  assert.match(router, /<SpacePage/u);
-  assert.match(router, /<BrainPage/u);
-  assert.match(router, /<ConversationSurface/u);
+  // The active view routing and conversation surface are owned by the workbench.
+  assert.match(workbench, /function renderView/u);
+  assert.match(workbench, /function ConversationSurface/u);
+  assert.match(workbench, /<HomePage/u);
+  assert.match(workbench, /<SpacePage/u);
+  assert.match(workbench, /<BrainPage/u);
   assert.match(sidebar, /export function Sidebar/u);
   assert.match(sidebar, /from '\.\/SpaceManagerDialog'/u);
   assert.match(topBar, /<DesktopWindowControls/u);

@@ -5,11 +5,10 @@ import test from "node:test";
 import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
 
 test("panel conversation rendering has one workbench-owned production path", async () => {
-  const [main, personalWorkbench, workbench, conversationSurface, transcript, evidence, confirmation, topBar, richText, richTextStyle, globalStyles, styleEntry] = await Promise.all([
+  const [main, personalWorkbench, workbench, transcript, evidence, confirmation, topBar, richText, richTextStyle, globalStyles, styleEntry] = await Promise.all([
     readPanelUiSource("main.tsx"),
     readPanelUiSource(path.join("personal-workbench", "personal-workbench.tsx")),
     readPanelUiSource(path.join("personal-workbench", "workbench", "agentarbor-workbench.tsx")),
-    readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "ConversationSurface.tsx")),
     readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "ConversationTranscript.tsx")),
     readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "ActivityEvidence.tsx")),
     readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "ConfirmationCard.tsx")),
@@ -22,9 +21,13 @@ test("panel conversation rendering has one workbench-owned production path", asy
 
   assert.match(main, /import "\.\/personal-workbench\/workbench\/styles\/index\.css"/u);
   assert.match(personalWorkbench, /from "\.\/workbench\/app\/App"/u);
-  assert.match(workbench, /<WorkbenchViewRouter/u);
-  assert.match(conversationSurface, /<ConversationTranscript/u);
-  assert.match(conversationSurface, /projectChatActiveView/u);
+  // Active path: agentarbor-workbench.tsx routes views via the inline renderView and
+  // owns the conversation surface via the inline ConversationSurface + projectConversationSurface.
+  assert.match(workbench, /function renderView/u);
+  assert.match(workbench, /function ConversationSurface/u);
+  assert.match(workbench, /projectConversationSurface/u);
+  assert.match(workbench, /<ConversationTranscript/u);
+  assert.match(workbench, /projectChatActiveView/u);
   assert.match(workbench, /surfaceTitle=\{surfaceTitle\}/u);
   assert.doesNotMatch(topBar, /关于机器学习的学习方法|认知偏见与阅读整理/u);
 

@@ -311,7 +311,7 @@ Workbench Shell
 - `src/app/tool-center/adapters/local-workspace-sandbox.ts`：应用层路径/大小/命令策略；它不是 OS 级沙盒。
 - `src/app/tool-center/adapters/local-workspace-command-tools.ts`：前后台 Shell、日志、端口等待和进程树终止。
 
-迁移期间必须明确以下差异：当前 `SpaceWrite`/`SpaceEdit` 主要接受 `referenceId + relativePath`，目标契约改为模型可见绝对路径并在后端解析到内部身份；当前 Task Soil 快照规则不能阻止撤销后的活动 Run 继续访问，必须增加即时 deny overlay；当前 Space 删除和 Ordinary Conversation 级联清理若未完全接线，不能在 UI 中声称已经完成；当前 Shell 的应用层策略不能宣传成强制沙盒。
+当前已收敛状态：`SpaceWrite`/`SpaceEdit` 已改为接受模型可见真实绝对路径，后端按冻结授权反查所属引用并换根，模型不再使用 `referenceId + relativePath`；`status` 非 `available` 的引用不再进入 Run 冻结授权。待收敛项：Run 冻结快照仍不能阻止撤销后的活动 Run 继续访问，必须增加即时 deny overlay；Space 删除与 Ordinary Conversation 级联清理若未完全接线，不能在 UI 中声称已完成；Shell 的应用层策略不能宣传成强制沙盒。
 
 ## 11. 建议状态与错误码
 

@@ -71,6 +71,7 @@ import {
   type AgentNotesFeature,
 } from "../agent-notes/index.js";
 import {
+  canonicalSpacePathIdentity,
   createFileSystemSpaceReferenceDeletionJournal,
   createSqliteSpaceRepository,
   createSpaceFeature,
@@ -780,10 +781,7 @@ function managedKnowledgeAssetWriteError(error: unknown): unknown {
  * Windows 走不区分大小写的规范形式，Unix 保留大小写语义。
  */
 async function canonicalWorkspaceMountIdentity(value: string): Promise<string> {
-  const absolute = path.resolve(value);
-  const canonical = await fs.realpath(absolute).catch(() => absolute);
-  const slashed = canonical.replaceAll("\\", "/").replace(/(?<=[^/])\/+$/u, "");
-  return process.platform === "win32" ? slashed.toLocaleLowerCase("en-US") : slashed;
+  return await canonicalSpacePathIdentity(value, (target) => fs.realpath(target));
 }
 
 function resolveRuntimeHome(input: {

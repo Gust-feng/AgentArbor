@@ -52,6 +52,12 @@ export {
   type SpaceToolOptions,
 } from "./space-tools.js";
 export {
+  canonicalSpacePathIdentity,
+  resolveSpacePath,
+  type SpacePathIdentity,
+  type SpacePathResolution,
+} from "./space-path-resolver.js";
+export {
   isSpaceReferenceWritePermission,
   spaceReferenceAttachmentId,
   spaceReferenceIdFromAttachmentId,

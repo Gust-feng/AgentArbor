@@ -1,10 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
-  PANEL_BRAND_LEGACY_ICON_PATHNAME,
   PANEL_BRAND_LOGO_PATHNAME,
   createPanelHtml,
-  readPanelBrandIconAsset,
   readPanelBrandLogoAsset,
   readPanelStaticAsset,
 } from "./panel-assets.js";
@@ -197,16 +195,6 @@ async function handlePanelRequest(
 
   if (request.method === "GET" && url.pathname === PANEL_BRAND_LOGO_PATHNAME) {
     const asset = readPanelBrandLogoAsset();
-    response.writeHead(200, {
-      "content-type": asset.contentType,
-      "cache-control": "no-store",
-    });
-    response.end(asset.body);
-    return;
-  }
-
-  if (request.method === "GET" && url.pathname === PANEL_BRAND_LEGACY_ICON_PATHNAME) {
-    const asset = readPanelBrandIconAsset();
     response.writeHead(200, {
       "content-type": asset.contentType,
       "cache-control": "no-store",

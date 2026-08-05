@@ -37,6 +37,10 @@ import {
   electronAutoUpdaterFromModule,
   type ElectronUpdaterLike,
 } from "../app-update/electron-app-update-service.js";
+import {
+  AGENTARBOR_APP_NAME,
+  desktopAppUserModelId,
+} from "./panel-desktop-identity.js";
 
 const activeWindows = new Set<BrowserWindow>();
 const activeDesktopSessions = new Set<PanelDesktopSession>();
@@ -61,8 +65,6 @@ const WINDOW_CLOSE_CHANNEL = "agentarbor:window-close";
 const LOCAL_PREFERENCE_GET_CHANNEL = "agentarbor:local-preference-get";
 const LOCAL_PREFERENCE_SET_CHANNEL = "agentarbor:local-preference-set";
 const STARTUP_ANIMATION_PREFERENCE_KEY = "agentarbor:startup-animation";
-const AGENTARBOR_APP_ID = "com.agentarbor.desktop";
-const AGENTARBOR_APP_NAME = "AgentArbor";
 const STARTUP_WINDOW_EXPAND_MS = 720;
 const STARTUP_WINDOW_REDUCED_MOTION_MS = 80;
 const STARTUP_WINDOW_RENDERER_SETTLE_MS = 80;
@@ -282,7 +284,7 @@ function exitDesktopAfterCleanup(exitCode: number): void {
 function configureDesktopAppIdentity(): void {
   app.setName(AGENTARBOR_APP_NAME);
   if (process.platform === "win32") {
-    app.setAppUserModelId(AGENTARBOR_APP_ID);
+    app.setAppUserModelId(desktopAppUserModelId(app.isPackaged));
   }
   try {
     app.setPath("userData", path.join(app.getPath("appData"), AGENTARBOR_APP_NAME));

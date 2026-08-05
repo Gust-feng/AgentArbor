@@ -14,7 +14,7 @@ test("panel desktop window options keep secure defaults", () => {
   const options = createPanelDesktopWindowOptions();
   const { icon, ...stableOptions } = options;
 
-  assert.equal(isPanelBrandLogoPath(icon), true);
+  assert.equal(isPanelDesktopIconPath(icon), true);
   assert.deepEqual(stableOptions, {
     title: "AgentArbor",
     width: 1440,
@@ -593,9 +593,6 @@ function createFakePanelDesktopWindow(): FakePanelDesktopWindow {
   };
 }
 
-function isPanelBrandLogoPath(value: string): boolean {
-  return (
-    value.endsWith(path.join("src", "app", "panel-ui", "public", "favicon.png")) ||
-    value.endsWith(path.join("dist", "app", "panel-ui", "favicon.png"))
-  );
+function isPanelDesktopIconPath(value: string): boolean {
+  return value.endsWith(path.join("dist", "app", "desktop-assets", "favicon.png"));
 }

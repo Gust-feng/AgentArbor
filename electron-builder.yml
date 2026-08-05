@@ -24,15 +24,15 @@ publish:
   repo: AgentArbor
   releaseType: release
 win:
-  icon: src/app/panel-ui/public/favicon.ico
+  icon: build/icons/favicon.ico
   target:
     - target: nsis
       arch:
         - x64
   artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
 nsis:
-  installerIcon: src/app/panel-ui/public/favicon.ico
-  uninstallerIcon: src/app/panel-ui/public/favicon.ico
+  installerIcon: build/icons/favicon.ico
+  uninstallerIcon: build/icons/favicon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

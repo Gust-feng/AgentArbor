@@ -11,7 +11,7 @@
   "scripts": {
     "clean:dist": "node scripts/clean-dist.mjs",
     "build": "pnpm clean:dist && pnpm build:node && pnpm copy:sub-agents && pnpm typecheck:panel && pnpm build:panel",
-    "build:node": "tsc -p tsconfig.json",
+    "build:node": "pnpm generate:icons && tsc -p tsconfig.json",
     "copy:sub-agents": "node scripts/copy-sub-agent-assets.mjs",
     "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
     "build:panel": "vite build --config vite.panel.config.ts",
@@ -29,11 +29,12 @@
     "panel:desktop": "pnpm build && pnpm exec electron dist/app/panel-desktop.js",
     "panel:desktop:smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --smoke",
     "panel:desktop:window-smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --window-smoke",
-    "generate:windows-icon": "node scripts/generate-windows-icon.mjs",
-    "dist:desktop:win": "pnpm generate:windows-icon && pnpm build && pnpm exec electron-builder --win nsis --x64 --publish never",
+    "generate:icons": "node scripts/generate-icon-assets.mjs",
+    "dist:desktop:win": "pnpm build && pnpm exec electron-builder --win nsis --x64 --publish never",
     "publish:desktop:win": "pnpm dist:desktop:win && node scripts/publish-windows-release.mjs"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
     "@tailwindcss/vite": "4.3.0",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.2",

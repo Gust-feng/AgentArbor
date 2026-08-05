@@ -38,12 +38,14 @@ const electronBin = path.join(root, "node_modules", "electron", "cli.js");
 const packageJson = path.join(root, "package.json");
 const tsconfig = path.join(root, "tsconfig.json");
 const copySubAgentsScript = path.join(root, "scripts", "copy-sub-agent-assets.mjs");
+const generateIconsScript = path.join(root, "scripts", "generate-icon-assets.mjs");
 const panelEntry = path.join(root, "dist", "app", "panel.js");
 const panelDesktopEntry = path.join(root, "dist", "app", "panel-desktop.js");
 
 assertLocalFile(packageJson, "package.json");
 assertLocalFile(tsconfig, "tsconfig.json");
 assertLocalFile(copySubAgentsScript, "scripts/copy-sub-agent-assets.mjs");
+assertLocalFile(generateIconsScript, "scripts/generate-icon-assets.mjs");
 assertLocalTool(tscBin, "typescript");
 assertLocalTool(viteBin, "vite");
 if (args.desktop) {
@@ -250,6 +252,13 @@ function assertLocalTool(filePath, packageName) {
 }
 
 function runInitialNodeBuild() {
+  const iconResult = spawnSync(process.execPath, [generateIconsScript], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (iconResult.status !== 0) {
+    throw new Error(`Initial icon generation failed with code ${iconResult.status ?? 1}.`);
+  }
   const result = spawnSync(process.execPath, [tscBin, "-p", tsconfig], {
     cwd: root,
     stdio: "inherit",

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
-import { OrdinaryFeatureError, type OrdinaryExecutionOutcome, type OrdinaryExecutionPort, type OrdinaryFeatureDiagnostic, type OrdinaryRunRepository, type OrdinaryRunState } from "./contracts.js";
+import { OrdinaryFeatureError, type OrdinaryConversationControlRepository, type OrdinaryExecutionOutcome, type OrdinaryExecutionPort, type OrdinaryFeatureDiagnostic, type OrdinaryRunRepository, type OrdinaryRunState } from "./contracts.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
@@ -78,6 +78,349 @@ test("failed first submission removes an uncommitted conversation birth so the s
   const retried = await feature.commands.submitTurn(request);
   const completed = await waitForStatus(feature, retried.run.runId, "completed");
   assert.equal(completed.status.kind, "completed");
+});
+
+test("control save with an unknown commit result cannot expose its deleted Session to retry", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-control-unknown-commit-"));
+  const sessions = new SessionHarness();
+  const durableControls = createFileSystemOrdinaryConversationControlRepository(root);
+  let failSaveAfterCommit = true;
+  let failFirstReconciliationRead = false;
+  const controls: OrdinaryConversationControlRepository = {
+    async save(state, expectedRevision, savedAt) {
+      const saved = await durableControls.save(state, expectedRevision, savedAt);
+      if (failSaveAfterCommit) {
+        failSaveAfterCommit = false;
+        failFirstReconciliationRead = true;
+        throw new Error("conversation control response unavailable after commit");
+      }
+      return saved;
+    },
+    async get(conversationId) {
+      if (failFirstReconciliationRead) {
+        failFirstReconciliationRead = false;
+        throw new Error("conversation control reconciliation unavailable");
+      }
+      return durableControls.get(conversationId);
+    },
+    list: (limit) => durableControls.list(limit),
+    delete: (conversationId, expectedRevision) => durableControls.delete(conversationId, expectedRevision),
+  };
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+  const request = {
+    submissionId: "control-unknown-commit",
+    input: { userMessage: "retry the control birth" },
+    birth: ordinaryRunBirth(),
+  };
+
+  await assert.rejects(feature.commands.submitTurn(request), /response unavailable after commit/u);
+  const oldControl = await durableControls.get("conversation:control-unknown-commit");
+  assert.ok(oldControl);
+  assert.equal(sessions.created.length, 1);
+  assert.deepEqual(sessions.deleted, []);
+
+  const retried = await feature.commands.submitTurn(request);
+  await waitForStatus(feature, retried.run.runId, "completed");
+  const finalControl = await durableControls.get(retried.conversation.conversationId);
+  assert.ok(finalControl);
+  assert.equal(sessions.created.length, 2);
+  assert.equal(finalControl.state.sessionRef.sessionId, sessions.created[1]?.sessionId);
+  assert.deepEqual(sessions.deleted, [oldControl.state.sessionRef.sessionId]);
+});
+
+test("run save with an unknown commit result is removed before the same submission retries", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-run-unknown-commit-"));
+  const sessions = new SessionHarness();
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  let failSaveAfterCommit = true;
+  let failFirstReconciliationRead = false;
+  let failFirstCleanupDelete = true;
+  let uncertainRunId: string | undefined;
+  const repository: OrdinaryRunRepository = {
+    ...durableRepository,
+    async save(state, expectedRevision) {
+      if (failSaveAfterCommit && expectedRevision === 0) {
+        await durableRepository.save(state, expectedRevision);
+        failSaveAfterCommit = false;
+        failFirstReconciliationRead = true;
+        uncertainRunId = state.runId;
+        throw new Error("run response unavailable after commit");
+      }
+      return durableRepository.save(state, expectedRevision);
+    },
+    async get(runId) {
+      if (failFirstReconciliationRead && runId === uncertainRunId) {
+        failFirstReconciliationRead = false;
+        throw new Error("run reconciliation unavailable");
+      }
+      return durableRepository.get(runId);
+    },
+    async delete(runId) {
+      if (failFirstCleanupDelete && runId === uncertainRunId) {
+        failFirstCleanupDelete = false;
+        throw new Error("run cleanup temporarily unavailable");
+      }
+      await durableRepository.delete(runId);
+    },
+  };
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+  const request = {
+    submissionId: "run-unknown-commit",
+    input: { userMessage: "retry the run birth" },
+    birth: ordinaryRunBirth(),
+  };
+
+  await assert.rejects(feature.commands.submitTurn(request), /response unavailable after commit/u);
+  if (uncertainRunId === undefined) assert.fail("the failed save must record its uncertain run id");
+  assert.ok(await durableRepository.get(uncertainRunId));
+  assert.ok(await controls.get("conversation:run-unknown-commit"));
+  assert.equal(sessions.created.length, 1);
+  assert.deepEqual(sessions.deleted, []);
+
+  const retried = await feature.commands.submitTurn(request);
+  await waitForStatus(feature, retried.run.runId, "completed");
+  assert.equal(await durableRepository.get(uncertainRunId), undefined);
+  assert.equal(sessions.created.length, 2);
+  assert.deepEqual(sessions.deleted, [sessions.created[0]?.sessionId]);
+  assert.notEqual(retried.run.runId, uncertainRunId);
+  assert.ok(await durableRepository.get(retried.run.runId));
+});
+
+test("restart adopts an uncertain committed run when cleanup could not remove it", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-run-unknown-restart-"));
+  const sessions = new SessionHarness();
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  let failSaveAfterCommit = true;
+  let failFirstReconciliationRead = false;
+  let failFirstCleanupDelete = true;
+  let uncertainRunId: string | undefined;
+  const repository: OrdinaryRunRepository = {
+    ...durableRepository,
+    async save(state, expectedRevision) {
+      if (failSaveAfterCommit && expectedRevision === 0) {
+        await durableRepository.save(state, expectedRevision);
+        failSaveAfterCommit = false;
+        failFirstReconciliationRead = true;
+        uncertainRunId = state.runId;
+        throw new Error("run response unavailable after commit");
+      }
+      return durableRepository.save(state, expectedRevision);
+    },
+    async get(runId) {
+      if (failFirstReconciliationRead && runId === uncertainRunId) {
+        failFirstReconciliationRead = false;
+        throw new Error("run reconciliation unavailable");
+      }
+      return durableRepository.get(runId);
+    },
+    async delete(runId) {
+      if (failFirstCleanupDelete && runId === uncertainRunId) {
+        failFirstCleanupDelete = false;
+        throw new Error("run cleanup temporarily unavailable");
+      }
+      await durableRepository.delete(runId);
+    },
+  };
+  const first = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+    now: clock(),
+    idFactory: ids(),
+  });
+  const request = {
+    submissionId: "run-unknown-restart",
+    input: { userMessage: "recover the committed run" },
+    birth: ordinaryRunBirth(),
+  };
+
+  await assert.rejects(first.commands.submitTurn(request), /response unavailable after commit/u);
+  if (uncertainRunId === undefined) assert.fail("the failed save must record its uncertain run id");
+  assert.ok(await durableRepository.get(uncertainRunId));
+  assert.deepEqual(sessions.deleted, []);
+  await first.release();
+
+  const restarted = createOrdinaryAgentFeature({
+    repository: durableRepository,
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+  });
+  t.after(async () => { await restarted.release(); await removeTestDirectory(root); });
+  const recovered = await restarted.commands.submitTurn(request);
+  assert.equal(recovered.run.runId, uncertainRunId);
+  await waitForStatus(restarted, recovered.run.runId, "completed");
+  assert.equal(sessions.created.length, 1);
+  assert.deepEqual(sessions.deleted, []);
+});
+
+test("same submission finishes pending birth cleanup before creating a replacement Session", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-conversation-birth-cleanup-race-"));
+  const sessions = new SessionHarness();
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  let failInitialSave = true;
+  const repository: OrdinaryRunRepository = {
+    ...durableRepository,
+    async save(state, expectedRevision) {
+      if (failInitialSave && expectedRevision === 0) {
+        failInitialSave = false;
+        throw new Error("initial run snapshot unavailable");
+      }
+      return durableRepository.save(state, expectedRevision);
+    },
+  };
+  const durableControls = createFileSystemOrdinaryConversationControlRepository(root);
+  let controlDeleteAttempts = 0;
+  const controls: OrdinaryConversationControlRepository = {
+    save: (state, expectedRevision, savedAt) => durableControls.save(state, expectedRevision, savedAt),
+    get: (conversationId) => durableControls.get(conversationId),
+    list: (limit) => durableControls.list(limit),
+    async delete(conversationId, expectedRevision) {
+      controlDeleteAttempts += 1;
+      if (controlDeleteAttempts <= 2) throw new Error("transient conversation control cleanup failure");
+      await durableControls.delete(conversationId, expectedRevision);
+    },
+  };
+  const feature = createOrdinaryAgentFeature({
+    repository,
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  const request = {
+    submissionId: "birth-cleanup-race",
+    input: { userMessage: "retry without reusing a deleted Session" },
+    birth: ordinaryRunBirth(),
+  };
+  await assert.rejects(feature.commands.submitTurn(request), /initial run snapshot unavailable/u);
+  assert.equal(controlDeleteAttempts, 1);
+  assert.equal(sessions.created.length, 1);
+  assert.deepEqual(sessions.deleted, [sessions.created[0]?.sessionId]);
+
+  await assert.rejects(
+    feature.commands.submitTurn(request),
+    (error: unknown) => error instanceof OrdinaryFeatureError &&
+      error.code === "ordinary_conversation_cleanup_pending",
+  );
+  assert.equal(controlDeleteAttempts, 2);
+  assert.equal(sessions.created.length, 1);
+
+  const retried = await feature.commands.submitTurn(request);
+  await waitForStatus(feature, retried.run.runId, "completed");
+  await waitForCondition(() => controlDeleteAttempts >= 3);
+
+  const finalControl = await durableControls.get(retried.conversation.conversationId);
+  assert.ok(finalControl);
+  assert.equal(sessions.created.length, 2);
+  assert.equal(finalControl.state.sessionRef.sessionId, sessions.created[1]?.sessionId);
+  assert.notEqual(finalControl.state.sessionRef.sessionId, sessions.deleted[0]);
+  assert.ok(await durableRepository.get(retried.run.runId));
+});
+
+test("startup keeps an orphan control when Session cleanup fails so the next start can retry", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-startup-orphan-cleanup-retry-"));
+  t.after(() => removeTestDirectory(root));
+  const sessions = new FailOnceDeleteSessionHarness();
+  const sessionRef = ordinaryAgentSessionRef("orphan-session");
+  sessions.ensure(sessionRef);
+  const controls = createFileSystemOrdinaryConversationControlRepository(root);
+  const conversationId = "orphan-conversation";
+  await controls.save({
+    conversationId,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    sessionRef,
+  }, 0, "2026-01-01T00:00:00.000Z");
+
+  const first = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+  });
+  await first.queries.listConversations();
+  assert.ok(await controls.get(conversationId), "the control must remain available after a failed Session delete");
+  await first.release();
+
+  sessions.failuresRemaining = 0;
+  const restarted = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+  });
+  await restarted.queries.listConversations();
+  assert.equal(await controls.get(conversationId), undefined);
+  assert.deepEqual(sessions.deleteAttempts, [sessionRef.sessionId, sessionRef.sessionId]);
+  await restarted.release();
+});
+
+test("startup retries an orphan control delete after its Session was removed", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-startup-orphan-control-cleanup-retry-"));
+  t.after(() => removeTestDirectory(root));
+  const sessions = new SessionHarness();
+  const sessionRef = ordinaryAgentSessionRef("orphan-control-session");
+  sessions.ensure(sessionRef);
+  const durableControls = createFileSystemOrdinaryConversationControlRepository(root);
+  const conversationId = "orphan-control-conversation";
+  await durableControls.save({
+    conversationId,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    sessionRef,
+  }, 0, "2026-01-01T00:00:00.000Z");
+  let controlDeleteAttempts = 0;
+  const controls: OrdinaryConversationControlRepository = {
+    save: (state, expectedRevision, savedAt) => durableControls.save(state, expectedRevision, savedAt),
+    get: (id) => durableControls.get(id),
+    list: (limit) => durableControls.list(limit),
+    async delete(id, expectedRevision) {
+      controlDeleteAttempts += 1;
+      if (controlDeleteAttempts === 1) throw new Error("transient conversation control cleanup failure");
+      await durableControls.delete(id, expectedRevision);
+    },
+  };
+  const feature = createOrdinaryAgentFeature({
+    repository: createFileSystemOrdinaryRunRepository(root),
+    conversationRepository: controls,
+    execution: immediateExecution(sessions),
+    sessionRepository: sessions,
+  });
+
+  await feature.queries.listConversations();
+  await waitForCondition(async () => {
+    if (controlDeleteAttempts < 2) return false;
+    try {
+      return await durableControls.get(conversationId) === undefined;
+    } catch {
+      return false;
+    }
+  });
+
+  assert.equal(await durableControls.get(conversationId), undefined);
+  assert.deepEqual(sessions.deleteAttempts, [sessionRef.sessionId, sessionRef.sessionId]);
+  await feature.release();
 });
 
 test("conversation projection reads completed Session answers in one batch", async (t) => {
@@ -494,10 +837,10 @@ async function complete(input: Parameters<OrdinaryExecutionPort["execute"]>[0], 
   return { status: "completed", answer, session: { ...session, latestLeafRef: assistantEntryRef }, toolCalls: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
 }
 
-async function waitForCondition(predicate: () => boolean): Promise<void> {
+async function waitForCondition(predicate: () => boolean | Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
   throw new Error("Timed out waiting for Ordinary conversation cleanup");
@@ -534,6 +877,7 @@ async function removeTestDirectory(root: string): Promise<void> {
 
 type SessionNode = { readonly ref: AgentSessionEntryRef; readonly parent: AgentSessionEntryRef | null; readonly text: string };
 class SessionHarness implements AgentSessionRepository {
+  readonly created: AgentSessionRef[] = [];
   readonly deleted: string[] = [];
   readonly deleteAttempts: string[] = [];
   readonly assistantEntryReadBatches: string[][] = [];
@@ -542,7 +886,7 @@ class SessionHarness implements AgentSessionRepository {
   private readonly refs = new Map<string, AgentSessionRef>();
   ensure(ref: AgentSessionRef): void { this.refs.set(ref.sessionId, ref); this.nodes.set(ref.sessionId, this.nodes.get(ref.sessionId) ?? new Map()); if (!this.active.has(ref.sessionId)) this.active.set(ref.sessionId, null); }
   append(ref: AgentSessionRef, entryId: string, parent = this.active.get(ref.sessionId) ?? null, text = ""): AgentSessionEntryRef { this.ensure(ref); const entry = { sessionId: ref.sessionId, entryId }; this.nodes.get(ref.sessionId)!.set(entryId, { ref: entry, parent, text }); this.active.set(ref.sessionId, entry); return entry; }
-  async create(input: { readonly sessionId: string; readonly sessionCwd: string }): Promise<AgentSessionRef> { const ref = { ...ordinaryAgentSessionRef(input.sessionId), sessionCwd: input.sessionCwd }; this.ensure(ref); return ref; }
+  async create(input: { readonly sessionId: string; readonly sessionCwd: string }): Promise<AgentSessionRef> { const ref = { ...ordinaryAgentSessionRef(input.sessionId), sessionCwd: input.sessionCwd }; this.created.push(ref); this.ensure(ref); return ref; }
   async getActiveLeaf(ref: AgentSessionRef): Promise<AgentSessionEntryRef | null> { this.ensure(ref); return this.active.get(ref.sessionId) ?? null; }
   async moveActiveLeaf(ref: AgentSessionRef, target: AgentSessionEntryRef | null): Promise<AgentSessionEntryRef | null> { this.ensure(ref); this.active.set(ref.sessionId, target); return target; }
   async getActiveBranchEntryRefs(ref: AgentSessionRef): Promise<readonly AgentSessionEntryRef[]> { const result: AgentSessionEntryRef[] = []; let current = this.active.get(ref.sessionId) ?? null; while (current !== null) { result.push(current); current = this.nodes.get(ref.sessionId)?.get(current.entryId)?.parent ?? null; } return result.reverse(); }
@@ -553,4 +897,16 @@ class SessionHarness implements AgentSessionRepository {
   async readToolCalls(_input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef }): Promise<readonly ToolCallRequest[]> { return []; }
   async reconcileToolResultEntries(input: { readonly sessionRef: AgentSessionRef; readonly assistantEntryRef: AgentSessionEntryRef; readonly orderedResults: readonly ToolCallResult[] }): Promise<AgentSessionEntryRef> { return this.append(input.sessionRef, `${input.assistantEntryRef.entryId}-results`); }
   async delete(ref: AgentSessionRef): Promise<void> { this.deleteAttempts.push(ref.sessionId); if (this.refs.has(ref.sessionId)) this.deleted.push(ref.sessionId); this.nodes.delete(ref.sessionId); this.active.delete(ref.sessionId); this.refs.delete(ref.sessionId); }
+}
+
+class FailOnceDeleteSessionHarness extends SessionHarness {
+  failuresRemaining = 1;
+  override async delete(ref: AgentSessionRef): Promise<void> {
+    if (this.failuresRemaining > 0) {
+      this.deleteAttempts.push(ref.sessionId);
+      this.failuresRemaining -= 1;
+      throw new Error("transient Session cleanup failure");
+    }
+    await super.delete(ref);
+  }
 }

@@ -388,6 +388,197 @@ test("terminal run snapshot is saved before Session finalization", async (t) => 
   assert.deepEqual(order, ["terminal-save", "session-finalize"]);
 });
 
+test("completed outcome commit failures become a structured block and preserve the completed Session leaf", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-completion-commit-failure-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  let finalized = false;
+  let finalizationTarget: AgentSessionEntryRef | null | undefined;
+  const diagnostics: string[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async save(state, expectedRevision) {
+        if (state.status.kind === "completed") {
+          throw new Error("completed snapshot storage unavailable");
+        }
+        return durableRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      execute: (input) => completedOutcome(input, "completed before commit failure", sessions),
+      async finalizeSession(_runId, target) {
+        finalized = true;
+        finalizationTarget = target;
+      },
+    },
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "completion_commit_failed") diagnostics.push(diagnostic.kind);
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("completion-commit-failure"));
+  const state = await waitForStatus(feature, "completion-commit-failure", "blocked");
+
+  assert.equal(
+    state.status.kind === "blocked" ? state.status.reason.code : undefined,
+    "ordinary_completion_commit_failed",
+  );
+  assert.equal(state.session.phase, "rollbackable");
+  assert.equal(
+    state.session.phase === "rollbackable" ? state.session.endLeafRef.entryId : undefined,
+    "completion-commit-failure-answer",
+  );
+  assert.equal(finalized, true);
+  assert.equal(finalizationTarget, undefined);
+  assert.deepEqual(diagnostics, ["completion_commit_failed"]);
+});
+
+test("completed commit recovery retries a transient block-save failure", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-completion-block-retry-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  let blockedSaveAttempts = 0;
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async save(state, expectedRevision) {
+        if (state.status.kind === "completed") throw new Error("completed snapshot unavailable");
+        if (state.status.kind === "blocked" && blockedSaveAttempts++ === 0) {
+          throw new Error("blocked snapshot temporarily unavailable");
+        }
+        return durableRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: { execute: (input) => completedOutcome(input, "retry completed", sessions) },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("completion-block-retry"));
+  const state = await waitForStatus(feature, "completion-block-retry", "blocked");
+  assert.equal(state.status.kind, "blocked");
+  assert.equal(blockedSaveAttempts, 2);
+});
+
+test("an uncertain completed save is reconciled as completed when the snapshot reached storage", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-completion-commit-reconcile-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  const diagnostics: string[] = [];
+  let rejectCompletedResponse = true;
+  let finalizationTarget: AgentSessionEntryRef | null | undefined;
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async save(state, expectedRevision) {
+        const saved = await durableRepository.save(state, expectedRevision);
+        if (state.status.kind === "completed" && rejectCompletedResponse) {
+          rejectCompletedResponse = false;
+          throw new Error("completed snapshot response lost after commit");
+        }
+        return saved;
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      execute: (input) => completedOutcome(input, "durably completed", sessions),
+      async finalizeSession(_runId, target) { finalizationTarget = target; },
+    },
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "completion_commit_failed") diagnostics.push(diagnostic.kind);
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => { await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("completion-commit-reconcile"));
+  const state = await waitForStatus(feature, "completion-commit-reconcile", "completed");
+
+  assert.equal(state.session.phase, "rollbackable");
+  assert.equal(
+    state.session.phase === "rollbackable" ? state.session.endLeafRef.entryId : undefined,
+    "completion-commit-reconcile-answer",
+  );
+  assert.equal(finalizationTarget, undefined);
+  assert.deepEqual(diagnostics, ["completion_commit_failed"]);
+});
+
+test("completed commit retry activates a queued successor after reconciliation temporarily fails", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-completion-commit-successor-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  let releasePredecessor!: () => void;
+  const predecessorReleased = new Promise<void>((resolve) => { releasePredecessor = resolve; });
+  let loseCompletedResponse = true;
+  let failFirstReconciliationRead = false;
+  const executed: string[] = [];
+  const stableTerminalRuns: string[] = [];
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async get(runId) {
+        if (failFirstReconciliationRead) {
+          failFirstReconciliationRead = false;
+          throw new Error("completed snapshot reconciliation temporarily unavailable");
+        }
+        return durableRepository.get(runId);
+      },
+      async save(state, expectedRevision) {
+        const saved = await durableRepository.save(state, expectedRevision);
+        if (state.status.kind === "completed" && state.runId === "completion-reconcile-predecessor" &&
+            loseCompletedResponse) {
+          loseCompletedResponse = false;
+          failFirstReconciliationRead = true;
+          throw new Error("completed snapshot response lost after commit");
+        }
+        return saved;
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        executed.push(input.runId);
+        if (input.runId === "completion-reconcile-predecessor") await predecessorReleased;
+        return completedOutcome(input, `${input.runId} completed`, sessions);
+      },
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  feature.events.subscribeStableTerminalRuns((runId) => stableTerminalRuns.push(runId));
+  t.after(async () => { releasePredecessor(); await feature.release(); await removeTestDirectory(root); });
+
+  await feature.commands.start(startInput("completion-reconcile-predecessor"));
+  const successor = startInput("completion-reconcile-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: {
+      ...successor.turn,
+      ordinal: 2,
+      predecessorRunId: "completion-reconcile-predecessor",
+    },
+  });
+  assert.equal((await feature.queries.getRun(successor.runId))?.status.kind, "queued");
+
+  releasePredecessor();
+  await waitForStatus(feature, successor.runId, "completed");
+
+  assert.deepEqual(executed, ["completion-reconcile-predecessor", "completion-reconcile-successor"]);
+  assert.equal(stableTerminalRuns.includes("completion-reconcile-predecessor"), true);
+});
+
 test("run birth rolls back newly claimed managed attachments when the run snapshot cannot be saved", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-managed-claim-rollback-"));
   const attachmentRoot = path.join(root, "managed-attachments");
@@ -2159,6 +2350,81 @@ test("cancelled run exposes stable facts only after accepted tool results settle
   assert.equal(facts?.toolFacts[0]?.toolName, "read");
   assert.equal(facts?.toolFacts[0]?.status, "completed");
   assert.equal("output" in (facts?.toolFacts[0] ?? {}), false);
+});
+
+test("failed accepted-tool persistence keeps barriers closed until feature-owned settlement retry succeeds", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-settlement-retry-"));
+  const durableRepository = createFileSystemOrdinaryRunRepository(root);
+  const sessions = new SessionHarness();
+  const toolResult = completedTool("settlement-tool", "settlement.txt");
+  const executionReachedTool = createGate();
+  const settlementRetryObserved = createGate();
+  let releaseTool!: () => void;
+  const toolReleased = new Promise<void>((resolve) => { releaseTool = resolve; });
+  let resultPersistenceAvailable = false;
+  let resultPersistenceAttempts = 0;
+  const feature = createOrdinaryAgentFeature({
+    repository: {
+      ...durableRepository,
+      async save(state, expectedRevision) {
+        if (state.runId === "settlement-predecessor" &&
+            state.toolCalls.some((result) => result.callId === toolResult.callId)) {
+          resultPersistenceAttempts += 1;
+          if (!resultPersistenceAvailable) throw new Error("tool result storage unavailable");
+        }
+        return durableRepository.save(state, expectedRevision);
+      },
+    },
+    conversationRepository: createFileSystemOrdinaryConversationControlRepository(root),
+    sessionRepository: sessions,
+    execution: {
+      async execute(input) {
+        if (input.runId !== "settlement-predecessor") {
+          return completedOutcome(input, "successor after settlement", sessions);
+        }
+        await prepareSession(input, sessions);
+        executionReachedTool.enter();
+        await toolReleased;
+        await input.onToolResult?.(toolResult);
+        throw new Error("tool result callback must reject while persistence is unavailable");
+      },
+    },
+    onDiagnostic: (diagnostic) => {
+      if (diagnostic.kind === "successor_activation_failed" &&
+          diagnostic.predecessorRunId === "settlement-predecessor") {
+        settlementRetryObserved.enter();
+      }
+    },
+    now: clock(),
+    idFactory: ids(),
+  });
+  t.after(async () => {
+    resultPersistenceAvailable = true;
+    releaseTool();
+    await feature.release();
+    await removeTestDirectory(root);
+  });
+
+  await feature.commands.start(startInput("settlement-predecessor"));
+  await executionReachedTool.entered;
+  const successor = startInput("settlement-successor");
+  await feature.commands.start({
+    ...successor,
+    turn: { ...successor.turn, ordinal: 2, predecessorRunId: "settlement-predecessor" },
+  });
+  releaseTool();
+
+  await waitForStatus(feature, "settlement-predecessor", "failed");
+  await settlementRetryObserved.entered;
+  assert.equal((await feature.queries.getRun(successor.runId))?.status.kind, "queued");
+  assert.equal(await feature.queries.getStableTerminalRunFacts("settlement-predecessor"), undefined);
+
+  resultPersistenceAvailable = true;
+  await waitForStatus(feature, successor.runId, "completed");
+  const facts = await waitForStableTerminalFacts(feature, "settlement-predecessor");
+  assert.equal(facts.toolFacts.length, 1);
+  assert.equal(facts.toolFacts[0]?.toolFactId, toolResult.callId);
+  assert.equal(resultPersistenceAttempts >= 3, true);
 });
 
 test("restart reconciliation makes recovered blocked runs stable and readable", async (t) => {

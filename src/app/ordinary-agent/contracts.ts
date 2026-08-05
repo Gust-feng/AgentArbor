@@ -46,7 +46,9 @@ export type OrdinaryFeatureErrorCode =
   | "ordinary_confirmation_in_progress"
   | "ordinary_tool_result_conflict"
   | "ordinary_submission_conflict"
-  | "ordinary_managed_attachment_unavailable";
+  | "ordinary_conversation_cleanup_pending"
+  | "ordinary_managed_attachment_unavailable"
+  | "ordinary_completion_commit_failed";
 
 /** Expected command/query failures that protocol adapters may map without parsing messages. */
 export class OrdinaryFeatureError extends Error {
@@ -126,6 +128,12 @@ export type OrdinaryFeatureDiagnostic =
       readonly runId: string;
       readonly conversationId: string;
       readonly attachmentIds: readonly string[];
+      readonly error: unknown;
+    }
+  | {
+      /** Model execution completed, but the terminal Ordinary snapshot could not be committed. */
+      readonly kind: "completion_commit_failed";
+      readonly runId: string;
       readonly error: unknown;
     };
 

@@ -489,7 +489,9 @@ function ordinaryFeatureHttpError(error: OrdinaryFeatureError): PanelHttpError {
     case "ordinary_confirmation_in_progress":
     case "ordinary_tool_result_conflict":
     case "ordinary_submission_conflict":
+    case "ordinary_conversation_cleanup_pending":
     case "ordinary_managed_attachment_unavailable":
+    case "ordinary_completion_commit_failed":
       return new PanelHttpError(409, error.code, error.message);
   }
 }

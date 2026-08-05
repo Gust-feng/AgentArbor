@@ -107,6 +107,8 @@ export function createOrdinaryAgentFeature(input: {
   const sessionFinalizationPending = new Set<string>();
   const sessionFinalizationFailures = new Map<string, unknown>();
   const sessionFinalizationRetries = new Map<string, Promise<void>>();
+  const completionCommitRetryTimers = new Map<string, NodeJS.Timeout>();
+  const completionCommitRetryCounts = new Map<string, number>();
   const successorActivationPumps = new Map<string, {
     diagnosticRunId: string;
     inFlight?: Promise<void>;
@@ -120,6 +122,13 @@ export function createOrdinaryAgentFeature(input: {
   const conversationCleanupTasks = new Map<string, Promise<void>>();
   const conversationCleanupRetryTimers = new Map<string, NodeJS.Timeout>();
   const conversationCleanupFailureCounts = new Map<string, number>();
+  const pendingUncommittedConversationCleanups = new Map<string, {
+    readonly control: OrdinaryConversationControlDocument;
+    readonly runIds: readonly string[];
+  }>();
+  const pendingUncommittedConversationBirths = new Map<string, {
+    readonly sessionRef: AgentSessionRef;
+  }>();
   const managedAttachmentClaimRollbacks = new Map<string, ManagedAttachmentClaimRollback>();
   const managedAttachmentClaimRollbackTasks = new Map<string, Promise<void>>();
   const managedAttachmentClaimRollbackRetryTimers = new Map<string, NodeJS.Timeout>();
@@ -185,6 +194,13 @@ export function createOrdinaryAgentFeature(input: {
         summary.conversationId,
         new Error("Conversation control document is missing; the run was isolated from recovery."),
       );
+    }
+    if (!startupRunEnumerationFailed) {
+      for (const [conversationId, control] of [...conversationDocuments]) {
+        if (control.state.deletedAt !== undefined ||
+            runSummaries.some((summary) => summary.conversationId === conversationId)) continue;
+        await scheduleConversationCleanup(conversationId, control, [], "delete_uncommitted");
+      }
     }
     const deletedConversationIds = new Set<string>();
     for (const control of conversationDocuments.values()) {
@@ -789,15 +805,31 @@ export function createOrdinaryAgentFeature(input: {
     if (accepted.size === 0) acceptedToolResults.delete(runId);
   }
 
+  function forgetReconciledApprovalResults(runId: string): void {
+    const accepted = acceptedToolResults.get(runId);
+    const state = documents.get(runId)?.state;
+    if (accepted === undefined || state === undefined) return;
+    for (const [factId, result] of accepted) {
+      if (result.status === "approval_required" &&
+          state.toolCalls.some((persisted) => toolCallFactId(persisted) === factId &&
+            persisted.status !== "approval_required")) {
+        accepted.delete(factId);
+      }
+    }
+    if (accepted.size === 0) acceptedToolResults.delete(runId);
+  }
+
   async function persistToolResult(runId: string, result: ToolCallResult): Promise<void> {
     await enqueue(runId, async () => {
       const current = await load(runId);
       if (current === undefined) return;
-      // Cancellation commits promptly, but an already executing tool may finish after
-      // abort. Its observed result still belongs to this active execution lease.
-      if (current.state.status.kind !== "running" && !controllers.has(runId)) return;
       const key = ordinaryToolResultKey(result);
       const factId = toolCallFactId(result);
+      // Cancellation commits promptly, but an already executing tool may finish after
+      // abort. Once accepted, the fact remains feature-owned after the controller
+      // is released so terminal settlement can finish its durable write.
+      if (current.state.status.kind !== "running" && !controllers.has(runId) &&
+          !acceptedToolResults.get(runId)?.has(factId)) return;
       const existing = current.state.toolCalls.find((item) => toolCallFactId(item) === factId);
       if (existing !== undefined) {
         if (existing.status !== "approval_required") {
@@ -1056,7 +1088,16 @@ export function createOrdinaryAgentFeature(input: {
     const document = await load(runId);
     if (document === undefined || isTerminal(document.state)) return;
     if (outcome.status === "completed") {
-      const state = await mutate(runId, { type: "complete", session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+      let state: OrdinaryRunState;
+      try {
+        state = await mutate(runId, { type: "complete", session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
+      } catch (error) {
+        throw new OrdinaryFeatureError(
+          "ordinary_completion_commit_failed",
+          "Model execution completed, but the terminal Ordinary snapshot could not be committed.",
+          { cause: error },
+        );
+      }
       await finalizeExecutionSession(runId, state, false);
       return;
     }
@@ -1067,6 +1108,109 @@ export function createOrdinaryAgentFeature(input: {
     }
     const state = await mutate(runId, { type: "fail", error: outcome.error, session: outcome.session, toolCalls: outcome.toolCalls, usage: outcome.usage, toolMetrics: outcome.toolMetrics, capabilityResolution: outcome.capabilityResolution });
     await finalizeExecutionSession(runId, state, true);
+  }
+
+  async function handleCompletedCommitFailure(
+    runId: string,
+    outcome: OrdinaryExecutionOutcome | undefined,
+    error: unknown,
+  ): Promise<boolean> {
+    if (outcome?.status !== "completed" ||
+        !(error instanceof OrdinaryFeatureError) ||
+        error.code !== "ordinary_completion_commit_failed") {
+      return false;
+    }
+    emitDiagnostic({ kind: "completion_commit_failed", runId, error });
+    let latest = await load(runId);
+    try {
+      const persisted = await input.repository.get(runId);
+      if (persisted !== undefined && (latest === undefined || persisted.revision > latest.revision)) {
+        documents.set(runId, persisted);
+        syncDurableToolResults(persisted.state);
+        const terminalEvent = persisted.state.timeline.at(-1);
+        if (terminalEvent !== undefined && isTerminalEvent(terminalEvent)) recordTransition(terminalEvent);
+        latest = persisted;
+      }
+    } catch (refreshError) {
+      emitDiagnostic({
+        kind: "completion_commit_failed",
+        runId,
+        error: new AggregateError(
+          [error, refreshError],
+          `Ordinary run ${runId} could not verify whether its completed snapshot was committed`,
+        ),
+      });
+    }
+    if (latest === undefined || isTerminal(latest.state)) {
+      // The repository may have committed before reporting a transport error.
+      // Never rewrite an already-terminal fact in that case.
+      if (latest?.state.status.kind === "completed") {
+        await finalizeExecutionSession(runId, latest.state, false).catch(() => undefined);
+      }
+      clearCompletedCommitRetry(runId);
+      if (latest !== undefined) {
+        await activateSuccessor(runId);
+        notifyStableTerminal(runId);
+      }
+      return true;
+    }
+    try {
+      const acceptedCompletedSession = outcome.session.latestLeafRef === null
+        ? outcome.session
+        : { ...outcome.session, safeLeafRef: outcome.session.latestLeafRef };
+      const blocked = await mutate(runId, {
+        type: "block",
+        reason: {
+          code: "ordinary_completion_commit_failed",
+          message: "模型执行已完成，但 Ordinary 终态无法写入。请发送新消息继续；系统不会将这次完成改写为失败。",
+        },
+        continueBy: "new_turn",
+        session: acceptedCompletedSession,
+        toolCalls: outcome.toolCalls,
+      });
+      // The Session already contains the completed assistant response. Keep that
+      // leaf even though the Ordinary terminal snapshot had to record a block.
+      await finalizeExecutionSession(runId, blocked, false).catch(() => undefined);
+      clearCompletedCommitRetry(runId);
+      await activateSuccessor(runId);
+    } catch (blockError) {
+      emitDiagnostic({ kind: "completion_commit_failed", runId, error: blockError });
+      scheduleCompletedCommitRetry(runId, outcome, blockError);
+    }
+    return true;
+  }
+
+  function scheduleCompletedCommitRetry(
+    runId: string,
+    outcome: OrdinaryExecutionOutcome,
+    error: unknown,
+  ): void {
+    if (released || completionCommitRetryTimers.has(runId)) return;
+    const retryError = error instanceof OrdinaryFeatureError &&
+      error.code === "ordinary_completion_commit_failed"
+      ? error
+      : new OrdinaryFeatureError(
+          "ordinary_completion_commit_failed",
+          "Model execution completed, but the terminal Ordinary snapshot could not be committed.",
+          { cause: error },
+        );
+    const attempt = (completionCommitRetryCounts.get(runId) ?? 0) + 1;
+    completionCommitRetryCounts.set(runId, attempt);
+    const delayMs = Math.min(30_000, 250 * (2 ** Math.min(attempt - 1, 7)));
+    const timer = setTimeout(() => {
+      completionCommitRetryTimers.delete(runId);
+      const retry = handleCompletedCommitFailure(runId, outcome, retryError);
+      trackPostExecutionTask(retry.then(() => undefined, () => undefined));
+    }, delayMs);
+    timer.unref?.();
+    completionCommitRetryTimers.set(runId, timer);
+  }
+
+  function clearCompletedCommitRetry(runId: string): void {
+    const timer = completionCommitRetryTimers.get(runId);
+    if (timer !== undefined) clearTimeout(timer);
+    completionCommitRetryTimers.delete(runId);
+    completionCommitRetryCounts.delete(runId);
   }
 
   async function finalizeExecutionSession(
@@ -1172,6 +1316,7 @@ export function createOrdinaryAgentFeature(input: {
       await applyOutcome(runId, outcome);
       forgetPersistedToolResults(runId, outcome.toolCalls);
     } catch (error) {
+      if (await handleCompletedCommitFailure(runId, outcome, error)) return;
       let failure = error;
       try {
         await completeReasoning(runId);
@@ -1224,8 +1369,7 @@ export function createOrdinaryAgentFeature(input: {
     let current = await load(runId);
     if (current === undefined) return;
     if (current.state.status.kind === "awaiting_approval") {
-      if (current.state.pendingToolRound === undefined &&
-          current.state.pendingNestedToolCalls === undefined) acceptedToolResults.delete(runId);
+      if (resultPersistenceFailure !== undefined) throw resultPersistenceFailure;
       return;
     }
     if (current.state.pendingToolRound !== undefined ||
@@ -1250,9 +1394,8 @@ export function createOrdinaryAgentFeature(input: {
     if (isTerminal(current.state) && current.state.toolCalls.some((result) => result.status === "approval_required")) {
       await reconcileLostApprovalResults(runId);
       current = await load(runId) ?? current;
+      forgetReconciledApprovalResults(runId);
     }
-    if (current.state.pendingToolRound === undefined &&
-        current.state.pendingNestedToolCalls === undefined) acceptedToolResults.delete(runId);
     if (resultPersistenceFailure !== undefined) throw resultPersistenceFailure;
   }
 
@@ -1477,6 +1620,19 @@ export function createOrdinaryAgentFeature(input: {
     if (control?.state.deletedAt !== undefined) return;
     let runs = await schedulingRuns(conversationId, control);
     let candidate = nextEligibleQueuedRun(runs);
+    if (candidate === undefined) {
+      const settlementBlocker = runs.find((run) =>
+        isTerminal(run) && run.status.kind !== "cancelled" &&
+        acceptedToolResults.has(run.runId) &&
+        !executions.has(run.runId) && !controllers.has(run.runId));
+      if (settlementBlocker !== undefined) {
+        pump.diagnosticRunId = settlementBlocker.runId;
+        await settleExecution(settlementBlocker.runId);
+        notifyStableTerminal(settlementBlocker.runId);
+        runs = await schedulingRuns(conversationId, await loadConversationControl(conversationId));
+        candidate = nextEligibleQueuedRun(runs);
+      }
+    }
     if (candidate === undefined) {
       const finalizationBlocker = runs.find((run) =>
         isTerminal(run) && !isSchedulingBarrierCleared(run) &&
@@ -1818,7 +1974,10 @@ export function createOrdinaryAgentFeature(input: {
   }
 
   async function start(startInput: StartOrdinaryRunInput): Promise<OrdinaryRunState> {
-    return enqueue(`conversation:${startInput.turn.conversationId}`, () => startWithinConversation(startInput));
+    return enqueue(`conversation:${startInput.turn.conversationId}`, async () => {
+      await settlePendingUncommittedConversationCleanup(startInput.turn.conversationId);
+      return startWithinConversation(startInput);
+    });
   }
 
   async function submitTurn(submitInput: SubmitOrdinaryTurnInput): Promise<SubmitOrdinaryTurnResult> {
@@ -1830,6 +1989,7 @@ export function createOrdinaryAgentFeature(input: {
       submissionId === undefined ? idFactory("conversation") : `conversation:${submissionId}`
     );
     return enqueue(`conversation:${conversationId}`, async () => {
+      await settlePendingUncommittedConversationCleanup(conversationId);
       let createdConversation = false;
       let createdConversationSession: AgentSessionRef | undefined;
       if (submissionTurnId !== undefined) {
@@ -1880,12 +2040,14 @@ export function createOrdinaryAgentFeature(input: {
           createdAt,
           sessionRef,
         };
+        pendingUncommittedConversationBirths.set(conversationId, { sessionRef });
         try {
           control = await input.conversationRepository.save(state, 0, createdAt);
         } catch (error) {
-          await input.sessionRepository.delete(sessionRef).catch(() => undefined);
+          await reconcilePendingUncommittedConversationBirth(conversationId);
           throw error;
         }
+        pendingUncommittedConversationBirths.delete(conversationId);
         conversationDocuments.set(conversationId, control);
         createdConversation = true;
       }
@@ -1923,6 +2085,80 @@ export function createOrdinaryAgentFeature(input: {
     });
   }
 
+  async function reconcilePendingUncommittedConversationBirth(conversationId: string): Promise<void> {
+    const pending = pendingUncommittedConversationBirths.get(conversationId);
+    if (pending === undefined) return;
+    let control: OrdinaryConversationControlDocument | undefined;
+    try {
+      control = await input.conversationRepository.get(conversationId);
+    } catch (error) {
+      emitDiagnostic({
+        kind: "conversation_cleanup_failed",
+        conversationId,
+        phase: "conversation_control",
+        error,
+      });
+      return;
+    }
+    if (control === undefined) {
+      try {
+        await input.sessionRepository.delete(pending.sessionRef);
+        pendingUncommittedConversationBirths.delete(conversationId);
+      } catch (error) {
+        emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "session", error });
+      }
+      return;
+    }
+    if (control.state.deletedAt !== undefined ||
+        control.state.sessionRef.sessionId !== pending.sessionRef.sessionId) {
+      emitDiagnostic({
+        kind: "conversation_cleanup_failed",
+        conversationId,
+        phase: "conversation_control",
+        error: new Error("Persisted conversation control does not match the unresolved birth."),
+      });
+      return;
+    }
+    let runIds: readonly string[];
+    try {
+      runIds = (await input.repository.list(Number.MAX_SAFE_INTEGER))
+        .filter((summary) => summary.conversationId === conversationId)
+        .map((summary) => summary.runId);
+    } catch (error) {
+      emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "run_enumeration", error });
+      return;
+    }
+    conversationDocuments.set(conversationId, control);
+    pendingUncommittedConversationBirths.delete(conversationId);
+    await scheduleConversationCleanup(conversationId, control, runIds, "delete_uncommitted");
+  }
+
+  async function settlePendingUncommittedConversationCleanup(conversationId: string): Promise<void> {
+    if (pendingUncommittedConversationBirths.has(conversationId)) {
+      await reconcilePendingUncommittedConversationBirth(conversationId);
+      if (pendingUncommittedConversationBirths.has(conversationId)) {
+        throw new OrdinaryFeatureError(
+          "ordinary_conversation_cleanup_pending",
+          `Ordinary conversation ${conversationId} has an unresolved birth; retry this operation.`,
+        );
+      }
+    }
+    const pending = pendingUncommittedConversationCleanups.get(conversationId);
+    if (pending === undefined) return;
+    await scheduleConversationCleanup(
+      conversationId,
+      pending.control,
+      pending.runIds,
+      "delete_uncommitted",
+    );
+    if (pendingUncommittedConversationCleanups.has(conversationId)) {
+      throw new OrdinaryFeatureError(
+        "ordinary_conversation_cleanup_pending",
+        `Ordinary conversation ${conversationId} is still being cleaned up; retry this operation.`,
+      );
+    }
+  }
+
   async function cleanupFailedInitialConversationBirth(inputValue: {
     readonly conversationId: string;
     readonly sessionRef: AgentSessionRef;
@@ -1932,9 +2168,11 @@ export function createOrdinaryAgentFeature(input: {
     // repository directly so startup enumeration failures cannot mistake an
     // unknown run for an uncommitted birth.
     let persistedRun: OrdinaryRunSnapshotDocument | undefined;
+    let runLookupFailed = false;
     try {
       persistedRun = await input.repository.get(inputValue.runId);
     } catch (error) {
+      runLookupFailed = true;
       emitDiagnostic({
         kind: "conversation_cleanup_failed",
         conversationId: inputValue.conversationId,
@@ -1942,35 +2180,18 @@ export function createOrdinaryAgentFeature(input: {
         runId: inputValue.runId,
         error,
       });
-      return;
     }
-    if (persistedRun !== undefined) return;
+    if (persistedRun !== undefined && documents.has(inputValue.runId)) return;
 
     const control = conversationDocuments.get(inputValue.conversationId);
     if (control === undefined || control.state.deletedAt !== undefined ||
         control.state.sessionRef.sessionId !== inputValue.sessionRef.sessionId) return;
-    try {
-      await input.conversationRepository.delete(inputValue.conversationId, control.revision);
-      conversationDocuments.delete(inputValue.conversationId);
-    } catch (error) {
-      emitDiagnostic({
-        kind: "conversation_cleanup_failed",
-        conversationId: inputValue.conversationId,
-        phase: "conversation_control",
-        error,
-      });
-      return;
-    }
-    try {
-      await input.sessionRepository.delete(inputValue.sessionRef);
-    } catch (error) {
-      emitDiagnostic({
-        kind: "conversation_cleanup_failed",
-        conversationId: inputValue.conversationId,
-        phase: "session",
-        error,
-      });
-    }
+    await scheduleConversationCleanup(
+      inputValue.conversationId,
+      control,
+      runLookupFailed || persistedRun !== undefined ? [inputValue.runId] : [],
+      "delete_uncommitted",
+    );
   }
 
   async function mutateConversation(
@@ -1980,6 +2201,7 @@ export function createOrdinaryAgentFeature(input: {
     assertLive();
     await readyPromise;
     return enqueue(`conversation:${conversationId}`, async () => {
+      await settlePendingUncommittedConversationCleanup(conversationId);
       const current = await loadConversationControl(conversationId);
       if (current === undefined) {
         throw new OrdinaryFeatureError(
@@ -2016,6 +2238,7 @@ export function createOrdinaryAgentFeature(input: {
     readonly stepsBack?: number;
   }): Promise<OrdinaryConversationReadModel> {
     const control = await enqueue(`conversation:${rollback.conversationId}`, async () => {
+      await settlePendingUncommittedConversationCleanup(rollback.conversationId);
       const current = await loadConversationControl(rollback.conversationId);
       if (current === undefined) {
         throw new OrdinaryFeatureError("ordinary_conversation_not_found", `Ordinary conversation ${rollback.conversationId} was not found`);
@@ -2055,6 +2278,7 @@ export function createOrdinaryAgentFeature(input: {
       readonly runIds: readonly string[];
     } | undefined;
     await enqueue(`conversation:${conversationId}`, async () => {
+      await settlePendingUncommittedConversationCleanup(conversationId);
       const current = await loadConversationControl(conversationId);
       if (current === undefined) return;
       let tombstone = current;
@@ -2079,10 +2303,29 @@ export function createOrdinaryAgentFeature(input: {
 
   function scheduleConversationCleanup(
     conversationId: string,
-    tombstone: OrdinaryConversationControlDocument,
+    control: OrdinaryConversationControlDocument,
     runIds: readonly string[],
+    controlDisposition: "retain_tombstone" | "delete_uncommitted" = "retain_tombstone",
   ): Promise<void> | undefined {
     if (released) return undefined;
+    let cleanupControl = control;
+    let scheduledRunIds = runIds;
+    let pendingState: {
+      readonly control: OrdinaryConversationControlDocument;
+      readonly runIds: readonly string[];
+    } | undefined;
+    if (controlDisposition === "delete_uncommitted") {
+      const existing = pendingUncommittedConversationCleanups.get(conversationId);
+      pendingState = {
+        control: existing === undefined || control.revision >= existing.control.revision
+          ? control
+          : existing.control,
+        runIds: [...new Set([...(existing?.runIds ?? []), ...runIds])],
+      };
+      pendingUncommittedConversationCleanups.set(conversationId, pendingState);
+      cleanupControl = pendingState.control;
+      scheduledRunIds = pendingState.runIds;
+    }
     const pendingRetry = conversationCleanupRetryTimers.get(conversationId);
     if (pendingRetry !== undefined) {
       clearTimeout(pendingRetry);
@@ -2092,20 +2335,22 @@ export function createOrdinaryAgentFeature(input: {
     if (activeCleanup !== undefined) return activeCleanup;
     let retryNeeded = false;
     const cleanup = (async () => {
-      const cleanupRunIds = new Set(runIds);
-      try {
-        const persisted = await input.repository.list(Number.MAX_SAFE_INTEGER);
-        for (const summary of persisted) {
-          if (summary.conversationId === conversationId) cleanupRunIds.add(summary.runId);
+      const cleanupRunIds = new Set(scheduledRunIds);
+      if (controlDisposition === "retain_tombstone") {
+        try {
+          const persisted = await input.repository.list(Number.MAX_SAFE_INTEGER);
+          for (const summary of persisted) {
+            if (summary.conversationId === conversationId) cleanupRunIds.add(summary.runId);
+          }
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({
+            kind: "conversation_cleanup_failed",
+            conversationId,
+            phase: "run_enumeration",
+            error,
+          });
         }
-      } catch (error) {
-        retryNeeded = true;
-        emitDiagnostic({
-          kind: "conversation_cleanup_failed",
-          conversationId,
-          phase: "run_enumeration",
-          error,
-        });
       }
       for (const runId of cleanupRunIds) {
         const execution = executions.get(runId);
@@ -2140,7 +2385,8 @@ export function createOrdinaryAgentFeature(input: {
         activityStreams.delete(runId);
         listeners.delete(runId);
       }
-      if (input.managedAttachmentRepository !== undefined) {
+      if ((controlDisposition === "retain_tombstone" || (!retryNeeded && cleanupRunIds.size > 0)) &&
+          input.managedAttachmentRepository !== undefined) {
         try {
           await input.managedAttachmentRepository.deleteConversation(conversationId);
         } catch (error) {
@@ -2148,16 +2394,32 @@ export function createOrdinaryAgentFeature(input: {
           emitDiagnostic({ kind: "managed_attachment_cleanup_failed", conversationId, error });
         }
       }
-      try {
-        await input.sessionRepository.delete(tombstone.state.sessionRef);
-      } catch (error) {
-        retryNeeded = true;
-        emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "session", error });
+      if (controlDisposition === "retain_tombstone" || !retryNeeded) {
+        try {
+          await input.sessionRepository.delete(cleanupControl.state.sessionRef);
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "session", error });
+        }
+      }
+      if (!retryNeeded && controlDisposition === "delete_uncommitted") {
+        try {
+          await input.conversationRepository.delete(conversationId, cleanupControl.revision);
+          conversationDocuments.delete(conversationId);
+          unavailableConversationIds.delete(conversationId);
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "conversation_control", error });
+        }
       }
     })();
     const tracked = cleanup.finally(() => {
       if (conversationCleanupTasks.get(conversationId) === tracked) conversationCleanupTasks.delete(conversationId);
       if (!retryNeeded) {
+        if (controlDisposition === "delete_uncommitted" &&
+            pendingUncommittedConversationCleanups.get(conversationId) === pendingState) {
+          pendingUncommittedConversationCleanups.delete(conversationId);
+        }
         conversationCleanupFailureCounts.delete(conversationId);
         return;
       }
@@ -2168,7 +2430,7 @@ export function createOrdinaryAgentFeature(input: {
       const retryTimer = setTimeout(() => {
         if (conversationCleanupRetryTimers.get(conversationId) !== retryTimer) return;
         conversationCleanupRetryTimers.delete(conversationId);
-        void scheduleConversationCleanup(conversationId, tombstone, runIds);
+        void scheduleConversationCleanup(conversationId, cleanupControl, scheduledRunIds, controlDisposition);
       }, retryDelayMs);
       retryTimer.unref?.();
       conversationCleanupRetryTimers.set(conversationId, retryTimer);
@@ -2465,6 +2727,7 @@ export function createOrdinaryAgentFeature(input: {
         await applyOutcome(ownerRunId, outcome);
         forgetPersistedToolResults(ownerRunId, outcome.toolCalls);
       } catch (error) {
+        if (await handleCompletedCommitFailure(ownerRunId, outcome, error)) return;
         let failure = error;
         try {
           await completeReasoning(ownerRunId);
@@ -2682,11 +2945,16 @@ export function createOrdinaryAgentFeature(input: {
     for (const timer of conversationCleanupRetryTimers.values()) clearTimeout(timer);
     conversationCleanupRetryTimers.clear();
     conversationCleanupFailureCounts.clear();
+    pendingUncommittedConversationCleanups.clear();
+    pendingUncommittedConversationBirths.clear();
     for (const timer of cancellationCleanupRetryTimers.values()) clearTimeout(timer);
     cancellationCleanupRetryTimers.clear();
     cancellationCleanupFailureCounts.clear();
     for (const timer of managedAttachmentClaimRollbackRetryTimers.values()) clearTimeout(timer);
     managedAttachmentClaimRollbackRetryTimers.clear();
+    for (const timer of completionCommitRetryTimers.values()) clearTimeout(timer);
+    completionCommitRetryTimers.clear();
+    completionCommitRetryCounts.clear();
     await Promise.allSettled([...visibleAssistantBuffers.keys()].map(persistVisibleAssistantCheckpoint));
     for (const controller of controllers.values()) controller.abort("ordinary_feature_released");
     await releaseContinuations();

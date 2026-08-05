@@ -544,6 +544,8 @@ function assemblePanelRuntime(input: {
         console.error(`[panel-server] Ordinary managed attachment ${diagnostic.identity ?? "storage"} recovery was isolated`, diagnostic.error);
       } else if (diagnostic.kind === "managed_attachment_claim_rollback_failed") {
         console.error(`[panel-server] Ordinary run ${diagnostic.runId} could not roll back managed attachment claims; the feature will retry and startup reconciliation remains the final fallback`, diagnostic.error);
+      } else if (diagnostic.kind === "completion_commit_failed") {
+        console.error(`[panel-server] Ordinary run ${diagnostic.runId} completed in Pi but its terminal snapshot could not be committed; the run remains blocked instead of being rewritten as failed`, diagnostic.error);
       } else {
         console.error(`[panel-server] Ordinary startup recovery could not enumerate ${diagnostic.source}; new live conversations remain available`, diagnostic.error);
       }

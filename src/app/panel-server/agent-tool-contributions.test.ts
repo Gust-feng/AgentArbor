@@ -88,7 +88,11 @@ test("Host keeps the NoteWrite catalog contract static and injects run-born note
 test("Host selects feature-owned Space and Personal Knowledge contributions", () => {
   const registrations: string[] = [];
   const resolveFeatureContributions = createHostFeatureAgentToolContributionResolver({
-    spaces: { commands: {}, queries: {} } as never,
+    spaces: {
+      commands: {},
+      queries: {},
+      events: { subscribe: () => () => {} },
+    } as never,
     personalKnowledge: { commands: {}, queries: {} } as never,
   });
   const contributions = resolveFeatureContributions({ workspaceRoot: "/workspace" });

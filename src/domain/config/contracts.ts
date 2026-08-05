@@ -122,6 +122,12 @@ export type ModelCapabilities = {
   readonly supportsStructuredOutputs: boolean;
   readonly supportsStreaming: boolean;
   readonly supportsVisionInput: boolean;
+  /** Provenance-rich image capability fact; Pi model.input remains final transport authority. */
+  readonly imageInput?: {
+    readonly status: "supported" | "unsupported" | "unknown";
+    readonly source: "registry" | "override" | "protocol_default";
+    readonly verifiedAt?: string;
+  };
   readonly supportsReasoningEffort: boolean;
   readonly supportsReasoningOutput?: boolean;
   readonly preferredApiStyle: ModelPreferredApiStyle;

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { CodedExecutionError } from "../execution-errors/index.js";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import { createTaskSoil } from "../../domain/soil/index.js";
@@ -77,7 +78,7 @@ test("Desktop Agent resolves authorized local image refs into ephemeral model at
   }
 });
 
-test("Desktop Agent does not attach image payloads for non-vision models", async () => {
+test("Desktop Agent rejects image input for non-vision models", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-no-vision-"));
   const imagePath = path.join(root, "screen.png");
   await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -91,14 +92,41 @@ test("Desktop Agent does not attach image payloads for non-vision models", async
     });
     const messages: readonly ModelMessage[] = [{ role: "user", content: "Describe the image." }];
 
-    const resolved = await attachDesktopFileInputsToModelMessages({
-      messages,
-      taskSoil,
-      modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
-      workspaceRoot: root,
+    await assert.rejects(
+      attachDesktopFileInputsToModelMessages({
+        messages,
+        taskSoil,
+        modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
+        workspaceRoot: root,
+      }),
+      (error: unknown) => error instanceof CodedExecutionError && error.code === "model_vision_input_unsupported",
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent rejects an image ref that becomes unreadable before model preparation", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-missing-"));
+  const imagePath = path.join(root, "missing.png");
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the image",
+      goalId: "goal-missing-image",
+      traceId: "trace-missing-image",
+      contextRefs: [{ ref: `local-file:${imagePath}`, kind: "file", metadata: { mimeType: "image/png" } }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
     });
 
-    assert.equal(resolved[0]?.attachments, undefined);
+    await assert.rejects(
+      attachDesktopFileInputsToModelMessages({
+        messages: [{ role: "user", content: "Describe the image." }],
+        taskSoil,
+        modelCapabilities: VISION_CAPABILITIES,
+        workspaceRoot: root,
+      }),
+      (error: unknown) => error instanceof CodedExecutionError && error.code === "model_input_attachment_unavailable",
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

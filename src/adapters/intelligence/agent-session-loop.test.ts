@@ -26,7 +26,11 @@ import type {
   ToolExecutor,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
-import { toolCallFactId, withToolModelAttachments } from "../../domain/tools/index.js";
+import {
+  toolCallFactId,
+  toolModelAttachmentsFromOutput,
+  withToolModelAttachments,
+} from "../../domain/tools/index.js";
 import { createAgentSessionLoop } from "./agent-session-loop.js";
 import { ToolCenter } from "../../app/tool-center/tool-center.js";
 import { createReadToolOutputTool } from "../../app/tool-center/adapters/tool-output-read-tool.js";
@@ -797,6 +801,8 @@ test("load activation rolls the ordered active set back when Ordinary rejects th
   assert.deepEqual(context.activeToolNames, ["mcp_search", "mcp_load"]);
   const toolResultEntries = (await fixture.session.getBranch()).flatMap((entry) =>
     entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : []);
+  // The owning feature rejected the load fact and the active set was rolled
+  // back, so the failed result must not retain Pi's activation marker.
   assert.equal(toolResultEntries[0]?.addedToolNames, undefined);
   await loop.release();
 });
@@ -1119,15 +1125,24 @@ test("agent session loop reads prior turns from the injected session", async (t)
   await secondLoop.release();
 });
 
-test("agent session loop sends image bytes to the provider without persisting them in Session", async (t) => {
+test("agent session loop persists image bytes in Session so later turns can reference them", async (t) => {
   const fixture = await createFixture(t);
   const imageData = Buffer.from("ephemeral-image-bytes").toString("base64");
-  fixture.faux.setResponses([(context) => {
-    const current = context.messages.at(-1);
-    assert.equal(current?.role, "user");
-    assert.equal(JSON.stringify(current).includes(imageData), true);
-    return fauxAssistantMessage("image inspected");
-  }]);
+  fixture.faux.setResponses([
+    (context) => {
+      const current = context.messages.at(-1);
+      assert.equal(current?.role, "user");
+      assert.equal(JSON.stringify(current).includes(imageData), true);
+      return fauxAssistantMessage("image inspected");
+    },
+    (context) => {
+      assert.equal(
+        context.messages.some((message) => message.role === "user" && JSON.stringify(message).includes(imageData)),
+        true,
+      );
+      return fauxAssistantMessage("follow-up image inspected");
+    },
+  ]);
   const loop = createAgentSessionLoop(fixture);
 
   const result = await loop.execute(loopInput(emptyGateway(), {
@@ -1148,9 +1163,20 @@ test("agent session loop sends image bytes to the provider without persisting th
 
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
   const branchJson = JSON.stringify(await fixture.session.getBranch());
-  assert.equal(branchJson.includes(imageData), false);
-  assert.match(branchJson, /image attachment omitted from durable Session/u);
+  // 图片字节必须进入 durable Session：否则后续轮次模型无法再引用此前发送的图片。
+  assert.equal(branchJson.includes(imageData), true);
   await loop.release();
+
+  const secondLoop = createAgentSessionLoop(fixture);
+  const second = await secondLoop.execute(loopInput(emptyGateway(), {
+    messages: [
+      { role: "system", content: "You are the Ordinary Agent." },
+      { role: "user", content: "请继续说明刚才图片里的内容。" },
+    ],
+  }));
+
+  assert.equal(second.status, "completed", second.status === "failed" ? second.error : undefined);
+  await secondLoop.release();
 });
 
 test("agent session loop does not call the provider when cancellation is already requested", async (t) => {
@@ -1538,7 +1564,7 @@ test("agent session loop reads an oversized ToolCenter result through Pi continu
   await loop.release();
 });
 
-test("agent session loop keeps tool-origin images available to the next model request only", async (t) => {
+test("agent session loop persists tool-origin images so later turns can reference them", async (t) => {
   const fixture = await createFixture(t);
   const imageData = Buffer.from("tool-image-bytes").toString("base64");
   fixture.faux.setResponses([
@@ -1571,12 +1597,124 @@ test("agent session loop keeps tool-origin images available to the next model re
   });
   const loop = createAgentSessionLoop(fixture);
 
-  const result = await loop.execute(loopInput(gateway));
+  const result = await loop.execute(loopInput(gateway, {
+    onToolResult: async (toolResult) => {
+      // The owning feature is notified only after Pi has appended message_end,
+      // so a crash cannot leave a durable run fact ahead of its image entry.
+      assert.equal(JSON.stringify(await fixture.session.getBranch()).includes(imageData), true);
+      assert.equal(toolModelAttachmentsFromOutput(toolResult.output)?.length, 1);
+    },
+  }));
 
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(
+    toolModelAttachmentsFromOutput(result.toolResults.find((item) => item.callId === "image-call")?.output)?.length,
+    1,
+  );
   const branchJson = JSON.stringify(await fixture.session.getBranch());
-  assert.equal(branchJson.includes(imageData), false);
-  assert.match(branchJson, /image attachment omitted from durable Session/u);
+  // 工具产出的图片同样必须进入 durable Session，跨轮引用才成立。
+  assert.equal(branchJson.includes(imageData), true);
+  await loop.release();
+
+  fixture.faux.setResponses([(context) => {
+    assert.equal(
+      context.messages.some((message) => message.role === "toolResult" && JSON.stringify(message).includes(imageData)),
+      true,
+    );
+    return fauxAssistantMessage("follow-up tool image inspected");
+  }]);
+  const secondLoop = createAgentSessionLoop(fixture);
+  const second = await secondLoop.execute(loopInput(gateway, {
+    messages: [
+      { role: "system", content: "You are the Ordinary Agent." },
+      { role: "user", content: "请继续说明刚才工具返回的图片。" },
+    ],
+  }));
+
+  assert.equal(second.status, "completed", second.status === "failed" ? second.error : undefined);
+  await secondLoop.release();
+});
+
+test("agent session loop rejects tool-origin images when the frozen run capability is text-only", async (t) => {
+  const fixture = await createFixture(t);
+  const imageData = Buffer.from("tool-image-without-vision").toString("base64");
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("inspect_image", { path: "image.png" }, { id: "text-only-image-call" }), {
+      stopReason: "toolUse",
+    }),
+  ]);
+  const gateway = gatewayFor({
+    definition: toolDefinition("inspect_image", "read-only"),
+    execute: async (request) => ({
+      ...request,
+      output: withToolModelAttachments({ kind: "image-result" }, [{
+        kind: "image",
+        attachmentId: "text-only-image",
+        source: { kind: "data", mimeType: "image/png", data: imageData },
+      }]),
+      status: "completed",
+      durationMs: 1,
+    }),
+  });
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop({ ...fixture, supportsVisionInput: false });
+
+  const result = await loop.execute(loopInput(gateway, {
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(accepted[0]?.status, "failed");
+  assert.equal(accepted[0]?.errorFacts?.code, "tool_result_image_input_unsupported");
+  assert.equal(accepted[0]?.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(accepted[0]?.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(JSON.stringify(await fixture.session.getBranch()).includes(imageData), false);
+  await loop.release();
+});
+
+test("agent session loop rejects current user images when Pi model.input is text-only", async (t) => {
+  const fixture = await createFixture(t);
+  const imageData = Buffer.from("current-user-image").toString("base64");
+  const textOnlyModel = { ...fixture.selectedModel, input: ["text"] as ("text" | "image")[] };
+  const loop = createAgentSessionLoop({ ...fixture, selectedModel: textOnlyModel });
+
+  const result = await loop.execute(loopInput(emptyGateway(), {
+    messages: [{
+      role: "user",
+      content: "inspect this image",
+      attachments: [{
+        kind: "image",
+        attachmentId: "current-user-image",
+        source: { kind: "data", mimeType: "image/png", data: imageData },
+      }],
+    }],
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "model_image_input_unsupported");
+  assert.equal(fixture.faux.state.callCount, 0);
+  await loop.release();
+});
+
+test("agent session loop rejects historical Session images when Pi model.input is text-only", async (t) => {
+  const fixture = await createFixture(t);
+  const imageData = Buffer.from("historical-session-image").toString("base64");
+  await fixture.session.appendMessage({
+    role: "user",
+    content: [{ type: "image", mimeType: "image/png", data: imageData }],
+    timestamp: Date.now(),
+  });
+  fixture.faux.setResponses([fauxAssistantMessage("must not reach provider")]);
+  const textOnlyModel = { ...fixture.selectedModel, input: ["text"] as ("text" | "image")[] };
+  const loop = createAgentSessionLoop({ ...fixture, selectedModel: textOnlyModel });
+
+  const result = await loop.execute(loopInput(emptyGateway(), {
+    messages: [{ role: "user", content: "continue" }],
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "model_image_input_unsupported");
+  assert.equal(fixture.faux.state.callCount, 0);
   await loop.release();
 });
 

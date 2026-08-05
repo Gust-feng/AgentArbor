@@ -8,6 +8,7 @@ import {
   type AgentMessage,
   type CompactionSettings,
   type Session,
+  type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import type { AgentSessionEntryRef } from "../../app/model-runtime/agent-session.js";
@@ -22,7 +23,7 @@ export type SessionContextCompactionResult =
     }
   | {
       readonly status: "failed";
-      readonly code: "context_compaction_failed" | "context_overflow";
+      readonly code: "context_compaction_failed" | "context_overflow" | "context_compaction_images_unsupported";
       readonly error: string;
     };
 
@@ -31,12 +32,20 @@ export type SessionContextCompactionInput = {
   readonly activeContextMessages: readonly AgentMessage[];
   readonly modelRegistry: Models;
   readonly selectedModel: Model<Api>;
+  /** Pi's frozen reasoning setting must also govern compaction summaries. */
+  readonly thinkingLevel?: ThinkingLevel;
   readonly abortSignal: AbortSignal;
   readonly compactionSettings?: CompactionSettings;
   readonly compactionInstructions?: string;
 };
 
-/** Compacts the active Session branch and returns the exact context for the next provider request. */
+/**
+ * Compacts the active Session branch with Pi's public compaction primitives.
+ * AgentHarness currently exposes compact() only while idle, so the request
+ * boundary adapter cannot invoke that method during a live turn; this helper
+ * deliberately delegates preparation, summarization, and append semantics to
+ * Pi instead of maintaining a second compaction state machine.
+ */
 export async function compactSessionContextIfNeeded(
   input: SessionContextCompactionInput,
 ): Promise<SessionContextCompactionResult> {
@@ -57,12 +66,21 @@ export async function compactSessionContextIfNeeded(
       error: "The active session context exceeds the model window but has no safe compaction cut point.",
     };
   }
+  if (prepared.value.messagesToSummarize.some(containsImageContent) ||
+      prepared.value.turnPrefixMessages.some(containsImageContent)) {
+    return {
+      status: "failed",
+      code: "context_compaction_images_unsupported",
+      error: "The active Session contains image content in the compaction prefix; Pi image-aware request-boundary compaction is required.",
+    };
+  }
   const compacted = await compact(
     prepared.value,
     input.modelRegistry,
     input.selectedModel,
     input.compactionInstructions,
     input.abortSignal,
+    input.thinkingLevel,
   );
   if (!compacted.ok) {
     return { status: "failed", code: "context_compaction_failed", error: compacted.error.message };
@@ -98,4 +116,12 @@ export async function compactSessionContextIfNeeded(
     compactionEntryRef: { sessionId, entryId: compactionEntryId },
     tokensBefore: compacted.value.tokensBefore,
   };
+}
+
+function containsImageContent(message: AgentMessage): boolean {
+  const content = (message as { readonly content?: unknown }).content;
+  return Array.isArray(content) && content.some((block) =>
+    typeof block === "object" && block !== null &&
+    (block as { readonly type?: unknown }).type === "image",
+  );
 }

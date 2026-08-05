@@ -34,6 +34,8 @@ test("model provider binding maps both supported protocols without model-name ga
     contextWindow: 200_000,
     maxTokens: 20_000,
   });
+  assert.deepEqual(chat.selectedModel.input, ["text"]);
+  assert.deepEqual(responses.selectedModel.input, ["text"]);
   assert.equal(responses.selectedModel.api, "openai-responses");
   assert.equal(responses.selectedModel.provider, "agentarbor-responses-profile");
 });

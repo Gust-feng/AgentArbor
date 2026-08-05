@@ -48,7 +48,9 @@ export class ModelProtocolContinuationPersistenceError extends Error {
 /**
  * Produces the exact JSON-safe protocol continuation facts that a feature may
  * persist without interpreting provider-private data. Request-only extensions
- * and model attachments remain ephemeral.
+ * and domain-level model attachment references are not copied into this
+ * protocol-extension envelope; Pi Session owns persistence of consumed image
+ * content at the provider message boundary.
  */
 export function persistedModelProtocolExtensions(
   extensions: ModelMessage["protocolExtensions"],

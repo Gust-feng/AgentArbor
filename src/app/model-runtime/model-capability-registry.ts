@@ -35,8 +35,10 @@ export const PROTOCOL_BASELINE_MODEL_CAPABILITIES: ModelCapabilities = {
   supportsParallelToolCalls: false,
   supportsStructuredOutputs: false,
   supportsStreaming: true,
-  // Generic OpenAI-compatible routes are user-controlled; explicit capability overrides can close image input.
-  supportsVisionInput: true,
+  // Generic OpenAI-compatible routes are user-controlled. Vision is opt-in
+  // through a verified model definition or an explicit capability override.
+  supportsVisionInput: false,
+  imageInput: { status: "unknown", source: "protocol_default", verifiedAt: VERIFIED_AT },
   supportsReasoningEffort: false,
   supportsReasoningOutput: false,
   preferredApiStyle: "openai_compatible",
@@ -736,6 +738,13 @@ function capabilitiesForDefinition(definition: ModelDefinition): ModelCapabiliti
   const protocolProfileId = definition.providerProfileId ?? "openai";
   return {
     ...definition.capabilities,
+    imageInput: definition.capabilities.imageInput ?? {
+      status: definition.capabilities.supportsVisionInput ? "supported" : "unsupported",
+      source: "registry",
+      ...(definition.capabilities.lastVerifiedAt === undefined
+        ? {}
+        : { verifiedAt: definition.capabilities.lastVerifiedAt }),
+    },
     protocolProfileId,
     reasoningControl: definition.reasoningControl ?? definition.capabilities.reasoningControl ?? "none",
   };
@@ -748,6 +757,7 @@ function fallbackCapabilitiesForProfile(profile: SanitizedModelProviderConfig): 
     protocolProfileId: providerProtocolProfileIdFor(profile),
     preferredApiStyle: preferredApiStyleForProtocol(profile.protocolKind),
     supportsToolCalling: supportsProtocolToolCalling(protocolCapabilities),
+    imageInput: { status: "unknown", source: "protocol_default", verifiedAt: VERIFIED_AT },
   };
 }
 
@@ -819,6 +829,14 @@ function mergeCapabilities(
   base: ModelCapabilities,
   override: Partial<ModelCapabilities>
 ): ModelCapabilities {
+  const imageInput = override.imageInput ?? (
+    override.supportsVisionInput === undefined
+      ? base.imageInput
+      : {
+          status: override.supportsVisionInput ? "supported" : "unsupported",
+          source: "override" as const,
+        }
+  );
   return {
     contextWindowTokens: override.contextWindowTokens ?? base.contextWindowTokens,
     maxOutputTokens: override.maxOutputTokens ?? base.maxOutputTokens,
@@ -827,6 +845,7 @@ function mergeCapabilities(
     supportsStructuredOutputs: override.supportsStructuredOutputs ?? base.supportsStructuredOutputs,
     supportsStreaming: override.supportsStreaming ?? base.supportsStreaming,
     supportsVisionInput: override.supportsVisionInput ?? base.supportsVisionInput,
+    ...(imageInput === undefined ? {} : { imageInput }),
     supportsReasoningEffort: override.supportsReasoningEffort ?? base.supportsReasoningEffort,
     supportsReasoningOutput: override.supportsReasoningOutput ?? base.supportsReasoningOutput,
     preferredApiStyle: override.preferredApiStyle ?? base.preferredApiStyle,

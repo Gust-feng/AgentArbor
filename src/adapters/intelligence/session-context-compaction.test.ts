@@ -93,3 +93,40 @@ test("session context compaction reports overflow when one retained turn still e
   assert.equal(result.status === "failed" ? result.code : undefined, "context_overflow");
   assert.equal(faux.state.callCount, 1);
 });
+
+test("session context compaction refuses to summarize image content until Pi preserves it", async () => {
+  const session = await new InMemorySessionRepo().create({ id: "session-one" });
+  await session.appendMessage({
+    role: "user",
+    content: [
+      { type: "text", text: "old image context" },
+      { type: "image", mimeType: "image/png", data: Buffer.from("image").toString("base64") },
+    ],
+    timestamp: 1,
+  });
+  for (let index = 0; index < 30; index += 1) {
+    await session.appendMessage({ role: "user", content: `old context ${index} `.repeat(50), timestamp: index * 2 + 3 });
+    await session.appendMessage(fauxAssistantMessage(`old answer ${index}`));
+  }
+  await session.appendMessage({ role: "user", content: "current request", timestamp: 100 });
+  const faux = fauxProvider({ models: [{ id: "small-model", contextWindow: 3_000, maxTokens: 500 }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+
+  const result = await compactSessionContextIfNeeded({
+    agentSession: session,
+    activeContextMessages: (await session.buildContext()).messages,
+    modelRegistry: models,
+    selectedModel: faux.getModel(),
+    abortSignal: new AbortController().signal,
+    compactionSettings: TEST_SETTINGS,
+  });
+
+  assert.deepEqual(result, {
+    status: "failed",
+    code: "context_compaction_images_unsupported",
+    error: "The active Session contains image content in the compaction prefix; Pi image-aware request-boundary compaction is required.",
+  });
+  assert.equal(faux.state.callCount, 0);
+  assert.equal((await session.getEntries()).some((entry) => entry.type === "compaction"), false);
+});

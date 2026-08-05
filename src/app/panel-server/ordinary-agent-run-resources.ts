@@ -266,6 +266,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
           executionEnvironment,
           modelRegistry: providerBinding.modelRegistry,
           selectedModel: providerBinding.selectedModel,
+          supportsVisionInput: resources.capabilitySnapshot.modelCapabilities.supportsVisionInput,
           thinkingLevel: providerBinding.thinkingLevel,
           transformProviderPayload: providerBinding.transformProviderPayload,
           toolDefinitionTokenCounter: tokenCounter.countText,

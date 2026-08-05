@@ -39,4 +39,14 @@ export type ModelInputAttachment =
       readonly filename: string;
       readonly detail?: "low" | "high";
       readonly byteLength?: number;
-    };
+  };
+
+/** JSON-safe identity for an inline image already written to a Pi Session. */
+export type ModelInputAttachmentRef = {
+  readonly kind: "image";
+  readonly attachmentId?: string;
+  readonly inputRef?: string;
+  readonly mimeType: string;
+  readonly byteLength?: number;
+  readonly sha256: string;
+};

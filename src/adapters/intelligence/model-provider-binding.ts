@@ -154,7 +154,9 @@ function createConfiguredProviderModel(
     baseUrl: options.baseUrl,
     reasoning: options.supportsReasoningOutput ??
       (options.requestSettings?.reasoningEffort !== undefined && options.requestSettings.reasoningEffort !== "none"),
-    input: options.supportsVisionInput === false ? ["text"] : ["text", "image"],
+    // Pi's model.input is the final transport capability gate. An omitted
+    // declaration is unknown, so never advertise image input by default.
+    input: options.supportsVisionInput === true ? ["text", "image"] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: positiveInteger(options.contextWindow, DEFAULT_CONTEXT_WINDOW, "contextWindow"),
     maxTokens: positiveInteger(

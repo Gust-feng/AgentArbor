@@ -30,6 +30,14 @@ export class OrdinaryRunSnapshotIncompatibleError extends Error {
 const jsonValueSchema: z.ZodType<unknown> = z.lazy(() => z.union([
   z.null(), z.string(), z.number().finite(), z.boolean(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema),
 ]));
+const modelAttachmentRefSchema = z.object({
+  kind: z.literal("image"),
+  attachmentId: z.string().min(1).optional(),
+  inputRef: z.string().min(1).optional(),
+  mimeType: z.string().min(1),
+  byteLength: z.number().int().nonnegative().optional(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
 const toolInputSchemaSchema = z.custom<ToolInputSchema>((value) => {
   try {
     cloneToolInputSchema(value);
@@ -141,6 +149,7 @@ const pendingNestedToolCallSchema = z.object({
 const toolCallSchema = z.object({
   callId: z.string().min(1), factId: z.string().min(1).optional(), parentToolCallFactId: z.string().min(1).optional(), toolName: canonicalToolNameSchema, input: jsonValueSchema.optional(),
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
+  modelAttachmentRefs: z.array(modelAttachmentRefSchema).optional(),
   error: z.string().optional(), errorDomain: z.string().optional(), errorFacts: z.record(z.string(), jsonValueSchema).optional(),
   failureAttribution: z.enum(["schema_validation", "execution_failure"]).optional(),
   delegatedExecution: z.object({

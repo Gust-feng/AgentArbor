@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 import {
   JsonlSessionRepo,
   Session,
@@ -6,12 +7,14 @@ import {
   type ExecutionEnv,
   type JsonlSessionMetadata,
 } from "@earendil-works/pi-agent-core";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type {
   AgentSessionEntryRef,
   AgentSessionAssistantEntry,
   AgentSessionRef,
   AgentSessionRepository,
 } from "../../app/model-runtime/agent-session.js";
+import type { ModelInputAttachmentRef } from "../../domain/intelligence/index.js";
 import { canonicalToolResultMessage } from "../../app/model-runtime/tool-result-message.js";
 import {
   normalizeToolFactValue,
@@ -28,6 +31,7 @@ export type AgentSessionRepositoryErrorCode =
   | "agent_session_duplicate"
   | "agent_session_ref_invalid"
   | "agent_session_metadata_mismatch"
+  | "agent_session_attachment_mismatch"
   | "agent_session_not_found"
   | "agent_session_revoke_failed"
   | "agent_session_writer_active";
@@ -278,13 +282,48 @@ export class FileSystemAgentSessionRepository implements AgentSessionRepository 
         const content = entry?.type === "message" && entry.message.role === "toolResult"
           ? entry.message.content
           : [];
-        const text = content.length === 1 && content[0]?.type === "text" ? content[0].text : undefined;
+        const textBlocks = content.filter((block) => block.type === "text");
+        const text = textBlocks.length === 1 ? textBlocks[0]?.text : undefined;
+        const actualImages = content.filter((block): block is ImageContent => block.type === "image");
+        const expectedImages = expectedMessage === undefined
+          ? []
+          : toolResultImageContentFromAttachments(expectedMessage.attachments);
+        const expectedImageRefs = expected?.modelAttachmentRefs ?? [];
+        if (expectedImages.length === 0 && expectedImageRefs.length === 0 && actualImages.length > 0) {
+          throw new AgentSessionRepositoryError(
+            "agent_session_attachment_mismatch",
+            `Agent session tool result ${expected.callId} contains a durable image that the run fact cannot prove.`,
+          );
+        }
+        const imagesMatch = expectedImages.length > 0
+          ? JSON.stringify(actualImages) === JSON.stringify(expectedImages)
+          : expectedImageRefs.length === 0
+            ? actualImages.length === 0
+            : imageRefsMatch(actualImages, expectedImageRefs);
+        if (!imagesMatch && expectedImageRefs.length > 0) {
+          throw new AgentSessionRepositoryError(
+            "agent_session_attachment_mismatch",
+            `Agent session tool result ${expected.callId} image manifest does not match the durable Session entry.`,
+          );
+        }
         if (entry?.type !== "message" || entry.message.role !== "toolResult" || expected === undefined ||
             entry.message.toolCallId !== expected.callId || entry.message.toolName !== expected.toolName ||
-            entry.message.isError !== (expected.status !== "completed") || text !== expectedMessage?.content) {
+            entry.message.isError !== (expected.status !== "completed") || text !== expectedMessage?.content ||
+            !imagesMatch) {
           await lease.session.moveTo(input.assistantEntryRef.entryId);
           matchingSuffixLength = 0;
           break;
+        }
+      }
+      for (const result of input.orderedResults.slice(matchingSuffixLength)) {
+        const expectedRefs = result.modelAttachmentRefs ?? [];
+        if (expectedRefs.length === 0) continue;
+        const availableImages = toolResultImageContentFromAttachments(canonicalToolResultMessage(result).attachments);
+        if (availableImages.length !== expectedRefs.length) {
+          throw new AgentSessionRepositoryError(
+            "agent_session_attachment_mismatch",
+            `Agent session tool result ${result.callId} has image references but no recoverable image payload.`,
+          );
         }
       }
       for (const result of input.orderedResults.slice(matchingSuffixLength)) {
@@ -293,7 +332,10 @@ export class FileSystemAgentSessionRepository implements AgentSessionRepository 
           role: "toolResult",
           toolCallId: result.callId,
           toolName: result.toolName,
-          content: [{ type: "text", text: modelMessage.content }],
+          content: [
+            { type: "text", text: modelMessage.content },
+            ...toolResultImageContentFromAttachments(modelMessage.attachments),
+          ],
           isError: result.status !== "completed",
           timestamp: Date.now(),
         });
@@ -487,6 +529,30 @@ export class FileSystemAgentSessionRepository implements AgentSessionRepository 
     }
     return resolved;
   }
+}
+
+function toolResultImageContentFromAttachments(
+  attachments: ReturnType<typeof canonicalToolResultMessage>["attachments"],
+): ImageContent[] {
+  return (attachments ?? []).flatMap((attachment) => {
+    if (attachment.kind !== "image" || attachment.source.kind !== "data") return [];
+    return [{ type: "image" as const, mimeType: attachment.source.mimeType, data: attachment.source.data }];
+  });
+}
+
+function imageRefsMatch(
+  actualImages: readonly ImageContent[],
+  expectedRefs: readonly ModelInputAttachmentRef[],
+): boolean {
+  if (actualImages.length !== expectedRefs.length) return false;
+  return actualImages.every((image, index) => {
+    const expected = expectedRefs[index];
+    if (expected === undefined) return false;
+    const actualBytes = Buffer.from(image.data, "base64");
+    return image.mimeType === expected.mimeType &&
+      (expected.byteLength === undefined || expected.byteLength === actualBytes.byteLength) &&
+      createHash("sha256").update(actualBytes).digest("hex") === expected.sha256;
+  });
 }
 
 function normalizeStorageKey(storageKey: string): string {

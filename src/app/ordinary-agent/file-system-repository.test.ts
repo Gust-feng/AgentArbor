@@ -7,6 +7,7 @@ import { OrdinaryFeatureError } from "./contracts.js";
 import { createFileSystemOrdinaryRunRepository, OrdinaryRunSnapshotIncompatibleError } from "./file-system-repository.js";
 import {
   createInitialOrdinaryRunState,
+  recordOrdinaryToolResult,
   recordOrdinaryNestedToolRequests,
   transitionOrdinaryRun,
 } from "./state.js";
@@ -208,6 +209,43 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
   assert.equal(rawSnapshot.includes("BASE64_MUST_NOT_REACH_DISK"), false);
   assert.equal(rawSnapshot.includes('"attachmentId": "image"'), true);
   assert.equal(rawSnapshot.includes("read:file:image.png"), true);
+});
+
+test("file repository round-trips JSON-safe model attachment references in tool facts", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-attachment-refs-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("tool-attachment-refs", "2026-01-01T00:00:00.000Z");
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const result = {
+    callId: "capture-call",
+    toolName: "capture",
+    input: {},
+    output: { captured: true },
+    modelAttachmentRefs: [{
+      kind: "image" as const,
+      attachmentId: "capture-image",
+      mimeType: "image/png",
+      byteLength: 5,
+      sha256: "a".repeat(64),
+    }],
+    status: "completed" as const,
+    durationMs: 5,
+  };
+  const withResult = recordOrdinaryToolResult({
+    state: running,
+    result,
+    recordedAt: "2026-01-01T00:00:02.000Z",
+  });
+
+  await repository.save(withResult, 0);
+
+  assert.deepEqual((await repository.get(withResult.runId))?.state.toolCalls[0]?.modelAttachmentRefs, result.modelAttachmentRefs);
 });
 
 test("v6 output events persist only Session entry refs instead of assistant text", async (t) => {

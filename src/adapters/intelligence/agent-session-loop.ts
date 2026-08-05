@@ -12,7 +12,6 @@ import {
   type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { createHash } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import {
   isContextOverflow,
   Type,
@@ -44,9 +43,10 @@ import {
   TOOL_VISIBILITY_ACTIVATION_KIND,
 } from "../../app/model-runtime/tool-visibility-contract.js";
 import type { ConfirmationDecision, ConfirmationRequest } from "../../domain/confirmation/index.js";
-import type { ModelInputAttachment, ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
+import type { ModelInputAttachment, ModelInputAttachmentRef, ModelMessage, ModelUsage } from "../../domain/intelligence/index.js";
 import {
   cloneToolInputSchema,
+  copyToolModelAttachments,
   modelVisibleToolDescription,
   normalizeToolFactValue,
   stableToolSchemaStringify,
@@ -67,6 +67,8 @@ export type AgentSessionLoopOptions = {
   readonly executionEnvironment: ExecutionEnv;
   readonly modelRegistry: Models;
   readonly selectedModel: Model<Api>;
+  /** Frozen Ordinary capability; Pi model.input remains the transport projection. */
+  readonly supportsVisionInput?: boolean;
   readonly agentSession: Session;
   readonly thinkingLevel?: ThinkingLevel;
   readonly transformProviderPayload?: ModelProviderPayloadTransformer;
@@ -127,6 +129,10 @@ type PendingToolRequest = {
   readonly modelVisibleAtRequest: boolean;
 };
 
+type PendingToolResultDelivery = {
+  readonly result: ToolCallResult;
+};
+
 type ApprovalResolution = {
   readonly kind: "resolved";
   readonly decision: ConfirmationDecision;
@@ -139,9 +145,12 @@ type DelegatedAgentResultGateway = AgentLoopToolBoundary["gateway"] & {
 
 type AgentSessionExecutionState = {
   readonly toolResults: Map<string, ToolCallResult>;
+  readonly pendingToolResults: Map<string, PendingToolResultDelivery>;
   readonly approvals: ApprovalDecisionCoordinator;
   readonly sessionId: string;
   readonly agentSession: Session;
+  readonly supportsVisionInput: boolean;
+  readonly modelInputSupportsImage: boolean;
   readonly startLeafEntryId: string | null;
   readonly compactionEntryIds: string[];
   readonly abortSignalCleanups: Set<() => void>;
@@ -199,14 +208,16 @@ export function createAgentSessionLoop(options: AgentSessionLoopOptions): AgentL
       if (released) throw new Error("Agent session loop has been released.");
       if (activeExecution !== undefined) throw new Error("Agent session loop is already executing.");
       if (input.abortSignal.aborted) return cancelledBeforeStart(input);
-      const prompt = preparePromptInput(input);
       const sessionId = (await options.agentSession.getMetadata()).id;
       const startEntryId = await options.agentSession.getLeafId();
       const state: AgentSessionExecutionState = {
         toolResults: new Map(),
+        pendingToolResults: new Map(),
         approvals: new ApprovalDecisionCoordinator(),
         sessionId,
         agentSession: options.agentSession,
+        supportsVisionInput: options.supportsVisionInput ?? options.selectedModel.input.includes("image"),
+        modelInputSupportsImage: options.selectedModel.input.includes("image"),
         startLeafEntryId: startEntryId,
         compactionEntryIds: [],
         abortSignalCleanups: new Set(),
@@ -220,12 +231,20 @@ export function createAgentSessionLoop(options: AgentSessionLoopOptions): AgentL
         cancellationRequested: false,
         usage: {},
       };
+      const prompt = preparePromptInput(input);
+      if (prompt.images !== undefined && !state.modelInputSupportsImage) {
+        return failedResult(
+          state,
+          "The active Pi model does not accept image input for this run.",
+          "model_image_input_unsupported",
+        );
+      }
       await input.onSessionWriteCheckpoint?.({
         kind: "start_leaf_captured",
         sessionId,
         startLeafRef: startEntryId === null ? null : { sessionId, entryId: startEntryId },
       });
-      const runtimeSession = createEphemeralAttachmentSession(options.agentSession);
+      const runtimeSession = createRunLocalContextSession(options.agentSession);
       const harnessTools = createHarnessTools(input, state, options);
       const harness = new AgentHarness({
         env: options.executionEnvironment,
@@ -299,22 +318,14 @@ function preparePromptInput(
   };
 }
 
-/** Keeps provider input ephemeral while retaining a truthful durable Session transcript. */
-function createEphemeralAttachmentSession(session: Session): Session {
-  const overlays: Array<{ readonly durable: AgentMessage; readonly ephemeral: AgentMessage }> = [];
+/** Keeps dynamic tool activation markers scoped to the run that produced them. */
+function createRunLocalContextSession(session: Session): Session {
   const currentRunMessageEntryIds = new Set<string>();
   return new Proxy(session, {
     get(target, property, receiver) {
       if (property === "appendMessage") {
         return async (message: AgentMessage) => {
-          const durable = sanitizeSessionMessage(message);
-          if (!isDeepStrictEqual(durable, message)) {
-            overlays.push({
-              durable: globalThis.structuredClone(durable),
-              ephemeral: globalThis.structuredClone(message),
-            });
-          }
-          const entryId = await target.appendMessage(durable);
+          const entryId = await target.appendMessage(message);
           currentRunMessageEntryIds.add(entryId);
           return entryId;
         };
@@ -322,7 +333,7 @@ function createEphemeralAttachmentSession(session: Session): Session {
       if (property === "buildContext") {
         return async (...args: Parameters<Session["buildContext"]>) => {
           const options = args[0] ?? {};
-          const context = await target.buildContext({
+          return target.buildContext({
             ...options,
             entryTransforms: [
               ...(options.entryTransforms ?? []),
@@ -330,14 +341,6 @@ function createEphemeralAttachmentSession(session: Session): Session {
                 stripPriorRunToolActivationMarker(entry, currentRunMessageEntryIds)),
             ],
           });
-          const remaining = [...overlays];
-          const messages = context.messages.map((message) => {
-            const index = remaining.findIndex((overlay) => isDeepStrictEqual(overlay.durable, message));
-            if (index < 0) return message;
-            const [overlay] = remaining.splice(index, 1);
-            return globalThis.structuredClone(overlay.ephemeral);
-          });
-          return { ...context, messages };
         };
       }
       const value = Reflect.get(target, property, receiver);
@@ -358,12 +361,29 @@ function stripPriorRunToolActivationMarker(
   return { ...entry, message };
 }
 
-function sanitizeSessionMessage(message: AgentMessage): AgentMessage {
-  if (!("content" in message) || !Array.isArray(message.content)) return message;
-  const content = message.content.map((block) => block.type === "image"
-    ? { type: "text" as const, text: "[image attachment omitted from durable Session]" }
-    : block);
-  return { ...message, content } as AgentMessage;
+function messageContainsImage(message: AgentMessage): boolean {
+  return "content" in message && Array.isArray(message.content) && message.content.some((block) =>
+    typeof block === "object" && block !== null && "type" in block && block.type === "image");
+}
+
+function compactionPreparationContainsImage(preparation: {
+  readonly messagesToSummarize: readonly AgentMessage[];
+  readonly turnPrefixMessages: readonly AgentMessage[];
+}): boolean {
+  return preparation.messagesToSummarize.some(messageContainsImage) ||
+    preparation.turnPrefixMessages.some(messageContainsImage);
+}
+
+function assertModelContextAcceptsImages(
+  messages: readonly AgentMessage[],
+  state: AgentSessionExecutionState,
+): void {
+  if (state.modelInputSupportsImage || !messages.some(messageContainsImage)) return;
+  state.maintenanceFailure = {
+    code: "model_image_input_unsupported",
+    error: "The active Pi model does not accept image content already present in the Session.",
+  };
+  throw new Error(state.maintenanceFailure.error);
 }
 
 function createHarnessTools(
@@ -578,7 +598,7 @@ function createVisibilityControlTool(input: {
         input.onToolInvoked?.();
         const result = visibilityControlFailure(request, errorMessage(error), "tool_visibility_invalid_input", startedAt);
         const acceptanceFailure = await acceptToolResultForDelivery(input.input, input.state, result);
-        return acceptanceFailure ?? harnessToolResult(result);
+        return acceptanceFailure ?? harnessToolResult(result, input.state, false);
       }
       emitToolRequested(input.input, request);
       input.onToolInvoked?.();
@@ -618,6 +638,7 @@ function createVisibilityControlTool(input: {
       }
       return harnessToolResult(
         execution.result,
+        input.state,
         execution.result.status === "cancelled",
         execution.addedToolNames,
       );
@@ -890,15 +911,15 @@ function createHarnessTool(
       if (preflight.status === "blocked") {
         const deliveryFailure = await acceptToolResultForDelivery(input, state, preflight.result);
         if (deliveryFailure !== undefined) return deliveryFailure;
-        return harnessToolResult(preflight.result, preflight.result.status === "cancelled");
+        return harnessToolResult(preflight.result, state, preflight.result.status === "cancelled");
       }
       let approvedConfirmationIds = boundary.permission.approvedConfirmationIds;
       if (preflight.status === "approval_required") {
         const approval = requireApprovalRequiredResult(preflight.result);
         const resolution = await resolveApproval(input, state, approval, context);
         if (resolution.kind === "delivery_failure") return resolution.response;
-        if (resolution.kind === "cancelled") return harnessToolResult(resolution.result, true);
-        if (resolution.kind === "denied") return harnessToolResult(resolution.result);
+        if (resolution.kind === "cancelled") return harnessToolResult(resolution.result, state, true);
+        if (resolution.kind === "denied") return harnessToolResult(resolution.result, state, false);
         approvedConfirmationIds = uniqueStrings([
           ...(approvedConfirmationIds ?? []),
           requireConfirmationRequest(approval).confirmationId,
@@ -921,7 +942,7 @@ function createHarnessTool(
         if (result.status !== "approval_required") {
           const deliveryFailure = await acceptToolResultForDelivery(input, state, result);
           if (deliveryFailure !== undefined) return deliveryFailure;
-          return harnessToolResult(result, result.status === "cancelled");
+          return harnessToolResult(result, state, result.status === "cancelled");
         }
 
         // ToolCenter may discover a gate after starting a read-only operation. Keep
@@ -930,8 +951,8 @@ function createHarnessTool(
         const approval = requireApprovalRequiredResult(result);
         const resolution = await resolveApproval(input, state, approval, context);
         if (resolution.kind === "delivery_failure") return resolution.response;
-        if (resolution.kind === "cancelled") return harnessToolResult(resolution.result, true);
-        if (resolution.kind === "denied") return harnessToolResult(resolution.result);
+        if (resolution.kind === "cancelled") return harnessToolResult(resolution.result, state, true);
+        if (resolution.kind === "denied") return harnessToolResult(resolution.result, state, false);
         approvedConfirmationIds = uniqueStrings([
           ...(approvedConfirmationIds ?? []),
           requireConfirmationRequest(approval).confirmationId,
@@ -994,6 +1015,7 @@ function createDelegatedAgentTool(
       const acceptanceFailure = await acceptToolResultForDelivery(input, state, delivered);
       return acceptanceFailure ?? harnessToolResult(
         delivered,
+        state,
         state.toolRequestAcceptanceFailure !== undefined ||
           state.toolAcceptanceFailure !== undefined ||
           state.maintenanceFailure !== undefined ||
@@ -1109,11 +1131,13 @@ function attachDelegatedHarnessHooks(
   const preparedToolCallIds = new Set<string>();
   attachProviderPayloadHook(harness, options, metadataByName);
   harness.on("context", async ({ messages }) => {
+    assertModelContextAcceptsImages(messages, state);
     const compaction = await compactSessionContextIfNeeded({
       agentSession,
       activeContextMessages: messages,
       modelRegistry: options.modelRegistry,
       selectedModel: harness.getModel(),
+      thinkingLevel: harness.getThinkingLevel(),
       abortSignal,
       ...(options.compactionSettings === undefined ? {} : { compactionSettings: options.compactionSettings }),
     });
@@ -1121,6 +1145,14 @@ function attachDelegatedHarnessHooks(
     return compaction.status === "compacted"
       ? { messages: [...compaction.compactedContextMessages] }
       : undefined;
+  });
+  harness.on("session_before_compact", ({ preparation }) => {
+    if (!compactionPreparationContainsImage(preparation)) return undefined;
+    state.maintenanceFailure = {
+      code: "context_compaction_images_unsupported",
+      error: "The active Session contains image content in the compaction prefix; Pi image-aware compaction is required.",
+    };
+    return { cancel: true };
   });
   harness.on("tool_result", ({ details }) => {
     const result = toolResultFromDetails(details);
@@ -1140,6 +1172,13 @@ function attachDelegatedHarnessHooks(
         preparedToolCallIds,
         abortSignal,
       });
+      return;
+    }
+    if (event.type === "message_end" && event.message.role === "toolResult") {
+      const delivery = pendingToolResultForMessage(state, event.message, parentFactId);
+      if (delivery !== undefined) {
+        await deliverAcceptedToolResult(loopInput, state, delivery);
+      }
       return;
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
@@ -1201,11 +1240,13 @@ function attachHarnessHooks(
 ): void {
   attachProviderPayloadHook(harness, options, metadataByName);
   harness.on("context", async ({ messages }) => {
+    assertModelContextAcceptsImages(messages, state);
     const sessionCompaction = await compactSessionContextIfNeeded({
       agentSession: runtimeSession,
       activeContextMessages: messages,
       modelRegistry: options.modelRegistry,
       selectedModel: harness.getModel(),
+      thinkingLevel: harness.getThinkingLevel(),
       abortSignal: input.abortSignal,
       ...(options.compactionSettings === undefined
         ? {}
@@ -1233,6 +1274,14 @@ function attachHarnessHooks(
       return { messages: [...sessionCompaction.compactedContextMessages] };
     }
     return undefined;
+  });
+  harness.on("session_before_compact", ({ preparation }) => {
+    if (!compactionPreparationContainsImage(preparation)) return undefined;
+    state.maintenanceFailure = {
+      code: "context_compaction_images_unsupported",
+      error: "The active Session contains image content in the compaction prefix; Pi image-aware compaction is required.",
+    };
+    return { cancel: true };
   });
   harness.on("tool_result", ({ details }) => {
     const result = toolResultFromDetails(details);
@@ -1397,6 +1446,13 @@ async function projectHarnessEvent(
   const entryId = await state.agentSession.getLeafId();
   if (entryId === null) throw new Error("Session did not expose the entry appended by message_end.");
   state.latestLeafEntryId = entryId;
+  if (event.message.role === "toolResult") {
+    const delivery = pendingToolResultForMessage(state, event.message);
+    if (delivery !== undefined) {
+      await deliverAcceptedToolResult(input, state, delivery);
+    }
+    return;
+  }
   if (event.message.role === "user") {
     state.inputEntryId ??= entryId;
     await input.onSessionWriteCheckpoint?.({
@@ -1898,13 +1954,35 @@ async function acceptToolResult(
   input: AgentLoopInput,
   state: AgentSessionExecutionState,
   result: ToolCallResult,
+): Promise<PendingToolResultDelivery> {
+  const deliverable = toolResultForPiTransport(
+    result,
+    state.supportsVisionInput,
+    state.modelInputSupportsImage,
+  );
+  const factId = toolCallFactId(deliverable);
+  state.toolResults.set(factId, cloneToolResult(deliverable));
+  const delivery: PendingToolResultDelivery = { result: deliverable };
+  if (toolResultImageContentFromAttachments(canonicalToolResultMessage(deliverable).attachments).length > 0) {
+    state.pendingToolResults.set(factId, delivery);
+  } else {
+    await deliverAcceptedToolResult(input, state, { result: deliverable });
+  }
+  return delivery;
+}
+
+async function deliverAcceptedToolResult(
+  input: AgentLoopInput,
+  state: AgentSessionExecutionState,
+  delivery: PendingToolResultDelivery,
 ): Promise<void> {
-  const deliverable = toolResultForPiTransport(result);
-  state.toolResults.set(toolCallFactId(deliverable), cloneToolResult(deliverable));
+  const result = delivery.result;
+  state.pendingToolResults.delete(toolCallFactId(result));
   try {
-    await input.onToolResult?.(cloneToolResult(deliverable));
+    await input.onToolResult?.(cloneToolResult(result));
   } catch (error) {
     state.toolAcceptanceFailure ??= error;
+    state.toolResults.set(toolCallFactId(result), toolResultAcceptanceFailure(result, error));
     throw error;
   }
 }
@@ -1934,7 +2012,7 @@ async function acceptToolResultForDelivery(
   } catch (error) {
     const failure = toolResultAcceptanceFailure(result, error);
     state.toolResults.set(toolCallFactId(failure), failure);
-    return harnessToolResult(failure, true);
+    return harnessToolResult(failure, state, true);
   }
 }
 
@@ -2170,10 +2248,15 @@ function clearRunAbortSignals(state: AgentSessionExecutionState): void {
 
 function harnessToolResult(
   result: ToolCallResult,
+  state: Pick<AgentSessionExecutionState, "supportsVisionInput" | "modelInputSupportsImage">,
   terminate = false,
   addedToolNames?: readonly string[],
 ) {
-  const deliverable = toolResultForPiTransport(result);
+  const deliverable = toolResultForPiTransport(
+    result,
+    state.supportsVisionInput,
+    state.modelInputSupportsImage,
+  );
   const message = canonicalToolResultMessage(deliverable);
   const imageContent = toolResultImageContentFromAttachments(message.attachments);
   return {
@@ -2182,34 +2265,74 @@ function harnessToolResult(
     ...(deliverable === result && addedToolNames !== undefined && addedToolNames.length > 0
       ? { addedToolNames: [...addedToolNames] }
       : {}),
-    ...(terminate || deliverable.errorFacts?.code === "tool_result_attachment_not_supported"
+    ...(terminate || deliverable.errorFacts?.code === "tool_result_attachment_not_supported" ||
+        deliverable.errorFacts?.code === "tool_result_image_input_unsupported" ||
+        deliverable.errorFacts?.code === "tool_result_image_input_projection_mismatch"
       ? { terminate: true }
       : {}),
   };
 }
 
-function toolResultForPiTransport(result: ToolCallResult): ToolCallResult {
+function toolResultForPiTransport(
+  result: ToolCallResult,
+  supportsVisionInput: boolean,
+  modelInputSupportsImage: boolean,
+): ToolCallResult {
   const attachments = toolModelAttachmentsFromOutput(result.output);
   const unsupported = attachments?.find((attachment) =>
     attachment.kind !== "image" || attachment.source.kind !== "data"
   );
-  if (unsupported === undefined) return result;
+  const image = attachments?.find((attachment) => attachment.kind === "image" && attachment.source.kind === "data");
+  const deliveryFailureCode = image !== undefined && !supportsVisionInput
+    ? "tool_result_image_input_unsupported"
+    : image !== undefined && !modelInputSupportsImage
+      ? "tool_result_image_input_projection_mismatch"
+      : undefined;
+  if (unsupported === undefined && deliveryFailureCode === undefined) {
+    return attachments === undefined || result.modelAttachmentRefs !== undefined
+      ? result
+      : { ...result, modelAttachmentRefs: modelAttachmentRefsFromAttachments(attachments) };
+  }
+  const attachment = unsupported ?? image;
+  if (attachment === undefined) return result;
   return {
     ...result,
+    // structuredClone retains the JSON execution facts while intentionally
+    // dropping the non-enumerable attachment carrier rejected by this transport.
+    output: result.output === undefined ? undefined : globalThis.structuredClone(result.output),
+    modelAttachmentRefs: undefined,
     status: "failed",
-    error: `Tool result could not be delivered to the Pi model because ${unsupported.kind} attachments are unsupported by the active model transport.`,
+    error: deliveryFailureCode === undefined
+      ? `Tool result could not be delivered to the Pi model because ${attachment.kind} attachments are unsupported by the active model transport.`
+      : `Tool result image could not be delivered because the active model does not accept image input.`,
     errorDomain: "runtime_error",
     errorFacts: {
       ...(result.errorFacts ?? {}),
-      code: "tool_result_attachment_not_supported",
+      code: deliveryFailureCode ?? "tool_result_attachment_not_supported",
       sourceExecutionStatus: result.status,
       doNotBlindlyRetry: true,
       outputDeliveryPhase: "model_transport",
-      attachmentKind: unsupported.kind,
-      attachmentSource: unsupported.source.kind,
+      attachmentKind: attachment.kind,
+      attachmentSource: attachment.source.kind,
     },
     confirmationRequest: undefined,
   };
+}
+
+function modelAttachmentRefsFromAttachments(
+  attachments: readonly ModelInputAttachment[],
+): readonly ModelInputAttachmentRef[] {
+  return attachments.flatMap((attachment) => {
+    if (attachment.kind !== "image" || attachment.source.kind !== "data") return [];
+    return [{
+      kind: "image" as const,
+      ...(attachment.attachmentId === undefined ? {} : { attachmentId: attachment.attachmentId }),
+      ...(attachment.inputRef === undefined ? {} : { inputRef: attachment.inputRef }),
+      mimeType: attachment.source.mimeType,
+      ...(attachment.byteLength === undefined ? {} : { byteLength: attachment.byteLength }),
+      sha256: createHash("sha256").update(Buffer.from(attachment.source.data, "base64")).digest("hex"),
+    }];
+  });
 }
 
 function deniedToolResult(
@@ -2289,6 +2412,30 @@ function toolResultFromDetails(details: unknown): ToolCallResult | undefined {
   if (typeof details !== "object" || details === null || !("kind" in details)) return undefined;
   const candidate = details as ToolExecutionDetails;
   return candidate.kind === "result" ? candidate.result : undefined;
+}
+
+type PiToolResultMessage = Extract<AgentMessage, { readonly role: "toolResult" }>;
+
+function pendingToolResultForMessage(
+  state: AgentSessionExecutionState,
+  message: PiToolResultMessage,
+  parentToolCallFactId?: string,
+): PendingToolResultDelivery | undefined {
+  const detailed = toolResultFromDetails(message.details);
+  if (detailed !== undefined) {
+    return state.pendingToolResults.get(toolCallFactId(detailed));
+  }
+  const matches = [...state.pendingToolResults.values()].filter(({ result }) =>
+    result.callId === message.toolCallId && result.toolName === message.toolName &&
+    result.parentToolCallFactId === parentToolCallFactId);
+  if (matches.length > 1) {
+    throwHarnessMaintenanceFailure(
+      state,
+      "session_tool_result_identity_mismatch",
+      `Pi returned ambiguous pending tool results for call ${message.toolCallId}.`,
+    );
+  }
+  return matches[0];
 }
 
 function emitToolRequested(input: AgentLoopInput, request: ToolCallRequest): void {
@@ -2475,7 +2622,16 @@ function cloneModelMessage(message: ModelMessage): ModelMessage {
 }
 
 function cloneToolResult(result: ToolCallResult): ToolCallResult {
-  return globalThis.structuredClone(result);
+  const cloned = globalThis.structuredClone(result);
+  if (result.output !== undefined && cloned.output !== undefined &&
+      typeof result.output === "object" && result.output !== null &&
+      typeof cloned.output === "object" && cloned.output !== null) {
+    return {
+      ...cloned,
+      output: copyToolModelAttachments(result.output, cloned.output),
+    };
+  }
+  return cloned;
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { CodedExecutionError } from "../execution-errors/index.js";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelInputAttachment, ModelMessage } from "../../domain/intelligence/index.js";
 import type { TaskSoil, TaskSoilContextRef } from "../../domain/soil/index.js";
@@ -22,27 +23,50 @@ export async function attachDesktopFileInputsToModelMessages(input: {
   readonly workspaceRoot?: string;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 }): Promise<readonly ModelMessage[]> {
-  if (input.modelCapabilities?.supportsVisionInput !== true) {
+  const imageRefs = input.taskSoil.contextRefs.filter(isImageContextRef);
+  if (imageRefs.length === 0) {
     return input.messages;
+  }
+  if (input.modelCapabilities?.supportsVisionInput !== true) {
+    throw new CodedExecutionError(
+      "model_vision_input_unsupported",
+      "This run contains image attachments, but the frozen model capability does not support image input.",
+    );
   }
   const attachments = await resolveImageAttachments({
     taskSoil: input.taskSoil,
     workspaceRoot: input.workspaceRoot ?? process.cwd(),
     resolveManagedAttachmentPath: input.resolveManagedAttachmentPath,
   });
-  if (attachments.length === 0) {
-    return input.messages;
+  if (attachments.failures.length > 0) {
+    throw new CodedExecutionError(
+      "model_input_attachment_unavailable",
+      `Image attachments could not be delivered: ${attachments.failures.join("; ")}`,
+    );
   }
-  return appendAttachmentsToCurrentUserMessage(input.messages, attachments);
+  if (attachments.items.length === 0) {
+    throw new CodedExecutionError(
+      "model_input_attachment_unavailable",
+      "Image attachments were declared for this run, but none could be read.",
+    );
+  }
+  return appendAttachmentsToCurrentUserMessage(input.messages, attachments.items);
 }
+
+type ResolvedImageAttachments = {
+  readonly items: readonly ModelInputAttachment[];
+  readonly failures: readonly string[];
+};
 
 async function resolveImageAttachments(input: {
   readonly taskSoil: TaskSoil;
   readonly workspaceRoot: string;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
-}): Promise<readonly ModelInputAttachment[]> {
+}): Promise<ResolvedImageAttachments> {
   const attachments: ModelInputAttachment[] = [];
+  const failures: string[] = [];
   for (const ref of input.taskSoil.contextRefs) {
+    if (!isImageContextRef(ref)) continue;
     const resolved = await resolveReadableFileRef(
       ref,
       input.workspaceRoot,
@@ -50,18 +74,26 @@ async function resolveImageAttachments(input: {
       input.resolveManagedAttachmentPath,
     );
     if (resolved === undefined) {
+      failures.push(`${ref.ref}: file is unavailable or not authorized`);
       continue;
     }
     const mimeType = imageMimeTypeFor(ref, resolved.absolutePath);
     if (mimeType === undefined) {
+      failures.push(`${ref.ref}: image MIME type could not be determined`);
       continue;
     }
     const stat = await fs.stat(resolved.absolutePath).catch(() => undefined);
-    if (stat?.isFile() !== true || stat.size > MAX_IMAGE_ATTACHMENT_BYTES) {
+    if (stat?.isFile() !== true) {
+      failures.push(`${ref.ref}: not a readable file`);
+      continue;
+    }
+    if (stat.size > MAX_IMAGE_ATTACHMENT_BYTES) {
+      failures.push(`${ref.ref}: exceeds the ${MAX_IMAGE_ATTACHMENT_BYTES} byte image limit`);
       continue;
     }
     const data = await fs.readFile(resolved.absolutePath).catch(() => undefined);
     if (data === undefined) {
+      failures.push(`${ref.ref}: file could not be read`);
       continue;
     }
     attachments.push({
@@ -78,7 +110,13 @@ async function resolveImageAttachments(input: {
       byteLength: stat.size,
     });
   }
-  return attachments;
+  return { items: attachments, failures };
+}
+
+function isImageContextRef(ref: TaskSoilContextRef): boolean {
+  if (ref.kind !== "file") return false;
+  if (ref.metadata?.mimeType?.startsWith("image/") === true) return true;
+  return IMAGE_MIME_BY_EXTENSION[path.extname(ref.ref).toLowerCase()] !== undefined;
 }
 
 function imageMimeTypeFor(ref: TaskSoilContextRef, absolutePath: string): string | undefined {

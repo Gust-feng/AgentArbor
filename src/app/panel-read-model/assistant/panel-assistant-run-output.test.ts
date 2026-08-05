@@ -13,7 +13,7 @@ test("visible run problem prefers app-level errors", () => {
   );
 });
 
-test("visible run problem gives out-of-fuel a recoverable paused message", () => {
+test("visible run problem surfaces the raw blocked reason instead of a generic message", () => {
   assert.deepEqual(
     visibleRunProblem(
       { status: "paused" },
@@ -23,7 +23,7 @@ test("visible run problem gives out-of-fuel a recoverable paused message", () =>
     ),
     {
       title: "任务没有完成",
-      message: "任务没有完成。",
+      message: "raw out_of_fuel",
       tone: "warning",
     }
   );

@@ -57,6 +57,9 @@ export async function resolveConversationSpaceAccess(
 }
 
 function isAgentAccessibleLocalReference(item: SpaceReferenceItem): item is AgentAccessibleSpaceReferenceItem {
+  // An unavailable source cannot be read or written, so freezing a grant for it
+  // would hand the model an authorization that can only fail at execution time.
+  if (item.status === "unavailable") return false;
   return item.reference.kind === "local_file" ||
     item.reference.kind === "workspace_folder" ||
     item.reference.kind === "managed_folder";

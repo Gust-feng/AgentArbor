@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { AboutSettings, SettingsDialog } from "./settings-dialog";
 
-test("about settings controls developer-only product information", () => {
+test("about settings hides developer mode behind the version gesture", () => {
   function ControlledAbout(): React.ReactElement {
     const [enabled, setEnabled] = useState(false);
     return (
@@ -12,7 +12,7 @@ test("about settings controls developer-only product information", () => {
         config={{
           product: {
             name: "AgentArbor",
-            version: "0.3.2",
+            version: "0.4.0",
             defaultEntry: "Desktop Shell / Panel",
             runtimeModeLabel: "Ordinary Agent",
             configDirectory: "C:/config",
@@ -31,16 +31,19 @@ test("about settings controls developer-only product information", () => {
 
   render(<ControlledAbout />);
 
-  const developerSwitch = screen.getByRole("switch", { name: "显示开发者信息" });
-  expect(developerSwitch.getAttribute("aria-checked")).toBe("false");
+  expect(screen.queryByRole("switch", { name: "显示开发者信息" })).toBeNull();
   expect(screen.queryByLabelText("产品运行信息")).toBeNull();
   expect(screen.queryByLabelText("本机数据目录")).toBeNull();
 
-  fireEvent.click(developerSwitch);
+  const version = screen.getByRole("button", { name: "版本 0.4.0" });
+  for (let click = 0; click < 7; click += 1) fireEvent.click(version);
 
-  expect(developerSwitch.getAttribute("aria-checked")).toBe("true");
   expect(screen.getByLabelText("产品运行信息")).toBeTruthy();
   expect(screen.getByLabelText("本机数据目录")).toBeTruthy();
+
+  for (let click = 0; click < 7; click += 1) fireEvent.click(version);
+  expect(screen.queryByLabelText("产品运行信息")).toBeNull();
+  expect(screen.queryByLabelText("本机数据目录")).toBeNull();
 });
 
 test("system prompt editor is only mounted in developer mode", async () => {

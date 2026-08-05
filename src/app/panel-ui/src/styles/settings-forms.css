@@ -61,13 +61,20 @@
 }
 
 .about-product-card {
-  display: flex;
+  display: grid;
   width: 100%;
   max-width: 100%;
-  align-items: center;
-  gap: var(--space-3);
   min-width: 0;
   overflow: hidden;
+  padding: 0;
+}
+
+.about-product-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
 }
 
 .about-product-main {
@@ -87,7 +94,6 @@
   gap: 5px;
 }
 
-.about-product-mark,
 .about-fact-icon,
 .about-path-icon {
   display: inline-flex;
@@ -98,14 +104,12 @@
 }
 
 .about-product-mark {
-  width: 56px;
-  height: 56px;
-  border: 1px solid color-mix(in oklch, var(--border) 86%, transparent);
-  border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, white 72%, transparent), transparent),
-    color-mix(in oklch, var(--surface) 88%, var(--content-surface-muted));
-  padding: 8px;
+  display: inline-flex;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
 }
 
 .about-product-mark img {
@@ -118,7 +122,7 @@
 .about-product-card h3 {
   max-width: 100%;
   min-width: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: var(--weight-heading);
   line-height: 1.2;
   overflow-wrap: anywhere;
@@ -131,28 +135,36 @@
   gap: 6px;
 }
 
-.about-product-version,
+.about-product-version {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--muted);
+  cursor: default;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.about-product-version:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid color-mix(in oklch, var(--accent) 72%, transparent);
+  outline-offset: 3px;
+}
+
 .about-product-runtime {
   display: inline-flex;
   align-items: center;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  background: var(--row-bg);
   padding: 2px 7px;
+  color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
   white-space: nowrap;
-}
-
-.about-product-version {
-  border: 1px solid color-mix(in oklch, var(--accent) 32%, var(--border));
-  background: color-mix(in oklch, var(--accent) 12%, transparent);
-  color: color-mix(in oklch, var(--accent) 60%, var(--fg));
-  font-variant-numeric: tabular-nums;
-}
-
-.about-product-runtime {
-  border: 1px solid var(--border);
-  background: var(--row-bg);
-  color: var(--muted);
 }
 
 .about-product-github-link {
@@ -265,9 +277,11 @@
   overflow: hidden;
 }
 
-.about-update-card {
+.about-update-panel {
   display: grid;
   gap: var(--space-3);
+  border-top: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  padding: var(--space-4);
 }
 
 .about-update-check-button,
@@ -306,16 +320,54 @@
 
 .about-update-status-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  color: color-mix(in oklch, var(--fg) 82%, var(--muted));
-  font-size: 13px;
-  line-height: 1.45;
+  gap: 12px;
 }
 
-.about-update-status-row > span:last-child {
+.about-update-symbol {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--content-surface-muted);
+  color: var(--muted);
+}
+
+.about-update-symbol.success {
+  background: color-mix(in oklch, var(--status-success) 10%, var(--surface));
+  color: color-mix(in oklch, var(--status-success) 72%, var(--fg));
+}
+
+.about-update-symbol.warning {
+  background: color-mix(in oklch, var(--status-warning) 10%, var(--surface));
+  color: var(--amber-text);
+}
+
+.about-update-symbol.danger {
+  background: var(--danger-soft);
+  color: var(--status-danger);
+}
+
+.about-update-copy {
+  display: grid;
   min-width: 0;
+  gap: 3px;
+}
+
+.about-update-copy strong {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: var(--weight-heading);
+  line-height: 1.3;
+}
+
+.about-update-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -323,6 +375,7 @@
   display: grid;
   gap: 5px;
   border-top: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  margin-left: 44px;
   padding-top: 10px;
 }
 
@@ -341,53 +394,19 @@
   white-space: pre-wrap;
 }
 
-.about-update-pill {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--content-border);
-  border-radius: var(--radius-lg);
-  background: var(--content-surface-muted);
-  padding: 3px 9px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: var(--weight-label);
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.about-update-pill.success {
-  border-color: color-mix(in oklch, var(--status-success) 34%, var(--border));
-  background: color-mix(in oklch, var(--status-success) 12%, var(--surface));
-  color: color-mix(in oklch, var(--status-success) 70%, var(--fg));
-}
-
-.about-update-pill.warning {
-  border-color: color-mix(in oklch, var(--status-warning) 32%, var(--border));
-  background: color-mix(in oklch, var(--status-warning) 8%, var(--surface));
-  color: var(--amber-text);
-}
-
-.about-update-pill.danger {
-  border-color: var(--danger-border);
-  background: var(--danger-soft);
-  color: var(--status-danger);
-}
-
-.about-update-pill.neutral {
-  color: color-mix(in oklch, var(--muted) 88%, var(--fg));
-}
-
-.about-update-download-link,
-.about-update-install-button {
-  justify-self: start;
+.about-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: 44px;
 }
 
 .about-update-progress {
   position: relative;
   width: 100%;
   height: 6px;
+  margin-left: 44px;
+  max-width: calc(100% - 44px);
   overflow: hidden;
   border-radius: 999px;
   background: color-mix(in oklch, var(--border) 62%, transparent);
@@ -402,7 +421,7 @@
 }
 
 .about-update-checked-at {
-  margin: 0;
+  margin: 0 0 0 44px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.4;
@@ -455,7 +474,7 @@
 }
 
 @media (max-width: 720px) {
-  .about-product-card {
+  .about-product-header {
     align-items: start;
   }
 
@@ -464,8 +483,13 @@
   }
 
   .about-update-status-row {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 32px minmax(0, 1fr);
     align-items: start;
+  }
+
+  .about-update-check-button {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .about-path-row {
@@ -486,9 +510,8 @@
   }
 
   .about-product-mark {
-    width: 48px;
-    height: 48px;
-    padding: 7px;
+    width: 56px;
+    height: 56px;
   }
 
   .about-product-github-link {

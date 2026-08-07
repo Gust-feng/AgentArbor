@@ -21,6 +21,7 @@
 - [共享工具层收敛与重复实现治理](16-共享工具层收敛与重复实现治理.md)
 - [Multi-Agent 源码归档边界](17-Multi-Agent源码归档边界.md)
 - [Space、Workspace、Conversation 与资源权限开发指南](18-Space工作区对话与资源权限开发指南.md)
+- [Conversation 双资源 owner 与统一运行作用域（Accepted）](../../架构设计/产品架构/ADR-0035-Conversation双资源owner与统一运行作用域.md)
 
 ## 当前最小运行命令
 

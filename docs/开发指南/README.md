@@ -4,7 +4,7 @@
 
 开发指南不是过程归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
 
-长期产品架构事实源是 [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](../架构设计/产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)，工程实现以 [功能模块边界与组合根](06-工程实现/11-功能模块边界与组合根.md) 为准。ADR-0024、ADR-0026、ADR-0027 分别保留 Ordinary 默认、Sub-Agent 工具和工具事实链契约；ADR-0025 仅保留延期 Multi-Agent 内部闭环的历史边界；Space/Workspace 资源生命周期以 ADR-0034 为准。ADR-0022 仅保留未被取代的长期能力边界，ADR-0023 是历史 Profile 方案。
+长期产品架构事实源是 [ADR-0028-AgentArbor统一Workbench与功能模块化单体架构](../架构设计/产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)，工程实现以 [功能模块边界与组合根](06-工程实现/11-功能模块边界与组合根.md) 为准。ADR-0024、ADR-0026、ADR-0027 分别保留 Ordinary 默认、Sub-Agent 工具和工具事实链契约；ADR-0025 仅保留延期 Multi-Agent 内部闭环的历史边界；Space/Workspace 资源生命周期以 ADR-0034 为准，Conversation owner 与统一 Run 作用域以 ADR-0035 为准。ADR-0022 仅保留未被取代的长期能力边界，ADR-0023 是历史 Profile 方案。
 
 ## 阅读顺序
 

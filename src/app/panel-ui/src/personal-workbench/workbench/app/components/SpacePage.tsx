@@ -14,7 +14,6 @@ import {
   MessageSquare,
   Plus,
   Search,
-  ArrowRight,
   NotebookPen,
   Brain,
   MoreHorizontal,
@@ -595,12 +594,6 @@ export function SpacePage({
     if (item.openUrl !== undefined) window.open(item.openUrl, '_blank', 'noopener,noreferrer')
   }
 
-  async function handleOpenConversation(conversationId: string) {
-    if (onOpenConversation === undefined) return
-    const opened = await onOpenConversation(conversationId)
-    if (opened !== false) onNavigate('conv-done')
-  }
-
   async function runSpaceAction(operation: () => void | Promise<void>) {
     setActionError(null)
     try {
@@ -817,31 +810,6 @@ export function SpacePage({
               />
             ))}
           </div>
-
-          {/* 关联对话（owner read-model，ADR-0035 §8.1） */}
-          {(space?.conversations?.length ?? 0) > 0 && (
-            <div className="mt-4">
-              <div className="flex items-center justify-between px-2.5 mb-1">
-                <span className="text-xs font-medium" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                  关联对话
-                </span>
-              </div>
-              <div className="space-y-0.5">
-                {space!.conversations!.map((conversation) => (
-                  <button
-                    key={conversation.conversationId}
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-black/5"
-                    style={{ color: 'var(--aa-text-2, #6b655d)' }}
-                    onClick={() => handleOpenConversation(conversation.conversationId)}
-                  >
-                    <MessageSquare size={12} style={{ color: 'var(--aa-text-3, #aba39b)' }} />
-                    <span className="flex-1 truncate">{conversation.title}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -860,25 +828,7 @@ export function SpacePage({
         </DeferredSurfaceBoundary>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {selectedItem?.type === 'conversation' ? (
-            <CenteredCard>
-              <MessageSquare size={22} style={{ color: 'var(--aa-accent, #6865a7)' }} />
-              <p className="text-sm mt-3 mb-1 font-medium" style={{ color: 'var(--aa-text-1, #292722)' }}>
-                {selectedItem.name}
-              </p>
-              <p className="text-xs mb-5" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                Space 所属对话{selectedItem.meta ? ` · ${selectedItem.meta}` : ''}
-              </p>
-              {(selectedItem.conversationId !== undefined || onOpenItem !== undefined) && <button
-                onClick={() => void handleOpenReference(selectedItem)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-xs font-medium text-white transition-opacity hover:opacity-90"
-                style={{ background: 'var(--aa-accent, #6865a7)' }}
-              >
-                打开对话
-                <ArrowRight size={12} />
-              </button>}
-          </CenteredCard>
-          ) : selectedItem?.type !== 'folder' && selectedItem ? (
+          {selectedItem?.type !== 'folder' && selectedItem ? (
             <ReferencePreview
               ref={referencePreviewRef}
               itemId={selectedItem.referenceId ?? selectedItem.id}

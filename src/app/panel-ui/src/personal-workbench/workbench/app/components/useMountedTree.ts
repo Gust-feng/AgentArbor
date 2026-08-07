@@ -67,7 +67,10 @@ function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['t
   }
 }
 
-export function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
+export function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem | undefined {
+  // 对话不属于空间树（ADR-0035 §8.1）：旧 conversation 引用不再投影为树节点，
+  // 关联对话从 owner read-model 在侧边栏空间行展开展示。
+  if (item.kind === 'conversation_reference') return undefined
   return {
     id: item.itemId,
     name: item.title,
@@ -75,7 +78,7 @@ export function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
     domainKind: item.kind,
     meta: item.detail ?? item.updatedAtLabel,
     defaultExpanded: item.kind === 'folder',
-    children: item.children?.map(projectSpaceItem),
+    children: item.children?.map(projectSpaceItem).filter((child): child is SpaceItem => child !== undefined),
     conversationId: item.conversationId,
     openUrl: item.openUrl,
     openable: item.openable,
@@ -86,7 +89,7 @@ export function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem {
 
 function projectSpaceTree(space: PersonalSpaceProjection | undefined): SpaceItem[] {
   if (space === undefined) return []
-  return space.items.map(projectSpaceItem)
+  return space.items.map(projectSpaceItem).filter((item): item is SpaceItem => item !== undefined)
 }
 
 /** 外部引用条目的稳定 id：`referenceId::<encoded relativePath>`。 */

@@ -305,8 +305,11 @@ function countEntries(entries: readonly SpaceTreeEntry[]): number {
 }
 
 function projectEntries(entries: readonly SpaceTreeEntry[]): PersonalSpaceItemProjection[] {
+  // 对话不再属于空间树（ADR-0035 §8.1）：旧 conversation 引用只作兼容数据保留，
+  // 关联对话统一从 owner read-model 展示（侧边栏空间行展开）。
+  const visibleEntries = entries.filter((entry) => entry.item.reference.kind !== "conversation");
   const childrenByParent = new Map<string | undefined, SpaceTreeEntry[]>();
-  for (const entry of entries) {
+  for (const entry of visibleEntries) {
     const group = childrenByParent.get(entry.item.parentId) ?? [];
     group.push(entry);
     childrenByParent.set(entry.item.parentId, group);

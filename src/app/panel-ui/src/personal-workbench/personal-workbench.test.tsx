@@ -97,23 +97,23 @@ test("falls back to a valid Space item when the selected reference disappears fr
     spaceId: "space-study",
     title: "学习空间",
     items: [
-      { itemId: "conversation-removed", title: "即将删除的对话", kind: "conversation_reference" as const, conversationId: "conversation-removed" },
-      { itemId: "conversation-kept", title: "保留的对话", kind: "conversation_reference" as const, conversationId: "conversation-kept" },
+      { itemId: "asset-removed", title: "即将删除的资料", kind: "workbench_asset" as const, assetId: "asset-removed", referenceId: "asset-removed" },
+      { itemId: "asset-kept", title: "保留的资料", kind: "workbench_asset" as const, assetId: "asset-kept", referenceId: "asset-kept" },
     ],
   };
   const rendered = render(<PersonalWorkbench {...baseProps({ spaces: [initialSpace] })} />);
   await user.click(screen.getByRole("button", { name: "学习空间" }));
   const tree = await screen.findByRole("tree", { name: "学习空间资料" });
-  await user.click(within(tree).getByText("即将删除的对话"));
-  expect(screen.getAllByText("即将删除的对话").length).toBeGreaterThan(1);
+  await user.click(within(tree).getByText("即将删除的资料"));
+  expect(screen.getAllByText("即将删除的资料").length).toBeGreaterThan(1);
 
   rendered.rerender(<PersonalWorkbench {...baseProps({
     spaces: [{ ...initialSpace, items: [initialSpace.items[1]!] }],
   })} />);
 
   await waitFor(() => {
-    expect(within(screen.getByRole("tree", { name: "学习空间资料" })).queryByText("即将删除的对话")).toBeNull();
-    expect(screen.getAllByText("保留的对话").length).toBeGreaterThan(1);
+    expect(within(screen.getByRole("tree", { name: "学习空间资料" })).queryByText("即将删除的资料")).toBeNull();
+    expect(screen.getAllByText("保留的资料").length).toBeGreaterThan(1);
   });
 });
 

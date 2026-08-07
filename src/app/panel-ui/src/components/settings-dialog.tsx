@@ -153,9 +153,9 @@ export function SettingsDialog(props: {
   if (!props.open) return null;
 
   const visibleGroups = settingsGroupsForDeveloperMode(props.developerModeEnabled);
-  const visibleActiveGroup = !props.developerModeEnabled && DEVELOPER_SETTINGS_GROUPS.has(activeGroup)
-    ? "about"
-    : activeGroup;
+  const visibleActiveGroup = visibleGroups.some((group) => group.id === activeGroup)
+    ? activeGroup
+    : visibleGroups[0]?.id ?? "models";
   const activeInfo = visibleGroups.find((group) => group.id === visibleActiveGroup) ?? visibleGroups[0]!;
   return (
     <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="设置">
@@ -319,9 +319,15 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
 ];
 
 const DEVELOPER_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["pathMemory", "developer"]);
+// The migrated PersonalWorkbench does not consume the legacy theme layer yet.
+// Keep the implementation available for the later adaptation, but do not expose
+// a setting that currently cannot affect the production surface.
+const TEMPORARILY_HIDDEN_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["appearance"]);
 
 export function settingsGroupsForDeveloperMode(enabled: boolean): typeof SETTINGS_GROUPS {
-  return enabled ? SETTINGS_GROUPS : SETTINGS_GROUPS.filter((group) => !DEVELOPER_SETTINGS_GROUPS.has(group.id));
+  return SETTINGS_GROUPS.filter((group) =>
+    !TEMPORARILY_HIDDEN_SETTINGS_GROUPS.has(group.id)
+    && (enabled || !DEVELOPER_SETTINGS_GROUPS.has(group.id)));
 }
 
 const AGENTARBOR_GITHUB_REPOSITORY_URL = "https://github.com/Gust-feng/AgentArbor";

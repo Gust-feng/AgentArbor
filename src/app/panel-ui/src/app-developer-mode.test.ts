@@ -18,8 +18,10 @@ test("developer-only settings stay out of the normal settings navigation", () =>
   const normalGroups = settingsGroupsForDeveloperMode(false).map((group) => group.id);
   expect(normalGroups).not.toContain("pathMemory");
   expect(normalGroups).not.toContain("developer");
+  expect(normalGroups).not.toContain("appearance");
 
   const developerGroups = settingsGroupsForDeveloperMode(true).map((group) => group.id);
   expect(developerGroups).toContain("pathMemory");
   expect(developerGroups).toContain("developer");
+  expect(developerGroups).not.toContain("appearance");
 });

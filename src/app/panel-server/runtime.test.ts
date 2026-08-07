@@ -378,6 +378,34 @@ test("Space owner run birth uses the Space managedRoot as cwd", async () => {
   }
 });
 
+test("Space owner run discovers project skills from the managedRoot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-skill-scope-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    const space = await runtime.spaceFeature.commands.createSpace({ title: "技能空间" });
+    const skillRoot = path.join(directory, "runtime", "spaces", space.id, "files", ".agents", "skills", "probe-skill");
+    await fs.mkdir(skillRoot, { recursive: true });
+    await fs.writeFile(
+      path.join(skillRoot, "SKILL.md"),
+      "---\nname: probe-skill\ndescription: 探测技能\n---\n技能正文。\n",
+      "utf8",
+    );
+
+    const birth = await runtime.prepareOrdinaryRunBirth({
+      goal: "使用技能",
+      owner: { kind: "space", id: space.id },
+    });
+
+    const skill = birth.capabilitySnapshot.skillCatalog.find((item) => item.name === "probe-skill");
+    assert.notEqual(skill, undefined);
+    assert.equal(skill?.sourceKind, "project");
+    assert.equal(skill?.sourcePath.includes(path.join(".agents", "skills")), true);
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
 test("Workspace owner run birth uses the current mount root as cwd", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-scope-runtime-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;

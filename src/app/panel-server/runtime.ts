@@ -1019,10 +1019,13 @@ async function prepareOrdinaryRunBirth(
   input: PanelRunInput,
   conversationId?: string,
 ): Promise<OrdinaryRunBirth> {
+  // 先解析 owner 作用域：能力快照（Skill/Sub-Agent roots、工具 fallback）与
+  // workspace 字段都要以 owner 根为准（ADR-0035 §3.1/§3.2）。
+  const scope = await resolveConversationExecutionScope(runtime, input, conversationId);
   const [informationAccess, toolConfirmation, baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
     runtime.configCenter.getInformationAccessConfig(),
     runtime.configCenter.getToolConfirmationConfig(),
-    capabilitySnapshotForRun(runtime, input.modelOverride),
+    capabilitySnapshotForRun(runtime, input.modelOverride, scope.cwd),
     runtime.configCenter.getDesktopAgentConfig(),
   ]);
   const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
@@ -1030,7 +1033,6 @@ async function prepareOrdinaryRunBirth(
     input.reasoningEffort,
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
-  const scope = await resolveConversationExecutionScope(runtime, input, conversationId);
   const ownerContext = scope.owner === undefined
     ? undefined
     : await formatOwnerContext(runtime, {
@@ -1191,8 +1193,11 @@ async function modelProviderConfigForRun(
 async function capabilitySnapshotForRun(
   runtime: PanelRuntime,
   override: PanelRunInput["modelOverride"],
+  ownerCwd?: string,
 ): Promise<import("../../domain/config/index.js").BasicAgentCapabilitySnapshot> {
-  const snapshot = await runtime.capabilityCenter.snapshot();
+  // owner 作用域（ADR-0035 §3.1）：Skill/Sub-Agent roots 与工具 fallback 以
+  // owner 根为准；无 owner（遗留/测试路径）复用缓存快照。
+  const snapshot = await runtime.capabilityCenter.snapshot(ownerCwd === undefined ? {} : { workspaceDirectory: ownerCwd });
   if (override === undefined) {
     return snapshot;
   }

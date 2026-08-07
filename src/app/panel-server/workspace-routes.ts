@@ -73,6 +73,15 @@ export async function handlePanelWorkspaceRoute(
     return false;
   }
 
+  const deleteMatch = /^\/api\/workspaces\/([^/]+)$/u.exec(url.pathname);
+  if (deleteMatch !== null && request.method === "DELETE") {
+    const workspaceId = decode(deleteMatch[1]);
+    runtime.workspaceDeletion.assertAvailable(workspaceId);
+    await runtime.workspaceDeletion.deleteWorkspace(workspaceId);
+    writeJson(response, 200, { ok: true });
+    return true;
+  }
+
   return false;
 }
 

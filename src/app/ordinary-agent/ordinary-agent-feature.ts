@@ -2854,6 +2854,16 @@ export function createOrdinaryAgentFeature(input: {
         const control = await loadConversationControl(conversationId);
         return control === undefined ? undefined : control.state.owner;
       },
+      async listConversationsByOwner(owner) {
+        await readyPromise;
+        const projected = await Promise.all([...conversationDocuments.values()].map((control) =>
+          control.state.owner !== undefined &&
+          control.state.owner.kind === owner.kind &&
+          control.state.owner.id === owner.id
+            ? conversationView(control)
+            : Promise.resolve(undefined)));
+        return clone(projected.filter((view): view is OrdinaryConversationReadModel => view !== undefined));
+      },
       async listConversations(limit = 50) {
         await readyPromise;
         const projected = await Promise.all([...conversationDocuments.values()].map((control) => conversationView(control)));

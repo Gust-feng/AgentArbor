@@ -603,6 +603,8 @@ export interface OrdinaryAgentFeature {
     listConversations(limit?: number): Promise<readonly OrdinaryConversationReadModel[]>;
     /** Canonical owner（ADR-0035）；v2 旧对话返回 undefined，由 Host 以 Space 树引用回退。 */
     getConversationOwner(conversationId: string): Promise<ConversationOwner | undefined>;
+    /** Owner 视角的对话列表（ADR-0035 §8.1），供删除协调与资源页 read-model 使用。 */
+    listConversationsByOwner(owner: ConversationOwner): Promise<readonly OrdinaryConversationReadModel[]>;
     getManagedAttachment(attachmentId: string): Promise<OrdinaryManagedAttachmentRecord | undefined>;
     /** Returns undefined until the run's terminal facts are durably settled. */
     getStableTerminalRunFacts(runId: string): Promise<OrdinaryStableTerminalRunFacts | undefined>;

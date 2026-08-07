@@ -97,6 +97,7 @@ import {
   createWorkspaceFeature,
   type WorkspaceFeature,
 } from "../workspaces/index.js";
+import { createWorkspaceDeletionCoordinator, type WorkspaceDeletionCoordinator } from "./workspace-deletion-coordinator.js";
 import {
   applyPendingWorkbenchRestore,
   createWorkbenchDataMaintenance,
@@ -181,6 +182,7 @@ export type PanelRuntime = {
   readonly workspaceFeature: WorkspaceFeature;
   readonly spaceConversationLink: SpaceConversationLinkCoordinator;
   readonly spaceConversationDeletion: SpaceConversationDeletionCoordinator;
+  readonly workspaceDeletion: WorkspaceDeletionCoordinator;
   readonly personalKnowledgeFeature: PersonalKnowledgeFeature<import("../panel-api-contracts.js").DocumentPreview>;
   readonly workbenchDataMaintenance: WorkbenchDataMaintenance;
   readonly pathMemoryFeature: PathMemoryFeature;
@@ -689,6 +691,18 @@ function assemblePanelRuntime(input: {
     journal: spaceConversationLinkJournal,
     runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
   });
+  const workspaceDeletion = createWorkspaceDeletionCoordinator({
+    workspaces: {
+      commands: { deleteWorkspace: workspaceFeature.commands.deleteWorkspace, unlinkWorkspaceFromSpace: workspaceFeature.commands.unlinkWorkspaceFromSpace },
+      queries: { get: workspaceFeature.queries.get },
+    },
+    ordinary: {
+      commands: { deleteConversation: ordinaryAgentFeature.commands.deleteConversation },
+      queries: { listConversationsByOwner: ordinaryAgentFeature.queries.listConversationsByOwner },
+    },
+    processes: processRegistry,
+    processTerminator,
+  });
   const projectionChangeUnsubscribers = [
     spaceFeature.events.subscribe((event) => {
       workbenchProjectionChanges.publish(projectionChangeFromSpace(event));
@@ -762,6 +776,7 @@ function assemblePanelRuntime(input: {
     workspaceFeature,
     spaceConversationLink,
     spaceConversationDeletion,
+    workspaceDeletion,
     personalKnowledgeFeature,
     workbenchDataMaintenance,
     pathMemoryFeature,

@@ -26,6 +26,8 @@ export type WorkspaceProjectionState = {
   readonly error?: string;
   readonly refresh: () => Promise<void>;
   readonly addWorkspace: () => Promise<void>;
+  /** 移除工作区登记：外部文件夹与知识副本保留，直属对话按删除流程收口。 */
+  readonly deleteWorkspace: (workspaceId: string) => Promise<void>;
 };
 
 export function useWorkspaceProjection(enabled: boolean): WorkspaceProjectionState {
@@ -81,12 +83,30 @@ export function useWorkspaceProjection(enabled: boolean): WorkspaceProjectionSta
     }
   }, [enabled, mutationPending, refresh]);
 
+  const deleteWorkspace = useCallback(async (workspaceId: string) => {
+    if (!enabled || mutationPending) return;
+    setMutationPending(true);
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => undefined) as { error?: { code?: string; message?: string } } | undefined;
+        throw new Error(body?.error?.message ?? `HTTP ${response.status}`);
+      }
+      setError(undefined);
+      await refresh();
+    } catch (requestError) {
+      setError(workspaceErrorText(requestError, "移除工作区失败。"));
+    } finally {
+      setMutationPending(false);
+    }
+  }, [enabled, mutationPending, refresh]);
+
   useEffect(() => {
     if (!enabled) return;
     void refresh();
   }, [enabled, refresh]);
 
-  return { workspaces, loading, mutationPending, error, refresh, addWorkspace };
+  return { workspaces, loading, mutationPending, error, refresh, addWorkspace, deleteWorkspace };
 }
 
 function workspaceErrorText(error: unknown, fallback: string): string {

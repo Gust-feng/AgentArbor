@@ -57,8 +57,6 @@ export type PersonalWorkbenchProps = {
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly onStartNewConversation: (owner?: { readonly kind: "space" | "workspace"; readonly id: string }) => Promise<boolean>;
   readonly onOpenConversation: (conversationId: string) => boolean | Promise<boolean>;
-  /** 空间页右侧预览对话内容（不跳转对话页）。 */
-  readonly onPreviewConversation?: (conversationId: string) => Promise<Conversation | undefined>;
   readonly pendingConversationIds?: ReadonlySet<string>;
   readonly onRenameConversation: (conversationId: string, title: string) => void | Promise<void>;
   readonly onToggleConversationPinned: (conversationId: string, pinned: boolean) => void | Promise<void>;
@@ -170,8 +168,11 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   }, [knowledgeLoadState.status, props.personalKnowledgePersistenceEnabled, view]);
 
   useEffect(() => {
-    if (hasAttention && !isConversationView(view)) setView("conv-active");
-  }, [hasAttention, view]);
+    const conversationBelongsToActiveSpace = view === "space"
+      && activeConversation?.owner?.kind === "space"
+      && activeConversation.owner.id === activeSpaceId;
+    if (hasAttention && !isConversationView(view) && !conversationBelongsToActiveSpace) setView("conv-active");
+  }, [activeConversation?.owner, activeSpaceId, hasAttention, view]);
 
   useEffect(() => () => {
     focusTransitionRef.current?.cancel();
@@ -284,6 +285,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
           onRetry: workspaceProjection.refresh,
         }}
         onAddWorkspace={workspaceProjection.addWorkspace}
+        onDeleteWorkspace={workspaceProjection.deleteWorkspace}
         activeSpaceId={activeSpaceId}
         activeConversationId={props.conversation?.conversationId}
         onNavigate={navigate}
@@ -431,15 +433,10 @@ function renderView(input: {
 }) {
   if (input.view === "home") {
     return <HomePage
-      onNavigate={input.navigate}
-      onOpenConversation={input.props.onOpenConversation}
-      conversations={input.props.conversations}
       spaces={input.props.spaces ?? []}
       workspaces={input.workspaceProjection.workspaces}
       ownerSelection={input.homeOwnerSelection}
       onOwnerChange={input.onHomeOwnerChange}
-      activeSpaceId={input.activeSpaceId}
-      onActiveSpaceChange={input.onActiveSpaceChange}
       input={input.homeInput}
       focusRequest={input.homeFocusRequest}
     />;
@@ -452,13 +449,18 @@ function renderView(input: {
       targetId={input.spaceTargetId}
       space={activeSpace}
       actions={input.props.spaceActions}
-      currentConversation={input.activeConversation === undefined ? undefined : {
-        conversationId: input.activeConversation.conversationId,
-        title: input.activeConversation.title,
-      }}
       onOpenItem={input.props.onOpenSpaceItem}
       onOpenConversation={input.props.onOpenConversation}
-      onPreviewConversation={input.props.onPreviewConversation}
+      activeConversationId={input.activeConversation?.conversationId}
+      conversationContent={
+        <ConversationSurface
+          props={input.props}
+          conversation={input.activeConversation}
+          projection={input.conversationProjection}
+          state={input.conversationState}
+          input={input.conversationInput}
+        />
+      }
       onRenameConversation={input.props.onRenameConversation}
       onToggleConversationPinned={input.props.onToggleConversationPinned}
       onDeleteConversation={input.props.onDeleteConversation}
@@ -606,7 +608,6 @@ function WorkbenchStatusNotice(props: {
         <button
           type="button"
           aria-label="重新加载工作台数据"
-          title="重新加载工作台数据"
           onClick={props.onRetry}
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-black/5 disabled:opacity-40"
           style={{ color: "var(--aa-text-3)" }}

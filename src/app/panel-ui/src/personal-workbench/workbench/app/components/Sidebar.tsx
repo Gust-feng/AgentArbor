@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Home,
@@ -49,6 +49,8 @@ interface SidebarProps {
     readonly onRetry: () => void | Promise<void>
   }
   onAddWorkspace?: () => void | Promise<void>
+  /** 移除工作区登记（外部文件夹与知识副本保留）。 */
+  onDeleteWorkspace?: (workspaceId: string) => void | Promise<void>
   activeSpaceId: string | null
   activeConversationId?: string
   onOpenConversation: (conversationId: string) => boolean | Promise<boolean>
@@ -81,6 +83,7 @@ export function Sidebar({
   workspaces = [],
   workspaceLoadState,
   onAddWorkspace,
+  onDeleteWorkspace,
   activeSpaceId,
   activeConversationId,
   onOpenConversation,
@@ -113,6 +116,7 @@ export function Sidebar({
   const pendingSpaceIdsRef = useRef<Set<string> | null>(null)
   const [openingConversationId, setOpeningConversationId] = useState<string | null>(null)
   const [pendingSpaceDeletion, setPendingSpaceDeletion] = useState<{ readonly id: string; readonly label: string } | null>(null)
+  const [pendingWorkspaceDeletion, setPendingWorkspaceDeletion] = useState<{ readonly id: string; readonly label: string } | null>(null)
 
   async function openConversation(conversationId: string) {
     if (openingConversationId === conversationId || pendingConversationIds.has(conversationId)) return
@@ -164,6 +168,18 @@ export function Sidebar({
     setPendingSpaceDeletion(null)
     try {
       const result = onDeleteSpace(pending.id)
+      void Promise.resolve(result).catch(() => undefined)
+    } catch {
+      // The owner projects the mutation error; the sidebar only closes its confirmation surface.
+    }
+  }
+
+  function confirmWorkspaceDeletion(): void {
+    const pending = pendingWorkspaceDeletion
+    if (pending === null || onDeleteWorkspace === undefined) return
+    setPendingWorkspaceDeletion(null)
+    try {
+      const result = onDeleteWorkspace(pending.id)
       void Promise.resolve(result).catch(() => undefined)
     } catch {
       // The owner projects the mutation error; the sidebar only closes its confirmation surface.
@@ -232,7 +248,6 @@ export function Sidebar({
             onClick={() => onNavigate('home')}
             labelsVisible={labelsVisible}
             collapsed={collapsed}
-            tooltip="首页"
             icon={<Home size={14}/>}
             label="首页"
           />
@@ -250,7 +265,6 @@ export function Sidebar({
               onClick={addSpace}
               disabled={onCreateSpace === undefined || spaceLoadState?.mutationPending === true}
               aria-label="新建空间"
-              title="新建空间"
               className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/spaces:opacity-50 hover:!opacity-100"
               style={{ width: 18, height: 18, color: 'var(--aa-text-3)', marginRight: -3 }}
             >
@@ -295,7 +309,6 @@ export function Sidebar({
               onClick={() => void onAddWorkspace?.()}
               disabled={onAddWorkspace === undefined || workspaceLoadState?.mutationPending === true}
               aria-label="添加工作区"
-              title="添加工作区"
               className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/workspaces:opacity-50 hover:!opacity-100"
               style={{ width: 18, height: 18, color: 'var(--aa-text-3)', marginRight: -3 }}
             >
@@ -309,6 +322,7 @@ export function Sidebar({
             <WorkspaceRow
               key={workspace.workspaceId}
               workspace={workspace}
+              onDelete={() => setPendingWorkspaceDeletion({ id: workspace.workspaceId, label: workspace.title })}
               conversations={orderedConversations.filter((conversation) =>
                 conversation.owner?.kind === 'workspace' && conversation.owner.id === workspace.workspaceId)}
               activeConversationId={activeConversationId}
@@ -339,7 +353,6 @@ export function Sidebar({
             onClick={() => onNavigate('brain')}
             labelsVisible={labelsVisible}
             collapsed={collapsed}
-            tooltip="知识库"
             icon={<Library size={14}/>}
             label="知识库"
           />
@@ -358,7 +371,6 @@ export function Sidebar({
           type="button"
           onClick={onOpenSettings}
           aria-label="打开设置"
-          title={!labelsVisible ? '设置' : undefined}
           className="flex h-8 w-full items-center rounded-lg text-sm hover:bg-black/5"
           style={{
             gap: 8,
@@ -394,6 +406,18 @@ export function Sidebar({
         onConfirm={confirmSpaceDeletion}
       />
 
+      <ActionConfirmationDialog
+        request={pendingWorkspaceDeletion === null ? undefined : {
+          eyebrow: '工作区操作',
+          title: `移除工作区“${pendingWorkspaceDeletion.label}”`,
+          description: '工作区将从侧边栏移除，其直属对话一并收口。',
+          consequence: '电脑上的文件夹和知识副本不会被删除。',
+          confirmLabel: '移除工作区',
+        }}
+        onCancel={() => setPendingWorkspaceDeletion(null)}
+        onConfirm={confirmWorkspaceDeletion}
+      />
+
     </aside>
   )
 }
@@ -420,6 +444,7 @@ const WORKSPACE_DOT = '#8a7fa8'
 
 function WorkspaceRow(props: {
   readonly workspace: PersonalWorkspaceProjection
+  readonly onDelete: () => void
   readonly conversations: readonly ConversationSummary[]
   readonly activeConversationId?: string
   readonly view: View
@@ -433,6 +458,10 @@ function WorkspaceRow(props: {
   readonly onDeleteConversation: (conversationId: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const pinnedCount = props.conversations.reduce(
+    (count, conversation) => count + (conversation.pinnedAt !== undefined ? 1 : 0),
+    0,
+  )
   return (
     <div className="space-y-0.5">
       <SidebarListRow
@@ -443,7 +472,9 @@ function WorkspaceRow(props: {
         editing={false}
         onRename={() => undefined}
         onCancelRename={() => undefined}
-        actions={[]}
+        actions={[
+          { label: '移除工作区', icon: <Trash2 size={12}/>, danger: true, onClick: props.onDelete },
+        ]}
         meta={
           <span className="flex items-center gap-1">
             {props.workspace.status === 'disconnected' && (
@@ -469,7 +500,8 @@ function WorkspaceRow(props: {
           )}
           <div className="pl-3 space-y-0.5">
             {props.conversations.map((conversation, index) => (
-              <SidebarListRow
+              <Fragment key={conversation.conversationId}>
+                <SidebarListRow
                 key={conversation.conversationId}
                 active={(props.view === 'conv-active' || props.view === 'conv-done') && props.activeConversationId === conversation.conversationId}
                 onClick={() => props.openConversation(conversation.conversationId)}
@@ -496,7 +528,17 @@ function WorkspaceRow(props: {
                   { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => void props.onDeleteConversation(conversation.conversationId) },
                 ]}
                 pending={props.pendingConversationIds.has(conversation.conversationId)}
-              />
+                />
+                {index === pinnedCount - 1
+                  && pinnedCount > 0
+                  && pinnedCount < props.conversations.length && (
+                  <div
+                    className="aa-conversation-divider my-1 border-t"
+                    style={{ borderColor: 'var(--aa-border)' }}
+                    aria-hidden="true"
+                  />
+                )}
+              </Fragment>
             ))}
           </div>
         </SidebarConversationScrollArea>
@@ -516,7 +558,6 @@ function SpaceLoadFailure(props: {
       <button
         type="button"
         aria-label="重新加载空间"
-        title="重新加载空间"
         onClick={() => void props.onRetry()}
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-black/5"
         style={{ color: 'var(--aa-text-3)' }}

@@ -69,6 +69,7 @@ export async function submitPanelTask(
   explicitGoal?: string,
   conversationBehavior: PanelTaskConversationBehavior = "continue",
   newConversationSpaceId?: string,
+  newConversationOwner?: { readonly kind: "space" | "workspace"; readonly id: string },
 ): Promise<boolean> {
   const trimmed = (explicitGoal ?? options.goal).trim();
   const startsNewConversation = conversationBehavior === "new";
@@ -94,7 +95,8 @@ export async function submitPanelTask(
     aiMode: options.aiMode,
     toolConfirmationPolicy: options.toolConfirmationPolicy,
     modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
-    ...(startsNewConversation && newConversationSpaceId !== undefined ? { spaceId: newConversationSpaceId } : {}),
+    ...(startsNewConversation && newConversationOwner !== undefined ? { owner: newConversationOwner } : {}),
+    ...(startsNewConversation && newConversationOwner === undefined && newConversationSpaceId !== undefined ? { spaceId: newConversationSpaceId } : {}),
     taskSoilInput: taskSoilInputFromAttachments(attachmentsBeforeSubmit),
     ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
   };

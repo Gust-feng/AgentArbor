@@ -23,7 +23,7 @@ export type AppRunController = {
   readonly submissionAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly loadConversation: (conversationId: string) => Promise<boolean>;
   readonly startTask: (explicitGoal?: string) => Promise<boolean>;
-  readonly startNewConversation: (spaceId?: string) => Promise<boolean>;
+  readonly startNewConversation: (owner?: { readonly kind: "space" | "workspace"; readonly id: string }) => Promise<boolean>;
   readonly refreshConversations: () => Promise<void>;
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
   readonly cancelRun: () => Promise<void>;
@@ -93,20 +93,21 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     return await submitTask("continue", explicitGoal);
   }
 
-  async function startNewConversation(spaceId?: string): Promise<boolean> {
-    return await submitTask("new", undefined, spaceId);
+  async function startNewConversation(owner?: { readonly kind: "space" | "workspace"; readonly id: string }): Promise<boolean> {
+    return await submitTask("new", undefined, undefined, owner);
   }
 
   async function submitTask(
     conversationBehavior: "continue" | "new",
     explicitGoal?: string,
     newConversationSpaceId?: string,
+    newConversationOwner?: { readonly kind: "space" | "workspace"; readonly id: string },
   ): Promise<boolean> {
     return await submitPanelTask({
       ...options,
       refreshConversations,
       startLiveUpdates: liveUpdates.startLiveUpdates,
-    }, explicitGoal, conversationBehavior, newConversationSpaceId);
+    }, explicitGoal, conversationBehavior, newConversationSpaceId, newConversationOwner);
   }
 
   async function refreshConversations(): Promise<void> {

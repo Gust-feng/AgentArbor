@@ -147,3 +147,65 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Home recent conversations ─────────────────────────────── */
+.aa-agent-home__recent {
+  margin-top: 28px;
+  width: min(560px, 100%);
+}
+
+.aa-agent-home__recent-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--aa-text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.aa-agent-home__recent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.aa-agent-home__recent-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.aa-agent-home__recent-row:hover {
+  background: rgba(45, 40, 34, 0.05);
+}
+
+.aa-agent-home__recent-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--aa-text-1);
+}
+
+.aa-agent-home__recent-owner {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--aa-text-3);
+}

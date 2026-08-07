@@ -34,7 +34,8 @@ test('presents one stable ambient line with the quiet task entry', () => {
   expect(screen.queryByLabelText('AgentArbor Agent')).toBeNull()
 })
 
-test('does not repeat conversation history on the task entry surface', () => {
+test('shows recent conversations with owner labels on the task entry surface', () => {
+  const onOpenConversation = vi.fn()
   const conversations: ConversationSummary[] = [
     {
       conversationId: 'running',
@@ -42,6 +43,7 @@ test('does not repeat conversation history on the task entry surface', () => {
       currentAction: '正在运行相关测试',
       activeRunId: 'run-1',
       updatedAt: '2026-07-30T12:00:00.000Z',
+      owner: { kind: 'space', id: 'space-study' },
     },
     {
       conversationId: 'attention',
@@ -49,22 +51,30 @@ test('does not repeat conversation history on the task entry surface', () => {
       nextStep: '确认配置写入',
       requiresUserAction: true,
       updatedAt: '2026-07-29T12:00:00.000Z',
+      owner: { kind: 'workspace', id: 'workspace-1' },
     },
   ]
 
   render(
     <HomePage
       onNavigate={vi.fn()}
-      onOpenConversation={vi.fn()}
+      onOpenConversation={onOpenConversation}
       conversations={conversations}
+      spaces={[{ spaceId: 'space-study', title: '学习空间' }]}
+      workspaces={[{ workspaceId: 'workspace-1', title: 'AgentArbor', status: 'available', linkCount: 0 }]}
       input={inputProps()}
       focusRequest={0}
     />,
   )
 
-  expect(screen.queryByText('继续工作')).toBeNull()
-  expect(screen.queryByText('重构工具边界')).toBeNull()
-  expect(screen.queryByText('更新模型配置')).toBeNull()
+  expect(screen.getByLabelText('最近对话')).toBeTruthy()
+  expect(screen.getByText('重构工具边界')).toBeTruthy()
+  expect(screen.getByText('更新模型配置')).toBeTruthy()
+  expect(screen.getByText('空间 · 学习空间')).toBeTruthy()
+  expect(screen.getByText('工作区 · AgentArbor')).toBeTruthy()
+
+  fireEvent.click(screen.getByText('重构工具边界'))
+  expect(onOpenConversation).toHaveBeenCalledWith('running')
 })
 
 test('hides context usage until the task entry becomes a conversation', () => {

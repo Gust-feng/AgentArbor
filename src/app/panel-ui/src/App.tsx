@@ -208,9 +208,9 @@ export function App(): React.ReactElement {
     onUpdateQueuedMessage: updateQueuedMessage,
     onGuideQueuedMessage: guideQueuedMessage,
   };
-  const startNewConversation = useCallback((spaceId?: string) => {
+  const startNewConversation = useCallback((owner?: { readonly kind: "space" | "workspace"; readonly id: string }) => {
     clearQueuedMessages();
-    return runActions.startNewConversation(spaceId);
+    return runActions.startNewConversation(owner);
   }, [clearQueuedMessages, runActions.startNewConversation]);
   const openConversation = useCallback((conversationId: string) => {
     clearQueuedMessages();

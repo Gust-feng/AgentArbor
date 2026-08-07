@@ -215,6 +215,7 @@ const birthSchema = z.object({
     workspace: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
   }).strict().optional(),
   workspaceSelection: z.enum(["default", "explicit"]).optional(),
+  ownerContext: z.string().max(16_000).optional(),
   informationAccess: z.object({
     sourcePreference: z.array(z.string()), web: z.object({
       provider: z.enum(["tavily", "exa", "zai", "metaso", "google", "bing", "model_builtin", "none"]),

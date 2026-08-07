@@ -265,6 +265,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
           goal: input.runInput.userMessage,
           taskSoil,
           skillContexts,
+          ownerContext: input.birth.ownerContext,
         });
         const messagesWithAttachments = await attachDesktopFileInputsToModelMessages({
           messages: modelInput.messages,

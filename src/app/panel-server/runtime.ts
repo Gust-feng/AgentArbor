@@ -1031,6 +1031,13 @@ async function prepareOrdinaryRunBirth(
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
   const scope = await resolveConversationExecutionScope(runtime, input, conversationId);
+  const ownerContext = scope.owner === undefined
+    ? undefined
+    : await formatOwnerContext(runtime, {
+        owner: scope.owner,
+        cwd: scope.cwd ?? capabilitySnapshot.workspace.workspaceDirectory,
+        managedRoot: scope.managedRoot,
+      });
   const effectiveCapabilitySnapshot = scope.cwd === undefined
     ? capabilitySnapshot
     : {
@@ -1054,9 +1061,34 @@ async function prepareOrdinaryRunBirth(
     capabilitySnapshot: effectiveCapabilitySnapshot,
     agentNoteVersions: noteSnapshot.versions,
     workspaceSelection: scope.owner === undefined ? "default" : "explicit",
+    ownerContext,
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
   };
+}
+
+/** 组装模型可见的 owner 区块（ADR-0035 §6.2）。引用列表由本轮 TaskSoil 附件块承载。 */
+async function formatOwnerContext(
+  runtime: PanelRuntime,
+  scope: { readonly owner: ConversationOwner; readonly cwd: string; readonly managedRoot?: string },
+): Promise<string> {
+  if (scope.owner.kind === "workspace") {
+    const workspace = await runtime.workspaceFeature.queries.get(scope.owner.id);
+    return [
+      "[Current conversation owner]",
+      "kind=workspace",
+      `name=${workspace?.title ?? scope.owner.id}`,
+      `path=${scope.cwd}`,
+    ].join("\n");
+  }
+  const space = await runtime.spaceFeature.queries.getTree(scope.owner.id);
+  const managedRoot = scope.managedRoot ?? scope.cwd;
+  return [
+    "[Current conversation owner]",
+    "kind=space",
+    `name=${space?.space.title ?? scope.owner.id}`,
+    `managed_root=${managedRoot}`,
+  ].join("\n");
 }
 
 /**

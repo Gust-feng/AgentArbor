@@ -140,3 +140,24 @@ test("Desktop Agent model input does not silently trim canonical history or the 
   assert.equal(result.messages[1]?.content, historySentinel);
   assert.equal(result.messages.at(-1)?.content.endsWith(requestSentinel), true);
 });
+
+test("Desktop Agent model input injects the frozen owner block before the user request", () => {
+  const result = buildDesktopAgentModelInput({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    goal: "整理构建问题",
+    taskSoil: createTaskSoil({
+      rawGoal: "整理构建问题",
+      goalId: "goal-owned",
+      traceId: "trace-owned",
+      createdAt: "2026-07-14T00:00:00.000Z",
+    }),
+    ownerContext: "[Current conversation owner]\nkind=space\nname=产品规划\nmanaged_root=C:\\AgentArborData\\spaces\\space-1\\files",
+  });
+
+  const content = result.messages.at(-1)?.content ?? "";
+  assert.match(content, /\[Current conversation owner\]/u);
+  assert.match(content, /kind=space/u);
+  assert.match(content, /name=产品规划/u);
+  assert.match(content, /managed_root=C:\\AgentArborData\\spaces\\space-1\\files/u);
+  assert.match(content, /\[Current user request\]/u);
+});

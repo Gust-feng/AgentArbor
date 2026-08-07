@@ -370,6 +370,9 @@ test("Space owner run birth uses the Space managedRoot as cwd", async () => {
     assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory, path.resolve(expectedRoot));
     assert.equal(birth.workspaceSelection, "explicit");
     assert.equal((await fs.stat(expectedRoot)).isDirectory(), true);
+    assert.match(birth.ownerContext ?? "", /kind=space/u);
+    assert.match(birth.ownerContext ?? "", /name=产品规划/u);
+    assert.match(birth.ownerContext ?? "", /managed_root=/u);
   } finally {
     await cleanupRuntime(runtime, directory);
   }
@@ -394,6 +397,9 @@ test("Workspace owner run birth uses the current mount root as cwd", async () =>
 
     assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory.toLowerCase(), path.resolve(project).toLowerCase());
     assert.equal(birth.workspaceSelection, "explicit");
+    assert.match(birth.ownerContext ?? "", /kind=workspace/u);
+    assert.match(birth.ownerContext ?? "", /name=project/u);
+    assert.match(birth.ownerContext ?? "", /path=/u);
   } finally {
     await cleanupRuntime(runtime, directory);
   }

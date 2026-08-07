@@ -16,6 +16,8 @@ export type BuildDesktopAgentModelInputOptions = {
   readonly taskSoil: TaskSoil;
   readonly priorModelContext?: readonly ModelMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  /** 模型可见的 owner 区块（ADR-0035 §6.2）；随 birth 冻结，未提供时不注入。 */
+  readonly ownerContext?: string;
 };
 
 /**
@@ -55,10 +57,12 @@ function currentUserMessageContent(input: BuildDesktopAgentModelInputOptions): s
     .map((ref, index) => attachmentBlock(ref, input.taskSoil, index))
     .filter(isString);
   const goal = normalizeModelFacingText(input.goal);
-  if (skills.length === 0 && attachments.length === 0) {
+  const owner = input.ownerContext === undefined ? undefined : normalizeModelFacingText(input.ownerContext);
+  if (skills.length === 0 && attachments.length === 0 && owner === undefined) {
     return goal;
   }
   return [
+    owner === undefined ? undefined : owner,
     skills.length === 0 ? undefined : `[Selected skill instructions]\n${skills.join("\n\n")}`,
     attachments.length === 0 ? undefined : `[User-provided context]\n${attachments.join("\n")}`,
     `[Current user request]\n${goal}`,

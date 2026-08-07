@@ -13,6 +13,11 @@ type SpaceSummaryResponse = {
 
 type SpaceTreeResponse = {
   readonly tree: SpaceTree;
+  readonly conversations?: readonly {
+    readonly conversationId: string;
+    readonly title: string;
+    readonly updatedAt?: string;
+  }[];
 };
 
 type SpaceReferenceKind = SpaceReference["kind"];
@@ -52,12 +57,12 @@ export function useSpaceProjection(enabled = true): {
     const abortController = new AbortController();
     spaceRefreshControllersRef.current.set(spaceId, abortController);
     try {
-      const { tree } = await getJson<SpaceTreeResponse>(
+      const { tree, conversations } = await getJson<SpaceTreeResponse>(
         `/api/spaces/${encodeURIComponent(spaceId)}`,
         { signal: abortController.signal },
       );
       if (spaceRefreshRevisionRef.current.get(spaceId) !== revision) return;
-      setSpaces((current) => current.map((space) => space.spaceId === spaceId ? projectTree(tree) : space));
+      setSpaces((current) => current.map((space) => space.spaceId === spaceId ? projectTree(tree, conversations) : space));
     } catch (reason: unknown) {
       // A newer refresh for the same Space owns the result. Superseded reads
       // are normal during quick successive mutations and must not surface as
@@ -90,11 +95,11 @@ export function useSpaceProjection(enabled = true): {
         listed.spaces.map((summary) => [summary.id, spaceRefreshRevisionRef.current.get(summary.id) ?? 0]),
       );
       const trees = await Promise.all(listed.spaces.map(async (summary) => {
-        const { tree } = await getJson<SpaceTreeResponse>(
+        const { tree, conversations } = await getJson<SpaceTreeResponse>(
           `/api/spaces/${encodeURIComponent(summary.id)}`,
           { signal: abortController.signal },
         );
-        return projectTree(tree);
+        return projectTree(tree, conversations);
       }));
       if (epoch !== refreshEpochRef.current) return;
       setSpaces((current) => {
@@ -281,13 +286,17 @@ function basename(value: string): string {
   return segment === undefined || segment.length === 0 ? "工作区文件夹" : segment;
 }
 
-function projectTree(tree: SpaceTree): PersonalSpaceProjection {
+function projectTree(tree: SpaceTree, conversations?: SpaceTreeResponse["conversations"]): PersonalSpaceProjection {
   return {
     spaceId: tree.space.id,
     title: tree.space.title,
     itemCount: countEntries(tree.entries),
     color: colorFor(tree.space.id),
     items: projectEntries(tree.entries),
+    ...(conversations === undefined ? {} : { conversations: conversations.map((conversation) => ({
+      conversationId: conversation.conversationId,
+      title: conversation.title,
+    })) }),
   };
 }
 

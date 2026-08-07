@@ -70,7 +70,17 @@ export async function handlePanelSpaceRoute(
     const known = await feature.queries.getTree(spaceId);
     if (known === undefined) throw new PanelHttpError(404, "space_not_found", "未找到空间。");
     const tree = known;
-    writeJson(response, 200, { ok: true, tree });
+    // 关联对话是组合根生成的 read-model（ADR-0035 §8.1）；新对话不再写入 Space 树引用。
+    const ownerConversations = await runtime.ordinaryAgentFeature.queries.listConversationsByOwner({ kind: "space", id: spaceId });
+    writeJson(response, 200, {
+      ok: true,
+      tree,
+      conversations: ownerConversations.map((conversation) => ({
+        conversationId: conversation.conversationId,
+        title: conversation.title,
+        updatedAt: conversation.updatedAt,
+      })),
+    });
     return true;
   }
   if (treeMatch !== null && request.method === "DELETE") {

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import {
   FileSystemAgentSessionRepository,
 } from "../../adapters/intelligence/index.js";
@@ -185,7 +186,7 @@ export type PanelRuntime = {
   readonly pathMemoryFeature: PathMemoryFeature;
   readonly experienceCandidateFeature: ExperienceCandidateFeature;
   readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
-  readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
+  readonly prepareOrdinaryRunBirth: (input: PanelRunInput, conversationId?: string) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
   readonly workbenchDatabase: SqliteRuntimeDatabase;
   readonly workbenchAssets: WorkbenchAssetRepository;
@@ -368,6 +369,7 @@ function assemblePanelRuntime(input: {
   const runtimeHome = resolveRuntimeHome(input);
   const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
   const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
+  const managedSpaceRoot = path.join(runtimeHome, "spaces");
   let knowledgeAssetsReady = Promise.resolve();
   applyPendingWorkbenchRestore(runtimeHome, {
     assertSpaceDeletionIdle: () => assertSpaceDeletionJournalIdle(runtimeHome),
@@ -690,6 +692,13 @@ function assemblePanelRuntime(input: {
   const projectionChangeUnsubscribers = [
     spaceFeature.events.subscribe((event) => {
       workbenchProjectionChanges.publish(projectionChangeFromSpace(event));
+      if (event.type === "space.created") {
+        // Each Space owns a managedRoot（ADR-0035 §2.3）。Directory creation is a
+        // Host mechanical step: missing roots are recreated lazily by the scope
+        // resolver, and failures are diagnostics that never block the Space command.
+        void ensureSpaceManagedRoot(path.join(managedSpaceRoot, event.space.id))
+          .catch((error) => console.error(`[panel-server] Could not create managedRoot for Space ${event.space.id}`, error));
+      }
     }),
     personalKnowledgeFeature.events.subscribe((event) => {
       workbenchProjectionChanges.publish(projectionChangeFromPersonalKnowledge(event));
@@ -758,7 +767,7 @@ function assemblePanelRuntime(input: {
     pathMemoryFeature,
     experienceCandidateFeature,
     ordinaryPathMemoryConnector,
-    prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
+    prepareOrdinaryRunBirth: (runInput, conversationId) => prepareOrdinaryRunBirth(runtime, runInput, conversationId),
     toolOutputStore,
     workbenchDatabase,
     workbenchAssets,
@@ -993,6 +1002,7 @@ export function reconstructFrozenOrdinaryDefinition(
 async function prepareOrdinaryRunBirth(
   runtime: PanelRuntime,
   input: PanelRunInput,
+  conversationId?: string,
 ): Promise<OrdinaryRunBirth> {
   const [informationAccess, toolConfirmation, baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
     runtime.configCenter.getInformationAccessConfig(),
@@ -1005,7 +1015,14 @@ async function prepareOrdinaryRunBirth(
     input.reasoningEffort,
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
-  const workspaceRoot = capabilitySnapshot.workspace.workspaceDirectory;
+  const scope = await resolveConversationExecutionScope(runtime, input, conversationId);
+  const effectiveCapabilitySnapshot = scope.cwd === undefined
+    ? capabilitySnapshot
+    : {
+        ...capabilitySnapshot,
+        workspace: { ...capabilitySnapshot.workspace, workspaceDirectory: scope.cwd },
+      };
+  const workspaceRoot = effectiveCapabilitySnapshot.workspace.workspaceDirectory;
   const noteSnapshot = await runtime.agentNotesFeature.queries.startupSnapshot(workspaceRoot);
   // The injected note is frozen with this run's definition. This preserves the
   // existing definition/hash invariant: a restarted run uses exactly the notes
@@ -1015,16 +1032,54 @@ async function prepareOrdinaryRunBirth(
   runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), definition);
   return {
     instructions: definition.prompt.systemPrompt,
-    aiMode: input.aiMode ?? capabilitySnapshot.activeModel.defaultAiMode,
-    config: capabilitySnapshot.activeModel,
+    aiMode: input.aiMode ?? effectiveCapabilitySnapshot.activeModel.defaultAiMode,
+    config: effectiveCapabilitySnapshot.activeModel,
     reasoningEffort: input.reasoningEffort,
     agentDefinitionRef,
-    capabilitySnapshot,
+    capabilitySnapshot: effectiveCapabilitySnapshot,
     agentNoteVersions: noteSnapshot.versions,
-    workspaceSelection: "default",
+    workspaceSelection: scope.owner === undefined ? "default" : "explicit",
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
   };
+}
+
+/**
+ * Resolves the frozen execution scope for a run birth（ADR-0035 §3.1）。
+ *
+ * - New conversation: the requested owner decides the cwd（Space managedRoot /
+ *   Workspace current mount root）。
+ * - Existing conversation: the canonical owner stored on the Ordinary document.
+ *
+ * When no owner is resolvable（legacy submission paths）, the scope is empty and
+ * the run keeps the legacy global workspaceDirectory behavior; it is still
+ * reported as the default selection.
+ */
+async function resolveConversationExecutionScope(
+  runtime: PanelRuntime,
+  input: PanelRunInput,
+  conversationId: string | undefined,
+): Promise<{ readonly owner?: ConversationOwner; readonly cwd?: string; readonly managedRoot?: string }> {
+  const requestedOwner = input.owner ?? (input.spaceId === undefined ? undefined : { kind: "space" as const, id: input.spaceId });
+  const owner = requestedOwner ?? (conversationId === undefined
+    ? undefined
+    : await runtime.ordinaryAgentFeature.queries.getConversationOwner(conversationId));
+  if (owner === undefined) return {};
+  if (owner.kind === "workspace") {
+    const workspace = await runtime.workspaceFeature.queries.get(owner.id);
+    const mount = workspace?.mounts.find((entry) => entry.status === "active");
+    if (mount === undefined) {
+      throw new Error(`Workspace ${owner.id} has no active mount and cannot host a run.`);
+    }
+    return { owner, cwd: mount.rootPath };
+  }
+  const managedRoot = path.join(resolveRuntimeHome(runtime), "spaces", owner.id, "files");
+  await ensureSpaceManagedRoot(managedRoot);
+  return { owner, cwd: managedRoot, managedRoot };
+}
+
+async function ensureSpaceManagedRoot(managedRoot: string): Promise<void> {
+  await fs.mkdir(managedRoot, { recursive: true });
 }
 
 function definitionWithAgentNotes(

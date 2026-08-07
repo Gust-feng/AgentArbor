@@ -191,7 +191,7 @@ async function submitTurn(
     ...runInput,
     taskSoilInput: spaceAccess.taskSoilInput,
   };
-  const birth = await runtime.prepareOrdinaryRunBirth(effectiveRunInput);
+  const birth = await runtime.prepareOrdinaryRunBirth(effectiveRunInput, conversationId);
   const submitted = conversationId === undefined
     ? await runtime.spaceConversationLink.submit({
         owner: owner!,

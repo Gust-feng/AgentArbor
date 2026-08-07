@@ -354,6 +354,51 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
   }
 });
 
+test("Space owner run birth uses the Space managedRoot as cwd", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-scope-runtime-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    const space = await runtime.spaceFeature.commands.createSpace({ title: "产品规划" });
+
+    const birth = await runtime.prepareOrdinaryRunBirth({
+      goal: "整理构建问题",
+      owner: { kind: "space", id: space.id },
+    });
+
+    const expectedRoot = path.join(directory, "runtime", "spaces", space.id, "files");
+    assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory, path.resolve(expectedRoot));
+    assert.equal(birth.workspaceSelection, "explicit");
+    assert.equal((await fs.stat(expectedRoot)).isDirectory(), true);
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
+test("Workspace owner run birth uses the current mount root as cwd", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-scope-runtime-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    const project = path.join(directory, "project");
+    await fs.mkdir(project, { recursive: true });
+    const { workspace } = await runtime.workspaceFeature.commands.registerWorkspace({
+      rootPath: project,
+      sourceIdentity: "dev:project",
+    });
+
+    const birth = await runtime.prepareOrdinaryRunBirth({
+      goal: "修复项目",
+      owner: { kind: "workspace", id: workspace.id },
+    });
+
+    assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory.toLowerCase(), path.resolve(project).toLowerCase());
+    assert.equal(birth.workspaceSelection, "explicit");
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
 async function replaceAgentNote(
   runtime: PanelRuntime,
   scope: AgentNoteScope,

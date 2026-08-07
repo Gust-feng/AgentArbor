@@ -285,3 +285,17 @@
     animation: none !important;
   }
 }
+
+.topbar-surface-owner {
+  flex-shrink: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--aa-text-3);
+  background: var(--aa-accent-bg);
+}
+

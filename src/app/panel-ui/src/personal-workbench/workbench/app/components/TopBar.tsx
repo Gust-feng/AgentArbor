@@ -15,6 +15,8 @@ interface TopBarProps {
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
   surfaceTitle?: string
+  /** 对话固定 owner 徽标（ADR-0035 §9.4），如 "空间 · 产品规划"。 */
+  surfaceOwner?: string
   conversationState?: LiveConversationState
   onEnterFocus?: () => void
   // 知识库路径面包屑:打开的文件标题(无则在知识库根部);点根部回到知识库列表。
@@ -32,6 +34,7 @@ export function TopBar({
   sidebarCollapsed,
   onToggleSidebar,
   surfaceTitle,
+  surfaceOwner,
   conversationState,
   onEnterFocus,
   brainFileTitle,
@@ -120,6 +123,11 @@ export function TopBar({
             {isMinimal && surfaceTitle && (
               <span className="topbar-surface-context">
                 <span className="topbar-surface-title">{surfaceTitle}</span>
+                {surfaceOwner !== undefined && (
+                  <span className="topbar-surface-owner" title={surfaceOwner}>
+                    {surfaceOwner}
+                  </span>
+                )}
                 {conversationStatus !== undefined && (
                   <ConversationHeaderStatus state={conversationStatus} />
                 )}

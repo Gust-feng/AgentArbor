@@ -118,6 +118,11 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
     : isConversationView(view)
       ? activeConversation?.title ?? "新的对话"
       : undefined;
+  const surfaceOwner = isConversationView(view) && activeConversation?.owner !== undefined
+    ? (activeConversation.owner.kind === "space"
+        ? `空间 · ${props.spaces?.find((space) => space.spaceId === activeConversation.owner?.id)?.title ?? "空间"}`
+        : `工作区 · ${workspaceProjection.workspaces.find((workspace) => workspace.workspaceId === activeConversation.owner?.id)?.title ?? "工作区"}`)
+    : undefined;
 
   useEffect(() => {
     setPersonalKnowledgePersistenceEnabled(props.personalKnowledgePersistenceEnabled === true);
@@ -303,6 +308,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
           sidebarCollapsed={props.sidebarCollapsed}
           onToggleSidebar={props.onToggleSidebar}
           surfaceTitle={surfaceTitle}
+          surfaceOwner={surfaceOwner}
           conversationState={isConversationView(view) ? conversationState : undefined}
           onEnterFocus={isConversationView(view) && conversationMode === "normal"
             ? () => setConversationMode("focus")

@@ -1320,7 +1320,13 @@ function SpaceConversationRow(props: {
       onMouseLeave={() => setHovered(false)}
       onClick={() => { if (!props.renaming) props.onOpen() }}
     >
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: props.dot, flexShrink: 0 }} />
+      <span style={{
+        width: 8,
+        height: 8,
+        borderRadius: 2,
+        background: props.dot,
+        flexShrink: 0,
+      }} />
       {props.renaming ? (
         <InlineName
           value={props.conversation.title}

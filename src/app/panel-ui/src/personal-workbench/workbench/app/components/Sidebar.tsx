@@ -474,6 +474,7 @@ function WorkspaceRow(props: {
                 active={(props.view === 'conv-active' || props.view === 'conv-done') && props.activeConversationId === conversation.conversationId}
                 onClick={() => props.openConversation(conversation.conversationId)}
                 dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
+                dotShape="square"
                 label={conversation.title}
                 editing={props.renamingConversationId === conversation.conversationId}
                 editSelectAll={false}

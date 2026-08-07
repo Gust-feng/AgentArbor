@@ -107,6 +107,8 @@ export interface SidebarListRowProps {
   readonly active: boolean
   readonly onClick: () => void
   readonly dot: string
+  /** 标识形状：会话用圆角方块，空间/工作区用圆形（默认）。 */
+  readonly dotShape?: 'circle' | 'square'
   readonly label: string
   readonly meta?: ReactNode
   readonly editing: boolean
@@ -118,7 +120,7 @@ export interface SidebarListRowProps {
 }
 
 /** Conversation and space row with stable geometry and delayed actions. */
-export function SidebarListRow({ active, onClick, dot, label, meta, editing, editSelectAll, onRename, onCancelRename, actions, pending = false }: SidebarListRowProps) {
+export function SidebarListRow({ active, onClick, dot, dotShape = 'circle', label, meta, editing, editSelectAll, onRename, onCancelRename, actions, pending = false }: SidebarListRowProps) {
   const [hovered, setHovered] = useState(false)
 
   return (
@@ -137,7 +139,13 @@ export function SidebarListRow({ active, onClick, dot, label, meta, editing, edi
         transition: 'background 120ms ease, color 120ms ease',
       }}
     >
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flexShrink: 0 }}/>
+      <span style={{
+        width: 8,
+        height: 8,
+        borderRadius: dotShape === 'square' ? 2 : '50%',
+        background: dot,
+        flexShrink: 0,
+      }}/>
       {editing ? (
         <SidebarInlineRenameField value={label} onCommit={onRename} onCancel={onCancelRename} selectAll={editSelectAll}/>
       ) : (

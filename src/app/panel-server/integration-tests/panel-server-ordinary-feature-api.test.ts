@@ -118,6 +118,35 @@ test("Ordinary Panel entry submits directly to the feature and exposes the canon
   }
 });
 
+test("new Conversation creation keeps one Space owner across an idempotent retry", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-space-owner-retry-"));
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    ordinaryAgentExecution: completedExecution(directory, "done", {}),
+  });
+  try {
+    const spaces = await requestJson(server.url, "/api/spaces");
+    const spaceId = spaces.body.spaces[0].id as string;
+    const body = { goal: "建立唯一归属", submissionId: "owner-retry", spaceId };
+    const first = await requestJson(server.url, "/api/conversations", { method: "POST", body });
+    const second = await requestJson(server.url, "/api/conversations", { method: "POST", body });
+
+    assert.equal(first.status, 202);
+    assert.equal(second.status, 202);
+    assert.equal(first.body.conversation.conversationId, "conversation:owner-retry");
+    assert.equal(second.body.conversation.conversationId, first.body.conversation.conversationId);
+    const tree = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    const owners = tree.body.tree.entries.filter((entry: { item: { reference: { kind: string; conversationId?: string } } }) =>
+      entry.item.reference.kind === "conversation" && entry.item.reference.conversationId === "conversation:owner-retry",
+    );
+    assert.equal(owners.length, 1);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Ordinary turns inherit only the local references from their owning Space", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-space-access-"));
   const firstFile = path.join(directory, "first.md");
@@ -130,11 +159,6 @@ test("Ordinary turns inherit only the local references from their owning Space",
     ordinaryAgentExecution: completedExecution(directory, "space answer", {}),
   });
   try {
-    const conversation = await requestJson(server.url, "/api/conversations", {
-      method: "POST",
-      body: { goal: "start" },
-    });
-    const conversationId = conversation.body.conversation.conversationId as string;
     const firstSpace = await requestJson(server.url, "/api/spaces", { method: "POST", body: { title: "一" } });
     const secondSpace = await requestJson(server.url, "/api/spaces", { method: "POST", body: { title: "二" } });
     const firstSpaceId = firstSpace.body.space.id as string;
@@ -147,17 +171,18 @@ test("Ordinary turns inherit only the local references from their owning Space",
       method: "POST",
       body: { title: "二号文件", reference: { kind: "local_file", path: secondFile } },
     });
-    await requestJson(server.url, `/api/spaces/${encodeURIComponent(firstSpaceId)}/references`, {
+    const conversation = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { title: "当前对话", reference: { kind: "conversation", conversationId } },
+      body: { goal: "start", submissionId: "space-access-start", spaceId: firstSpaceId },
     });
+    const conversationId = conversation.body.conversation.conversationId as string;
 
-    const duplicateOwner = await requestJson(server.url, `/api/spaces/${encodeURIComponent(secondSpaceId)}/references`, {
+    const duplicateOwner = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { title: "重复对话", reference: { kind: "conversation", conversationId } },
+      body: { goal: "重复对话", submissionId: "space-access-duplicate", spaceId: secondSpaceId },
     });
-    assert.equal(duplicateOwner.status, 409);
-    assert.equal(duplicateOwner.body.error.code, "space_conversation_ownership_conflict");
+    assert.equal(duplicateOwner.status, 202);
+    assert.notEqual(duplicateOwner.body.conversation.conversationId, conversationId);
 
     const submitted = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
       method: "POST",
@@ -192,15 +217,7 @@ test("deleting an Ordinary conversation only unlinks its Space conversation refe
     });
     const conversationId = submitted.body.conversation.conversationId as string;
     await waitForView(server.url, submitted.body.run.runId, "completed");
-    const createdSpace = await requestJson(server.url, "/api/spaces", {
-      method: "POST",
-      body: { title: "保留内容" },
-    });
-    const spaceId = createdSpace.body.space.id as string;
-    const conversation = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
-      method: "POST",
-      body: { title: "当前对话", reference: { kind: "conversation", conversationId } },
-    });
+    const spaceId = submitted.body.conversation.spaceId as string;
     const file = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       method: "POST",
       body: { title: "本地文件", reference: { kind: "local_file", path: localFile } },
@@ -221,7 +238,7 @@ test("deleting an Ordinary conversation only unlinks its Space conversation refe
 
     const tree = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}`);
     const retainedIds = tree.body.tree.entries.map((entry: { item: { id: string } }) => entry.item.id);
-    assert.equal(retainedIds.includes(conversation.body.item.id as string), false);
+    assert.equal(retainedIds.some((id: string) => id.startsWith("space-conversation:")), false);
     assert.equal(retainedIds.includes(file.body.item.id as string), true);
     assert.equal(retainedIds.includes(managed.body.item.id as string), true);
     assert.equal(await fs.readFile(localFile, "utf8"), "keep this file");
@@ -270,7 +287,7 @@ test("Ordinary HTTP boundary returns stable validation errors before feature exe
   }
 });
 
-test("Ordinary conversation projects its frozen run workspace before and after restart", async () => {
+test("Ordinary conversation ignores the retired per-conversation workspace input", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-panel-workspace-"));
   const workspaceDirectory = path.join(directory, "project-workspace");
   await fs.mkdir(workspaceDirectory, { recursive: true });
@@ -282,15 +299,12 @@ test("Ordinary conversation projects its frozen run workspace before and after r
   try {
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "remember this workspace", workspaceDirectory },
+      body: { goal: "ignore this workspace", workspaceDirectory },
     });
     const conversationId = submitted.body.conversation.conversationId;
     await waitForView(server.url, submitted.body.run.runId, "completed");
-    assert.deepEqual(submitted.body.conversation.workspaceFolder, {
-      label: path.basename(workspaceDirectory),
-      path: workspaceDirectory,
-      selection: "explicit",
-    });
+    assert.equal(submitted.body.conversation.workspaceFolder.selection, "default");
+    assert.notEqual(submitted.body.conversation.workspaceFolder.path, workspaceDirectory);
     assert.deepEqual(
       (await requestJson(server.url, "/api/conversations")).body.conversations[0].workspaceFolder,
       submitted.body.conversation.workspaceFolder,
@@ -379,6 +393,7 @@ test("Ordinary submit response keeps its command facts when a concurrent delete 
       },
     },
   });
+  const raceSpace = await runtime.spaceFeature.commands.createSpace({ title: "竞态空间" });
   const replay = runtime.ordinaryAgentFeature.events.replay.bind(runtime.ordinaryAgentFeature.events);
   Object.defineProperty(runtime.ordinaryAgentFeature.events, "replay", {
     configurable: true,
@@ -402,7 +417,7 @@ test("Ordinary submit response keeps its command facts when a concurrent delete 
   try {
     const seed = await requestJson(baseUrl, "/api/conversations", {
       method: "POST",
-      body: { goal: "seed" },
+      body: { goal: "seed", submissionId: "race-seed", spaceId: raceSpace.id },
     });
     conversationId = seed.body.conversation.conversationId;
     await waitForView(baseUrl, seed.body.run.runId, "completed");

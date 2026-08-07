@@ -60,6 +60,7 @@ test("Panel composition closes failed Workbench storage before Space recovery st
     phase: "files_staged",
     rootReferenceId: reference.id,
     removedReferences: [reference],
+    ownedAssetIds: [],
     targets: [{
       referenceId: reference.id,
       kind: "local_file",
@@ -139,9 +140,62 @@ test("Panel capability snapshots freeze Space tools so an Ordinary Agent can org
   try {
     runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const snapshot = await runtime.capabilityCenter.snapshot();
-    for (const name of ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename", "SpaceWrite", "SpaceEdit"]) {
+    for (const name of ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename", "Write", "Edit"]) {
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
     }
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("SpaceWrite"), false);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("SpaceEdit"), false);
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
+test("Panel composition revokes and stops processes when a Space reference is unlinked", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-process-revocation-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  const stoppedPids: number[] = [];
+  try {
+    runtime = createPanelRuntime({
+      configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
+      processTerminator: {
+        killTree(pid) {
+          stoppedPids.push(pid);
+          return { status: "killed" };
+        },
+      },
+    });
+    const space = await runtime.spaceFeature.commands.createSpace({ title: "Space" });
+    const reference = await runtime.spaceFeature.commands.addReference({
+      spaceId: space.id,
+      title: "Workspace",
+      reference: { kind: "workspace_folder", path: directory },
+    });
+    runtime.processRegistry.register({
+      processId: "space-process",
+      conversationId: "conversation-1",
+      spaceId: space.id,
+      referenceId: reference.id,
+      runId: "run-1",
+      authorizationMode: "confirm_each",
+      permissionState: "active",
+      pid: 32123,
+      kind: "background",
+      lifetime: "workspace_session",
+      owned: true,
+      commandLine: "test server",
+      cwd: directory,
+      startedAt: "2026-08-06T00:00:00.000Z",
+      status: "running",
+    });
+
+    await runtime.spaceFeature.commands.unlinkReference(reference.id);
+    assert.notEqual(runtime.processRegistry.get("space-process")?.permissionState, "active");
+    await runtime.flushSpaceProcessCleanup();
+
+    assert.deepEqual(stoppedPids, [32123]);
+    assert.equal(runtime.processRegistry.get("space-process")?.permissionState, "stopped");
+    assert.equal(runtime.processRegistry.get("space-process")?.status, "killed");
   } finally {
     await cleanupRuntime(runtime, directory);
   }
@@ -211,7 +265,7 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
   }
 });
 
-test("Panel composition removes a frozen Space file link after a failed Agent run deleted its source", async () => {
+test("Panel composition does not scan frozen Space links when an Agent run finishes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-file-terminal-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
   try {
@@ -238,8 +292,6 @@ test("Panel composition removes a frozen Space file link after a failed Agent ru
       title: "linked.md",
       reference: { kind: "local_file", path: source },
     });
-    const cursor = runtime.workbenchProjectionChanges.replay().cursor;
-
     await runtime.ordinaryAgentFeature.commands.start({
       runId: "delete-space-file-run",
       sessionRef: ordinaryAgentSessionRef(),
@@ -261,14 +313,7 @@ test("Panel composition removes a frozen Space file link after a failed Agent ru
         Date.now() < deadline) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    while (await runtime.spaceFeature.queries.getReference(reference.id) !== undefined && Date.now() < deadline) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-
-    assert.equal(await runtime.spaceFeature.queries.getReference(reference.id), undefined);
-    assert.equal(runtime.workbenchProjectionChanges.replay(cursor).changes.some((change) =>
-      change.owners.includes("spaces") && change.referenceIds?.includes(reference.id)
-    ), true);
+    assert.notEqual(await runtime.spaceFeature.queries.getReference(reference.id), undefined);
   } finally {
     await cleanupRuntime(runtime, directory);
   }
@@ -304,13 +349,6 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
       workspace: agentNoteContentVersion("- Build this project with pnpm build."),
     });
 
-    // Notes are scoped: a different workspace sees only the global notebook.
-    const otherBirth = await runtime.prepareOrdinaryRunBirth({
-      goal: "check other notes",
-      workspaceDirectory: path.join(directory, "other-project"),
-    });
-    assert.match(otherBirth.instructions, /Reply in Chinese/u);
-    assert.doesNotMatch(otherBirth.instructions, /pnpm build/u);
   } finally {
     await cleanupRuntime(runtime, directory);
   }

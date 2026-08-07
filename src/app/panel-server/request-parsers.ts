@@ -41,6 +41,10 @@ import { PanelHttpError } from "./http-utils.js";
 export type PanelRunInput = {
   readonly goal: string;
   readonly submissionId?: string;
+  /** 兼容旧创建入口：等价于 owner { kind: "space", id: spaceId }。 */
+  readonly spaceId?: string;
+  /** 新 Conversation 的 canonical owner（ADR-0035）；与 spaceId 同时提供时以 owner 为准。 */
+  readonly owner?: { readonly kind: "space" | "workspace"; readonly id: string };
   readonly aiMode?: ModelRuntimeMode;
   readonly requestedRunMode?: PanelRunMode;
   readonly reasoningEffort?: ModelRunReasoningEffort;
@@ -49,7 +53,6 @@ export type PanelRunInput = {
     readonly profileId: string;
     readonly model: string;
   };
-  readonly workspaceDirectory?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
 };
 
@@ -123,15 +126,25 @@ const pathMemoryTerminalStatusSchema = z.enum(["completed", "failed", "cancelled
 const aiModeSchema = z.enum(["none", "fake", "openai-compatible", "openai-responses"]);
 const configuredAiModeSchema = z.enum(["none", "openai-compatible", "openai-responses"]);
 
+const conversationOwnerSchema = z.object({
+  kind: z.enum(["space", "workspace"]),
+  id: optionalTrimmedStringSchema,
+}).strict().superRefine((owner, context) => {
+  if (owner.id === undefined) {
+    context.addIssue({ code: "custom", path: ["id"], message: "owner id is required" });
+  }
+});
+
 const ordinaryRunRequestSchema = z.preprocess(normalizeRequestObject, z.object({
   goal: optionalTrimmedStringSchema,
   submissionId: optionalTrimmedStringSchema,
+  spaceId: optionalTrimmedStringSchema,
+  owner: conversationOwnerSchema.optional(),
   aiMode: z.unknown().optional(),
   runMode: z.unknown().optional(),
   reasoningEffort: z.unknown().optional(),
   toolConfirmationPolicy: z.unknown().optional(),
   modelOverride: z.unknown().optional(),
-  workspaceDirectory: optionalTrimmedStringSchema,
   taskSoilInput: z.unknown().optional(),
 }));
 
@@ -474,15 +487,19 @@ export function parseRunInput(raw: unknown): PanelRunInput {
   if (request.submissionId !== undefined && request.submissionId.length > 200) {
     throw new PanelHttpError(400, "invalid_submission_id", "提交标识无效。");
   }
+  const owner = request.owner === undefined
+    ? undefined
+    : { kind: request.owner.kind, id: request.owner.id! };
   return {
     goal,
     submissionId: request.submissionId,
+    spaceId: request.spaceId,
+    owner,
     aiMode: parseOptionalAiMode(request.aiMode, "AI 模式无效。"),
     requestedRunMode: parseOptionalRunMode(request.runMode),
     reasoningEffort: parseOptionalRunReasoningEffort(request.reasoningEffort),
     toolConfirmationPolicy: parseToolConfirmationPolicy(request.toolConfirmationPolicy),
     modelOverride: parseModelOverride(request.modelOverride),
-    workspaceDirectory: request.workspaceDirectory,
     taskSoilInput: parseCanonicalTaskSoilInput(request.taskSoilInput),
   };
 }

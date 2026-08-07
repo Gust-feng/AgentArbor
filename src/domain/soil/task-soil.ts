@@ -9,6 +9,10 @@ import type {
 export type TaskSoilContextRef = {
   readonly attachmentId?: string;
   readonly ref: string;
+  /** Set when the run authorizes this path, letting the model see it and call file tools on it. */
+  readonly pathGranted?: boolean;
+  /** Run-frozen backend identity used to reject a different filesystem object at the same path. */
+  readonly sourceIdentity?: string;
   readonly kind: "user_goal" | "workspace" | "file" | "project" | "web" | "runtime";
   readonly title?: string;
   readonly summary?: string;

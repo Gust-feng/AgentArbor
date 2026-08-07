@@ -138,6 +138,9 @@ const MIGRATIONS = [{
     DELETE FROM knowledge_recently_opened
       WHERE ref_id NOT IN (SELECT ref_id FROM knowledge_pages);
   `,
+}, {
+  version: 8,
+  sql: `UPDATE knowledge_pages SET kind = 'space_reference' WHERE asset_json IS NOT NULL;`,
 }] as const;
 
 export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeDatabase): PersonalKnowledgeRepository {
@@ -342,6 +345,17 @@ function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowle
       if (command.page.kind === "note" && database.connection.prepare("SELECT 1 FROM personal_notes WHERE id = ?").get(command.page.refId) === undefined) {
         throw new PersonalKnowledgeError("personal_note_not_found", `Note ${command.page.refId} was not found.`);
       }
+      if (command.page.kind !== "space_reference") {
+        const existing = database.connection.prepare(
+          "SELECT asset_json AS assetJson FROM knowledge_pages WHERE ref_id = ?",
+        ).get(command.page.refId) as Record<string, SQLInputValue> | undefined;
+        if (existing?.assetJson !== null && existing?.assetJson !== undefined) {
+          throw new PersonalKnowledgeError(
+            "personal_knowledge_invalid_input",
+            `Managed knowledge asset ${command.page.refId} cannot be reclassified.`,
+          );
+        }
+      }
       database.connection.prepare(`
         INSERT INTO knowledge_pages(ref_id, kind, collected_at, asset_json) VALUES (?, ?, ?, ?)
         ON CONFLICT(ref_id) DO UPDATE SET
@@ -352,6 +366,9 @@ function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowle
       return;
     case "knowledge.uncollect":
       database.transaction(() => removeKnowledgeReference(database, command.refId));
+      return;
+    case "space.cleanup":
+      cleanupSpace(database, command.spaceId, command.referenceIds);
       return;
     case "knowledge.link_add":
       requireKnowledgePages(database, command.link.from, command.link.to);
@@ -413,6 +430,50 @@ function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowle
   }
 }
 
+function cleanupSpace(database: SqliteRuntimeDatabase, spaceId: string, referenceIds: readonly string[]): void {
+  const sourceReferenceIds = new Set(referenceIds);
+  database.transaction(() => {
+    const noteIds = database.connection.prepare(
+      "SELECT id FROM personal_notes WHERE space_id = ?",
+    ).all(spaceId).map((row) => String((row as Record<string, SQLInputValue>).id));
+
+    if (noteIds.length > 0) {
+      const deleteNotePages = database.connection.prepare("DELETE FROM knowledge_pages WHERE ref_id = ?");
+      const deleteLinks = database.connection.prepare("DELETE FROM knowledge_links WHERE from_ref_id = ? OR to_ref_id = ?");
+      const deleteAssignments = database.connection.prepare("DELETE FROM knowledge_theme_assignments WHERE ref_id = ?");
+      const deleteRecentlyOpened = database.connection.prepare("DELETE FROM knowledge_recently_opened WHERE ref_id = ?");
+      const deleteRevisions = database.connection.prepare("DELETE FROM personal_note_revisions WHERE note_id = ?");
+      const deleteNotes = database.connection.prepare("DELETE FROM personal_notes WHERE id = ?");
+      for (const noteId of noteIds) {
+        deleteLinks.run(noteId, noteId);
+        deleteAssignments.run(noteId);
+        deleteRecentlyOpened.run(noteId);
+        deleteNotePages.run(noteId);
+        deleteRevisions.run(noteId);
+        deleteNotes.run(noteId);
+      }
+    }
+
+    if (sourceReferenceIds.size === 0) return;
+    const pages = database.connection.prepare(
+      "SELECT ref_id AS refId, asset_json AS assetJson FROM knowledge_pages WHERE asset_json IS NOT NULL",
+    ).all();
+    const update = database.connection.prepare("UPDATE knowledge_pages SET asset_json = ? WHERE ref_id = ?");
+    for (const row of pages) {
+      const value = row as Record<string, SQLInputValue>;
+      const rawAsset = value.assetJson === null ? undefined : JSON.parse(String(value.assetJson)) as unknown;
+      if (!isRecord(rawAsset)) continue;
+      const sourceReferenceId = typeof rawAsset.sourceReferenceId === "string" ? rawAsset.sourceReferenceId : undefined;
+      if (sourceReferenceId === undefined || !sourceReferenceIds.has(sourceReferenceId)) continue;
+      const { sourceReferenceId: _sourceReferenceId, sourceRelativePath: _sourceRelativePath, ...detachedAsset } = rawAsset;
+      update.run(JSON.stringify(detachedAsset), String(value.refId));
+    }
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function removeKnowledgeReference(database: SqliteRuntimeDatabase, refId: string): void {
   database.connection.prepare("DELETE FROM knowledge_pages WHERE ref_id = ?").run(refId);
   database.connection.prepare("DELETE FROM knowledge_links WHERE from_ref_id = ? OR to_ref_id = ?").run(refId, refId);

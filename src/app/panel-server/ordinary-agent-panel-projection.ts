@@ -10,6 +10,7 @@ import type {
 import type { ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { ModelUsage } from "../../domain/intelligence/index.js";
 import { toolCallFactId, type ToolCallResult } from "../../domain/tools/index.js";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import type {
   OrdinaryConversationReadModel,
   OrdinaryConversationTurnReadModel,
@@ -161,6 +162,7 @@ export function projectOrdinaryPanelRunView(input: {
 
 export function projectOrdinaryPanelConversation(input: {
   readonly conversation: OrdinaryConversationReadModel;
+  readonly owner?: ConversationOwner;
   readonly spaceId?: string;
   readonly currentRun?: OrdinaryPanelRunView;
   readonly workspaceRun?: OrdinaryRunState;
@@ -175,6 +177,7 @@ export function projectOrdinaryPanelConversation(input: {
   const latestText = [...turns].reverse().find((turn) => turn.content.length > 0)?.content ?? "";
   return {
     conversationId: input.conversation.conversationId,
+    owner: input.owner,
     spaceId: input.spaceId,
     title: input.conversation.title,
     titleEditedAt: input.conversation.titleEditedAt,
@@ -204,9 +207,11 @@ export function projectOrdinaryPanelConversationSummary(
   conversation: OrdinaryConversationReadModel,
   workspaceRun?: OrdinaryRunState,
   spaceId?: string,
+  owner?: ConversationOwner,
 ): OrdinaryPanelConversationSummary {
   const { turns: _turns, currentRun: _currentRun, ...summary } = projectOrdinaryPanelConversation({
     conversation,
+    owner,
     workspaceRun,
     spaceId,
   });

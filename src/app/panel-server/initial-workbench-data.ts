@@ -4,7 +4,7 @@ import type { SpaceFeature } from "../spaces/index.js";
 import type { WorkbenchAssetRepository } from "../workbench-assets/index.js";
 import { getInitialWorkbenchAssets } from "../workbench-assets/index.js";
 
-export const INITIAL_WORKBENCH_DATA_KEY = "workbench-initial-assets/v3";
+export const INITIAL_WORKBENCH_DATA_KEY = "workbench-initial-assets/v5";
 export const INITIAL_SPACE_ID = "space-learning";
 
 export type InitialWorkbenchDataInitializer = {
@@ -38,11 +38,36 @@ const INITIAL_KNOWLEDGE_MATERIAL_IDS = [
   "m-attn-pdf",
   "m-transformer-md",
   "m-loss-img",
-  "m-stanford-video",
-  "m-podcast-audio",
   "m-train-code",
   "m-distill-web",
   "m-inspo-img",
+] as const;
+
+const INITIAL_KNOWLEDGE_THEMES = [
+  { id: "t-transformer", name: "Transformer", color: "#6865a7", origin: "agent" as const },
+  { id: "t-training", name: "训练与实践", color: "#c07a55", origin: "agent" as const },
+  { id: "t-method", name: "读书与方法", color: "#6f8778", origin: "agent" as const },
+  { id: "t-inspo", name: "灵感与杂谈", color: "#8a6aa0", origin: "agent" as const },
+] as const;
+
+const INITIAL_KNOWLEDGE_ASSIGNMENTS = [
+  { refId: "m-attn-pdf", themeId: "t-transformer" },
+  { refId: "m-transformer-md", themeId: "t-transformer" },
+  { refId: "m-train-code", themeId: "t-transformer" },
+  { refId: "f1-1", themeId: "t-training" },
+  { refId: "m-train-code", themeId: "t-training" },
+  { refId: "m-loss-img", themeId: "t-training" },
+  { refId: "f2-2", themeId: "t-method" },
+  { refId: "m-transformer-md", themeId: "t-method" },
+  { refId: "m-inspo-img", themeId: "t-inspo" },
+  { refId: "m-distill-web", themeId: "t-inspo" },
+] as const;
+
+const INITIAL_KNOWLEDGE_LINKS = [
+  { from: "m-transformer-md", to: "m-attn-pdf" },
+  { from: "m-transformer-md", to: "f2-2" },
+  { from: "m-loss-img", to: "f1-1" },
+  { from: "m-train-code", to: "m-attn-pdf" },
 ] as const;
 
 export async function initializeInitialWorkbenchData(input: {
@@ -64,7 +89,24 @@ export async function initializeInitialWorkbenchData(input: {
   const existingItemIds = new Set(existingTree?.entries.map((entry) => entry.item.id) ?? []);
   for (const item of INITIAL_SPACE_ITEMS) {
     if (existingItemIds.has(item.id)) continue;
-    await input.spaceFeature.commands.addReference({ ...item, spaceId: INITIAL_SPACE_ID });
+    const parentId = "parentId" in item ? item.parentId : undefined;
+    if (item.reference.kind === "conversation") {
+      await input.spaceFeature.commands.linkConversationOwner({
+        id: item.id,
+        spaceId: INITIAL_SPACE_ID,
+        title: item.title,
+        conversationId: item.reference.conversationId,
+        conversationTitle: item.reference.conversationTitle,
+      });
+    } else {
+      await input.spaceFeature.commands.addReference({
+        id: item.id,
+        spaceId: INITIAL_SPACE_ID,
+        title: item.title,
+        ...(parentId === undefined ? {} : { parentId }),
+        reference: item.reference,
+      });
+    }
   }
 
   const snapshot = await input.personalKnowledgeFeature.queries.snapshot();
@@ -78,6 +120,34 @@ export async function initializeInitialWorkbenchData(input: {
     });
   }
 
+  const existingThemeIds = new Set(snapshot.themes.map((theme) => theme.id));
+  for (const theme of INITIAL_KNOWLEDGE_THEMES) {
+    if (existingThemeIds.has(theme.id)) continue;
+    await input.personalKnowledgeFeature.commands.execute({ type: "theme.create", theme });
+    existingThemeIds.add(theme.id);
+  }
+
+  const assignmentKey = (refId: string, themeId: string): string => `${refId}\u0000${themeId}`;
+  const existingAssignments = new Set(snapshot.assignments.map((assignment) => assignmentKey(assignment.refId, assignment.themeId)));
+  for (const assignment of INITIAL_KNOWLEDGE_ASSIGNMENTS) {
+    const key = assignmentKey(assignment.refId, assignment.themeId);
+    if (existingAssignments.has(key)) continue;
+    await input.personalKnowledgeFeature.commands.execute({
+      type: "theme.assign",
+      assignment: { ...assignment, by: "agent", locked: false },
+    });
+    existingAssignments.add(key);
+  }
+
+  const linkKey = (from: string, to: string): string => `${from}\u0000${to}`;
+  const existingLinks = new Set(snapshot.links.map((link) => linkKey(link.from, link.to)));
+  for (const link of INITIAL_KNOWLEDGE_LINKS) {
+    const key = linkKey(link.from, link.to);
+    if (existingLinks.has(key)) continue;
+    await input.personalKnowledgeFeature.commands.execute({ type: "knowledge.link_add", link });
+    existingLinks.add(key);
+  }
+
   input.database.recordInitialization(INITIAL_WORKBENCH_DATA_KEY);
 }
 
@@ -87,7 +157,6 @@ const INITIAL_SPACE_ITEMS = [
   { id: "f2-3", parentId: "f2", title: "认知偏见与阅读整理", reference: { kind: "conversation" as const, conversationId: "conv-bias", conversationTitle: "认知偏见与阅读整理" } },
   { id: "f2-2", parentId: "f2", title: "卡片笔记法完整介绍", reference: { kind: "workbench_asset" as const, assetId: "f2-2" } },
   { id: "f1", title: "2026年学习资料", reference: { kind: "asset_folder" as const } },
-  { id: "f1-6", parentId: "f1", title: "梯度下降讲解.mp4", reference: { kind: "workbench_asset" as const, assetId: "f1-6" } },
   { id: "f1-5", parentId: "f1", title: "神经网络结构图.png", reference: { kind: "workbench_asset" as const, assetId: "f1-5" } },
   { id: "f1-3", parentId: "f1", title: "关于梯度下降的讨论", reference: { kind: "conversation" as const, conversationId: "conv-grad", conversationTitle: "关于梯度下降的讨论" } },
   { id: "f1-2", parentId: "f1", title: "CS231n 课程主页", reference: { kind: "workbench_asset" as const, assetId: "f1-2" } },

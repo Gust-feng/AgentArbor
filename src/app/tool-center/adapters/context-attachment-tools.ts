@@ -90,7 +90,7 @@ export function createListContextAttachmentsTool(options: ContextAttachmentToolO
   return {
     definition: {
       name: "AttachmentList",
-      description: "List user-provided context attachments available to this run without exposing local absolute paths.",
+      description: "List user-provided context attachments available to this run. Authorized local selections include their real paths; managed upload storage paths remain hidden.",
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -150,6 +150,7 @@ export function createReadContextAttachmentTextTool(options: ContextAttachmentTo
         requireFile: true,
         projectPathRequired: true,
         resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment text target could not be read.");
       if (!stat.isFile()) {
@@ -285,6 +286,7 @@ export function createReadContextAttachmentPdfTextTool(options: ContextAttachmen
         requireFile: true,
         projectPathRequired: true,
         resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment PDF target could not be read.");
       if (!stat.isFile()) {
@@ -424,6 +426,7 @@ export function createListContextAttachmentFilesTool(options: ContextAttachmentT
         requireFile: false,
         projectPathRequired: false,
         resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       if (target.rootKind !== "project") {
         throw new Error("attachment_list_files expects a project or workspace attachment.");
@@ -549,6 +552,7 @@ export function createSearchContextAttachmentFilesTool(options: ContextAttachmen
         requireFile: false,
         projectPathRequired: false,
         resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       await statAttachmentTarget(target.targetAbsolutePath, "Attachment search target could not be read.");
       const limit = Math.min(MAX_SEARCH_MATCHES, positiveInteger(record.limit) ?? MAX_SEARCH_MATCHES);

@@ -80,6 +80,8 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
     const createdRuntime = createPanelRuntime(options);
     runtime = createdRuntime;
     await createdRuntime.spaceFeature.ready();
+    await createdRuntime.spaceConversationLink.ready();
+    await createdRuntime.spaceConversationDeletion.ready();
     const server = createServer(createPanelRequestHandler(createdRuntime));
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 9090;
@@ -431,7 +433,6 @@ export async function releasePanelRuntimeResources(
   runtime.isQuiescing = true;
   const errors: unknown[] = [];
   await captureCleanupError(errors, () => ordinaryDisposal);
-  await captureCleanupError(errors, () => runtime.flushSpaceFileReconciliation());
   // Keep the connector subscribed until Ordinary has produced its final stable facts.
   await captureCleanupError(errors, () => runtime.ordinaryPathMemoryConnector.release());
   await captureCleanupError(errors, () => runtime.pathMemoryFeature.release());

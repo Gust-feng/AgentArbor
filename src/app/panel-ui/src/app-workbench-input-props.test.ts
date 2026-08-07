@@ -79,7 +79,6 @@ function options(
     goal: "next instruction",
     setGoal: () => undefined,
     attachments: [],
-    selectTaskWorkspace: () => undefined,
     selectAttachment: () => undefined,
     uploadAttachments: () => undefined,
     removeAttachment: () => undefined,

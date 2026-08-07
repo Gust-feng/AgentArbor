@@ -29,7 +29,7 @@ export function findCollectedSpaceReference(referenceId: string, relativePath = 
   const sourceKey = spaceReferenceSourceKey(referenceId, relativePath)
   return getPages().find((page) => page.kind === 'space_reference'
     && page.asset?.sourceReferenceId === referenceId
-    && spaceReferenceSourceKey(referenceId, page.asset.sourceRelativePath) === sourceKey)
+    && spaceReferenceSourceKey(referenceId, page.asset.sourceRelativePath ?? "") === sourceKey)
 }
 export function collectSpaceReference(referenceId: string, relativePath = ''): void {
   const sourceKey = spaceReferenceSourceKey(referenceId, relativePath)

@@ -20,6 +20,8 @@ import type { ToolOutputStore } from "./tool-output-store.js";
 import type { ToolOutputTokenCounter } from "./tool-output-limits.js";
 import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
 import type { LocalWorkspaceMutationCoordinator } from "./adapters/local-workspace-mutation-coordinator.js";
+import type { ContextAttachmentReadAuthorization } from "./adapters/context-attachment-access.js";
+import type { LocalWorkspacePathAuthorization } from "./adapters/local-workspace-common.js";
 
 export type AgentToolRuntimeContext = {
   readonly constraints?: readonly Constraint[];
@@ -53,6 +55,8 @@ export type CreateAgentToolCenterOptions = {
   readonly metricsSink?: ToolExecutionMetricsSink;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
+  readonly workspacePathAuthorization?: LocalWorkspacePathAuthorization;
 };
 
 export function createDefaultToolCenter(

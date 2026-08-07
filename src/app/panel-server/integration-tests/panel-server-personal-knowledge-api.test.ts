@@ -152,7 +152,7 @@ test("Personal Knowledge and Space references persist, open and clean up consist
     });
     assert.equal(missingReference.status, 400);
 
-    const removed = await requestJson(server.baseUrl, `/api/spaces/references/${encodeURIComponent(referenceId)}`, { method: "DELETE" });
+    const removed = await requestJson(server.baseUrl, `/api/spaces/references/${encodeURIComponent(referenceId)}/unlink`, { method: "POST", body: {} });
     assert.equal(removed.status, 200);
     const afterRemoval = await requestJson(server.baseUrl, "/api/personal-knowledge");
     assert.equal(afterRemoval.body.snapshot.pages[0].refId, knowledgeRefId);

@@ -42,10 +42,10 @@ test("Space deletion removes the container and its links without deleting source
     title: "本地文件",
     reference: { kind: "local_file", path: "C:/keep.md" },
   });
-  const conversation = await feature.commands.addReference({
+  const conversation = await feature.commands.linkConversationOwner({
     spaceId: space.id,
     title: "讨论",
-    reference: { kind: "conversation", conversationId: "conversation-1" },
+    conversationId: "conversation-1",
   });
 
   await feature.commands.deleteSpace(space.id);
@@ -61,6 +61,111 @@ test("Space deletion removes the container and its links without deleting source
     removedReferenceIds: [conversation.id, localFile.id],
   });
   await assert.rejects(feature.commands.deleteSpace(space.id), { code: "space_not_found" });
+});
+
+test("Space deletion runs physical deletion only for Space-owned managed folders", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  const lifecycle: string[] = [];
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    referenceDeletion: referenceDeletionFixture(lifecycle),
+  });
+  const space = await feature.commands.createSpace({ title: "项目" });
+  await feature.commands.addReference({
+    spaceId: space.id,
+    title: "内部资料",
+    reference: { kind: "managed_folder", path: "C:/managed" },
+  });
+  await feature.commands.addReference({
+    spaceId: space.id,
+    title: "外部资料",
+    reference: { kind: "workspace_folder", path: "C:/external" },
+  });
+
+  await feature.commands.deleteSpace(space.id);
+
+  assert.deepEqual(lifecycle, [
+    "journal:prepared",
+    "stage:id-2",
+    "journal:files_staged",
+    "journal:metadata_committed",
+    "remove-staged:id-2",
+    "journal:deleted",
+  ]);
+});
+
+test("Space deletion requires and invokes the Workbench asset deletion port", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const missingPort = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+  });
+  const blocked = await missingPort.commands.createSpace({ title: "未配置" });
+  await missingPort.commands.addReference({
+    spaceId: blocked.id,
+    title: "文档",
+    reference: { kind: "workbench_asset", assetId: "asset-blocked" },
+  });
+  await assert.rejects(missingPort.commands.deleteSpace(blocked.id), { code: "space_deletion_journal_failure" });
+  assert.notEqual(await missingPort.queries.getTree(blocked.id), undefined);
+
+  const deletedAssetIds: string[] = [];
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    ownedAssetDeletion: {
+      async deleteWorkbenchAssets(assetIds) { deletedAssetIds.push(...assetIds); },
+    },
+  });
+  const space = await feature.commands.createSpace({ title: "已配置" });
+  await feature.commands.addReference({
+    spaceId: space.id,
+    title: "文档",
+    reference: { kind: "workbench_asset", assetId: "asset-1" },
+  });
+  await assert.rejects(feature.commands.addReference({
+    spaceId: space.id,
+    title: "重复引用",
+    reference: { kind: "workbench_asset", assetId: "asset-1" },
+  }), { code: "space_asset_ownership_conflict" });
+
+  await feature.commands.deleteSpace(space.id);
+
+  assert.deepEqual(deletedAssetIds, ["asset-1"]);
+  assert.equal(await feature.queries.getTree(space.id), undefined);
+});
+
+test("Removing an internal material subtree deletes its owned Workbench assets", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const deletedAssetIds: string[] = [];
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    ownedAssetDeletion: {
+      async deleteWorkbenchAssets(assetIds) { deletedAssetIds.push(...assetIds); },
+    },
+  });
+  const space = await feature.commands.createSpace({ title: "项目" });
+  const folder = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "资料",
+    reference: { kind: "asset_folder" },
+  });
+  await feature.commands.addReference({
+    spaceId: space.id,
+    parentId: folder.id,
+    title: "文档",
+    reference: { kind: "workbench_asset", assetId: "asset-remove" },
+  });
+
+  await feature.commands.removeReference(folder.id);
+
+  assert.deepEqual(deletedAssetIds, ["asset-remove"]);
+  assert.deepEqual((await feature.queries.getTree(space.id))?.entries, []);
 });
 
 test("Space moves an asset folder with its complete subtree between spaces", async () => {
@@ -91,7 +196,14 @@ test("Space moves an asset folder with its complete subtree between spaces", asy
 test("Space removes an asset folder with its complete subtree", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
   let id = 0;
-  const feature = createSpaceFeature({ repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } }, idFactory: () => `id-${++id}` });
+  const deletedAssetIds: string[] = [];
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    ownedAssetDeletion: {
+      async deleteWorkbenchAssets(assetIds) { deletedAssetIds.push(...assetIds); },
+    },
+  });
   const space = await feature.commands.createSpace({ title: "项目" });
   const folder = await feature.commands.addReference({ spaceId: space.id, title: "资料", reference: { kind: "asset_folder" } });
   const child = await feature.commands.addReference({ spaceId: space.id, parentId: folder.id, title: "子目录", reference: { kind: "asset_folder" } });
@@ -101,6 +213,7 @@ test("Space removes an asset folder with its complete subtree", async () => {
   await feature.commands.removeReference(folder.id);
 
   assert.deepEqual((await feature.queries.getTree(space.id))?.entries.map((entry) => entry.item.id), [retained.id]);
+  assert.deepEqual(deletedAssetIds, ["asset-1"]);
 });
 
 test("Space runs the configured ownership lifecycle around reference metadata removal", async () => {
@@ -114,7 +227,7 @@ test("Space runs the configured ownership lifecycle around reference metadata re
   });
   const space = await feature.commands.createSpace({ title: "项目" });
   const folder = await feature.commands.addReference({ spaceId: space.id, title: "资料", reference: { kind: "asset_folder" } });
-  const file = await feature.commands.addReference({ spaceId: space.id, parentId: folder.id, title: "文档", reference: { kind: "local_file", path: "C:/note.md" } });
+  const file = await feature.commands.addReference({ spaceId: space.id, parentId: folder.id, title: "托管文档", reference: { kind: "managed_folder", path: "C:/note" } });
 
   await feature.commands.removeReference(folder.id);
 
@@ -129,7 +242,7 @@ test("Space runs the configured ownership lifecycle around reference metadata re
   assert.equal(await feature.queries.getReference(file.id), undefined);
 });
 
-test("Space unlinks a local file without running its ownership deletion lifecycle", async () => {
+test("Space refuses to unlink an internal managed folder outside its deletion lifecycle", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
   const lifecycle: string[] = [];
   let id = 0;
@@ -142,16 +255,27 @@ test("Space unlinks a local file without running its ownership deletion lifecycl
   const file = await feature.commands.addReference({
     spaceId: space.id,
     title: "文档",
-    reference: { kind: "local_file", path: "C:/note.md" },
+    reference: { kind: "managed_folder", path: "C:/note" },
   });
 
-  await feature.commands.unlinkReference(file.id);
-
+  await assert.rejects(feature.commands.unlinkReference(file.id), { code: "space_invalid_input" });
   assert.deepEqual(lifecycle, []);
-  assert.equal(await feature.queries.getReference(file.id), undefined);
+  assert.equal((await feature.queries.getReference(file.id))?.id, file.id);
 });
 
-test("Space unlinks a conversation without changing its files, folders, or managed content", async () => {
+test("Space never physically deletes an external file through the removal command", async () => {
+  const feature = createMountTestFeature();
+  const space = await feature.commands.createSpace({ title: "项目" });
+  const file = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "外部文件",
+    reference: { kind: "local_file", path: "C:/external.md" },
+  });
+  await assert.rejects(feature.commands.removeReference(file.id), { code: "space_invalid_input" });
+  assert.equal((await feature.queries.getReference(file.id))?.id, file.id);
+});
+
+test("Space unlinks an exact conversation link without changing its files, folders, or managed content", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
   const lifecycle: string[] = [];
   let id = 0;
@@ -161,10 +285,10 @@ test("Space unlinks a conversation without changing its files, folders, or manag
     referenceDeletion: referenceDeletionFixture(lifecycle),
   });
   const space = await feature.commands.createSpace({ title: "项目" });
-  const conversation = await feature.commands.addReference({
+  const conversation = await feature.commands.linkConversationOwner({
     spaceId: space.id,
     title: "讨论",
-    reference: { kind: "conversation", conversationId: "conversation-1" },
+    conversationId: "conversation-1",
   });
   const file = await feature.commands.addReference({
     spaceId: space.id,
@@ -188,8 +312,8 @@ test("Space unlinks a conversation without changing its files, folders, or manag
     reference: { kind: "workbench_asset", assetId: "asset-1" },
   });
 
-  await feature.commands.unlinkConversationReference("conversation-1");
-  await feature.commands.unlinkConversationReference("conversation-1");
+  await feature.commands.unlinkConversationReferenceItem(conversation.id);
+  await feature.commands.unlinkConversationReferenceItem(conversation.id);
 
   assert.deepEqual(lifecycle, []);
   assert.equal(await feature.queries.getReference(conversation.id), undefined);
@@ -251,7 +375,7 @@ test("Space latches an unrecoverable in-process deletion rollback and rejects la
   const file = await feature.commands.addReference({
     spaceId: space.id,
     title: "文档",
-    reference: { kind: "local_file", path: "C:/note.md" },
+    reference: { kind: "managed_folder", path: "C:/note" },
   });
   failWrites = true;
 
@@ -284,10 +408,10 @@ test("Space content changes do not reorder Spaces", async () => {
   const first = await feature.commands.createSpace({ title: "第一个" });
   const second = await feature.commands.createSpace({ title: "第二个" });
 
-  await feature.commands.addReference({
+  await feature.commands.linkConversationOwner({
     spaceId: first.id,
     title: "新资料",
-    reference: { kind: "conversation", conversationId: "conversation-1" },
+    conversationId: "conversation-1",
   });
 
   assert.deepEqual((await feature.queries.list()).map((space) => space.id), [first.id, second.id]);
@@ -342,6 +466,22 @@ test("Space allows one workspace mount to be referenced by several Spaces", asyn
   assert.equal((await feature.queries.getReference(mirrored.id))?.spaceId, second.id);
 });
 
+test("Space rejects sharing a Workbench asset across Spaces", async () => {
+  const feature = createMountTestFeature();
+  const first = await feature.commands.createSpace({ title: "一" });
+  const second = await feature.commands.createSpace({ title: "二" });
+  await feature.commands.addReference({
+    spaceId: first.id,
+    title: "文档",
+    reference: { kind: "workbench_asset", assetId: "asset-shared" },
+  });
+  await assert.rejects(feature.commands.addReference({
+    spaceId: second.id,
+    title: "重复文档",
+    reference: { kind: "workbench_asset", assetId: "asset-shared" },
+  }), { code: "space_asset_ownership_conflict" });
+});
+
 test("Space treats sibling workspace mounts that share a name prefix as distinct", async () => {
   const feature = createMountTestFeature();
   const space = await feature.commands.createSpace({ title: "一" });
@@ -349,6 +489,65 @@ test("Space treats sibling workspace mounts that share a name prefix as distinct
   const sibling = await feature.commands.addReference({ spaceId: space.id, title: "邻居", reference: { kind: "workspace_folder", path: "C:\\Workshop" } });
 
   assert.equal((await feature.queries.getReference(sibling.id))?.spaceId, space.id);
+});
+
+test("Space rejects an external file nested under a referenced workspace", async () => {
+  const feature = createMountTestFeature();
+  const space = await feature.commands.createSpace({ title: "一" });
+  await feature.commands.addReference({
+    spaceId: space.id,
+    title: "工作区",
+    reference: { kind: "workspace_folder", path: "C:\\Work" },
+  });
+  await assert.rejects(
+    feature.commands.addReference({
+      spaceId: space.id,
+      title: "文件",
+      reference: { kind: "local_file", path: "C:\\Work\\README.md" },
+    }),
+    { code: "space_workspace_mount_conflict" },
+  );
+});
+
+test("Space rejects duplicate external files and allows the same source in another Space", async () => {
+  const feature = createMountTestFeature();
+  const first = await feature.commands.createSpace({ title: "一" });
+  const second = await feature.commands.createSpace({ title: "二" });
+  await feature.commands.addReference({
+    spaceId: first.id,
+    title: "文件",
+    reference: { kind: "local_file", path: "C:\\Work\\README.md" },
+  });
+  await assert.rejects(
+    feature.commands.addReference({
+      spaceId: first.id,
+      title: "重复文件",
+      reference: { kind: "local_file", path: "c:/work/readme.md" },
+    }),
+    { code: "space_workspace_mount_conflict" },
+  );
+  const mirrored = await feature.commands.addReference({
+    spaceId: second.id,
+    title: "同一文件",
+    reference: { kind: "local_file", path: "c:/work/readme.md" },
+  });
+  assert.equal(mirrored.spaceId, second.id);
+});
+
+test("Space rejects moving an external workspace mount", async () => {
+  const feature = createMountTestFeature();
+  const source = await feature.commands.createSpace({ title: "来源" });
+  const destination = await feature.commands.createSpace({ title: "目标" });
+  const child = await feature.commands.addReference({
+    spaceId: source.id,
+    title: "子工作区",
+    reference: { kind: "workspace_folder", path: "C:\\Work\\api" },
+  });
+  await assert.rejects(
+    feature.commands.move({ target: { kind: "reference", id: child.id }, destinationSpaceId: destination.id }),
+    { code: "space_invalid_move" },
+  );
+  assert.equal((await feature.queries.getReference(child.id))?.spaceId, source.id);
 });
 
 test("Space conversation references form one unique ownership link", async () => {
@@ -360,21 +559,32 @@ test("Space conversation references form one unique ownership link", async () =>
   });
   const first = await feature.commands.createSpace({ title: "一" });
   const second = await feature.commands.createSpace({ title: "二" });
-  const link = await feature.commands.addReference({
+  const link = await feature.commands.linkConversationOwner({
     spaceId: first.id,
     title: "讨论",
-    reference: { kind: "conversation", conversationId: "conversation-1" },
+    conversationId: "conversation-1",
   });
 
   assert.deepEqual(await feature.queries.findConversationOwner("conversation-1"), {
     spaceId: first.id,
     referenceItemId: link.id,
   });
-  await assert.rejects(feature.commands.addReference({
+  await assert.rejects(feature.commands.linkConversationOwner({
     spaceId: second.id,
     title: "重复讨论",
-    reference: { kind: "conversation", conversationId: "conversation-1" },
+    conversationId: "conversation-1",
   }), { code: "space_conversation_ownership_conflict" });
+  await assert.rejects(feature.commands.addReference({
+    spaceId: second.id,
+    title: "普通引用",
+    reference: { kind: "conversation", conversationId: "conversation-2" } as never,
+  }), { code: "space_invalid_input" });
+  await assert.rejects(feature.commands.unlinkReference(link.id), { code: "space_invalid_input" });
+  await assert.rejects(feature.commands.removeReference(link.id), { code: "space_invalid_input" });
+  await assert.rejects(
+    feature.commands.move({ target: { kind: "reference", id: link.id }, destinationSpaceId: second.id }),
+    { code: "space_invalid_move" },
+  );
   assert.equal(await feature.queries.findConversationOwner("missing"), undefined);
 });
 
@@ -392,10 +602,10 @@ test("Space accepts only internal asset folders as metadata parents", async () =
     title: "文档",
     reference: { kind: "workbench_asset", assetId: "asset-1" },
   });
-  const conversation = await feature.commands.addReference({
+  const conversation = await feature.commands.linkConversationOwner({
     spaceId: first.id,
     title: "讨论",
-    reference: { kind: "conversation", conversationId: "conversation-1" },
+    conversationId: "conversation-1",
   });
   const otherFolder = await feature.commands.addReference({
     spaceId: second.id,
@@ -417,76 +627,6 @@ test("Space accepts only internal asset folders as metadata parents", async () =
     title: "跨空间子项",
     reference: { kind: "workbench_asset", assetId: "cross-space" },
   }), { code: "space_invalid_input" });
-});
-
-test("Space reports an unreachable reference as unavailable without removing it", async () => {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
-  let id = 0;
-  let clock = 0;
-  const feature = createSpaceFeature({
-    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
-    idFactory: () => `id-${++id}`,
-    now: () => `2026-08-06T00:00:0${++clock}.000Z`,
-  });
-  const events: unknown[] = [];
-  feature.events.subscribe((event) => events.push(event));
-  const space = await feature.commands.createSpace({ title: "项目" });
-  const item = await feature.commands.addReference({
-    spaceId: space.id,
-    title: "外部工作区",
-    reference: { kind: "workspace_folder", path: "C:/gone" },
-  });
-  assert.equal(item.status, undefined);
-
-  const unavailable = await feature.commands.markReferenceStatus({ itemId: item.id, status: "unavailable" });
-
-  assert.equal(unavailable.status, "unavailable");
-  assert.equal(typeof unavailable.unavailableAt, "string");
-  assert.deepEqual(await feature.queries.getReference(item.id), unavailable);
-  assert.deepEqual(events.at(-1), {
-    type: "space.reference_status_changed",
-    itemId: item.id,
-    spaceId: space.id,
-    status: "unavailable",
-  });
-
-  const restored = await feature.commands.markReferenceStatus({ itemId: item.id, status: "available" });
-
-  assert.equal(restored.status, "available");
-  assert.equal("unavailableAt" in restored, false);
-});
-
-test("Space keeps an unchanged reference status free of writes and events", async () => {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
-  let id = 0;
-  let writes = 0;
-  const feature = createSpaceFeature({
-    repository: {
-      async read() { return snapshot; },
-      async write(value) { writes += 1; snapshot = value; },
-    },
-    idFactory: () => `id-${++id}`,
-  });
-  const space = await feature.commands.createSpace({ title: "项目" });
-  const item = await feature.commands.addReference({
-    spaceId: space.id,
-    title: "外部工作区",
-    reference: { kind: "workspace_folder", path: "C:/keep" },
-  });
-  await feature.commands.markReferenceStatus({ itemId: item.id, status: "unavailable" });
-  const events: unknown[] = [];
-  feature.events.subscribe((event) => events.push(event));
-  const writesBefore = writes;
-
-  const repeated = await feature.commands.markReferenceStatus({ itemId: item.id, status: "unavailable" });
-
-  assert.equal(writes, writesBefore);
-  assert.deepEqual(events, []);
-  assert.equal(repeated.status, "unavailable");
-  await assert.rejects(
-    feature.commands.markReferenceStatus({ itemId: "missing", status: "unavailable" }),
-    { code: "space_reference_not_found" },
-  );
 });
 
 function referenceDeletionFixture(lifecycle: string[]) {

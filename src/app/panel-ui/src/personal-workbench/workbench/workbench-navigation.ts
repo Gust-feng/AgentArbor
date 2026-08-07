@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CurrentRunProjection } from "../../app-run-projection";
+import type { TaskStatus } from "../../contracts/common";
 import type { ChatInputProps } from "../../contracts/composer";
 import type { Conversation } from "../../contracts/conversation";
 import type { PendingConfirmation } from "../../contracts/run";
@@ -109,12 +110,18 @@ export function useWorkbenchNavigation(input: WorkbenchNavigationInput): Workben
   };
 }
 
-export function initialView(input: Pick<WorkbenchNavigationInput, "currentRun" | "pendingConfirmation">): View {
+/** Only the run status decides the opening view, so callers need not supply a whole run. */
+export type WorkbenchInitialViewInput = {
+  readonly currentRun: { readonly run?: { readonly status: TaskStatus } };
+  readonly pendingConfirmation?: WorkbenchNavigationInput["pendingConfirmation"];
+};
+
+export function initialView(input: WorkbenchInitialViewInput): View {
   return requiresImmediateConversationView(input) ? "conv-active" : "home";
 }
 
 export function requiresImmediateConversationView(
-  input: Pick<WorkbenchNavigationInput, "currentRun" | "pendingConfirmation">,
+  input: WorkbenchInitialViewInput,
 ): boolean {
   return input.pendingConfirmation !== undefined || input.currentRun.run?.status === "running";
 }

@@ -8,14 +8,12 @@ import {
 } from "./app-attachments";
 import { ApiError } from "./api";
 import type { ComposerToolConfirmationPolicy } from "./app-config-projection";
-import { selectTaskWorkspaceDirectory } from "./app-workspace-selection";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 
 export type AppComposerController = {
   readonly selectInputModel: (modelOptionId: string) => void;
   readonly selectAttachment: () => Promise<void>;
-  readonly selectTaskWorkspace: () => Promise<void>;
   readonly uploadAttachments: (files: readonly File[]) => Promise<void>;
   readonly removeAttachment: (attachmentId: string) => Promise<void>;
   readonly changeToolConfirmationPolicy: (nextPolicy: ComposerToolConfirmationPolicy) => void;
@@ -29,7 +27,6 @@ export type AppComposerControllerOptions = {
   readonly attachmentUploadAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
   readonly attachments?: readonly ContextAttachment[];
-  readonly setSelectedWorkspaceDirectory: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly selectedModelId: string;
   readonly setComposerSelectedModelId: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly selectComposerModel: (modelOptionId: string) => Promise<void>;
@@ -62,24 +59,6 @@ export function createAppComposerController(
     } catch (error) {
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, error: errorText(error, "添加附件失败。") }));
-      }
-    } finally {
-      if (options.mountedRef.current) options.setContextBusy(false);
-    }
-  }
-
-  async function selectTaskWorkspace(): Promise<void> {
-    if (options.contextBusy) return;
-    options.setContextBusy(true);
-    try {
-      const directory = await selectTaskWorkspaceDirectory();
-      if (options.mountedRef.current && directory !== undefined) {
-        options.setSelectedWorkspaceDirectory(directory);
-        options.setApp((previous) => ({ ...previous, error: undefined }));
-      }
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, error: errorText(error, "选择工作区失败。") }));
       }
     } finally {
       if (options.mountedRef.current) options.setContextBusy(false);
@@ -151,7 +130,6 @@ export function createAppComposerController(
   return {
     selectInputModel,
     selectAttachment,
-    selectTaskWorkspace,
     uploadAttachments,
     removeAttachment,
     changeToolConfirmationPolicy,

@@ -17,7 +17,7 @@ test("SpaceTree persists its current SQLite snapshot without inferring demo data
     await rm(directory, { recursive: true, force: true });
   });
   const snapshot: SpaceTreeSnapshot = {
-    schemaVersion: "space-tree/v3" as const,
+    schemaVersion: "space-tree/v4" as const,
     spaces: [{ id: "space-one", title: "学习空间", createdAt: "2026-01-01", updatedAt: "2026-01-01" }],
     referenceItems: [{
       id: "reference-top",
@@ -34,13 +34,22 @@ test("SpaceTree persists its current SQLite snapshot without inferring demo data
       reference: { kind: "asset_folder" },
       createdAt: "2026-01-01",
       updatedAt: "2026-01-01",
+    }, {
+      id: "reference-workspace",
+      spaceId: "space-one",
+      title: "外部工作区",
+      reference: { kind: "workspace_folder", path: "C:/work" },
+      sourceIdentity: "device:file-id",
+      createdAt: "2026-01-03",
+      updatedAt: "2026-01-03",
     }],
   };
   assert.deepEqual((await repository.read()).spaces, []);
   await repository.write(snapshot);
   assert.deepEqual((await repository.read()).spaces[0], snapshot.spaces[0]);
-  assert.deepEqual((await repository.read()).referenceItems.map((item) => item.id), ["reference-top", "reference-bottom"]);
+  assert.deepEqual((await repository.read()).referenceItems.map((item) => item.id), ["reference-top", "reference-bottom", "reference-workspace"]);
   assert.deepEqual((await repository.read()).referenceItems[0], snapshot.referenceItems[0]);
+  assert.deepEqual((await repository.read()).referenceItems[2], snapshot.referenceItems[2]);
 
   await repository.write({ ...snapshot, spaces: [{ ...snapshot.spaces[0], title: "新标题" }] });
   assert.deepEqual((await repository.read()).spaces[0], {
@@ -49,37 +58,47 @@ test("SpaceTree persists its current SQLite snapshot without inferring demo data
   });
 });
 
-test("SpaceTree keeps an unavailable reference status across a SQLite round trip", async (t) => {
+test("SpaceTree migration removes legacy unavailable references", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-spaces-sqlite-status-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
-  const repository = createSqliteSpaceRepository(database);
   t.after(async () => {
     database.close();
     await rm(directory, { recursive: true, force: true });
   });
-  const snapshot: SpaceTreeSnapshot = {
-    schemaVersion: "space-tree/v3" as const,
-    spaces: [{ id: "space-one", title: "项目", createdAt: "2026-08-06", updatedAt: "2026-08-06" }],
-    referenceItems: [{
-      id: "reference-missing",
-      spaceId: "space-one",
-      title: "已失联工作区",
-      reference: { kind: "workspace_folder", path: "C:/gone" },
-      status: "unavailable",
-      unavailableAt: "2026-08-06T01:00:00.000Z",
-      createdAt: "2026-08-06",
-      updatedAt: "2026-08-06",
-    }, {
-      id: "reference-plain",
-      spaceId: "space-one",
-      title: "无状态旧记录",
-      reference: { kind: "asset_folder" },
-      createdAt: "2026-08-06",
-      updatedAt: "2026-08-06",
-    }],
-  };
+  database.connection.exec(`
+    CREATE TABLE spaces (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      demo_dataset TEXT CHECK(demo_dataset IN ('learning-workspace'))
+    ) STRICT;
+    CREATE TABLE space_references (
+      id TEXT PRIMARY KEY,
+      space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      reference_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      parent_id TEXT REFERENCES space_references(id) ON DELETE CASCADE,
+      status TEXT CHECK(status IN ('available', 'unavailable')),
+      unavailable_at TEXT
+    ) STRICT;
+    CREATE INDEX space_references_space_idx ON space_references(space_id);
+    INSERT INTO spaces(id, title, demo_dataset, created_at, updated_at)
+      VALUES ('space-one', '项目', NULL, '2026-08-06', '2026-08-06');
+    INSERT INTO space_references(
+      id, space_id, title, parent_id, reference_json, status, unavailable_at, created_at, updated_at
+    ) VALUES (
+      'reference-missing', 'space-one', '已失联工作区', NULL,
+      '{"kind":"workspace_folder","path":"C:/gone"}', 'unavailable', '2026-08-06T01:00:00.000Z',
+      '2026-08-06', '2026-08-06'
+    );
+    INSERT INTO schema_migrations(owner, version, applied_at)
+      VALUES ('spaces', 4, '2026-08-06');
+  `);
 
-  await repository.write(snapshot);
+  const migrated = createSqliteSpaceRepository(database);
 
-  assert.deepEqual((await repository.read()).referenceItems, snapshot.referenceItems);
+  assert.deepEqual((await migrated.read()).referenceItems, []);
 });

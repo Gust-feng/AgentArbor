@@ -5,13 +5,14 @@ import { TextDecoder } from "node:util";
 import type { ToolContinuation, ToolExecutor, ToolFactValue } from "../../../domain/tools/index.js";
 import {
   asRecord,
+  authorizedPathFacts,
   decodeUtf8Text,
   DEFAULT_LOCAL_WORKSPACE_ROOT,
   isLikelyBinaryPath,
   MAX_LOCAL_WORKSPACE_FILE_BYTES,
   optionalSafeIntegerAtLeast,
   positiveInteger,
-  resolveWorkspacePath,
+  resolveAuthorizedWorkspacePath,
   safeRefToken,
   shouldSkipEntry,
   stringOrFallback,
@@ -114,7 +115,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
   return {
     definition: {
       name: "Read",
-      description: "Read a UTF-8 text file under the local workspace. Supports optional 1-based startLine/endLine windows for large or focused reads.",
+      description: "Read an authorized local UTF-8 text file by absolute or run-root-relative path. Supports optional 1-based startLine/endLine windows for large or focused reads.",
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -124,7 +125,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", minLength: 1, description: "Workspace-relative file path." },
+          path: { type: "string", minLength: 1, description: "Absolute or run-root-relative file path." },
           maxLength: { type: "integer", minimum: MIN_CHARACTER_WINDOW_CHARS, maximum: DEFAULT_MAX_CHARS, description: "Maximum characters to return; must be at least 3 so every truncated UTF-16 window can advance." },
           startLine: { type: "integer", minimum: 1, description: "Optional 1-based first line to return." },
           endLine: { type: "integer", minimum: 1, description: "Optional 1-based last line to return. When omitted with startLine, returns a bounded window." },
@@ -143,8 +144,15 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
     execute: async (input, context) => {
       throwIfAborted(context.abortSignal);
       const record = asRecord(input);
-      const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, ""));
-      assertSandboxAllowed(sandboxPolicy, sandboxRequest("read", rootDirectory, target.relativePath));
+      const target = await resolveAuthorizedWorkspacePath(
+        rootDirectory,
+        stringOrFallback(record.path, ""),
+        "read",
+        context,
+        options.pathAuthorization,
+      );
+      const pathFacts = authorizedPathFacts(target);
+      assertSandboxAllowed(sandboxPolicy, sandboxRequest("read", target.rootDirectory, target.relativePath));
       const stat = await fs.stat(target.absolutePath);
       throwIfAborted(context.abortSignal);
       if (!stat.isFile()) {
@@ -168,6 +176,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         return {
           refId: `workspace:file:${target.relativePath}`,
           path: target.relativePath,
+          ...pathFacts,
           bytes: observedSize,
           binary: true,
         };
@@ -194,14 +203,14 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
           content = await readLineRange(target.absolutePath, lineRange!, context.abortSignal);
         } catch (error) {
           if (error instanceof InvalidUtf8TextError) {
-            return invalidUtf8ReadResult(target.relativePath, stat.size);
+            return { ...asRecord(invalidUtf8ReadResult(target.relativePath, stat.size)), ...pathFacts };
           }
           throw error;
         }
       } else {
         const raw = decodeUtf8Text(bytes!);
         if (raw === undefined) {
-          return invalidUtf8ReadResult(target.relativePath, observedSize);
+          return { ...asRecord(invalidUtf8ReadResult(target.relativePath, observedSize)), ...pathFacts };
         }
         content = lineRange === undefined
           ? charWindowContent(raw, startChar ?? 0)
@@ -225,6 +234,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       const output = {
         refId: `workspace:file:${target.relativePath}`,
         path: target.relativePath,
+        ...pathFacts,
         bytes: observedSize,
         content: returned.text,
         startLine: content.range?.startLine,
@@ -239,7 +249,9 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         nextStartChar: nextStartChar ?? (returned.truncated ? returnedTextChars : undefined),
         nextStartLine,
         continuation: readFileContinuation({
-          path: target.relativePath,
+          // Continuation inputs get replayed by the model, and a multi-root Space rejects
+          // relative paths, so echo back the absolute path the caller can actually reuse.
+          path: target.absolutePath,
           maxLength,
           nextStartChar: nextStartChar ?? (returned.truncated ? returnedTextChars : undefined),
           nextStartLine,
@@ -250,7 +262,7 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         options.outputTokenCounter,
         context.toolCallId,
         lineRange === undefined
-          ? { path: target.relativePath, maxLength }
+          ? { path: target.absolutePath, maxLength }
           : undefined,
       );
     },
@@ -262,7 +274,7 @@ export function createLocalGlobTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT
   return {
     definition: {
       name: "Glob",
-      description: "Find workspace files recursively by glob pattern. Use patterns such as * or **/* to inspect directory contents, and Grep for file content.",
+      description: "Find authorized local files recursively by glob pattern. Use patterns such as * or **/* to inspect directory contents, and Grep for file content.",
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -273,7 +285,7 @@ export function createLocalGlobTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT
         type: "object",
         properties: {
           pattern: { type: "string", minLength: 1, description: "File glob such as **/*.ts or src/*.{js,ts}." },
-          path: { type: "string", description: "Workspace-relative directory to search. Defaults to workspace root." },
+          path: { type: "string", description: "Absolute or run-root-relative directory to search. Defaults to the run root." },
           limit: { type: "integer", minimum: 1, maximum: MAX_GLOB_MATCHES, description: "Maximum matching paths to return." },
           offset: { type: "integer", minimum: 0, maximum: MAX_GLOB_OFFSET, description: "Zero-based match offset for continuation." },
         },
@@ -286,8 +298,15 @@ export function createLocalGlobTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT
       const record = asRecord(input);
       const pattern = stringOrFallback(record.pattern, "");
       if (pattern.length === 0) throw new Error("Glob requires a non-empty pattern.");
-      const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, "."));
-      assertSandboxAllowed(sandboxPolicy, sandboxRequest("search", rootDirectory, target.relativePath));
+      const target = await resolveAuthorizedWorkspacePath(
+        rootDirectory,
+        stringOrFallback(record.path, "."),
+        "search",
+        context,
+        options.pathAuthorization,
+      );
+      const pathFacts = authorizedPathFacts(target);
+      assertSandboxAllowed(sandboxPolicy, sandboxRequest("search", target.rootDirectory, target.relativePath));
       const stat = await fs.stat(target.absolutePath);
       if (!stat.isDirectory()) throw new Error(`Glob expects a directory path: ${target.relativePath}`);
       const limit = Math.min(MAX_GLOB_MATCHES, positiveInteger(record.limit) ?? MAX_GLOB_MATCHES);
@@ -299,6 +318,7 @@ export function createLocalGlobTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT
       return fitCollectionOutput({
         refId: `workspace:glob:${safeRefToken(pattern)}`,
         path: target.relativePath,
+        ...pathFacts,
         pattern,
         matches: page,
         matchesReturned: page.length,
@@ -307,7 +327,7 @@ export function createLocalGlobTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT
         truncated: hasMoreAfter,
         nextOffset,
         continuation: nextOffset === undefined ? undefined : {
-          nextInput: { pattern, path: target.relativePath, offset: nextOffset, limit },
+          nextInput: { pattern, path: target.absolutePath, offset: nextOffset, limit },
         },
       }, "matches", "Glob", options.outputTokenCounter, context.toolCallId);
     },
@@ -320,7 +340,7 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
   return {
     definition: {
       name: "Grep",
-      description: "Search text files under the local workspace for a plain-text query. Uses ripgrep when available, with a JS recursive fallback.",
+      description: "Search authorized local text files for a plain-text query. Uses ripgrep when available, with a JS recursive fallback.",
       metadata: {
         category: "filesystem",
         riskLevel: "low",
@@ -331,7 +351,7 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         type: "object",
         properties: {
           query: { type: "string", minLength: 1, description: "Plain-text query to search for, case-insensitive." },
-          path: { type: "string", description: "Workspace-relative directory or file path. Defaults to workspace root." },
+          path: { type: "string", description: "Absolute or run-root-relative directory or file path. Defaults to the run root." },
           limit: { type: "integer", minimum: 1, maximum: MAX_GREP_MATCHES, description: "Maximum matches to return." },
           offset: { type: "integer", minimum: 0, maximum: MAX_GREP_OFFSET, description: "Zero-based match offset used to continue a truncated search." },
         },
@@ -346,14 +366,21 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
       if (query.length === 0) {
         throw new Error("grep requires a non-empty query.");
       }
-      const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, "."));
-      assertSandboxAllowed(sandboxPolicy, sandboxRequest("search", rootDirectory, target.relativePath));
+      const target = await resolveAuthorizedWorkspacePath(
+        rootDirectory,
+        stringOrFallback(record.path, "."),
+        "search",
+        context,
+        options.pathAuthorization,
+      );
+      const pathFacts = authorizedPathFacts(target);
+      assertSandboxAllowed(sandboxPolicy, sandboxRequest("search", target.rootDirectory, target.relativePath));
       const limit = Math.min(MAX_GREP_MATCHES, positiveInteger(record.limit) ?? MAX_GREP_MATCHES);
       const offset = boundedOffset(record.offset, MAX_GREP_OFFSET);
       const collectLimit = Math.min(MAX_GREP_COLLECT_LIMIT, offset + limit + 1);
       const ripgrepMatches = await ripgrepSearch?.({
         absolutePath: target.absolutePath,
-        rootDirectory,
+        rootDirectory: target.rootDirectory,
         query,
         limit: collectLimit,
         abortSignal: context.abortSignal,
@@ -369,7 +396,7 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         grepFacts = createGrepFacts();
         await grepPath(
           target.absolutePath,
-          rootDirectory,
+          target.rootDirectory,
           query.toLowerCase(),
           collectLimit,
           matches,
@@ -395,6 +422,7 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         refId: `workspace:grep:${target.relativePath}:${safeRefToken(query)}`,
         query,
         path: target.relativePath,
+        ...pathFacts,
         engine,
         offset,
         limit,
@@ -444,7 +472,7 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         nextOffset,
         continuation: grepFilesContinuation({
           query,
-          path: target.relativePath,
+          path: target.absolutePath,
           limit,
           nextOffset,
         }),

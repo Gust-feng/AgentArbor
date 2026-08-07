@@ -1,4 +1,5 @@
 import type { ConfirmationDecision, ConfirmationRequest } from "../../domain/confirmation/index.js";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import type {
   BasicAgentCapabilitySnapshot,
   ModelRunReasoningEffort,
@@ -30,7 +31,7 @@ import type {
 } from "./managed-attachment-repository.js";
 
 export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v6" as const;
-export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v2" as const;
+export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v3" as const;
 
 export type OrdinaryFeatureErrorCode =
   | "ordinary_feature_released"
@@ -171,6 +172,11 @@ export type OrdinaryConversationControlState = {
   readonly createdAt: string;
   /** Pi Session owns the transcript tree and active branch. */
   readonly sessionRef: AgentSessionRef;
+  /**
+   * Canonical Conversation owner（ADR-0035 §8.1）。v2 旧对话没有该字段，读取时
+   * 由 Host 以 Space 树引用作为兼容回退；新对话必须写入 owner。
+   */
+  readonly owner?: ConversationOwner;
   readonly titleOverride?: string;
   readonly titleEditedAt?: string;
   readonly pinnedAt?: string;
@@ -390,6 +396,7 @@ export interface OrdinaryExecutionContinuation {
 
 export type OrdinaryExecutionInput = {
   readonly runId: string;
+  readonly conversationId: string;
   readonly sessionRef: AgentSessionRef;
   readonly birth: OrdinaryRunBirth;
   /** Durable user input, including attachment refs that must be resolved per request. */
@@ -473,9 +480,14 @@ export type StartOrdinaryRunInput = {
 
 export type SubmitOrdinaryTurnInput = {
   readonly conversationId?: string;
+  /** Host-selected identity for a new conversation; mutually exclusive with conversationId. */
+  readonly newConversationId?: string;
+  /** Canonical owner for a new conversation（ADR-0035）；v2 兼容对话可省略。 */
+  readonly owner?: ConversationOwner;
   readonly submissionId?: string;
   readonly input: OrdinaryRunInput;
   readonly birth: OrdinaryRunBirth;
+  readonly abortSignal?: AbortSignal;
 };
 
 /** Ordinary owns the business run; the neutral decision owns only confirmation semantics. */
@@ -589,6 +601,8 @@ export interface OrdinaryAgentFeature {
     listRuns(limit?: number): Promise<readonly OrdinaryRunSummary[]>;
     getConversation(conversationId: string): Promise<OrdinaryConversationReadModel | undefined>;
     listConversations(limit?: number): Promise<readonly OrdinaryConversationReadModel[]>;
+    /** Canonical owner（ADR-0035）；v2 旧对话返回 undefined，由 Host 以 Space 树引用回退。 */
+    getConversationOwner(conversationId: string): Promise<ConversationOwner | undefined>;
     getManagedAttachment(attachmentId: string): Promise<OrdinaryManagedAttachmentRecord | undefined>;
     /** Returns undefined until the run's terminal facts are durably settled. */
     getStableTerminalRunFacts(runId: string): Promise<OrdinaryStableTerminalRunFacts | undefined>;

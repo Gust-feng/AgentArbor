@@ -33,5 +33,7 @@ export interface WorkbenchAssetRepository {
   get(id: string): Promise<WorkbenchAsset | undefined>;
   list(): Promise<readonly WorkbenchAsset[]>;
   upsertMany(assets: readonly WorkbenchAsset[]): Promise<void>;
+  /** Removes software-owned assets by id. Missing ids are ignored for idempotent Space cleanup. */
+  removeMany(assetIds: readonly string[]): Promise<void>;
   updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult>;
 }

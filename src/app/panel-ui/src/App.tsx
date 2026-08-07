@@ -13,15 +13,13 @@ import { useSpaceProjection } from "./app-space-state";
 
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
-  const taskState = useAppWorkbenchTaskState(app);
+  const taskState = useAppWorkbenchTaskState();
   const spaceProjection = useSpaceProjection();
   const {
     goal,
     setGoal,
     attachments,
     setAttachments,
-    selectedWorkspaceDirectory,
-    setSelectedWorkspaceDirectory,
   } = taskState;
   const configState = useAppWorkbenchConfigState(app);
   const {
@@ -100,8 +98,6 @@ export function App(): React.ReactElement {
     setMcpServerForm,
     attachments,
     setAttachments,
-    selectedWorkspaceDirectory,
-    setSelectedWorkspaceDirectory,
     selectedModelId,
     selectedModelSupportsReasoningEffort,
     selectedModelContextWindowTokens,
@@ -146,7 +142,6 @@ export function App(): React.ReactElement {
   const {
     selectInputModel,
     selectAttachment,
-    selectTaskWorkspace,
     uploadAttachments,
     removeAttachment,
     changeToolConfirmationPolicy,
@@ -177,8 +172,6 @@ export function App(): React.ReactElement {
     goal,
     setGoal,
     attachments,
-    selectedWorkspaceDirectory,
-    selectTaskWorkspace,
     selectAttachment,
     uploadAttachments,
     removeAttachment,
@@ -215,9 +208,9 @@ export function App(): React.ReactElement {
     onUpdateQueuedMessage: updateQueuedMessage,
     onGuideQueuedMessage: guideQueuedMessage,
   };
-  const startNewConversation = useCallback(() => {
+  const startNewConversation = useCallback((spaceId?: string) => {
     clearQueuedMessages();
-    return runActions.startNewConversation();
+    return runActions.startNewConversation(spaceId);
   }, [clearQueuedMessages, runActions.startNewConversation]);
   const openConversation = useCallback((conversationId: string) => {
     clearQueuedMessages();
@@ -301,8 +294,6 @@ export function App(): React.ReactElement {
         addLocalFile: spaceProjection.addLocalFile,
         addWorkspaceFolder: spaceProjection.addWorkspaceFolder,
         addWebReference: spaceProjection.addWebReference,
-        addConversation: spaceProjection.addConversation,
-        move: spaceProjection.move,
         rename: spaceProjection.rename,
         unlinkReference: spaceProjection.unlinkReference,
         removeReference: spaceProjection.removeReference,

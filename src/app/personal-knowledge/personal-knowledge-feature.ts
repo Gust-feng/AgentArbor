@@ -158,6 +158,27 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = un
           return { page, writeResult };
         });
       },
+      async cleanupSpace(input) {
+        await run(async () => {
+          const referenceIds = [...new Set(input.referenceIds.map((value) => required(value, "referenceId")))];
+          const spaceId = required(input.spaceId, "spaceId");
+          const sourceReferenceIdSet = new Set(referenceIds);
+          const snapshot = await repository.readSnapshot();
+          const affectedPageIds = snapshot.pages
+            .filter((page) => {
+              if (page.asset?.status === "managed") {
+                return page.asset?.sourceReferenceId !== undefined && sourceReferenceIdSet.has(page.asset.sourceReferenceId);
+              }
+              return snapshot.notes.some((note) => note.spaceId === spaceId && note.id === page.refId);
+            })
+            .map((page) => page.refId);
+          await repository.execute({ type: "space.cleanup", spaceId, referenceIds });
+          publish({
+            type: "personal_knowledge.changed",
+            ...(affectedPageIds.length === 0 ? {} : { refIds: affectedPageIds }),
+          });
+        });
+      },
       async uncollect(refIdInput) {
         await run(() => runManagedAssetMutation(async () => {
           const refId = required(refIdInput, "refId");

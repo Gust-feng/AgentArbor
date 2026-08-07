@@ -33,9 +33,10 @@ import {
 import { toSanitizedCommandShellConfig } from "../../config-center/command-shell-settings.js";
 import {
   asRecord,
+  type AuthorizedLocalWorkspacePath,
   DEFAULT_LOCAL_WORKSPACE_ROOT,
   positiveInteger,
-  resolveWorkspacePath,
+  resolveAuthorizedWorkspacePath,
   safeRefToken,
   throwIfAborted,
   type LocalWorkspaceToolOptions,
@@ -147,6 +148,10 @@ type CommandProcessFacts = {
   readonly registry: LocalCommandProcessRegistry;
   readonly runId?: string;
   readonly toolCallId?: string;
+  readonly conversationId?: string;
+  readonly spaceId?: string;
+  readonly referenceId?: string;
+  readonly authorizationMode: "confirm_each" | "full_access";
 };
 
 type CommandProgressReporter = {
@@ -193,12 +198,18 @@ export function createLocalShellCommandTool(
       );
       const background = record.background === true;
       const lifetime = background ? processLifetime(record.lifetime) : "run";
-      const cwd = await resolveCommandCwd(rootDirectory, record.cwd);
-      const processFacts = commandProcessFacts(options.processRegistry, context);
+      const cwd = await resolveCommandCwd(
+        rootDirectory,
+        record.cwd,
+        context,
+        options.pathAuthorization,
+      );
+      const displayedCwd = options.pathAuthorization === undefined ? cwd.relativePath : cwd.absolutePath;
+      const processFacts = commandProcessFacts(options.processRegistry, context, cwd);
       const progress = createCommandProgressReporter(context);
       assertSandboxAllowed(sandboxPolicy, {
         operation: "execute",
-        workspaceRoot: path.resolve(rootDirectory),
+        workspaceRoot: cwd.rootDirectory,
         relativePath: cwd.relativePath,
         command: normalized.command,
         commandLine: normalized.commandLine,
@@ -208,7 +219,7 @@ export function createLocalShellCommandTool(
       const executeDirectly = normalized.directProgram !== undefined &&
         await shouldExecuteDirectly({
           command: normalized.directProgram,
-          rootDirectory,
+          rootDirectory: options.pathAuthorization === undefined ? rootDirectory : cwd.absolutePath,
           platform: commandShell.platform,
         });
       const startedAt = Date.now();
@@ -238,11 +249,11 @@ export function createLocalShellCommandTool(
       }
       const rawOutcome = background
         ? normalized.directProgram === undefined || !executeDirectly
-          ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, lifetime, maxBackgroundLogBytes, processFacts)
-          : await runBackgroundProgramCommand(commandShell, normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, lifetime, maxBackgroundLogBytes, processFacts)
+          ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, displayedCwd, backgroundWaitMs, lifetime, maxBackgroundLogBytes, processFacts)
+          : await runBackgroundProgramCommand(commandShell, normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, displayedCwd, backgroundWaitMs, lifetime, maxBackgroundLogBytes, processFacts)
         : normalized.directProgram === undefined || !executeDirectly
-          ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts, progress)
-          : await runProgramCommand(normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts, progress);
+          ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, displayedCwd, timeoutMs, context.abortSignal, processFacts, progress)
+          : await runProgramCommand(normalized.directProgram, normalized.directArgs, normalized.commandLine, cwd.absolutePath, displayedCwd, timeoutMs, context.abortSignal, processFacts, progress);
       const result = await enrichCommandResult({
         result: rawOutcome.result,
         waitForPort,
@@ -295,7 +306,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         command: {
           type: "string",
           minLength: 1,
-          description: `Complete ${commandShell.syntax} command for ${commandShell.label}. Runs from the workspace root unless cwd is set.`,
+          description: `Complete ${commandShell.syntax} command for ${commandShell.label}. Runs from the current run root unless cwd is set.`,
         },
         timeoutMs: {
           type: "integer",
@@ -305,7 +316,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         },
         cwd: {
           type: "string",
-          description: "Optional workspace-relative working directory. Defaults to the workspace root.",
+          description: "Optional absolute or run-root-relative working directory. Defaults to the current run root.",
         },
         background: {
           type: "boolean",
@@ -565,7 +576,8 @@ function quoteCmdArg(value: string): string {
 
 function commandProcessFacts(
   registry: LocalCommandProcessRegistry | undefined,
-  context: ToolExecutionContext
+  context: ToolExecutionContext,
+  cwd: AuthorizedLocalWorkspacePath,
 ): CommandProcessFacts | undefined {
   if (registry === undefined) {
     return undefined;
@@ -575,6 +587,14 @@ function commandProcessFacts(
     registry,
     runId: stringField(record.runId) ?? stringField(record.traceId),
     toolCallId: stringField(record.toolCallId) ?? stringField(record.callId),
+    conversationId: context.conversationId,
+    spaceId: context.resourceScope?.ownerKind === "space"
+      ? context.resourceScope.ownerId
+      : cwd.resourceScope?.ownerKind === "space"
+        ? cwd.resourceScope.ownerId
+        : undefined,
+    referenceId: cwd.resourceId,
+    authorizationMode: context.confirmationPolicy === "full_access" ? "full_access" : "confirm_each",
   };
 }
 
@@ -591,6 +611,11 @@ function registerCommandProcess(
     processId,
     runId: facts.runId,
     toolCallId: facts.toolCallId,
+    conversationId: facts.conversationId,
+    spaceId: facts.spaceId,
+    referenceId: facts.referenceId,
+    authorizationMode: facts.authorizationMode,
+    permissionState: "active",
     owned: true,
   };
   facts.registry.register(registration);
@@ -1163,12 +1188,20 @@ function boundedTail(current: string, incoming: string, maxChars: number): strin
 
 async function resolveCommandCwd(
   rootDirectory: string,
-  value: unknown
-): Promise<{ readonly absolutePath: string; readonly relativePath: string }> {
-  const target = resolveWorkspacePath(rootDirectory, typeof value === "string" && value.trim().length > 0 ? value : ".");
+  value: unknown,
+  context: ToolExecutionContext,
+  authorization: LocalWorkspaceCommandToolOptions["pathAuthorization"],
+): Promise<AuthorizedLocalWorkspacePath> {
+  const target = await resolveAuthorizedWorkspacePath(
+    rootDirectory,
+    typeof value === "string" && value.trim().length > 0 ? value : ".",
+    "execute",
+    context,
+    authorization,
+  );
   const stat = await fs.stat(target.absolutePath);
   if (!stat.isDirectory()) {
-    throw new Error(`shell cwd must be a workspace directory: ${target.relativePath}`);
+    throw new Error(`shell cwd must be a directory: ${target.absolutePath}`);
   }
   return target;
 }

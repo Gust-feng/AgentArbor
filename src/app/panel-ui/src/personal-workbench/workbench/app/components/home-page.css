@@ -87,30 +87,32 @@
   padding-left: 2px;
 }
 
-.aa-agent-home__workspace {
+.aa-agent-home__space {
   display: inline-flex;
-  max-width: min(360px, 100%);
+  min-width: 0;
+  max-width: min(220px, 48%);
   height: 28px;
   align-items: center;
   gap: 7px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
   padding: 0 6px;
   color: var(--aa-text-3, #9d9690);
-  font-size: 12px;
-  transition: background-color 160ms ease, color 160ms ease;
 }
 
-.aa-agent-home__workspace:hover {
+.aa-agent-home__space select {
+  min-width: 0;
+  max-width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+.aa-agent-home__space select:hover,
+.aa-agent-home__space select:focus-visible {
   background: var(--aa-surface-hover, #eeebe6);
   color: var(--aa-text-2, #716d68);
-}
-
-.aa-agent-home__workspace span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 @media (max-width: 720px) {

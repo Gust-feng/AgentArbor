@@ -5,6 +5,7 @@ import { deflateRawSync } from "node:zlib";
 import { createTaskSoil, type TaskSoil } from "../../../domain/soil/index.js";
 import { ToolCenter } from "../../tool-center/tool-center.js";
 import { createContextAttachmentTools } from "./context-attachment-tools.js";
+import type { ContextAttachmentReadAuthorization } from "./context-attachment-access.js";
 
 export const TOOL_CONTEXT = {
   callerAgentId: "agent:test",
@@ -16,6 +17,7 @@ export function contextAttachmentToolCenter(input: {
   readonly workspaceRoot: string;
   readonly supportsVisionInput?: boolean;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly readAuthorization?: ContextAttachmentReadAuthorization;
 }): ToolCenter {
   const center = new ToolCenter();
   for (const tool of createContextAttachmentTools(input)) {

@@ -49,12 +49,13 @@ import {
 } from './ActionConfirmationDialog'
 
 /**
- * 学习空间 —— VS Code 式分栏:左侧资源管理器(我的笔记 + 资料),右侧书写/查看。
- * 单击进入,追求心流。笔记与外部引用分区呈现；引用是否可编辑由来源能力决定。
+ * Space —— VS Code 式分栏:左侧资源管理器(软件资产 + 外部数据源),右侧书写/查看。
+ * 外部 Workspace 只是只读权限引用；Space 自己维护的材料才允许编辑。
  */
 
 /**
- * 空间里的材料 / 对话引用。引用保留外部来源身份，文本来源可在冲突保护下编辑。
+ * 空间里的软件资产和外部数据源。Conversation 是 Space 的固定所属对象，
+ * 不是可以被普通引用操作修改的材料。
  * (「我写的笔记」是另一类可写对象,来自 notesStore,不在这棵树里。)
  * 所有条目都来自 SpaceFeature 的真实投影；初始内容由后端首次启动初始化。
  */
@@ -142,17 +143,22 @@ function TreeNode({
   const [hovered, setHovered] = useState(false)
   const [editing, setEditing] = useState(false)
   const selected = selectedId === item.id
-  const canMutateExternalEntry = item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined
   const isManagedFolder = !item.externalChild && item.domainKind === 'managed_folder'
-  const canCreateExternalEntry = item.type === 'folder' && item.referenceId !== undefined && isFileSystemFolderKind(item.domainKind)
-  const canRename = canMutateExternalEntry || (!item.externalChild && renameEnabled)
+  // 外部 Workspace 是只读数据源：不能在其目录内创建、重命名或删除文件。
+  const canCreateExternalEntry = !item.externalChild
+    && item.type === 'folder'
+    && item.referenceId !== undefined
+    && item.domainKind === 'managed_folder'
+  const canRename = !item.externalChild
+    && item.domainKind !== 'workspace_folder'
+    && item.domainKind !== 'conversation_reference'
+    && renameEnabled
+  // 外部数据源只允许移除当前 Space 的引用；Conversation owner 不属于普通引用操作。
   const canUnlink = !item.externalChild
-    && item.domainKind !== 'folder'
-    && item.domainKind !== 'managed_folder'
+    && (item.domainKind === 'workspace_folder' || item.domainKind === 'local_file' || item.domainKind === 'web_reference' || item.domainKind === 'generated_artifact')
     && unlinkEnabled
-  const canRemove = canMutateExternalEntry
-    || (isManagedFolder && removeManagedFolderEnabled)
-    || (!item.externalChild && (item.domainKind === 'folder' || item.domainKind === 'local_file') && removeEnabled)
+  const canRemove = (isManagedFolder && removeManagedFolderEnabled
+    || (!item.externalChild && item.domainKind === 'folder' && removeEnabled))
   const pl = 10 + depth * 14
 
   return (
@@ -169,7 +175,10 @@ function TreeNode({
             ? 'var(--aa-surface-hover, #eeebe6)'
             : 'transparent',
         }}
-        onMouseEnter={() => { setHovered(true); onPrefetch(item) }}
+        onMouseEnter={() => {
+          setHovered(true)
+          onPrefetch(item)
+        }}
         onMouseLeave={() => setHovered(false)}
         onClick={() => {
           if (editing) return
@@ -203,15 +212,9 @@ function TreeNode({
         ) : (
           <span
             className="flex-1 text-sm truncate"
-            style={{ color: item.status === 'unavailable' ? 'var(--aa-text-3, #aba39b)' : 'var(--aa-text-1, #292722)' }}
-            title={item.status === 'unavailable' ? '来源已找不到' : undefined}
+            style={{ color: 'var(--aa-text-1, #292722)' }}
           >
             {item.name}
-            {item.status === 'unavailable' && (
-              <span className="ml-1.5 text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                已找不到
-              </span>
-            )}
           </span>
         )}
 
@@ -222,7 +225,7 @@ function TreeNode({
             actions={[
               ...(canCreateExternalEntry ? [{ label: '新建文件', icon: <FilePlus size={12} />, onClick: () => onCreateEntry(item) }] : []),
               ...(canRename ? [{ label: '重命名', icon: <Pencil size={12} />, onClick: () => setEditing(true) }] : []),
-              ...(canUnlink ? [{ label: '取消链接', icon: <Unlink size={12} />, onClick: () => onUnlink(item) }] : []),
+              ...(canUnlink ? [{ label: '移除引用', icon: <Unlink size={12} />, onClick: () => onUnlink(item) }] : []),
               ...(canRemove ? [{ label: deleteLabelFor(item), icon: <Trash2 size={12} />, danger: true, onClick: () => onDelete(item) }] : []),
             ]}
           />
@@ -472,6 +475,10 @@ export function SpacePage({
 
   // Space feature owns mutations; this page only translates prototype intent.
   async function handleRenameItem(item: SpaceItem, name: string) {
+    // Workspace descendants are a read-only view of an external source. Their
+    // file mutations must go through the normal Agent file-tool contract, not
+    // through Space material actions.
+    if (item.externalChild) return
     if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
       setActionError(null)
       try {
@@ -505,6 +512,11 @@ export function SpacePage({
   }
 
   function handleDeleteItem(item: SpaceItem) {
+    // Never expose a physical-delete path for files shown inside an external
+    // Workspace reference. The row menu already hides this action; this guard
+    // keeps stale UI events from bypassing the read-only projection.
+    if (item.externalChild) return
+    if (item.domainKind === 'local_file' || item.domainKind === 'workspace_folder' || item.domainKind === 'web_reference' || item.domainKind === 'generated_artifact') return
     if (item.externalChild && item.referenceId !== undefined && item.relativePath !== undefined) {
       const referenceId = item.referenceId
       const relativePath = item.relativePath
@@ -539,46 +551,35 @@ export function SpacePage({
     }
     const removeReference = actions?.removeReference
     if (removeReference === undefined) return
-    const deletesLocalFile = item.domainKind === 'local_file'
     const deletesOwnedSubtree = item.domainKind === 'folder'
     requestSpaceConfirmation({
-      eyebrow: deletesLocalFile || deletesOwnedSubtree ? '空间资料' : '空间链接',
-      title: deletesLocalFile
-        ? `删除“${item.name}”`
-        : deletesOwnedSubtree
+      eyebrow: deletesOwnedSubtree ? '空间资料' : '空间链接',
+      title: deletesOwnedSubtree
           ? `删除“${item.name}”及其所有子项`
           : `取消“${item.name}”与当前空间的链接`,
-      description: deletesLocalFile
-        ? '这会从磁盘上删除该文件。'
-        : deletesOwnedSubtree
+      description: deletesOwnedSubtree
           ? '其中本地文件和软件自建文件夹会从磁盘删除，其他内容仅取消链接。'
           : '空间将不再引用此内容。',
-      consequence: deletesLocalFile || deletesOwnedSubtree
+      consequence: deletesOwnedSubtree
         ? '请确认你了解这项操作对空间内容的影响。'
         : '磁盘内容不会被删除。',
-      confirmLabel: deletesLocalFile
-        ? '删除文件'
-        : deletesOwnedSubtree
+      confirmLabel: deletesOwnedSubtree
           ? '删除文件夹'
           : '取消链接',
-     destructive: !deletesLocalFile && !deletesOwnedSubtree ? false : undefined,
+      destructive: deletesOwnedSubtree ? undefined : false,
     }, async () => {
       await removeReference(item.id)
       setSelectedId((prev) => (prev === item.id ? null : prev))
     })
   }
 
-  async function handleUnlinkItem(item: SpaceItem) {
+  function handleUnlinkItem(item: SpaceItem) {
     if (actions?.unlinkReference === undefined) return
-    setActionError(null)
-    try {
-      await actions.unlinkReference(item.id)
+    void runSpaceAction(async () => {
+      await actions.unlinkReference!(item.id)
       setSelectedId((current) => current === item.id ? null : current)
-    } catch (error) {
-      setActionError(actionErrorMessage(error))
-    }
+    })
   }
-
   // 目录加载 / 缓存 / 展开已收口到 useMountedTree；这里只剩读写动作与对外导航。
 
   async function handleOpenReference(item: SpaceItem) {
@@ -770,15 +771,6 @@ export function SpacePage({
                     icon: <Folder size={12} />,
                     onClick: () => void runSpaceAction(() => actions.addWorkspaceFolder!(space.spaceId)),
                   }]),
-                  ...(actions?.addConversation === undefined || currentConversation === undefined ? [] : [{
-                    label: '加入当前对话',
-                    icon: <MessageSquare size={12} />,
-                    onClick: () => void runSpaceAction(() => actions.addConversation!(
-                      space.spaceId,
-                      currentConversation.conversationId,
-                      currentConversation.title,
-                    )),
-                  }]),
                 ]}
               />
             )}
@@ -844,7 +836,7 @@ export function SpacePage({
                 {selectedItem.name}
               </p>
               <p className="text-xs mb-5" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-                对话引用{selectedItem.meta ? ` · ${selectedItem.meta}` : ''}
+                Space 所属对话{selectedItem.meta ? ` · ${selectedItem.meta}` : ''}
               </p>
               {(selectedItem.conversationId !== undefined || onOpenItem !== undefined) && <button
                 onClick={() => void handleOpenReference(selectedItem)}
@@ -1183,12 +1175,11 @@ function CenteredCard({ children }: { children: ReactNode }) {
 
 function hasMaterialCreateAction(
   actions: PersonalSpaceActions | undefined,
-  currentConversation: SpacePageProps['currentConversation'],
+  _currentConversation: SpacePageProps['currentConversation'],
 ): boolean {
   return actions?.createManagedFolder !== undefined
     || actions?.addLocalFile !== undefined
     || actions?.addWorkspaceFolder !== undefined
-    || (actions?.addConversation !== undefined && currentConversation !== undefined)
 }
 
 /**

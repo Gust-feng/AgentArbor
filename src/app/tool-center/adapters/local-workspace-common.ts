@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { TextDecoder } from "node:util";
+import type { ToolExecutionContext, ToolExecutionResourceScope } from "../../../domain/tools/index.js";
 import { utf16SafePrefixLength } from "../text-window.js";
 
 export const DEFAULT_LOCAL_WORKSPACE_ROOT = process.cwd();
@@ -13,7 +14,64 @@ export type LocalWorkspaceToolOptions = {
   readonly sandboxPolicy?: import("../../../domain/tools/index.js").SandboxPolicy;
   readonly commandShell?: import("../../../domain/config/index.js").SanitizedCommandShellConfig;
   readonly mutationCoordinator?: import("./local-workspace-mutation-coordinator.js").LocalWorkspaceMutationCoordinator;
+  readonly pathAuthorization?: LocalWorkspacePathAuthorization;
 };
+
+export type LocalWorkspacePathOperation = "read" | "search" | "write" | "edit" | "execute";
+
+export type AuthorizedLocalWorkspacePath = {
+  readonly absolutePath: string;
+  readonly relativePath: string;
+  /** Actual root used by the mature local tool after authorization resolves. */
+  readonly rootDirectory: string;
+  /** Product owner and resource identities retained for process/audit facts. */
+  readonly resourceScope?: ToolExecutionResourceScope;
+  readonly resourceId?: string;
+};
+
+/** Run-scoped Host authority. Local tools stay neutral and never read Space state. */
+export type LocalWorkspacePathAuthorization = {
+  readonly resourceScope?: ToolExecutionResourceScope;
+  resolve(input: {
+    readonly requestedPath: string;
+    readonly operation: LocalWorkspacePathOperation;
+    readonly workspaceRoot: string;
+    readonly context: ToolExecutionContext;
+  }): Promise<AuthorizedLocalWorkspacePath>;
+};
+
+export async function resolveAuthorizedWorkspacePath(
+  rootDirectory: string,
+  requestedPath: string,
+  operation: LocalWorkspacePathOperation,
+  context: ToolExecutionContext,
+  authorization?: LocalWorkspacePathAuthorization,
+): Promise<AuthorizedLocalWorkspacePath> {
+  if (authorization !== undefined) {
+    return authorization.resolve({
+      requestedPath,
+      operation,
+      workspaceRoot: path.resolve(rootDirectory),
+      context,
+    });
+  }
+  const target = resolveWorkspacePath(rootDirectory, requestedPath);
+  return {
+    ...target,
+    rootDirectory: path.resolve(rootDirectory),
+  };
+}
+
+/** Adds identities only for an explicitly authorized multi-root path. */
+export function authorizedPathFacts(target: AuthorizedLocalWorkspacePath): Readonly<Record<string, string>> {
+  return target.resourceScope === undefined && target.resourceId === undefined
+    ? {}
+    : {
+        absolutePath: target.absolutePath,
+        ...(target.resourceScope === undefined ? {} : { resourceOwnerId: target.resourceScope.ownerId }),
+        ...(target.resourceId === undefined ? {} : { referenceId: target.resourceId }),
+      };
+}
 
 export function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {

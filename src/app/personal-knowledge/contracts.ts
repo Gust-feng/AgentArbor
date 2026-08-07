@@ -38,8 +38,8 @@ export type KnowledgePage = {
     readonly title: string;
     readonly sourceLabel: string;
     readonly contentKind: "file" | "directory";
-    readonly sourceReferenceId: string;
-    readonly sourceRelativePath: string;
+    readonly sourceReferenceId?: string;
+    readonly sourceRelativePath?: string;
   };
 };
 
@@ -89,6 +89,7 @@ export type PersonalKnowledgeCommand =
   | { readonly type: "knowledge.link_add"; readonly link: KnowledgeLink }
   | { readonly type: "knowledge.link_remove"; readonly link: KnowledgeLink }
   | { readonly type: "knowledge.opened"; readonly refId: string; readonly openedAt: number }
+  | { readonly type: "space.cleanup"; readonly spaceId: string; readonly referenceIds: readonly string[] }
   | { readonly type: "theme.create"; readonly theme: KnowledgeTheme }
   | { readonly type: "theme.rename"; readonly themeId: string; readonly name: string }
   | { readonly type: "theme.delete"; readonly themeId: string }
@@ -124,8 +125,10 @@ export type PersonalKnowledgeFeature<TManagedAssetTextWriteResult = unknown> = {
       readonly text: string;
     }): Promise<PersonalKnowledgeManagedAssetTextUpdate<TManagedAssetTextWriteResult>>;
     uncollect(refId: string): Promise<void>;
+    /** Deletes Space-owned notes and detaches copied knowledge assets from Space references. */
+    cleanupSpace(input: { readonly spaceId: string; readonly referenceIds: readonly string[] }): Promise<void>;
     execute(command: Exclude<PersonalKnowledgeCommand, {
-      readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" | "knowledge.uncollect";
+      readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" | "knowledge.uncollect" | "space.cleanup";
     }>): Promise<void>;
   };
   readonly queries: {

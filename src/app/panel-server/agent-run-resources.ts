@@ -37,6 +37,8 @@ import {
 import type { AgentLoopTokenCounter } from "../context-maintenance/index.js";
 import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
+import type { ContextAttachmentReadAuthorization } from "../tool-center/adapters/context-attachment-access.js";
+import type { LocalWorkspacePathAuthorization } from "../tool-center/adapters/local-workspace-common.js";
 
 export type AgentRunResourceHost = {
   readonly configCenter: ConfigCenter;
@@ -290,6 +292,8 @@ export function createAgentToolCenterFactory(
     readonly taskSoil?: TaskSoil;
     readonly outputTokenCounter?: AgentLoopTokenCounter;
     readonly metricsSink?: ToolExecutionMetricsSink;
+    readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
+    readonly workspacePathAuthorization?: LocalWorkspacePathAuthorization;
   }) => createDefaultToolCenter({
     runtime: toolRuntime,
     env: resources.aiEnvironment,
@@ -312,5 +316,7 @@ export function createAgentToolCenterFactory(
     metricsSink: context?.metricsSink,
     fileMutationCoordinator: resources.fileMutationCoordinator,
     resolveManagedAttachmentPath: resources.resolveManagedAttachmentPath,
+    contextAttachmentReadAuthorization: context?.contextAttachmentReadAuthorization,
+    workspacePathAuthorization: context?.workspacePathAuthorization,
   });
 }

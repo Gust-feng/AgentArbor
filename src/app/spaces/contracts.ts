@@ -1,5 +1,5 @@
 /** Durable metadata for the roots visible in one Space. File descendants stay in their owning filesystem. */
-export const SPACE_TREE_SCHEMA_VERSION = "space-tree/v3" as const;
+export const SPACE_TREE_SCHEMA_VERSION = "space-tree/v4" as const;
 
 export type SpaceReference =
   | { readonly kind: "local_file"; readonly path: string }
@@ -11,6 +11,14 @@ export type SpaceReference =
   | { readonly kind: "generated_artifact"; readonly artifactRef: string }
   | { readonly kind: "conversation"; readonly conversationId: string; readonly conversationTitle?: string };
 
+/** References that may be created through the ordinary Space reference command. */
+export type SpaceAddableReference = Exclude<SpaceReference, { readonly kind: "conversation" }>;
+
+/** The two user-owned filesystem sources. They are links only; Space never owns their content. */
+export type SpaceExternalFileReference =
+  | Extract<SpaceReference, { readonly kind: "local_file" }>
+  | Extract<SpaceReference, { readonly kind: "workspace_folder" }>;
+
 export type Space = {
   readonly id: string;
   readonly title: string;
@@ -18,23 +26,16 @@ export type Space = {
   readonly updatedAt: string;
 };
 
-/**
- * `unavailable` 表示引用的来源当前找不到或不可访问。它只是提醒状态，不是删除：
- * 用户确认移除后引用记录才离开资源树，历史 Conversation、Run 和工具事实都不受影响。
- */
-export type SpaceReferenceStatus = "available" | "unavailable";
-
 export type SpaceReferenceItem = {
   readonly id: string;
   readonly spaceId: string;
   readonly title: string;
   readonly parentId?: string;
   readonly reference: SpaceReference;
+  /** Stable platform identity for an external source; never used as a model-facing path. */
+  readonly sourceIdentity?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  /** 省略等价于 `available`，使既有快照无需回填即可读取。 */
-  readonly status?: SpaceReferenceStatus;
-  readonly unavailableAt?: string;
 };
 
 export type SpaceTreeSnapshot = {
@@ -63,6 +64,11 @@ export interface SpaceRepository {
   write(snapshot: SpaceTreeSnapshot): Promise<void>;
 }
 
+/** Narrow cross-feature port for deleting software-owned Workbench assets. */
+export interface SpaceOwnedAssetDeletionPort {
+  deleteWorkbenchAssets(assetIds: readonly string[]): Promise<void>;
+}
+
 export type SpaceTarget = { readonly kind: "space" | "reference"; readonly id: string };
 export type SpaceMovableTarget = { readonly kind: "reference"; readonly id: string };
 
@@ -72,6 +78,7 @@ export type SpaceFeatureErrorCode =
   | "space_reference_not_found"
   | "space_invalid_move"
   | "space_workspace_mount_conflict"
+  | "space_asset_ownership_conflict"
   | "space_conversation_ownership_conflict"
   | "space_invalid_input"
   | "space_id_collision"
@@ -93,29 +100,27 @@ export type SpaceEvent =
   | { readonly type: "space.reference_added"; readonly item: SpaceReferenceItem }
   | { readonly type: "space.renamed"; readonly target: SpaceTarget; readonly spaceId: string }
   | { readonly type: "space.moved"; readonly target: SpaceMovableTarget; readonly sourceSpaceId: string; readonly destinationSpaceId: string }
-  | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string }
-  | { readonly type: "space.reference_status_changed"; readonly itemId: string; readonly spaceId: string; readonly status: SpaceReferenceStatus };
+  | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string };
 
 export type SpaceFeature = {
   /** Startup deletion reconciliation must settle before the Host accepts requests. */
   ready(): Promise<void>;
   readonly commands: {
     createSpace(input: { readonly id?: string; readonly title: string }): Promise<Space>;
-    /** Deletes the Space container and its links without deleting referenced source content. */
+    /** Deletes the Space container and Space-owned assets; external sources remain untouched. */
     deleteSpace(spaceId: string): Promise<void>;
-    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceReference }): Promise<SpaceReferenceItem>;
+    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceAddableReference }): Promise<SpaceReferenceItem>;
+    /** Creates the sole owning link for a Conversation. This is reserved for the Conversation coordinator. */
+    linkConversationOwner(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly conversationId: string; readonly conversationTitle?: string }): Promise<SpaceReferenceItem>;
     rename(input: { readonly target: SpaceTarget; readonly title: string }): Promise<SpaceTarget>;
     move(input: { readonly target: SpaceMovableTarget; readonly destinationSpaceId: string }): Promise<SpaceMovableTarget>;
-    /**
-     * Records whether a reference source is currently reachable. Reporting `unavailable` only
-     * raises a prompt; it never rebinds a moved path and never deletes derived history.
-     */
-    markReferenceStatus(input: { readonly itemId: string; readonly status: SpaceReferenceStatus }): Promise<SpaceReferenceItem>;
-    /** Removes only the Space metadata link and never deletes source content. */
+    /** Removes only an external/metadata link and never deletes an external source. Conversation owners use the coordinator command. */
     unlinkReference(itemId: string): Promise<void>;
-    /** Removes all conversation links for this conversation without touching other references or source content. */
+    /** Removes all Conversation owner links for this conversation; coordinator-only and idempotent. */
     unlinkConversationReference(conversationId: string): Promise<void>;
-    /** Removes the reference and any Space-owned source content through the durable deletion lifecycle. */
+    /** Removes one known conversation link without affecting a newer link with the same conversation id. */
+    unlinkConversationReferenceItem(itemId: string): Promise<void>;
+    /** Removes a Space-owned material and its source content through the durable deletion lifecycle. */
     removeReference(itemId: string): Promise<void>;
   };
   readonly queries: {

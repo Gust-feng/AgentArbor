@@ -536,6 +536,7 @@ function progressiveVisibilityPlan(): AgentLoopToolVisibilityPlan {
 function executionInput(abortSignal = new AbortController().signal) {
   return {
     runId: "run-1",
+    conversationId: "conversation-1",
     sessionRef: {
       sessionId: "session-1",
       storageKey: "session-1.jsonl",

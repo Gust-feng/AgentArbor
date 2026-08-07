@@ -51,6 +51,7 @@ export async function handlePanelOrdinaryRoute(
   const rename = /^\/api\/conversations\/([^/]+)\/rename$/u.exec(url.pathname);
   if (request.method === "POST" && rename !== null) {
     const conversationId = decode(rename[1]);
+    await assertConversationMutationAvailable(runtime, conversationId);
     const input = parseConversationRenameInput(await readJsonBody(request));
     const conversation = await runtime.ordinaryAgentFeature.commands.renameConversation(conversationId, input.title);
     writeJson(response, 200, {
@@ -63,6 +64,7 @@ export async function handlePanelOrdinaryRoute(
   const pin = /^\/api\/conversations\/([^/]+)\/pin$/u.exec(url.pathname);
   if (request.method === "POST" && pin !== null) {
     const conversationId = decode(pin[1]);
+    await assertConversationMutationAvailable(runtime, conversationId);
     const input = parseConversationPinInput(await readJsonBody(request));
     const conversation = await runtime.ordinaryAgentFeature.commands.setConversationPinned(conversationId, input.pinned);
     writeJson(response, 200, {
@@ -75,6 +77,7 @@ export async function handlePanelOrdinaryRoute(
   const rollback = /^\/api\/conversations\/([^/]+)\/rollback$/u.exec(url.pathname);
   if (request.method === "POST" && rollback !== null) {
     const conversationId = decode(rollback[1]);
+    await assertConversationMutationAvailable(runtime, conversationId);
     const input = parseConversationRollbackInput(await readJsonBody(request));
     const existing = await runtime.ordinaryAgentFeature.queries.getConversation(conversationId);
     if (existing === undefined) throw new PanelHttpError(404, "conversation_not_found", "未找到对话。");
@@ -103,8 +106,7 @@ export async function handlePanelOrdinaryRoute(
   }
   if (request.method === "DELETE" && conversation !== null) {
     const conversationId = decode(conversation[1]);
-    await runtime.ordinaryAgentFeature.commands.deleteConversation(conversationId);
-    await runtime.spaceFeature.commands.unlinkConversationReference(conversationId);
+    await runtime.spaceConversationLink.deleteConversation(conversationId);
     writeJson(response, 200, {
       ok: true,
       deletedConversationId: conversationId,
@@ -158,24 +160,53 @@ async function submitTurn(
   conversationId?: string,
 ): Promise<void> {
   const runInput = parseRunInput(await readJsonBody(request));
+  if (conversationId !== undefined) await assertConversationMutationAvailable(runtime, conversationId);
   if (runInput.requestedRunMode !== undefined && runInput.requestedRunMode !== "agent") {
     throw new PanelHttpError(400, "conversation_run_mode_not_supported", "对话入口只支持普通 Agent。");
   }
+  const explicitOwner = runInput.owner ?? (runInput.spaceId === undefined ? undefined : { kind: "space" as const, id: runInput.spaceId });
+  const owner = conversationId === undefined && explicitOwner === undefined
+    ? await soleOwnerFallback(runtime)
+    : explicitOwner;
+  const selectedSpaceId = owner?.kind === "space" ? owner.id : undefined;
+  if (conversationId === undefined && owner === undefined) {
+    throw new PanelHttpError(400, "conversation_owner_required", "开始新对话前请选择空间或工作区。");
+  }
+  const submissionId = conversationId === undefined
+    ? runInput.submissionId ?? crypto.randomUUID()
+    : runInput.submissionId;
   const spaceAccess = await resolveConversationSpaceAccess(
     runtime.spaceFeature,
     conversationId,
     runInput.taskSoilInput,
+    selectedSpaceId,
   );
+  if (spaceAccess.spaceId !== undefined) {
+    runtime.spaceConversationDeletion.assertAvailable(spaceAccess.spaceId);
+  }
+  if (conversationId === undefined && selectedSpaceId !== undefined && spaceAccess.spaceId !== selectedSpaceId) {
+    throw new PanelHttpError(404, "conversation_space_not_found", "所选空间不存在。");
+  }
   const effectiveRunInput = {
     ...runInput,
     taskSoilInput: spaceAccess.taskSoilInput,
   };
-  const submitted = await runtime.ordinaryAgentFeature.commands.submitTurn({
-    conversationId,
-    submissionId: effectiveRunInput.submissionId,
-    input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
-    birth: await runtime.prepareOrdinaryRunBirth(effectiveRunInput),
-  });
+  const birth = await runtime.prepareOrdinaryRunBirth(effectiveRunInput);
+  const submitted = conversationId === undefined
+    ? await runtime.spaceConversationLink.submit({
+        owner: owner!,
+        submissionId: submissionId!,
+        title: effectiveRunInput.goal,
+        runInput: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
+        birth,
+      })
+    : await runtime.ordinaryAgentFeature.commands.submitTurn({
+        conversationId,
+        owner,
+        submissionId: effectiveRunInput.submissionId,
+        input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
+        birth,
+      });
   const run = await projectCommandRun(runtime, submitted.run);
   writeJson(response, 202, {
     ok: true,
@@ -183,10 +214,27 @@ async function submitTurn(
       conversation: submitted.conversation,
       currentRun: run.view,
       workspaceRun: run.state,
+      owner,
       spaceId: spaceAccess.spaceId,
     }),
     run: run.view.run,
   });
+}
+
+async function soleOwnerFallback(runtime: PanelRuntime): Promise<{ readonly kind: "space"; readonly id: string } | undefined> {
+  const spaces = await runtime.spaceFeature.queries.list();
+  return spaces.length === 1 ? { kind: "space", id: spaces[0]!.id } : undefined;
+}
+
+async function assertConversationMutationAvailable(runtime: PanelRuntime, conversationId: string): Promise<void> {
+  runtime.spaceConversationLink.assertConversationAvailable(conversationId);
+  const owner = await conversationOwnerForList(runtime, conversationId);
+  if (owner === undefined) {
+    throw new PanelHttpError(409, "conversation_owner_required", "Conversation 缺少 owner，不能继续修改。");
+  }
+  if (owner.kind === "space") {
+    runtime.spaceConversationDeletion.assertAvailable(owner.id);
+  }
 }
 
 async function listConversations(runtime: PanelRuntime) {
@@ -195,7 +243,12 @@ async function listConversations(runtime: PanelRuntime) {
       ? undefined
       : await runtime.ordinaryAgentFeature.queries.getRun(conversation.latestRunId);
     const owner = await conversationOwnerForList(runtime, conversation.conversationId);
-    return projectOrdinaryPanelConversationSummary(conversation, workspaceRun, owner?.spaceId);
+    return projectOrdinaryPanelConversationSummary(
+      conversation,
+      workspaceRun,
+      owner?.kind === "space" ? owner.id : undefined,
+      owner,
+    );
   }));
 }
 
@@ -203,8 +256,11 @@ async function conversationOwnerForList(
   runtime: PanelRuntime,
   conversationId: string,
 ) {
+  const canonical = await runtime.ordinaryAgentFeature.queries.getConversationOwner(conversationId);
+  if (canonical !== undefined) return canonical;
   try {
-    return await runtime.spaceFeature.queries.findConversationOwner(conversationId);
+    const treeOwner = await runtime.spaceFeature.queries.findConversationOwner(conversationId);
+    return treeOwner === undefined ? undefined : { kind: "space" as const, id: treeOwner.spaceId };
   } catch (error) {
     // Historical builds allowed duplicate links. Keep the global conversation
     // list usable, while explicit open/submit still reports the conflict and
@@ -228,13 +284,14 @@ async function projectConversation(
     conversation.latestRunId === undefined
       ? Promise.resolve(undefined)
       : runtime.ordinaryAgentFeature.queries.getRun(conversation.latestRunId),
-    runtime.spaceFeature.queries.findConversationOwner(conversation.conversationId),
+    conversationOwnerForList(runtime, conversation.conversationId),
   ]);
   return projectOrdinaryPanelConversation({
     conversation,
     currentRun: currentRun?.view,
     workspaceRun,
-    spaceId: owner?.spaceId,
+    owner,
+    spaceId: owner?.kind === "space" ? owner.id : undefined,
   });
 }
 

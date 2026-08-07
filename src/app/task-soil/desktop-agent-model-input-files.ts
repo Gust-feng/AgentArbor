@@ -22,6 +22,9 @@ export async function attachDesktopFileInputsToModelMessages(input: {
   readonly modelCapabilities?: ModelCapabilities;
   readonly workspaceRoot?: string;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly readAuthorization?: {
+    assertReadAllowed(attachmentId: string): void | Promise<void>;
+  };
 }): Promise<readonly ModelMessage[]> {
   const imageRefs = input.taskSoil.contextRefs.filter(isImageContextRef);
   if (imageRefs.length === 0) {
@@ -37,6 +40,7 @@ export async function attachDesktopFileInputsToModelMessages(input: {
     taskSoil: input.taskSoil,
     workspaceRoot: input.workspaceRoot ?? process.cwd(),
     resolveManagedAttachmentPath: input.resolveManagedAttachmentPath,
+    readAuthorization: input.readAuthorization,
   });
   if (attachments.failures.length > 0) {
     throw new CodedExecutionError(
@@ -62,11 +66,22 @@ async function resolveImageAttachments(input: {
   readonly taskSoil: TaskSoil;
   readonly workspaceRoot: string;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly readAuthorization?: {
+    assertReadAllowed(attachmentId: string): void | Promise<void>;
+  };
 }): Promise<ResolvedImageAttachments> {
   const attachments: ModelInputAttachment[] = [];
   const failures: string[] = [];
   for (const ref of input.taskSoil.contextRefs) {
     if (!isImageContextRef(ref)) continue;
+    if (ref.attachmentId !== undefined) {
+      try {
+        await input.readAuthorization?.assertReadAllowed(ref.attachmentId);
+      } catch (error) {
+        failures.push(`${ref.ref}: ${error instanceof Error ? error.message : "read authorization failed"}`);
+        continue;
+      }
+    }
     const resolved = await resolveReadableFileRef(
       ref,
       input.workspaceRoot,

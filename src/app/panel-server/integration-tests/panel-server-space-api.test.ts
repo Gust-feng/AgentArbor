@@ -71,7 +71,7 @@ test("Panel streams feature and filesystem invalidations for Agent-side mutation
   }
 });
 
-test("Space API organizes reference metadata without altering the referenced conversation", async () => {
+test("Space API exposes Conversation ownership created by the conversation workflow", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
   try {
@@ -79,25 +79,21 @@ test("Space API organizes reference metadata without altering the referenced con
     assert.equal(created.status, 201);
     const spaceId = created.body.space.id as string;
 
-    const reference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+    const createdConversation = await requestJson(baseUrl, "/api/conversations", {
       method: "POST",
-      body: {
-        title: "架构讨论",
-        reference: { kind: "conversation", conversationId: "ordinary-conversation-1", conversationTitle: "架构讨论" },
-      },
+      body: { goal: "架构讨论", submissionId: "ordinary-conversation-1", spaceId },
     });
-    assert.equal(reference.status, 201);
+    assert.equal(createdConversation.status, 202);
+    const conversationId = createdConversation.body.conversation.conversationId as string;
 
     const tree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
     assert.equal(tree.status, 200);
     assert.equal(tree.body.tree.entries[0].kind, "reference");
-    assert.equal(tree.body.tree.entries[0].item.reference.conversationId, "ordinary-conversation-1");
+    assert.equal(tree.body.tree.entries[0].item.reference.conversationId, conversationId);
 
-    const removed = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(reference.body.item.id)}`, { method: "DELETE" });
-    assert.equal(removed.status, 200);
-    const afterRemoval = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
-    assert.equal(afterRemoval.body.tree.entries.length, 0);
-    // Space removal is strictly metadata-only: the feature never consults or deletes Ordinary state.
+    const deleted = await requestJson(baseUrl, `/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+    assert.equal(deleted.status, 200);
+    assert.equal((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`)).body.tree.entries.length, 0);
     assert.equal((await runtime.ordinaryAgentFeature.queries.listConversations()).length, 0);
   } finally {
     await closePanelServer(httpServer, runtime);
@@ -111,13 +107,11 @@ test("Space API deletes a Space and its links without deleting referenced source
   try {
     const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "临时空间" } });
     const spaceId = created.body.space.id as string;
-    await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+    const createdConversation = await requestJson(baseUrl, "/api/conversations", {
       method: "POST",
-      body: {
-        title: "保留的讨论",
-        reference: { kind: "conversation", conversationId: "ordinary-conversation-delete", conversationTitle: "保留的讨论" },
-      },
+      body: { goal: "保留的讨论", submissionId: "ordinary-conversation-delete", spaceId },
     });
+    assert.equal(createdConversation.status, 202);
 
     const removed = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`, { method: "DELETE" });
     assert.equal(removed.status, 200);
@@ -159,10 +153,6 @@ test("Space API creates and physically deletes app-owned folders and files", asy
   try {
     const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "本地资料" } });
     const spaceId = created.body.space.id as string;
-    const existing = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
-      method: "POST",
-      body: { title: "已有资料", reference: { kind: "conversation", conversationId: "existing-reference" } },
-    });
     const folder = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
       method: "POST",
       body: { title: "我的文件" },
@@ -170,7 +160,7 @@ test("Space API creates and physically deletes app-owned folders and files", asy
     assert.equal(folder.status, 201);
     assert.equal(folder.body.item.reference.kind, "managed_folder");
     const orderedTree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
-    assert.deepEqual(orderedTree.body.tree.entries.map((entry: { readonly item: { readonly title: string } }) => entry.item.title), ["我的文件", "已有资料"]);
+    assert.deepEqual(orderedTree.body.tree.entries.map((entry: { readonly item: { readonly title: string } }) => entry.item.title), ["我的文件"]);
     const itemId = folder.body.item.id as string;
     const folderPath = folder.body.item.reference.path as string;
     assert.equal(await fs.stat(folderPath).then((stat) => stat.isDirectory()), true);
@@ -192,8 +182,6 @@ test("Space API creates and physically deletes app-owned folders and files", asy
     const deletedFolder = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(itemId)}`, { method: "DELETE" });
     assert.equal(deletedFolder.status, 200);
     assert.equal(await fs.stat(folderPath).then(() => true, () => false), false);
-    const removedExisting = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(existing.body.item.id as string)}`, { method: "DELETE" });
-    assert.equal(removedExisting.status, 200);
     assert.deepEqual((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`)).body.tree.entries, []);
   } finally {
     await closePanelServer(httpServer, runtime);
@@ -201,7 +189,7 @@ test("Space API creates and physically deletes app-owned folders and files", asy
   }
 });
 
-test("Space API lets a linked file be unlinked or physically deleted and only unlinks linked folders", async () => {
+test("Space API only unlinks external files and folders without deleting sources", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-delete-reference-"));
   const linkedFile = path.join(directory, "linked.md");
   const linkedFolder = path.join(directory, "linked-folder");
@@ -233,21 +221,19 @@ test("Space API lets a linked file be unlinked or physically deleted and only un
       body: { title: "linked-folder", reference: { kind: "workspace_folder", path: linkedFolder } },
     });
 
-    const deletedFile = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(deletableFileReference.body.item.id as string)}`, { method: "DELETE" });
-    assert.equal(deletedFile.status, 200);
-    assert.equal(await fs.stat(linkedFile).then(() => true, () => false), false);
+    const rejectedDelete = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(deletableFileReference.body.item.id as string)}`, { method: "DELETE" });
+    assert.equal(rejectedDelete.status, 409);
+    assert.equal(await fs.readFile(linkedFile, "utf8"), "delete me");
+    const unlinkedAgain = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(deletableFileReference.body.item.id as string)}/unlink`, { method: "POST", body: {} });
+    assert.equal(unlinkedAgain.status, 200);
+    assert.equal(await fs.readFile(linkedFile, "utf8"), "delete me");
 
     const staleFileReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
       method: "POST",
       body: { title: "already-missing.md", reference: { kind: "local_file", path: path.join(directory, "already-missing.md") } },
     });
-    const removedStaleFile = await requestJson(
-      baseUrl,
-      `/api/spaces/references/${encodeURIComponent(staleFileReference.body.item.id as string)}`,
-      { method: "DELETE" },
-    );
-    assert.equal(removedStaleFile.status, 200);
-    assert.equal(await runtime.spaceFeature.queries.getReference(staleFileReference.body.item.id as string), undefined);
+    assert.equal(staleFileReference.status, 400);
+    assert.equal(staleFileReference.body.error.code, "space_invalid_input");
 
     const unlinkedFolder = await requestJson(
       baseUrl,
@@ -474,7 +460,7 @@ test("Space API validates the source Space when moving an entry", async () => {
     const destinationId = destination.body.space.id as string;
     const reference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(sourceId)}/references`, {
       method: "POST",
-      body: { title: "待移动", reference: { kind: "conversation", conversationId: "move-me" } },
+      body: { title: "待移动", reference: { kind: "web_page", url: "https://example.com/move-me" } },
     });
     const target = { kind: "reference", id: reference.body.item.id as string };
 
@@ -853,7 +839,7 @@ test("Space API keeps one workspace mount writable when several Spaces reference
   }
 });
 
-test("Space API marks a vanished reference unavailable and restores it without losing the link", async () => {
+test("Space API removes vanished references and requires a fresh re-add", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-availability-"));
   const sourceRoot = path.join(directory, "source");
   const keptRoot = path.join(directory, "kept");
@@ -873,23 +859,43 @@ test("Space API marks a vanished reference unavailable and restores it without l
     const vanishingId = vanishing.body.item.id as string;
     const keptId = kept.body.item.id as string;
     const treePath = `/api/spaces/${encodeURIComponent(spaceId)}`;
-    const statusOf = (tree: { body: { tree: { entries: readonly { item: { id: string; status?: string } }[] } } }, id: string) =>
-      tree.body.tree.entries.find((entry) => entry.item.id === id)?.item.status;
+    const hasReference = (tree: { body: { tree: { entries: readonly { item: { id: string } }[] } } }, id: string) =>
+      tree.body.tree.entries.some((entry) => entry.item.id === id);
 
     const initial = await requestJson(baseUrl, treePath);
-    assert.equal(statusOf(initial, vanishingId), "available");
-    assert.equal(statusOf(initial, keptId), "available");
+    assert.equal(hasReference(initial, vanishingId), true);
+    assert.equal(hasReference(initial, keptId), true);
 
     await removeTemporaryTree(sourceRoot);
+    await fs.mkdir(sourceRoot, { recursive: true });
+    const missingPreview = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(vanishingId)}/preview`);
+    assert.equal(missingPreview.status, 410);
+    assert.equal(missingPreview.body.error.code, "space_reference_source_missing");
     const afterLoss = await requestJson(baseUrl, treePath);
 
-    assert.equal(statusOf(afterLoss, vanishingId), "unavailable");
-    assert.equal(statusOf(afterLoss, keptId), "available");
+    assert.equal(hasReference(afterLoss, vanishingId), false);
+    assert.equal(hasReference(afterLoss, keptId), true);
 
-    await fs.mkdir(sourceRoot, { recursive: true });
     const afterRestore = await requestJson(baseUrl, treePath);
 
-    assert.equal(statusOf(afterRestore, vanishingId), "available");
+    assert.equal(hasReference(afterRestore, vanishingId), false);
+
+    const readded = await requestJson(baseUrl, referencesPath, {
+      method: "POST", body: { title: "replacement", reference: { kind: "workspace_folder", path: sourceRoot } },
+    });
+    assert.equal(readded.status, 201);
+    const replacementId = readded.body.item.id as string;
+    assert.notEqual(replacementId, vanishingId);
+    assert.equal(hasReference(await requestJson(baseUrl, treePath), replacementId), true);
+
+    await removeTemporaryTree(sourceRoot);
+    const missingMutation = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(replacementId)}/entry`, {
+      method: "POST",
+      body: { parentRelativePath: "", name: "new.md", kind: "file" },
+    });
+    assert.equal(missingMutation.status, 410);
+    assert.equal(missingMutation.body.error.code, "space_reference_source_missing");
+    assert.equal(hasReference(await requestJson(baseUrl, treePath), replacementId), false);
   } finally {
     await closePanelServer(httpServer, runtime);
     await removeTemporaryTree(directory);

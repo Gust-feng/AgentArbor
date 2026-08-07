@@ -44,7 +44,6 @@ export type PanelTaskSubmissionOptions = {
   readonly setGoal: (goal: string) => void;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
-  readonly selectedWorkspaceDirectory?: string;
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;
@@ -69,6 +68,7 @@ export async function submitPanelTask(
   options: PanelTaskSubmissionOptions,
   explicitGoal?: string,
   conversationBehavior: PanelTaskConversationBehavior = "continue",
+  newConversationSpaceId?: string,
 ): Promise<boolean> {
   const trimmed = (explicitGoal ?? options.goal).trim();
   const startsNewConversation = conversationBehavior === "new";
@@ -94,7 +94,7 @@ export async function submitPanelTask(
     aiMode: options.aiMode,
     toolConfirmationPolicy: options.toolConfirmationPolicy,
     modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
-    workspaceDirectory: options.selectedWorkspaceDirectory,
+    ...(startsNewConversation && newConversationSpaceId !== undefined ? { spaceId: newConversationSpaceId } : {}),
     taskSoilInput: taskSoilInputFromAttachments(attachmentsBeforeSubmit),
     ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
   };

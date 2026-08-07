@@ -12,8 +12,6 @@ export type WorkbenchInputPropsOptions = {
   readonly goal: string;
   readonly setGoal: (value: string) => void;
   readonly attachments: readonly ContextAttachment[];
-  readonly selectedWorkspaceDirectory?: string;
-  readonly selectTaskWorkspace: () => void | Promise<void>;
   readonly selectAttachment: () => void | Promise<void>;
   readonly uploadAttachments: (files: readonly File[]) => void | Promise<void>;
   readonly removeAttachment: (attachmentId: string) => void;
@@ -58,8 +56,6 @@ export function workbenchInputPropsFrom(
     onChange: options.setGoal,
     agentMode: activeInputAgentMode,
     attachments: options.attachments,
-    selectedWorkspaceDirectory: options.selectedWorkspaceDirectory,
-    onSelectWorkspaceDirectory: () => void options.selectTaskWorkspace(),
     onSelectAttachment: () => void options.selectAttachment(),
     onUploadAttachmentFiles: (files: readonly File[]) => void options.uploadAttachments(files),
     onRemoveAttachment: options.removeAttachment,

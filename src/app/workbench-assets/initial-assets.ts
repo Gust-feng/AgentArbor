@@ -88,18 +88,6 @@ export const MATERIALS: Record<string, Material> = {
       caption: '手绘的网络结构与推导草稿',
     },
   },
-  'f1-6': {
-    id: 'f1-6',
-    kind: 'video',
-    title: '梯度下降讲解.mp4',
-    origin: 'library',
-    meta: '08:24',
-    video: {
-      src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      poster: NN_IMG,
-      duration: '08:24',
-    },
-  },
   'f2-2': {
     id: 'f2-2',
     kind: 'web',
@@ -160,17 +148,6 @@ export const MATERIALS: Record<string, Material> = {
       caption: '像爬山：看不见顶，但每一步都在升高。',
     },
   },
-  'm-stanford-video': {
-    id: 'm-stanford-video',
-    kind: 'video',
-    title: '斯坦福公开课·反向传播.mp4',
-    origin: 'library',
-    meta: '17:52',
-    video: {
-      src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      duration: '17:52',
-    },
-  },
   'm-distill-web': {
     id: 'm-distill-web',
     kind: 'web',
@@ -182,19 +159,6 @@ export const MATERIALS: Record<string, Material> = {
       url: 'https://distill.pub/2017/feature-visualization',
       site: 'distill.pub',
       body: `特征可视化 (Feature Visualization)\n\n神经网络学到了什么？一种回答方式是：通过优化输入，找出能最大激活某个神经元的图像。\n\n从单个神经元，到通道，再到整层，可视化让我们得以"看见"网络内部的表示。越深的层，越倾向于表示越抽象、越语义化的概念。\n\n这类交互式文章的价值在于：把抽象的高维表示，翻译成人能直接看的图。`,
-    },
-  },
-  'm-podcast-audio': {
-    id: 'm-podcast-audio',
-    kind: 'audio',
-    title: '播客·深度学习的历史.mp3',
-    origin: 'library',
-    meta: '42:10',
-    audio: {
-      src: 'https://commondatastorage.googleapis.com/codeskulptor-demos/DDR_assets/Kangaroo_MusiQue_-_The_Neverwritten_Role_Playing_Game.mp3',
-      duration: '42:10',
-      transcript:
-        '……从感知机的寒冬，到 2012 年 AlexNet 在 ImageNet 上的爆发，再到 Transformer 统一各个领域——这一集我们聊聊那些关键转折点，以及它们背后被忽视的人。',
     },
   },
   'm-train-code': {

@@ -115,9 +115,10 @@ test("persists only existing Space references as knowledge pages", async (t) => 
   const { feature } = await fixture(t);
   await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
   const [managedPage] = (await feature.queries.snapshot()).pages;
-  assert.equal(managedPage?.kind, "space_reference");
-  assert.match(managedPage?.refId ?? "", /^[0-9a-f-]{36}$/u);
-  assert.deepEqual(managedPage?.asset, {
+  assert.ok(managedPage);
+  assert.equal(managedPage.kind, "space_reference");
+  assert.match(managedPage.refId, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(managedPage.asset, {
     status: "managed",
     title: "参考资料",
     sourceLabel: "C:/source",
@@ -132,6 +133,14 @@ test("persists only existing Space references as knowledge pages", async (t) => 
     }),
     (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_knowledge_invalid_input",
   );
+  await assert.rejects(
+    feature.commands.execute({
+      type: "knowledge.collect",
+      page: { refId: managedPage.refId, kind: "material", collectedAt: 3 },
+    }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_knowledge_invalid_input",
+  );
+  assert.equal((await feature.queries.snapshot()).pages[0]?.kind, "space_reference");
 });
 
 test("managed asset text updates return the lease-captured result and publish only after the write commits", async (t) => {
@@ -221,6 +230,32 @@ test("concurrent managed asset writes keep each command's lease-captured result"
   assert.deepEqual((await second).writeResult, { committedText: "second" });
 });
 
+test("Space cleanup deletes Space-owned notes and detaches copied assets without deleting the knowledge page", async (t) => {
+  const removedAssetIds: string[] = [];
+  const { feature } = await fixture(t, {
+    removeManagedAsset: async (itemId) => { removedAssetIds.push(itemId); },
+  });
+  const note = await feature.commands.createNote({ spaceId: "space-one", title: "空间笔记", bodyMarkdown: "内容" });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: note.id, kind: "note", collectedAt: 1 } });
+  const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
+  const events: Array<{ readonly type: string; readonly refIds?: readonly string[] }> = [];
+  feature.events.subscribe((event) => events.push(event));
+
+  await feature.commands.cleanupSpace({ spaceId: "space-one", referenceIds: ["reference-one"] });
+  assert.deepEqual(events, [{ type: "personal_knowledge.changed", refIds: [page.refId, note.id] }]);
+
+  const snapshot = await feature.queries.snapshot();
+  assert.deepEqual(snapshot.notes, []);
+  assert.equal(snapshot.pages.some((candidate) => candidate.refId === note.id), false);
+  assert.deepEqual(snapshot.pages.find((candidate) => candidate.refId === page.refId)?.asset, {
+    status: "managed",
+    title: "参考资料",
+    sourceLabel: "C:/source",
+    contentKind: "directory",
+  });
+  assert.deepEqual(await feature.queries.noteRevisions(note.id), []);
+  assert.deepEqual(removedAssetIds, []);
+});
 test("migrates existing material knowledge pages before adding Space references", async (t) => {
   const { database } = await fixture(t);
   database.connection.exec(`
@@ -267,9 +302,29 @@ test("migration removes relationships whose knowledge pages no longer exist", as
   assert.equal(database.connection.prepare("SELECT COUNT(*) AS count FROM knowledge_recently_opened").get()?.count, 0);
 });
 
+test("migration restores the managed knowledge asset kind", async (t) => {
+  const { database } = await fixture(t);
+  database.connection.prepare(
+    "INSERT INTO knowledge_pages(ref_id, kind, collected_at, asset_json) VALUES (?, 'material', 1, ?)",
+  ).run("managed-copy", JSON.stringify({
+    status: "managed",
+    title: "副本",
+    sourceLabel: "C:/source",
+    contentKind: "file",
+    sourceReferenceId: "reference-one",
+    sourceRelativePath: "",
+  }));
+  database.connection.prepare("UPDATE schema_migrations SET version = ? WHERE owner = ?").run(7, "personal-knowledge");
+
+  const migrated = createSqlitePersonalKnowledgeRepository(database);
+
+  assert.equal((await migrated.readSnapshot()).pages[0]?.kind, "space_reference");
+});
+
 async function fixture(
   t: import("node:test").TestContext,
   options: {
+    readonly removeManagedAsset?: (itemId: string) => Promise<void>;
     readonly writeManagedAssetText?: (input: {
       readonly page: import("./contracts.js").KnowledgePage;
       readonly relativePath: string;
@@ -284,7 +339,7 @@ async function fixture(
     repository: createSqlitePersonalKnowledgeRepository(database),
     spaceExists: async (spaceId) => spaceId === "space-one",
     captureSpaceReference: async () => ({ status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "directory", sourceReferenceId: "reference-one", sourceRelativePath: "" }),
-    removeManagedAsset: async () => undefined,
+    removeManagedAsset: options.removeManagedAsset ?? (async () => undefined),
     writeManagedAssetText: options.writeManagedAssetText,
   });
   t.after(async () => {

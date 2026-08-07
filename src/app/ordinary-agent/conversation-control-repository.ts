@@ -20,6 +20,11 @@ export class OrdinaryConversationSnapshotIncompatibleError extends Error {
   }
 }
 
+const ownerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("space"), id: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("workspace"), id: z.string().min(1) }).strict(),
+]);
+
 const stateSchema: z.ZodType<OrdinaryConversationControlState> = z.object({
   conversationId: z.string().min(1),
   createdAt: z.string().min(1),
@@ -29,6 +34,7 @@ const stateSchema: z.ZodType<OrdinaryConversationControlState> = z.object({
     sessionCwd: z.string().min(1),
     createdAt: z.string().min(1),
   }).strict(),
+  owner: ownerSchema.optional(),
   titleOverride: z.string().min(1).max(80).optional(),
   titleEditedAt: z.string().min(1).optional(),
   pinnedAt: z.string().min(1).optional(),

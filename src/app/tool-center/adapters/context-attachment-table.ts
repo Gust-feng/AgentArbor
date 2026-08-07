@@ -86,6 +86,7 @@ export function createInspectContextAttachmentTableTool(options: ContextAttachme
         requireFile: true,
         projectPathRequired: true,
         resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       const table = await loadTableTarget(entry, target, {
         sheetName: stringOrUndefined(record.sheetName),
@@ -172,6 +173,7 @@ export function createReadContextAttachmentTableTool(options: ContextAttachmentT
         requireFile: true,
         projectPathRequired: true,
         resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       const table = await loadTableTarget(entry, target, {
         sheetName: stringOrUndefined(record.sheetName),

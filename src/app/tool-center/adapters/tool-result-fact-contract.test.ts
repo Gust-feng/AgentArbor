@@ -287,7 +287,7 @@ test("ToolCenter exposes executable nextInput for bounded local read, glob, and 
     assert.equal(readOutput.truncated, true);
     assert.equal(readOutput.nextStartLine, 2);
     assert.deepEqual(asRecord(asRecord(readOutput.continuation).nextInput), {
-      path: "note-1.txt",
+      path: path.join(root, "note-1.txt"),
       startLine: 2,
     });
 
@@ -303,7 +303,7 @@ test("ToolCenter exposes executable nextInput for bounded local read, glob, and 
     assert.equal(charReadOutput.nextStartChar, 4);
     assert.equal(charReadOutput.nextStartLine, undefined);
     assert.deepEqual(asRecord(asRecord(charReadOutput.continuation).nextInput), {
-      path: "long.txt",
+      path: path.join(root, "long.txt"),
       maxLength: 5,
       startChar: 4,
     });
@@ -319,7 +319,7 @@ test("ToolCenter exposes executable nextInput for bounded local read, glob, and 
     assert.equal(globOutput.nextOffset, 2);
     assert.deepEqual(asRecord(asRecord(globOutput.continuation).nextInput), {
       pattern: "*.txt",
-      path: ".",
+      path: root,
       limit: 2,
       offset: 2,
     });
@@ -335,7 +335,7 @@ test("ToolCenter exposes executable nextInput for bounded local read, glob, and 
     assert.equal(grepOutput.nextOffset, 2);
     assert.deepEqual(asRecord(asRecord(grepOutput.continuation).nextInput), {
       query: "needle",
-      path: ".",
+      path: root,
       limit: 2,
       offset: 2,
     });

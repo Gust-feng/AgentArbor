@@ -29,6 +29,8 @@ export type SpaceReferenceDeletionJournalRecord = {
   readonly phase: SpaceReferenceDeletionPhase;
   readonly rootReferenceId: string;
   readonly removedReferences: readonly SpaceReferenceItem[];
+  /** Workbench assets whose metadata is removed in the same committed deletion. */
+  readonly ownedAssetIds?: readonly string[];
   readonly targets: readonly SpaceReferenceDeletionTarget[];
   readonly createdAt: string;
 };
@@ -66,8 +68,7 @@ const referenceItemSchema: z.ZodType<SpaceReferenceItem> = z.object({
   title: z.string().min(1),
   parentId: z.string().min(1).optional(),
   reference: spaceReferenceSchema,
-  status: z.enum(["available", "unavailable"]).optional(),
-  unavailableAt: z.string().min(1).optional(),
+  sourceIdentity: z.string().min(1).optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 }).strict();
@@ -85,6 +86,7 @@ const journalRecordSchema: z.ZodType<SpaceReferenceDeletionJournalRecord> = z.ob
   phase: z.enum(["prepared", "files_staged", "metadata_committed"]),
   rootReferenceId: z.string().min(1),
   removedReferences: z.array(referenceItemSchema).min(1),
+  ownedAssetIds: z.array(z.string().min(1)).optional().default([]),
   targets: z.array(deletionTargetSchema),
   createdAt: z.string().min(1),
 }).strict().superRefine((record, context) => {

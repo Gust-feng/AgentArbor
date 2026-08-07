@@ -361,6 +361,8 @@ const rawStateSchema = z.object({
       contextRefs: z.array(z.object({
         attachmentId: z.string().optional(),
         ref: z.string().min(1),
+        pathGranted: z.boolean().optional(),
+        sourceIdentity: z.string().min(1).optional(),
         kind: z.enum(["file", "project", "web", "workspace"]),
         title: z.string().optional(),
         summary: z.string().optional(),

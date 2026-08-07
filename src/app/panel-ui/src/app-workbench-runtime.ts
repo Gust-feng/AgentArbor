@@ -56,8 +56,6 @@ export type AppWorkbenchRuntimeOptions = {
   readonly setMcpServerForm: React.Dispatch<React.SetStateAction<McpServerForm>>;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
-  readonly selectedWorkspaceDirectory?: string;
-  readonly setSelectedWorkspaceDirectory: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly selectedModelId: string;
   readonly selectedModelSupportsReasoningEffort: boolean;
   readonly selectedModelContextWindowTokens?: number;
@@ -108,7 +106,7 @@ export type AppWorkbenchRuntime = {
   readonly settingsController: AppSettingsController;
   readonly composerActions: Pick<
     ReturnType<typeof createAppComposerController>,
-    "selectInputModel" | "selectAttachment" | "selectTaskWorkspace" | "uploadAttachments" | "removeAttachment" | "changeToolConfirmationPolicy"
+    "selectInputModel" | "selectAttachment" | "uploadAttachments" | "removeAttachment" | "changeToolConfirmationPolicy"
   >;
 };
 
@@ -241,7 +239,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     setGoal: options.setGoal,
     attachments: options.attachments,
     setAttachments: options.setAttachments,
-    selectedWorkspaceDirectory: options.selectedWorkspaceDirectory,
     goal: options.goal,
     aiMode: options.aiMode,
     composerReasoningEffort: options.composerReasoningEffort,
@@ -268,7 +265,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.goal,
     options.selectedModelId,
     options.selectedModelSupportsReasoningEffort,
-    options.selectedWorkspaceDirectory,
     options.setApp,
     options.setAttachments,
     options.setGoal,
@@ -303,7 +299,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mutationConversationIdsRef,
     setMutationConversationIds: setPendingConversationIds,
     resetChat: runController.resetChat,
-    setSelectedWorkspaceDirectory: options.setSelectedWorkspaceDirectory,
     setInputCloseSignal: options.setInputCloseSignal,
     setGoal: options.setGoal,
     setAttachments: options.setAttachments,
@@ -315,7 +310,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setGoal,
     options.setInputCloseSignal,
     options.setLegacyConversationScreen,
-    options.setSelectedWorkspaceDirectory,
     runController.resetChat,
   ]);
 
@@ -365,7 +359,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     attachmentUploadAttemptRef,
     setAttachments: options.setAttachments,
     attachments: options.attachments,
-    setSelectedWorkspaceDirectory: options.setSelectedWorkspaceDirectory,
     selectedModelId: options.selectedModelId,
     setComposerSelectedModelId: options.setComposerSelectedModelId,
     selectComposerModel: settingsController.selectComposerModel,
@@ -379,7 +372,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setApp,
     options.setAttachments,
     options.setComposerSelectedModelId,
-    options.setSelectedWorkspaceDirectory,
     options.setToolConfirmationPolicy,
     options.toolConfirmationPolicy,
     settingsController.saveToolConfirmationPolicy,
@@ -421,7 +413,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     composerActions: {
       selectInputModel: composerController.selectInputModel,
       selectAttachment: composerController.selectAttachment,
-      selectTaskWorkspace: composerController.selectTaskWorkspace,
       uploadAttachments: composerController.uploadAttachments,
       removeAttachment: composerController.removeAttachment,
       changeToolConfirmationPolicy: composerController.changeToolConfirmationPolicy,

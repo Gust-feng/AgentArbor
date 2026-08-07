@@ -25,7 +25,6 @@ export type AppSidebarConversationControllerOptions = {
   readonly mutationConversationIdsRef: React.MutableRefObject<Set<string>>;
   readonly setMutationConversationIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
   readonly resetChat: () => void;
-  readonly setSelectedWorkspaceDirectory: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly setInputCloseSignal: React.Dispatch<React.SetStateAction<number>>;
   readonly setGoal: React.Dispatch<React.SetStateAction<string>>;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
@@ -59,7 +58,6 @@ export function createAppSidebarConversationController(
       const response = await removeConversation(conversationId);
       if (!options.mountedRef.current) return;
       if (options.appRef.current.conversation?.conversationId === conversationId) {
-        options.setSelectedWorkspaceDirectory(undefined);
         options.resetChat();
       }
       options.setApp((previous) => ({
@@ -70,7 +68,6 @@ export function createAppSidebarConversationController(
     }, "删除会话失败。", undefined, (error) => {
       if (isMissingConversationError(error)) {
         if (options.appRef.current.conversation?.conversationId === conversationId) {
-          options.setSelectedWorkspaceDirectory(undefined);
           options.resetChat();
         }
         options.setApp((previous) => ({

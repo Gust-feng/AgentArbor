@@ -130,7 +130,7 @@ export function createKnowledgeDeleteNoteTool(options: PersonalKnowledgeToolOpti
   return tool({
     name: "KnowledgeDeleteNote",
     description: "Delete a persisted personal Markdown note using the revision returned by KnowledgeRead or KnowledgeSearch. A stale revision is rejected and never deletes newer content.",
-    metadata: writeMetadata,
+    metadata: destructiveMetadata,
     inputSchema: schema({
       noteId: { type: "string" },
       expectedRevision: { type: "number" },
@@ -201,6 +201,7 @@ function tool(spec: ToolSpec): ToolExecutor {
 
 const readMetadata = { category: "workspace", riskLevel: "low", operationType: "read-only", requiresConfirmation: false } as const;
 const writeMetadata = { category: "workspace", riskLevel: "low", operationType: "read-write", requiresConfirmation: false } as const;
+const destructiveMetadata = { category: "workspace", riskLevel: "high", operationType: "read-write", requiresConfirmation: true, fileOperation: "delete" } as const;
 
 function agentActor(context: ToolExecutionContext) {
   return {

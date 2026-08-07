@@ -72,10 +72,15 @@ import {
 } from "../agent-notes/index.js";
 import {
   canonicalSpacePathIdentity,
+  createSpaceRunPathAuthorization,
+  createSpaceRevocationOverlay,
   createFileSystemSpaceReferenceDeletionJournal,
   createSqliteSpaceRepository,
   createSpaceFeature,
+  inspectSpaceExternalSource,
   inspectFileSystemSpaceReferenceDeletionJournal,
+  spaceReferenceIdFromAttachmentId,
+  spaceExternalReferenceStatus,
   type SpaceEvent,
   type SpaceFeature,
 } from "../spaces/index.js";
@@ -87,6 +92,11 @@ import {
   type PersonalKnowledgeFeature,
 } from "../personal-knowledge/index.js";
 import {
+  createSqliteWorkspaceRepository,
+  createWorkspaceFeature,
+  type WorkspaceFeature,
+} from "../workspaces/index.js";
+import {
   applyPendingWorkbenchRestore,
   createWorkbenchDataMaintenance,
   hasUnappliedPendingWorkbenchRestore,
@@ -94,10 +104,10 @@ import {
   type WorkbenchDataMaintenance,
 } from "./workbench-data-maintenance.js";
 import { createSpaceReferenceDeletionFilePort } from "./space-reference-deletion.js";
-import { reconcileMissingRunSpaceFiles } from "./space-file-reference-reconciliation.js";
 import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
+  processCleanupHasUnresolvedStops,
   type ProcessRegistryCleanupResult,
   type ProcessTerminator,
 } from "../runtime-guard/index.js";
@@ -131,6 +141,14 @@ import {
   createWorkbenchProjectionChangeFeed,
   type WorkbenchProjectionChangeFeed,
 } from "./workbench-projection-change-feed.js";
+import {
+  createSpaceConversationDeletionCoordinator,
+  type SpaceConversationDeletionCoordinator,
+  createSpaceConversationLinkCoordinator,
+  type SpaceConversationLinkCoordinator,
+} from "./space-conversation-coordinator.js";
+import { createSqliteSpaceConversationDeletionJournal } from "./space-conversation-deletion-journal.js";
+import { createSqliteSpaceConversationLinkJournal } from "./space-conversation-link-journal.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -159,6 +177,8 @@ export type PanelRuntime = {
   readonly resolveManagedAttachmentPath: (attachmentId: string) => Promise<string | undefined>;
   readonly agentNotesFeature: AgentNotesFeature;
   readonly spaceFeature: SpaceFeature;
+  readonly spaceConversationLink: SpaceConversationLinkCoordinator;
+  readonly spaceConversationDeletion: SpaceConversationDeletionCoordinator;
   readonly personalKnowledgeFeature: PersonalKnowledgeFeature<import("../panel-api-contracts.js").DocumentPreview>;
   readonly workbenchDataMaintenance: WorkbenchDataMaintenance;
   readonly pathMemoryFeature: PathMemoryFeature;
@@ -177,7 +197,7 @@ export type PanelRuntime = {
   readonly knowledgeAssetsReady: Promise<void>;
   readonly ensureInitialWorkbenchData: () => Promise<void>;
   readonly flushSpaceKnowledgeSync: () => Promise<void>;
-  readonly flushSpaceFileReconciliation: () => Promise<void>;
+  readonly flushSpaceProcessCleanup: () => Promise<void>;
   readonly releaseAgentSessionStorage: () => Promise<void>;
   readonly resolveSubAgentRoots?: (input: PanelSubAgentRootsInput) => readonly SubAgentRootInput[];
 };
@@ -267,12 +287,17 @@ export async function preparePanelRuntimeStorageForStartup(runtimeHome: string):
   let spaceFeature: SpaceFeature | undefined;
   let startupError: unknown;
   try {
+    const workbenchAssets = createSqliteWorkbenchAssetRepository(database);
     spaceFeature = createSpaceFeature({
       repository: createSqliteSpaceRepository(database),
+      ownedAssetDeletion: {
+        deleteWorkbenchAssets: async (assetIds) => await workbenchAssets.removeMany(assetIds),
+      },
       referenceDeletion: {
         journal: createFileSystemSpaceReferenceDeletionJournal(journalRoot),
         files: createSpaceReferenceDeletionFilePort(path.join(runtimeHome, "space-folders")),
         leases: new InMemoryLocalWorkspaceMutationCoordinator(),
+        deleteOwnedAssets: async (assetIds) => await workbenchAssets.removeMany(assetIds),
       },
     });
     await spaceFeature.ready();
@@ -343,7 +368,6 @@ function assemblePanelRuntime(input: {
   const knowledgeAssetRoot = path.join(runtimeHome, "knowledge-assets");
   const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
   let knowledgeAssetsReady = Promise.resolve();
-  let spaceFileReconciliation = Promise.resolve();
   applyPendingWorkbenchRestore(runtimeHome, {
     assertSpaceDeletionIdle: () => assertSpaceDeletionJournalIdle(runtimeHome),
   });
@@ -353,6 +377,8 @@ function assemblePanelRuntime(input: {
     spaceRepository,
     personalKnowledgeRepository,
   } = openPanelWorkbenchStorage(runtimeHome);
+  const spaceConversationDeletionJournal = createSqliteSpaceConversationDeletionJournal(workbenchDatabase);
+  const spaceConversationLinkJournal = createSqliteSpaceConversationLinkJournal(workbenchDatabase);
   let beforeWorkbenchRestoreStage: (() => Promise<void>) | undefined;
   const workbenchDataMaintenance = createWorkbenchDataMaintenance({
     database: workbenchDatabase,
@@ -369,6 +395,12 @@ function assemblePanelRuntime(input: {
       return await fileMutationCoordinator.runExclusive(runtimeHome, async () => {
         if ((await spaceReferenceDeletionJournal.list()).length > 0) {
           throw new Error("Workbench storage cannot be snapshotted while a Space deletion journal is pending.");
+        }
+        if ((await spaceConversationDeletionJournal.list()).length > 0) {
+          throw new Error("Workbench storage cannot be snapshotted while a Space Conversation deletion is pending.");
+        }
+        if ((await spaceConversationLinkJournal.list()).length > 0) {
+          throw new Error("Workbench storage cannot be snapshotted while a Conversation link lifecycle is pending.");
         }
         return await operation();
       });
@@ -397,6 +429,10 @@ function assemblePanelRuntime(input: {
   const spaceFeature = createSpaceFeature({
     repository: spaceRepository,
     workspaceMountIdentity: canonicalWorkspaceMountIdentity,
+    externalSourceInspector: inspectSpaceExternalSource,
+    ownedAssetDeletion: {
+      deleteWorkbenchAssets: async (assetIds) => await workbenchAssets.removeMany(assetIds),
+    },
     referenceDeletion: {
       journal: spaceReferenceDeletionJournal,
       files: createSpaceReferenceDeletionFilePort(managedSpaceFolderRoot),
@@ -407,7 +443,18 @@ function assemblePanelRuntime(input: {
           diagnostic.error,
         );
       },
+      deleteOwnedAssets: async (assetIds) => await workbenchAssets.removeMany(assetIds),
     },
+  });
+  const unlinkSpaceExternalReference = async (referenceId: string): Promise<void> => {
+    try {
+      await spaceFeature.commands.unlinkReference(referenceId);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "space_reference_not_found")) throw error;
+    }
+  };
+  const workspaceFeature: WorkspaceFeature = createWorkspaceFeature({
+    repository: createSqliteWorkspaceRepository(workbenchDatabase),
   });
   const personalKnowledgeFeature = createPersonalKnowledgeFeature({
     repository: personalKnowledgeRepository,
@@ -419,7 +466,15 @@ function assemblePanelRuntime(input: {
     captureSpaceReference: async ({ assetId, referenceId, relativePath }) => {
       const item = await spaceFeature.queries.getReference(referenceId);
       if (item === undefined) return undefined;
-      return await captureKnowledgeAsset(knowledgeAssetRoot, assetId, item, relativePath);
+      if (await spaceExternalReferenceStatus(item) !== "current") {
+        await unlinkSpaceExternalReference(referenceId);
+        return undefined;
+      }
+      const asset = await captureKnowledgeAsset(knowledgeAssetRoot, assetId, item, relativePath);
+      if (await spaceExternalReferenceStatus(item) === "current") return asset;
+      await removeKnowledgeAsset(knowledgeAssetRoot, assetId);
+      await unlinkSpaceExternalReference(referenceId);
+      return undefined;
     },
     removeManagedAsset: async (itemId) => await removeKnowledgeAsset(knowledgeAssetRoot, itemId),
     stageManagedAssetRemoval: async (itemId) => await stageKnowledgeAssetRemoval(knowledgeAssetRoot, itemId),
@@ -460,11 +515,59 @@ function assemblePanelRuntime(input: {
   // Warm the formal initial dataset after owned storage reconciliation has started.
   void initialWorkbenchData.ensure().catch(() => undefined);
   const spaceKnowledgeSync = Promise.resolve();
+  const spaceRevocationOverlay = createSpaceRevocationOverlay(spaceFeature.events);
+  const contextAttachmentReadAuthorization = {
+    async assertReadAllowed(attachmentId: string): Promise<void> {
+      spaceRevocationOverlay.assertReadAllowed(attachmentId);
+      const referenceId = spaceReferenceIdFromAttachmentId(attachmentId);
+      if (referenceId === undefined) return;
+      const item = await spaceFeature.queries.getReference(referenceId);
+      if (item === undefined) {
+        throw new Error(`Space reference ${referenceId} was removed and is no longer readable.`);
+      }
+      if (await spaceExternalReferenceStatus(item) === "current") return;
+      await unlinkSpaceExternalReference(referenceId);
+      throw new Error(`Space reference ${referenceId} no longer points to its original source and was removed.`);
+    },
+  };
+  const activeSpaceProcessCleanups = new Set<Promise<void>>();
+  const trackSpaceProcessCleanup = (
+    cleanup: Promise<ProcessRegistryCleanupResult>,
+    referenceId: string,
+  ): void => {
+    let tracked: Promise<void>;
+    tracked = cleanup.then((result) => {
+      if (processCleanupHasUnresolvedStops(result)) {
+        console.error(
+          `[panel-server] Space reference ${referenceId} was revoked but one or more managed processes remain stop_pending`,
+          result.fact,
+        );
+      }
+    }, (error: unknown) => {
+      console.error(`[panel-server] Space reference ${referenceId} process cleanup failed`, error);
+    }).finally(() => {
+      activeSpaceProcessCleanups.delete(tracked);
+    });
+    activeSpaceProcessCleanups.add(tracked);
+  };
+  const spaceProcessLifecycleUnsubscribe = spaceFeature.events.subscribe((event) => {
+    if (event.type !== "space.reference_removed") return;
+    for (const referenceId of event.removedItemIds) {
+      // revokeByReference marks matching records before its first await.
+      trackSpaceProcessCleanup(
+        processRegistry.revokeByReference(referenceId, processTerminator),
+        referenceId,
+      );
+    }
+  });
   const resolveFeatureToolContributions = createHostFeatureAgentToolContributionResolver({
     agentNotes: agentNotesFeature,
     spaces: spaceFeature,
     personalKnowledge: personalKnowledgeFeature,
-    fileMutationCoordinator,
+    revocationOverlay: spaceRevocationOverlay,
+    assertSpaceAvailable: (spaceId) => spaceConversationDeletion.assertAvailable(spaceId),
+    deleteSpace: (spaceId) => spaceConversationDeletion.deleteSpace(spaceId),
+    deleteConversation: (conversationId) => spaceConversationLink.deleteConversation(conversationId),
   });
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
@@ -516,6 +619,14 @@ function assemblePanelRuntime(input: {
         : { routingMode: "keyword", abortSignal: context.abortSignal },
     ),
     resolveFeatureToolContributions,
+    contextAttachmentReadAuthorization,
+    resolveWorkspacePathAuthorization: ({ taskSoil, workspaceRoot }) =>
+      createSpaceRunPathAuthorization({
+        taskSoil,
+        workspaceRoot,
+        revocationOverlay: spaceRevocationOverlay,
+        onInvalidReference: unlinkSpaceExternalReference,
+      }),
     resolveSubAgentRoots: (workspaceRoot) =>
       input.resolveSubAgentRoots?.({ workspaceDirectory: workspaceRoot }) ?? input.subAgentRoots,
   });
@@ -557,6 +668,24 @@ function assemblePanelRuntime(input: {
     }),
     ...(input.ordinaryAgentExecution === undefined ? {} : { testOnlyAllowSessionlessExecution: true }),
   });
+  const spaceConversationDeletion = createSpaceConversationDeletionCoordinator({
+    spaces: spaceFeature,
+    ordinary: ordinaryAgentFeature,
+    personalKnowledge: personalKnowledgeFeature,
+    processes: processRegistry,
+    processTerminator,
+    journal: spaceConversationDeletionJournal,
+    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
+  });
+  const spaceConversationLink = createSpaceConversationLinkCoordinator({
+    spaces: spaceFeature,
+    ordinary: ordinaryAgentFeature,
+    workspaces: { queries: workspaceFeature.queries },
+    processes: processRegistry,
+    processTerminator,
+    journal: spaceConversationLinkJournal,
+    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
+  });
   const projectionChangeUnsubscribers = [
     spaceFeature.events.subscribe((event) => {
       workbenchProjectionChanges.publish(projectionChangeFromSpace(event));
@@ -567,23 +696,10 @@ function assemblePanelRuntime(input: {
     fileMutationCoordinator.events.subscribe(() => {
       workbenchProjectionChanges.publish({ owners: ["mounted_files"] });
     }),
-    ordinaryAgentFeature.events.subscribeStableTerminalRuns((runId) => {
-      // Shell commands bypass the file mutation coordinator. Reconcile only
-      // local files explicitly frozen into this run before refreshing views.
-      spaceFileReconciliation = spaceFileReconciliation.then(async () => {
-        const run = await ordinaryAgentFeature.queries.getRun(runId);
-        if (run !== undefined) {
-          const result = await reconcileMissingRunSpaceFiles(spaceFeature, run.input.taskSoil);
-          for (const failure of result.inspectionFailures) {
-            console.error(`[panel-server] Space file reference ${failure.referenceId} could not be reconciled`, failure.error);
-          }
-        }
-        workbenchProjectionChanges.publish({
-          owners: ["spaces", "mounted_files", "personal_knowledge"],
-        });
-      }).catch((error) => {
-        console.error(`[panel-server] Ordinary run ${runId} Space file reconciliation failed`, error);
-      });
+    ordinaryAgentFeature.events.subscribeStableTerminalRuns(() => {
+      // A terminal run invalidates only the mounted-file projection. Missing Space sources are
+      // reported by the actual preview/tool access and are never discovered by a background scan.
+      workbenchProjectionChanges.publish({ owners: ["mounted_files"] });
     }),
   ];
   const pathMemoryFeature = createPathMemoryFeature({
@@ -633,6 +749,8 @@ function assemblePanelRuntime(input: {
     resolveManagedAttachmentPath,
     agentNotesFeature,
     spaceFeature,
+    spaceConversationLink,
+    spaceConversationDeletion,
     personalKnowledgeFeature,
     workbenchDataMaintenance,
     pathMemoryFeature,
@@ -646,6 +764,8 @@ function assemblePanelRuntime(input: {
     workbenchProjectionChanges,
     releaseWorkbenchProjectionChanges: () => {
       for (const unsubscribe of projectionChangeUnsubscribers.splice(0)) unsubscribe();
+      spaceProcessLifecycleUnsubscribe();
+      spaceRevocationOverlay.dispose();
       workbenchProjectionChanges.release();
     },
     knowledgeAssetRoot,
@@ -653,14 +773,17 @@ function assemblePanelRuntime(input: {
     knowledgeAssetsReady,
     ensureInitialWorkbenchData: () => initialWorkbenchData.ensure(),
     flushSpaceKnowledgeSync: () => spaceKnowledgeSync,
-    flushSpaceFileReconciliation: () => spaceFileReconciliation,
+    flushSpaceProcessCleanup: async () => {
+      while (activeSpaceProcessCleanups.size > 0) {
+        await Promise.all([...activeSpaceProcessCleanups]);
+      }
+    },
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
   let restorePreparation: Promise<void> | undefined;
   beforeWorkbenchRestoreStage = () => restorePreparation ??= (async () => {
     runtime.isQuiescing = true;
     await ordinaryAgentFeature.release();
-    await spaceFileReconciliation;
     await initialWorkbenchData.ensure();
     await personalKnowledgeFeature.release();
     await spaceFeature.release();
@@ -730,12 +853,6 @@ function projectionChangeFromSpace(event: SpaceEvent) {
         owners: ["spaces"] as const,
         spaceIds: [event.spaceId],
         referenceIds: event.removedItemIds,
-      };
-    case "space.reference_status_changed":
-      return {
-        owners: ["spaces"] as const,
-        spaceIds: [event.spaceId],
-        referenceIds: [event.itemId],
       };
   }
 }
@@ -878,7 +995,7 @@ async function prepareOrdinaryRunBirth(
   const [informationAccess, toolConfirmation, baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
     runtime.configCenter.getInformationAccessConfig(),
     runtime.configCenter.getToolConfirmationConfig(),
-    capabilitySnapshotForRun(runtime, input.modelOverride, input.workspaceDirectory),
+    capabilitySnapshotForRun(runtime, input.modelOverride),
     runtime.configCenter.getDesktopAgentConfig(),
   ]);
   const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
@@ -902,7 +1019,7 @@ async function prepareOrdinaryRunBirth(
     agentDefinitionRef,
     capabilitySnapshot,
     agentNoteVersions: noteSnapshot.versions,
-    workspaceSelection: input.workspaceDirectory === undefined ? "default" : "explicit",
+    workspaceSelection: "default",
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
   };
@@ -945,6 +1062,7 @@ function resolveAppUpdateService(options: PanelServerOptions): AppUpdateServiceL
 export async function cleanupPanelRuntimeOwnedProcesses(
   runtime: PanelRuntime
 ): Promise<ProcessRegistryCleanupResult> {
+  await runtime.flushSpaceProcessCleanup();
   return runtime.processRegistry.cleanupOwnedProcesses(runtime.processTerminator);
 }
 
@@ -969,11 +1087,8 @@ async function modelProviderConfigForRun(
 async function capabilitySnapshotForRun(
   runtime: PanelRuntime,
   override: PanelRunInput["modelOverride"],
-  workspaceDirectory: PanelRunInput["workspaceDirectory"]
 ): Promise<import("../../domain/config/index.js").BasicAgentCapabilitySnapshot> {
-  const snapshot = workspaceDirectory === undefined
-    ? await runtime.capabilityCenter.snapshot()
-    : await runtime.capabilityCenter.snapshot({ workspaceDirectory });
+  const snapshot = await runtime.capabilityCenter.snapshot();
   if (override === undefined) {
     return snapshot;
   }

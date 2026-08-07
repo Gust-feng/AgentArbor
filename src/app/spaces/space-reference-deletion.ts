@@ -47,6 +47,7 @@ export type SpaceReferenceDeletionLifecycle = {
   remove(input: {
     readonly rootReferenceId: string;
     readonly removedReferences: readonly SpaceReferenceItem[];
+    readonly ownedAssetIds?: readonly string[];
     readonly nextSnapshot: SpaceTreeSnapshot;
     readonly createdAt: string;
   }): Promise<void>;
@@ -59,6 +60,7 @@ export function createSpaceReferenceDeletionLifecycle(input: {
   readonly leases: SpaceReferenceDeletionLeasePort;
   readonly createDeletionId?: () => string;
   readonly onDiagnostic?: (diagnostic: SpaceReferenceDeletionDiagnostic) => void;
+  readonly deleteOwnedAssets?: (assetIds: readonly string[]) => Promise<void>;
 }): SpaceReferenceDeletionLifecycle {
   const createDeletionId = input.createDeletionId ?? (() => crypto.randomUUID());
 
@@ -90,6 +92,7 @@ export function createSpaceReferenceDeletionLifecycle(input: {
             phase: "prepared",
             rootReferenceId: command.rootReferenceId,
             removedReferences: command.removedReferences,
+            ...(command.ownedAssetIds === undefined ? {} : { ownedAssetIds: command.ownedAssetIds }),
             targets,
             createdAt: command.createdAt,
           };
@@ -117,13 +120,13 @@ export function createSpaceReferenceDeletionLifecycle(input: {
           try {
             await finalizeCommittedDeletion(input, committed);
           } catch (error) { cleanupFailures.push(error); }
-          if (cleanupFailures.length > 0) publishDiagnostic(input.onDiagnostic, {
-            kind: "committed_cleanup_failed",
-            deletionId,
-            error: cleanupFailures.length === 1
+          if (cleanupFailures.length > 0) {
+            const failure = cleanupFailures.length === 1
               ? cleanupFailures[0]
-              : new AggregateError(cleanupFailures, `Committed Space deletion ${deletionId} cleanup did not converge.`),
-          });
+              : new AggregateError(cleanupFailures, `Committed Space deletion ${deletionId} cleanup did not converge.`);
+            publishDiagnostic(input.onDiagnostic, { kind: "committed_cleanup_failed", deletionId, error: failure });
+            throw new SpaceFeatureError("space_deletion_journal_failure", `Committed Space deletion ${deletionId} cleanup did not converge; recovery will retry it.`, { cause: failure });
+          }
         },
       );
     },
@@ -135,6 +138,7 @@ async function recoverDeletion(
     readonly repository: SpaceRepository;
     readonly journal: SpaceReferenceDeletionJournalStore;
     readonly files: SpaceReferenceDeletionFilePort;
+    readonly deleteOwnedAssets?: (assetIds: readonly string[]) => Promise<void>;
   },
   record: SpaceReferenceDeletionJournalRecord,
 ): Promise<void> {
@@ -179,6 +183,7 @@ async function rollbackUncommittedDeletion(
   input: {
     readonly journal: SpaceReferenceDeletionJournalStore;
     readonly files: SpaceReferenceDeletionFilePort;
+    readonly deleteOwnedAssets?: (assetIds: readonly string[]) => Promise<void>;
   },
   record: SpaceReferenceDeletionJournalRecord,
   cause: unknown,
@@ -215,6 +220,7 @@ async function finalizeCommittedDeletion(
   input: {
     readonly journal: SpaceReferenceDeletionJournalStore;
     readonly files: SpaceReferenceDeletionFilePort;
+    readonly deleteOwnedAssets?: (assetIds: readonly string[]) => Promise<void>;
   },
   record: SpaceReferenceDeletionJournalRecord,
 ): Promise<void> {
@@ -227,6 +233,15 @@ async function finalizeCommittedDeletion(
       failures.push(error);
     }
   }
+  const ownedAssetIds = record.ownedAssetIds ?? [];
+  if (ownedAssetIds.length > 0) {
+    try {
+      if (input.deleteOwnedAssets === undefined) throw new Error("Workbench asset deletion is unavailable during Space deletion recovery.");
+      await input.deleteOwnedAssets(ownedAssetIds);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
   if (failures.length > 0) {
     throw new AggregateError(failures, `Committed Space deletion ${record.deletionId} cleanup failed.`);
   }
@@ -235,7 +250,7 @@ async function finalizeCommittedDeletion(
 
 function ownedDeletionItems(items: readonly SpaceReferenceItem[]): readonly SpaceReferenceItem[] {
   const candidates = items.filter((item) =>
-    item.reference.kind === "local_file" || item.reference.kind === "managed_folder"
+    item.reference.kind === "managed_folder"
   ).sort((left, right) => sourcePath(left).length - sourcePath(right).length || sourcePath(left).localeCompare(sourcePath(right)));
   const roots: SpaceReferenceItem[] = [];
   for (const candidate of candidates) {
@@ -248,7 +263,7 @@ function ownedDeletionItems(items: readonly SpaceReferenceItem[]): readonly Spac
 }
 
 function sourcePath(item: SpaceReferenceItem): string {
-  if (item.reference.kind !== "local_file" && item.reference.kind !== "managed_folder") {
+  if (item.reference.kind !== "managed_folder" && item.reference.kind !== "local_file") {
     throw new SpaceFeatureError("space_deletion_recovery_failed", `Reference ${item.id} has no owned source path.`);
   }
   return path.resolve(item.reference.path);

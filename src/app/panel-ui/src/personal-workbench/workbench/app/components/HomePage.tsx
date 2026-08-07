@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { Layers } from 'lucide-react'
 import type { ChatInputProps } from '../../../../contracts/composer'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import { type View } from './Sidebar'
@@ -12,11 +12,14 @@ interface HomePageProps {
   onNavigate: (view: View) => void
   onOpenConversation: (conversationId: string) => boolean | Promise<boolean>
   conversations: readonly ConversationSummary[]
+  spaces?: readonly { readonly spaceId: string; readonly title: string }[]
+  activeSpaceId?: string | null
+  onActiveSpaceChange?: (spaceId: string | null) => void
   input: ChatInputProps
   focusRequest: number
 }
 
-export function HomePage({ input, focusRequest }: HomePageProps) {
+export function HomePage({ input, focusRequest, spaces = [], activeSpaceId = null, onActiveSpaceChange }: HomePageProps) {
   const [ambientCopy] = useState(() => selectHomeAmbientCopy())
   const [compositionBaseValue, setCompositionBaseValue] = useState<string | null>(null)
   const ambientDraftValue = compositionBaseValue ?? input.value
@@ -44,21 +47,19 @@ export function HomePage({ input, focusRequest }: HomePageProps) {
             />
           </div>
 
-          {input.onSelectWorkspaceDirectory !== undefined && (
-            <div className="aa-agent-home__context">
-              <button
-                type="button"
-                className="aa-agent-home__workspace"
-                onClick={input.onSelectWorkspaceDirectory}
-                aria-label={input.selectedWorkspaceDirectory === undefined
-                  ? '选择工作区'
-                  : `切换工作区：${input.selectedWorkspaceDirectory}`}
+          <div className="aa-agent-home__context">
+            <label className="aa-agent-home__space">
+              <Layers size={13} strokeWidth={1.8} aria-hidden="true" />
+              <select
+                aria-label="对话空间"
+                value={activeSpaceId ?? ''}
+                onChange={(event) => onActiveSpaceChange?.(event.target.value || null)}
               >
-                <FolderOpen size={13} strokeWidth={1.8} aria-hidden="true" />
-                <span>{workspaceLabel(input.selectedWorkspaceDirectory)}</span>
-              </button>
-            </div>
-          )}
+                {spaces.length === 0 && <option value="">请选择空间</option>}
+                {spaces.map((space) => <option key={space.spaceId} value={space.spaceId}>{space.title}</option>)}
+              </select>
+            </label>
+          </div>
         </div>
       </section>
     </div>
@@ -127,10 +128,4 @@ function HomeBackdrop() {
       </svg>
     </div>
   )
-}
-
-function workspaceLabel(path: string | undefined): string {
-  if (path === undefined) return '选择工作区'
-  const normalized = path.replace(/[\\/]+$/u, '')
-  return normalized.split(/[\\/]/u).at(-1) || path
 }

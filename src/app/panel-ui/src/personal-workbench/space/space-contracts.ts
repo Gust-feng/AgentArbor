@@ -23,8 +23,6 @@ export type PersonalSpaceItemProjection = {
   readonly openUrl?: string;
   readonly referenceId?: string;
   readonly assetId?: string;
-  /** 省略等价于可用；`unavailable` 表示来源当前找不到,需要提示用户而不是静默照常显示。 */
-  readonly status?: "available" | "unavailable";
   readonly children?: readonly PersonalSpaceItemProjection[];
 };
 
@@ -43,12 +41,6 @@ export type PersonalSpaceActions = {
   readonly addLocalFile?: (spaceId: string) => void | Promise<void>;
   readonly addWorkspaceFolder?: (spaceId: string) => void | Promise<void>;
   readonly addWebReference?: (spaceId: string, title: string, url: string) => void | Promise<void>;
-  readonly addConversation?: (spaceId: string, conversationId: string, title: string) => void | Promise<void>;
-  readonly move?: (
-    sourceSpaceId: string,
-    target: { readonly kind: "reference"; readonly id: string },
-    destinationSpaceId: string,
-  ) => void | Promise<void>;
   readonly rename?: (target: PersonalSpaceRenameTarget, title: string) => void | Promise<void>;
   /** Removes only the Space link and preserves the referenced source. */
   readonly unlinkReference?: (itemId: string) => void | Promise<void>;

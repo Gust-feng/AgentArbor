@@ -235,10 +235,18 @@ export interface ToolSecurityPolicy {
   evaluateToolCall(request: ToolCallRequest, definition: ToolDefinition, context: ToolSecurityEvaluationContext): ToolSecurityDecision;
 }
 
+/** Host-owned product scope carried through neutral tool execution facts. */
+export type ToolExecutionResourceScope = {
+  readonly ownerKind: string;
+  readonly ownerId: string;
+};
+
 export type ToolExecutionContext = {
   readonly callerAgentId: string;
   readonly traceId: string;
   readonly goalId: string;
+  readonly conversationId?: string;
+  readonly resourceScope?: ToolExecutionResourceScope;
   readonly toolCallId?: string;
   readonly approvedConfirmationIds?: readonly string[];
   readonly confirmationPolicy?: ToolConfirmationPolicy;

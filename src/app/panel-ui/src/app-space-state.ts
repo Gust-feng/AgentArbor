@@ -26,12 +26,6 @@ export function useSpaceProjection(enabled = true): {
   readonly addLocalFile: (spaceId: string) => Promise<void>;
   readonly addWorkspaceFolder: (spaceId: string) => Promise<void>;
   readonly addWebReference: (spaceId: string, title: string, url: string) => Promise<void>;
-  readonly addConversation: (spaceId: string, conversationId: string, conversationTitle: string) => Promise<void>;
-  readonly move: (
-    sourceSpaceId: string,
-    target: { readonly kind: "reference"; readonly id: string },
-    destinationSpaceId: string,
-  ) => Promise<void>;
   readonly rename: (target: { readonly kind: "space" | "reference"; readonly id: string }, title: string) => Promise<void>;
   readonly unlinkReference: (itemId: string) => Promise<void>;
   readonly removeReference: (itemId: string) => Promise<void>;
@@ -221,28 +215,6 @@ export function useSpaceProjection(enabled = true): {
     }), [spaceId]);
   }, [runMutation]);
 
-  const addConversation = useCallback(async (
-    spaceId: string,
-    conversationId: string,
-    conversationTitle: string,
-  ): Promise<void> => {
-    await runMutation(`add-conversation:${spaceId}:${conversationId}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
-      title: conversationTitle,
-      reference: { kind: "conversation", conversationId, conversationTitle },
-    }), [spaceId]);
-  }, [runMutation]);
-
-  const move = useCallback(async (
-    sourceSpaceId: string,
-    target: { readonly kind: "reference"; readonly id: string },
-    destinationSpaceId: string,
-  ): Promise<void> => {
-    await runMutation(`move:${target.kind}:${target.id}`, () => postJson(`/api/spaces/${encodeURIComponent(sourceSpaceId)}/move`, {
-      target,
-      destinationSpaceId,
-    }), [sourceSpaceId, destinationSpaceId]);
-  }, [runMutation]);
-
   const rename = useCallback(async (
     target: { readonly kind: "space" | "reference"; readonly id: string },
     title: string,
@@ -273,8 +245,6 @@ export function useSpaceProjection(enabled = true): {
     addLocalFile,
     addWorkspaceFolder,
     addWebReference,
-    addConversation,
-    move,
     rename,
     unlinkReference,
     removeReference,

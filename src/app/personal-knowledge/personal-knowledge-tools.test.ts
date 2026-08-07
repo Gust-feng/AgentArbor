@@ -29,6 +29,7 @@ test("Personal Knowledge tools search, read, create, update, delete and collect 
     await rm(directory, { recursive: true, force: true });
   });
   const tools = new Map(createPersonalKnowledgeTools({ knowledge: feature }).map((tool) => [tool.definition.name, tool]));
+  assert.equal(tools.get("KnowledgeDeleteNote")!.definition.metadata?.requiresConfirmation, true);
 
   const created = await execute(tools.get("KnowledgeCreateNote")!, {
     spaceId: "space-one",

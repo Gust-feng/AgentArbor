@@ -68,7 +68,6 @@ function fixture(initialAttachments: readonly ContextAttachment[]) {
     attachmentUploadAttemptRef: uploadAttemptRef,
     setAttachments: dispatch((next) => { attachments = next; }, () => attachments),
     attachments,
-    setSelectedWorkspaceDirectory: () => undefined,
     selectedModelId: "model-1",
     setComposerSelectedModelId: () => undefined,
     selectComposerModel: async () => undefined,

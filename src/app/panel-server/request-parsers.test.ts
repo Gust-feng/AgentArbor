@@ -77,6 +77,7 @@ test("parseRunInput accepts the canonical Panel payload and rejects missing or i
     aiMode: "openai-responses",
     reasoningEffort: "high",
     modelOverride: { profileId: "openai", model: "gpt-5" },
+    workspaceDirectory: "Z:/retired-conversation-workspace",
     taskSoilInput: {
       contextRefs: [{ ref: "file:notes/context.md", kind: "file" }],
       permissionBoundaryRefs: ["read:file:notes/context.md"],
@@ -84,12 +85,13 @@ test("parseRunInput accepts the canonical Panel payload and rejects missing or i
   }), {
     goal: "inspect the project",
     submissionId: undefined,
+    spaceId: undefined,
+    owner: undefined,
     aiMode: "openai-responses",
     requestedRunMode: undefined,
     reasoningEffort: "high",
     toolConfirmationPolicy: undefined,
     modelOverride: { profileId: "openai", model: "gpt-5" },
-    workspaceDirectory: undefined,
     taskSoilInput: {
       contextRefs: [{ ref: "file:notes/context.md", kind: "file", attachmentId: undefined, title: undefined, summary: undefined, metadata: undefined, readonlyPreview: undefined }],
       permissionBoundaryRefs: ["read:file:notes/context.md"],

@@ -1,11 +1,12 @@
 import { expect, test } from "vitest";
-import type { WorkbenchNavigationInput } from "./workbench-navigation";
+import type { TaskStatus } from "../../contracts/common";
+import type { WorkbenchInitialViewInput, WorkbenchNavigationInput } from "./workbench-navigation";
 import { initialView, requiresImmediateConversationView } from "./workbench-navigation";
 
-function navigationInput(status?: string, pending = false): Pick<WorkbenchNavigationInput, "currentRun" | "pendingConfirmation"> {
+function navigationInput(status?: TaskStatus, pending = false): WorkbenchInitialViewInput {
   return {
     currentRun: {
-      run: status === undefined ? undefined : { status } as never,
+      run: status === undefined ? undefined : { status },
     },
     pendingConfirmation: pending ? {} as NonNullable<WorkbenchNavigationInput["pendingConfirmation"]> : undefined,
   };

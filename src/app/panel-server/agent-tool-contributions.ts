@@ -4,7 +4,7 @@ import {
   type AgentNotesFeature,
   type AgentNoteVersions,
 } from "../agent-notes/index.js";
-import { createSpaceRevocationOverlay, createSpaceToolRegistryContribution, type SpaceFeature } from "../spaces/index.js";
+import { createSpaceRevocationOverlay, createSpaceToolRegistryContribution, type SpaceFeature, type SpaceRevocationOverlay } from "../spaces/index.js";
 import {
   createPersonalKnowledgeToolRegistryContribution,
   type PersonalKnowledgeFeature,
@@ -15,7 +15,6 @@ import type {
   AgentToolRuntimeContext,
 } from "../tool-center/factory.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import type { AgentHostRunResources } from "./agent-run-resources.js";
 
 export type HostFeatureAgentToolContributionResolver = (input: {
@@ -29,13 +28,16 @@ export function createHostFeatureAgentToolContributionResolver(input: {
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
   readonly spaces?: Pick<SpaceFeature, "commands" | "queries" | "events">;
   readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
-  readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly revocationOverlay?: SpaceRevocationOverlay;
+  readonly assertSpaceAvailable?: (spaceId: string) => void;
+  readonly deleteSpace?: (spaceId: string) => Promise<void>;
+  readonly deleteConversation?: (conversationId: string) => Promise<void>;
 }): HostFeatureAgentToolContributionResolver {
   // Shared across runs on purpose: a revocation is permanent, since re-adding a
   // reference mints a new id rather than reviving the revoked one.
-  const revocationOverlay = input.spaces === undefined
+  const revocationOverlay = input.revocationOverlay ?? (input.spaces === undefined
     ? undefined
-    : createSpaceRevocationOverlay(input.spaces.events);
+    : createSpaceRevocationOverlay(input.spaces.events));
   return ({ workspaceRoot, taskSoil, agentNoteVersions }) => [
     ...(input.agentNotes === undefined
       ? []
@@ -50,8 +52,10 @@ export function createHostFeatureAgentToolContributionResolver(input: {
           spaces: input.spaces,
           workspaceRoot,
           taskSoil,
-          mutationCoordinator: input.fileMutationCoordinator,
           revocationOverlay,
+          assertSpaceAvailable: input.assertSpaceAvailable,
+          deleteSpace: input.deleteSpace,
+          deleteConversation: input.deleteConversation,
         })]),
     ...(input.personalKnowledge === undefined
       ? []
@@ -62,7 +66,7 @@ export function createHostFeatureAgentToolContributionResolver(input: {
 /** Feature contributions selected by the application Host for every Agent run. */
 export function createHostAgentToolContributions(input: {
   readonly runtime: AgentToolRuntimeContext;
-  readonly resources: AgentHostRunResources;
+  readonly resources: Pick<AgentHostRunResources, "aiEnvironment" | "workspaceRoot">;
   readonly providerFetch?: AgentToolProviderFetch;
   readonly featureContributions?: readonly AgentToolRegistryContribution[];
 }): readonly AgentToolRegistryContribution[] {

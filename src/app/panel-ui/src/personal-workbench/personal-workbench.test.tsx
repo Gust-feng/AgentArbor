@@ -671,42 +671,35 @@ test("routes Space rename, unlink, and physical deletion through distinct action
   expect(rename).toHaveBeenCalledWith({ kind: "reference", id: "reference-material" }, "阅读摘录.md");
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
-  await user.click(screen.getByRole("button", { name: "取消链接" }));
+  await user.click(screen.getByRole("button", { name: "移除引用" }));
   expect(unlinkReference).toHaveBeenCalledWith("reference-material");
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
-  await user.click(screen.getByRole("button", { name: "删除文件" }));
-  expect(screen.getByRole("alertdialog", { name: "删除“阅读摘要.md”" })).toBeTruthy();
-  expect(removeReference).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "删除文件" }));
-  expect(removeReference).toHaveBeenCalledWith("reference-material");
+  expect(screen.queryByRole("button", { name: "删除文件" })).toBeNull();
 
   await user.click(screen.getByRole("button", { name: "项目目录操作" }));
-  expect(screen.getByRole("button", { name: "取消链接" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "移除引用" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "删除文件夹" })).toBeNull();
-  await user.click(screen.getByRole("button", { name: "取消链接" }));
+  await user.click(screen.getByRole("button", { name: "移除引用" }));
   expect(unlinkReference).toHaveBeenCalledWith("workspace-reference");
 
   await user.click(screen.getByRole("button", { name: "资料组操作" }));
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
   expect(screen.getByRole("alertdialog", { name: "删除“资料组”及其所有子项" })).toBeTruthy();
-  expect(removeReference).toHaveBeenCalledTimes(1);
+  expect(removeReference).toHaveBeenCalledTimes(0);
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
   expect(removeReference).toHaveBeenCalledWith("reference-group");
 });
 
-test("deletes app-owned folders and creates files from a linked workspace folder", async () => {
+test("deletes app-owned folders but keeps linked workspace folders read-only", async () => {
   const user = userEvent.setup();
   const removeReference = vi.fn().mockResolvedValue(undefined);
+  const unlinkReference = vi.fn().mockResolvedValue(undefined);
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === "POST" && url.endsWith("/references/managed-folder/entry")) {
       expect(JSON.parse(String(init.body))).toEqual({ parentRelativePath: "", name: "internal-note.md", kind: "file" });
       return jsonResponse({ entry: { relativePath: "internal-note.md" } });
-    }
-    if (init?.method === "POST" && url.endsWith("/references/folder-reference/entry")) {
-      expect(JSON.parse(String(init.body))).toEqual({ parentRelativePath: "", name: "new-note.md", kind: "file" });
-      return jsonResponse({ entry: { relativePath: "new-note.md" } });
     }
     if (url.includes("/references/managed-folder/preview?path=internal-note.md")) {
       return jsonResponse({ preview: {
@@ -718,20 +711,6 @@ test("deletes app-owned folders and creates files from a linked workspace folder
         presentation: { kind: "markdown", editable: true, sourceMode: true },
         content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
       } });
-    }
-    if (url.includes("/references/folder-reference/preview?path=new-note.md")) {
-      return jsonResponse({ preview: {
-        itemId: "folder-reference",
-        title: "项目文件",
-        sourceKind: "workspace_folder",
-        source: "C:/project/new-note.md",
-        status: "ready",
-        presentation: { kind: "markdown", editable: true, sourceMode: true },
-        content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
-      } });
-    }
-    if (url.endsWith("/references/folder-reference/preview")) {
-      return jsonResponse({ preview: directoryPreview("", [{ name: "new-note.md", relativePath: "new-note.md", kind: "file" }]) });
     }
     if (url.endsWith("/references/managed-folder/preview")) {
       return jsonResponse({ preview: {
@@ -753,10 +732,16 @@ test("deletes app-owned folders and creates files from a linked workspace folder
         { itemId: "folder-reference", title: "项目文件", kind: "workspace_folder", referenceId: "folder-reference" },
       ],
     }],
-    spaceActions: { removeReference },
+    spaceActions: { removeReference, unlinkReference },
   });
 
   await user.click(screen.getByRole("button", { name: "项目空间" }));
+  // 外部 Workspace 是只读数据源：根项只能移除当前 Space 的引用。
+  await user.click(await screen.findByRole("button", { name: "项目文件操作" }));
+  expect(screen.queryByRole("button", { name: "新建文件" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "重命名" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "删除文件夹" })).toBeNull();
+
   await user.click(await screen.findByRole("button", { name: "软件资料操作" }));
   await user.click(screen.getByRole("button", { name: "新建文件" }));
   await user.type(screen.getByRole("textbox", { name: "文件名称" }), "internal-note.md{Enter}");
@@ -772,13 +757,6 @@ test("deletes app-owned folders and creates files from a linked workspace folder
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
   expect(removeReference).toHaveBeenCalledWith("managed-folder");
 
-  await user.click(screen.getByRole("button", { name: "项目文件操作" }));
-  await user.click(screen.getByRole("button", { name: "新建文件" }));
-  await user.type(screen.getByRole("textbox", { name: "文件名称" }), "new-note.md{Enter}");
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-    "/api/spaces/references/folder-reference/entry",
-    expect.objectContaining({ method: "POST" }),
-  ));
 });
 
 test("routes the workbench material add menu through Space actions", async () => {
@@ -786,11 +764,10 @@ test("routes the workbench material add menu through Space actions", async () =>
   const createManagedFolder = vi.fn().mockResolvedValue(undefined);
   const addLocalFile = vi.fn().mockResolvedValue(undefined);
   const addWorkspaceFolder = vi.fn().mockResolvedValue(undefined);
-  const addConversation = vi.fn().mockResolvedValue(undefined);
   renderWorkbench({
     conversation: { conversationId: "conversation-current", title: "当前对话", turns: [] },
     spaces: [{ spaceId: "space-reading", title: "阅读资料", items: [] }],
-    spaceActions: { createManagedFolder, addLocalFile, addWorkspaceFolder, addConversation },
+    spaceActions: { createManagedFolder, addLocalFile, addWorkspaceFolder },
   });
 
   await user.click(screen.getByRole("button", { name: "阅读资料" }));
@@ -807,10 +784,8 @@ test("routes the workbench material add menu through Space actions", async () =>
   await user.click(screen.getByRole("button", { name: "添加资料" }));
   await user.click(screen.getByRole("button", { name: "添加工作区文件夹" }));
   expect(addWorkspaceFolder).toHaveBeenCalledWith("space-reading");
-
   await user.click(screen.getByRole("button", { name: "添加资料" }));
-  await user.click(screen.getByRole("button", { name: "加入当前对话" }));
-  expect(addConversation).toHaveBeenCalledWith("space-reading", "conversation-current", "当前对话");
+  expect(screen.queryByRole("button", { name: "加入当前对话" })).toBeNull();
 });
 
 test("opens a Search result in the Space that owns the reference", async () => {

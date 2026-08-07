@@ -164,7 +164,7 @@ function completedRun(
 
 function control(run: OrdinaryRunState): OrdinaryConversationControlDocument {
   return {
-    schemaVersion: "ordinary-conversation/v2",
+    schemaVersion: "ordinary-conversation/v3",
     revision: 1,
     savedAt: run.timestamps.updatedAt,
     state: {

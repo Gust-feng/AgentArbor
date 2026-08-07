@@ -54,7 +54,7 @@ export type PersonalWorkbenchProps = {
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<CurrentRunProjection["workView"]>["pendingConfirmation"];
   readonly confirmationBusy: boolean;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
-  readonly onStartNewConversation: () => Promise<boolean>;
+  readonly onStartNewConversation: (spaceId?: string) => Promise<boolean>;
   readonly onOpenConversation: (conversationId: string) => boolean | Promise<boolean>;
   readonly pendingConversationIds?: ReadonlySet<string>;
   readonly onRenameConversation: (conversationId: string, title: string) => void | Promise<void>;
@@ -215,7 +215,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
     placeholder: "想从哪里开始？",
     onSubmit: () => {
       if (props.inputProps.value.trim().length === 0) return;
-      void props.onStartNewConversation().then((started) => {
+      void props.onStartNewConversation(activeSpaceId ?? undefined).then((started) => {
         if (observedViewRef.current !== "home") return;
         if (started) {
           setView("conv-active");
@@ -224,7 +224,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
         }
       });
     },
-  }), [props.inputProps, props.onStartNewConversation]);
+  }), [activeSpaceId, props.inputProps, props.onStartNewConversation]);
 
   const conversationInput = useMemo<ChatInputProps>(() => ({
     ...props.inputProps,
@@ -315,6 +315,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
                     brainSelectedId,
                     spaceTargetId,
                     activeSpaceId,
+                    onActiveSpaceChange: setActiveSpaceId,
                     conversationMode,
                     onBrainSelect: setBrainSelectedId,
                     navigate,
@@ -389,6 +390,7 @@ function renderView(input: {
   readonly brainSelectedId: string | null;
   readonly spaceTargetId: string | null;
   readonly activeSpaceId: string | null;
+  readonly onActiveSpaceChange: (spaceId: string | null) => void;
   readonly conversationMode: ConversationMode;
   readonly onBrainSelect: (id: string | null) => void;
   readonly navigate: (view: View) => void;
@@ -400,6 +402,9 @@ function renderView(input: {
       onNavigate={input.navigate}
       onOpenConversation={input.props.onOpenConversation}
       conversations={input.props.conversations}
+      spaces={input.props.spaces ?? []}
+      activeSpaceId={input.activeSpaceId}
+      onActiveSpaceChange={input.onActiveSpaceChange}
       input={input.homeInput}
       focusRequest={input.homeFocusRequest}
     />;

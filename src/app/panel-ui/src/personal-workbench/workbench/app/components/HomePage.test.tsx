@@ -15,16 +15,12 @@ test('presents one stable ambient line with the quiet task entry', () => {
   const now = new Date(2026, 7, 3, 1, 30)
   vi.useFakeTimers()
   vi.setSystemTime(now)
-  const onSelectWorkspaceDirectory = vi.fn()
   render(
     <HomePage
       onNavigate={vi.fn()}
       onOpenConversation={() => true}
       conversations={[]}
-      input={inputProps({
-        selectedWorkspaceDirectory: 'Z:\\AgentArbor',
-        onSelectWorkspaceDirectory,
-      })}
+      input={inputProps()}
       focusRequest={0}
     />,
   )
@@ -33,7 +29,7 @@ test('presents one stable ambient line with the quiet task entry', () => {
   const copy = selectHomeAmbientCopy(now)
   expect(screen.getByLabelText(`${copy.lead}${copy.idleTail}`)).toBeTruthy()
   expect(screen.getByPlaceholderText('想从哪里开始？')).toBeTruthy()
-  expect(screen.getByRole('button', { name: '切换工作区：Z:\\AgentArbor' }).textContent).toContain('AgentArbor')
+  expect(screen.queryByRole('button', { name: /工作区/u })).toBeNull()
   expect(screen.queryByRole('heading')).toBeNull()
   expect(screen.queryByLabelText('AgentArbor Agent')).toBeNull()
 })

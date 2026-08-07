@@ -20,8 +20,8 @@ export interface BrainPage {
     title: string
     sourceLabel: string
     contentKind: 'file' | 'directory'
-    sourceReferenceId: string
-    sourceRelativePath: string
+    sourceReferenceId?: string
+    sourceRelativePath?: string
   }
 }
 

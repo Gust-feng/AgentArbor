@@ -83,4 +83,8 @@ test("Workbench asset repository atomically updates editable text using the expe
     expectedFingerprint: "irrelevant",
     text: "不存在",
   }), { status: "not_found" });
+
+  await repository.removeMany([markdown.id, markdown.id, "missing"]);
+  assert.equal(await repository.get(markdown.id), undefined);
+  assert.notEqual(await repository.get(code.id), undefined);
 });

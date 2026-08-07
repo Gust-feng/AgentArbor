@@ -25,8 +25,6 @@ export type ConversationFollowUpMode = "guide" | "queue";
 
 type AttachmentInputProps = {
   readonly attachments: readonly ContextAttachment[];
-  readonly selectedWorkspaceDirectory?: string;
-  readonly onSelectWorkspaceDirectory?: () => void;
   readonly onSelectAttachment: () => void;
   readonly onUploadAttachmentFiles?: (files: readonly File[]) => void | Promise<void>;
   readonly onRemoveAttachment: (attachmentId: string) => void;

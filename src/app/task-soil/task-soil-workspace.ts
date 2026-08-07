@@ -1,4 +1,5 @@
 import { asRecord } from "../../kernel/values/index.js";
+import path from "node:path";
 import type { Constraint } from "../../domain/constraints.js";
 import { createTaskSoil, type ReadonlySoilStore, type TaskSoil, type TaskSoilContextRef } from "../../domain/soil/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/contracts.js";
@@ -12,6 +13,13 @@ const MAX_PREVIEW_LENGTH = 640;
 export type DesktopTaskSoilContextRefInput = {
   readonly attachmentId?: string;
   readonly ref: string;
+  /**
+   * Server-side only. parseContextRef never reads this off request input, so a client
+   * cannot grant itself path visibility; the host derives it from an explicit read permission.
+   */
+  readonly pathGranted?: boolean;
+  /** Server-side only and ignored by request parsing, like pathGranted. */
+  readonly sourceIdentity?: string;
   readonly kind: "workspace" | "file" | "project" | "web";
   readonly title?: string;
   readonly summary?: string;
@@ -94,6 +102,7 @@ function createDesktopTaskSoilContextRefs(input: {
   readonly taskSoilInput?: DesktopTaskSoilInput;
 }): readonly TaskSoilContextRef[] {
   const supplied = input.taskSoilInput?.contextRefs ?? [];
+  const permissionRefs = input.taskSoilInput?.permissionBoundaryRefs ?? [];
   return [
     {
       ref: `goal:${input.goalId}`,
@@ -108,6 +117,15 @@ function createDesktopTaskSoilContextRefs(input: {
     ...supplied.map((ref) => ({
       attachmentId: ref.attachmentId,
       ref: ref.ref,
+      // System-selected local paths arrive with an exact read permission, but the
+      // browser client is not allowed to set `pathGranted` itself. Derive the
+      // model-visible path fact from the server-side permission boundary here.
+      pathGranted: hasLocalPathPermission(ref, permissionRefs)
+        ? true
+        : undefined,
+      sourceIdentity: hasLocalPathPermission(ref, permissionRefs)
+        ? ref.sourceIdentity
+        : undefined,
       kind: ref.kind,
       title: ref.title === undefined ? undefined : safeText(ref.title, 120),
       summary: ref.summary === undefined ? undefined : safeText(ref.summary, MAX_SUMMARY_LENGTH),
@@ -124,6 +142,32 @@ function createDesktopTaskSoilContextRefs(input: {
             },
     })),
   ];
+}
+
+function hasLocalPathPermission(
+  ref: DesktopTaskSoilContextRefInput,
+  permissionRefs: readonly string[],
+): boolean {
+  const prefix = ref.kind === "file" && ref.ref.toLowerCase().startsWith("local-file:")
+    ? "local-file"
+    : ref.kind === "project" && ref.ref.toLowerCase().startsWith("local-project:")
+      ? "local-project"
+      : undefined;
+  if (prefix === undefined) return false;
+  const rawPath = ref.ref.slice(`${prefix}:`.length);
+  if (!path.isAbsolute(rawPath)) return false;
+  const canonicalPath = comparableAbsolutePath(rawPath);
+  return permissionRefs.some((permission) => {
+    const permissionPrefix = `read:${prefix}:`;
+    if (!permission.startsWith(permissionPrefix)) return false;
+    const permissionPath = permission.slice(permissionPrefix.length);
+    return path.isAbsolute(permissionPath) && comparableAbsolutePath(permissionPath) === canonicalPath;
+  });
+}
+
+function comparableAbsolutePath(value: string): string {
+  const normalized = path.resolve(value);
+  return process.platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
 }
 
 function createDesktopPermissionRefs(

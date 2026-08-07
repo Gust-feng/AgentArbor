@@ -132,6 +132,46 @@ test("Desktop Agent rejects an image ref that becomes unreadable before model pr
   }
 });
 
+test("Desktop Agent rechecks live attachment authorization before reading a local image", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-revoked-"));
+  const imagePath = path.join(root, "replaced.png");
+  await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the image",
+      contextRefs: [{
+        attachmentId: "space-reference:reference-1",
+        ref: `local-file:${imagePath}`,
+        kind: "file",
+        metadata: { mimeType: "image/png" },
+      }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+    const checked: string[] = [];
+
+    await assert.rejects(
+      attachDesktopFileInputsToModelMessages({
+        messages: [{ role: "user", content: "Describe the image." }],
+        taskSoil,
+        modelCapabilities: VISION_CAPABILITIES,
+        workspaceRoot: root,
+        readAuthorization: {
+          assertReadAllowed(attachmentId) {
+            checked.push(attachmentId);
+            throw new Error("the Space reference no longer points to its original source");
+          },
+        },
+      }),
+      (error: unknown) => error instanceof CodedExecutionError &&
+        error.code === "model_input_attachment_unavailable" &&
+        error.message.includes("no longer points to its original source"),
+    );
+    assert.deepEqual(checked, ["space-reference:reference-1"]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test("Desktop Agent resolves authorized managed images without persisting their storage path", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-managed-image-"));
   const imagePath = path.join(root, "content");

@@ -13,6 +13,10 @@ export type ProcessKind = "background" | "foreground";
 
 export type ProcessLifetime = "run" | "workspace_session";
 
+export type ProcessAuthorizationMode = "confirm_each" | "full_access";
+
+export type ProcessPermissionState = "active" | "revoked" | "stop_pending" | "stopped";
+
 export type ProcessPortFact = {
   readonly port: number;
   readonly host: LocalPortHost;
@@ -62,8 +66,13 @@ export type ProcessFact = ProcessKillTreeFact | ProcessCommandLogLimitFact;
 
 export type ProcessRecord = {
   readonly processId: string;
+  readonly conversationId?: string;
+  readonly spaceId?: string;
+  readonly referenceId?: string;
   readonly runId?: string;
   readonly toolCallId?: string;
+  readonly authorizationMode?: ProcessAuthorizationMode;
+  readonly permissionState?: ProcessPermissionState;
   readonly pid?: number;
   readonly kind: ProcessKind;
   readonly lifetime: ProcessLifetime;
@@ -116,9 +125,15 @@ export type ProcessCleanupAttempt = {
   readonly killTree: ProcessKillTreeResult;
 };
 
-export type ProcessCleanupReason = "run_release" | "cancel" | "shutdown";
+export type ProcessCleanupReason =
+  | "run_release"
+  | "cancel"
+  | "shutdown"
+  | "reference_revoked"
+  | "space_deleted"
+  | "conversation_deleted";
 
-export type ProcessCleanupScope = "run" | "registry";
+export type ProcessCleanupScope = "run" | "registry" | "reference" | "space" | "conversation";
 
 export type ProcessCleanupFact = {
   readonly kind: "process_cleanup";
@@ -126,6 +141,9 @@ export type ProcessCleanupFact = {
   readonly scope: ProcessCleanupScope;
   readonly reason: ProcessCleanupReason;
   readonly runId?: string;
+  readonly conversationId?: string;
+  readonly spaceId?: string;
+  readonly referenceId?: string;
   readonly attempted: readonly ProcessCleanupAttempt[];
   readonly skipped: readonly ProcessCleanupSkip[];
 };
@@ -169,12 +187,22 @@ export type ProcessRegistryCleanupResult = {
   readonly fact: ProcessCleanupFact;
 };
 
+export function processCleanupHasUnresolvedStops(result: ProcessRegistryCleanupResult): boolean {
+  return result.attempted.some((attempt) => attempt.outcome === "unknown" || attempt.outcome === "error") ||
+    result.skipped.some((skip) => skip.reason !== "inactive_status");
+}
+
 export type ProcessStatusCounts = Readonly<Record<ProcessStatus, number>>;
 
 export type ProcessRunProcessSummary = {
   readonly processId: string;
+  readonly conversationId?: string;
+  readonly spaceId?: string;
+  readonly referenceId?: string;
   readonly runId?: string;
   readonly toolCallId?: string;
+  readonly authorizationMode?: ProcessAuthorizationMode;
+  readonly permissionState?: ProcessPermissionState;
   readonly pid?: number;
   readonly kind: ProcessKind;
   readonly lifetime: ProcessLifetime;
@@ -310,6 +338,7 @@ export class InMemoryProcessRegistry {
   markExited(processId: string, input: MarkProcessExitedInput = {}): ProcessRecord | undefined {
     return this.update(processId, {
       status: "exited",
+      permissionState: "stopped",
       endedAt: input.exitedAt ?? this.now(),
       exitCode: input.exitCode,
       signal: input.signal,
@@ -367,6 +396,46 @@ export class InMemoryProcessRegistry {
       summary: this.summarizeRun(runId),
       fact: cleanup.fact,
     };
+  }
+
+  /** Revokes a removed reference before the first asynchronous stop attempt. */
+  async revokeByReference(
+    referenceId: string,
+    terminator: ProcessTerminator,
+  ): Promise<ProcessRegistryCleanupResult> {
+    return await this.cleanupResourceRecords({
+      scope: "reference",
+      reason: "reference_revoked",
+      referenceId,
+      records: Array.from(this.records.values()).filter((record) => record.referenceId === referenceId),
+      terminator,
+    });
+  }
+
+  async cleanupBySpace(
+    spaceId: string,
+    terminator: ProcessTerminator,
+  ): Promise<ProcessRegistryCleanupResult> {
+    return await this.cleanupResourceRecords({
+      scope: "space",
+      reason: "space_deleted",
+      spaceId,
+      records: Array.from(this.records.values()).filter((record) => record.spaceId === spaceId),
+      terminator,
+    });
+  }
+
+  async cleanupByConversation(
+    conversationId: string,
+    terminator: ProcessTerminator,
+  ): Promise<ProcessRegistryCleanupResult> {
+    return await this.cleanupResourceRecords({
+      scope: "conversation",
+      reason: "conversation_deleted",
+      conversationId,
+      records: Array.from(this.records.values()).filter((record) => record.conversationId === conversationId),
+      terminator,
+    });
   }
 
   async cleanupOwnedBackgroundProcesses(
@@ -442,9 +511,64 @@ export class InMemoryProcessRegistry {
     };
   }
 
+  private async cleanupResourceRecords(input: {
+    readonly scope: "reference" | "space" | "conversation";
+    readonly reason: "reference_revoked" | "space_deleted" | "conversation_deleted";
+    readonly conversationId?: string;
+    readonly spaceId?: string;
+    readonly referenceId?: string;
+    readonly records: readonly ProcessRecord[];
+    readonly terminator: ProcessTerminator;
+  }): Promise<ProcessRegistryCleanupResult> {
+    // This loop intentionally runs before the first await. Once the owning
+    // resource is removed, managed process records must stop advertising an
+    // active permission even while OS termination is still in progress.
+    for (const record of input.records) {
+      this.update(record.processId, {
+        permissionState: isTerminalStatus(record.status) ? "stopped" : "revoked",
+      });
+    }
+
+    const cleanup = await this.cleanupMatchingRecords({
+      scope: input.scope,
+      reason: input.reason,
+      conversationId: input.conversationId,
+      spaceId: input.spaceId,
+      referenceId: input.referenceId,
+      records: input.records,
+      terminator: input.terminator,
+      includeUnowned: false,
+      statuses: UNRESOLVED_PROCESS_STATUSES,
+    });
+    for (const attempt of cleanup.attempted) {
+      this.update(attempt.processId, {
+        permissionState: attempt.outcome === "killed" || attempt.outcome === "already-exited"
+          ? "stopped"
+          : "stop_pending",
+      });
+    }
+    for (const skipped of cleanup.skipped) {
+      this.update(skipped.processId, {
+        permissionState: skipped.reason === "inactive_status" ? "stopped" : "stop_pending",
+      });
+    }
+
+    return {
+      kind: "process_registry_cleanup",
+      reason: cleanup.fact.reason,
+      observedAt: cleanup.fact.observedAt,
+      attempted: cleanup.attempted,
+      skipped: cleanup.skipped,
+      fact: cleanup.fact,
+    };
+  }
+
   private async cleanupMatchingRecords(input: {
     readonly scope: ProcessCleanupScope;
     readonly runId?: string;
+    readonly conversationId?: string;
+    readonly spaceId?: string;
+    readonly referenceId?: string;
     readonly reason: ProcessCleanupReason;
     readonly records: readonly ProcessRecord[];
     readonly terminator: ProcessTerminator;
@@ -486,6 +610,9 @@ export class InMemoryProcessRegistry {
     };
     const cleanupFact = withDefinedOptionals(cleanupBase, {
       runId: input.runId,
+      conversationId: input.conversationId,
+      spaceId: input.spaceId,
+      referenceId: input.referenceId,
     });
     this.cleanupFacts.push(cloneCleanupFact(cleanupFact));
     return {
@@ -520,6 +647,11 @@ export class InMemoryProcessRegistry {
     const next: ProcessRecord = {
       ...latest,
       status: nextStatus,
+      permissionState: isTerminalStatus(nextStatus)
+        ? "stopped"
+        : latest.permissionState === "revoked" || latest.permissionState === "stop_pending"
+          ? "stop_pending"
+          : latest.permissionState,
       endedAt: isTerminalStatus(nextStatus) ? latest.endedAt ?? observedAt : latest.endedAt,
       exitCode: killTree.exitCode ?? latest.exitCode,
       signal: killTree.signal ?? latest.signal,
@@ -678,6 +810,9 @@ function cloneCleanupFact(fact: ProcessCleanupFact): ProcessCleanupFact {
   };
   return withDefinedOptionals(clone, {
     runId: fact.runId,
+    conversationId: fact.conversationId,
+    spaceId: fact.spaceId,
+    referenceId: fact.referenceId,
   });
 }
 
@@ -708,8 +843,13 @@ function cloneRunProcessSummary(summary: ProcessRunProcessSummary): ProcessRunPr
     factCount: summary.factCount,
   };
   return withDefinedOptionals(clone, {
+    conversationId: summary.conversationId,
+    spaceId: summary.spaceId,
+    referenceId: summary.referenceId,
     runId: summary.runId,
     toolCallId: summary.toolCallId,
+    authorizationMode: summary.authorizationMode,
+    permissionState: summary.permissionState,
     pid: summary.pid,
     endedAt: summary.endedAt,
     exitCode: summary.exitCode,
@@ -745,8 +885,13 @@ function processRunProcessSummary(record: ProcessRecord): ProcessRunProcessSumma
   const latestFact = record.facts.at(-1);
   const summary: ProcessRunProcessSummary = {
     processId: record.processId,
+    conversationId: record.conversationId,
+    spaceId: record.spaceId,
+    referenceId: record.referenceId,
     runId: record.runId,
     toolCallId: record.toolCallId,
+    authorizationMode: record.authorizationMode,
+    permissionState: record.permissionState,
     pid: record.pid,
     kind: record.kind,
     lifetime: record.lifetime,

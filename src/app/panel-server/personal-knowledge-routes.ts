@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 
 import type { DocumentTextUpdateInput, PersonalNoteRevision } from "../panel-api-contracts.js";
-import { PersonalKnowledgeError, type PersonalKnowledgeCommand } from "../personal-knowledge/index.js";
+import { PersonalKnowledgeError } from "../personal-knowledge/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { managedKnowledgeDocumentTarget } from "./knowledge-asset-store.js";
@@ -185,11 +185,9 @@ export async function handlePanelPersonalKnowledgeRoute(
     return true;
   }
   if (url.pathname === "/api/personal-knowledge/commands" && request.method === "POST") {
-    const command = parse(commandSchema, await readJsonBody(request)) as PersonalKnowledgeCommand;
+    const command = parse(commandSchema, await readJsonBody(request));
     if (command.type === "knowledge.uncollect") await feature.commands.uncollect(command.refId);
-    else await feature.commands.execute(command as Exclude<PersonalKnowledgeCommand, {
-      readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" | "knowledge.uncollect";
-    }>);
+    else await feature.commands.execute(command);
     writeJson(response, 200, { ok: true });
     return true;
   }

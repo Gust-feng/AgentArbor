@@ -69,6 +69,7 @@ export function createReadContextAttachmentImageTool(
         requireFile: true,
         projectPathRequired: true,
         resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment image target could not be read.");
       const detail = imageDetailFromUnknown(record.detail);

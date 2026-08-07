@@ -625,7 +625,6 @@ function sidebarController(
     mutationConversationIdsRef,
     setMutationConversationIds: dispatch(writePending),
     resetChat,
-    setSelectedWorkspaceDirectory: () => undefined,
     setInputCloseSignal: () => undefined,
     setGoal: () => undefined,
     setAttachments: () => undefined,

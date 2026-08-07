@@ -163,6 +163,8 @@ test("managed attachment submission rejects IDs from another instance or convers
     testOnlySkipInitialWorkbenchData: true,
   });
   try {
+    const sourceSpaceId = await createSpaceId(sourceServer.url, "来源空间");
+    const targetSpaceId = await createSpaceId(targetServer.url, "目标空间");
     const foreignUpload = requireManagedUpload((await uploadAttachment(sourceServer.url, {
       filename: "foreign.txt",
       contentType: "text/plain",
@@ -170,7 +172,7 @@ test("managed attachment submission rejects IDs from another instance or convers
     })).body);
     const foreignSubmission = await requestJson(targetServer.url, "/api/conversations", {
       method: "POST",
-      body: submissionRequest("foreign attachment", "foreign-attachment-submission", foreignUpload),
+      body: submissionRequest("foreign attachment", "foreign-attachment-submission", foreignUpload, targetSpaceId),
     });
 
     const ownedUpload = requireManagedUpload((await uploadAttachment(sourceServer.url, {
@@ -180,11 +182,11 @@ test("managed attachment submission rejects IDs from another instance or convers
     })).body);
     const firstOwner = await requestJson(sourceServer.url, "/api/conversations", {
       method: "POST",
-      body: submissionRequest("claim attachment", "claim-attachment-submission", ownedUpload),
+      body: submissionRequest("claim attachment", "claim-attachment-submission", ownedUpload, sourceSpaceId),
     });
     const conflictingOwner = await requestJson(sourceServer.url, "/api/conversations", {
       method: "POST",
-      body: submissionRequest("reuse attachment", "reuse-attachment-submission", ownedUpload),
+      body: submissionRequest("reuse attachment", "reuse-attachment-submission", ownedUpload, sourceSpaceId),
     });
 
     assertManagedAttachmentConflict(foreignSubmission);
@@ -219,7 +221,8 @@ test("identical managed attachment retries with one submissionId return the same
       contentType: "text/plain",
       body: Buffer.from("retry once", "utf8"),
     })).body);
-    const body = submissionRequest("submit exactly once", "managed-idempotent-submission", attachment);
+    const spaceId = await createSpaceId(server.url, "幂等空间");
+    const body = submissionRequest("submit exactly once", "managed-idempotent-submission", attachment, spaceId);
 
     const first = await requestJson(server.url, "/api/conversations", { method: "POST", body });
     const retried = await requestJson(server.url, "/api/conversations", { method: "POST", body });
@@ -251,9 +254,10 @@ test("conversation-owned managed media remains readable after restart", async ()
       body: ONE_PIXEL_PNG,
     })).body);
     assert.ok(attachment.mediaPreviewUrl !== undefined);
+    const spaceId = await createSpaceId(server.url, "重启空间");
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: submissionRequest("persist media", "managed-media-restart", attachment),
+      body: submissionRequest("persist media", "managed-media-restart", attachment, spaceId),
     });
     assert.equal(submitted.status, 202);
     await waitForRunStatus(server.url, submitted.body.run.runId, "completed");
@@ -288,10 +292,11 @@ type JsonResponse = {
   readonly body: unknown;
 };
 
-function submissionRequest(goal: string, submissionId: string, attachment: ManagedUpload) {
+function submissionRequest(goal: string, submissionId: string, attachment: ManagedUpload, spaceId: string) {
   return {
     goal,
     submissionId,
+    spaceId,
     taskSoilInput: {
       contextRefs: [{
         attachmentId: attachment.attachmentId,
@@ -301,6 +306,13 @@ function submissionRequest(goal: string, submissionId: string, attachment: Manag
       permissionBoundaryRefs: attachment.permissionRefs,
     },
   };
+}
+
+async function createSpaceId(baseUrl: string, title: string): Promise<string> {
+  const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title } });
+  assert.equal(created.status, 201);
+  const space = (created.body as { readonly space: { readonly id: string } }).space;
+  return space.id;
 }
 
 function requireManagedUpload(body: unknown): ManagedUpload {

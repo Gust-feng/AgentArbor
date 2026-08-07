@@ -1,4 +1,4 @@
-import type { ReadonlySoilStore } from "../../domain/soil/index.js";
+import type { ReadonlySoilStore, TaskSoil } from "../../domain/soil/index.js";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv, Session } from "@earendil-works/pi-agent-core";
 import {
@@ -44,6 +44,8 @@ import {
 } from "../sub-agents/sub-agent-agent-tools.js";
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
 import type { SubAgentRootInput } from "../sub-agents/sub-agent-loader.js";
+import type { ContextAttachmentReadAuthorization } from "../tool-center/adapters/context-attachment-access.js";
+import type { LocalWorkspacePathAuthorization } from "../tool-center/adapters/local-workspace-common.js";
 import { attachDesktopFileInputsToModelMessages } from "../task-soil/desktop-agent-model-input-files.js";
 import { createTaskSoilFromDesktopInput } from "../task-soil/task-soil-workspace.js";
 import {
@@ -86,6 +88,11 @@ export type CreateOrdinaryAgentRunResourceAcquirerInput = {
   readonly resolveSkillContexts?: OrdinaryAgentSkillContextResolver;
   readonly resolveFeatureToolContributions?: HostFeatureAgentToolContributionResolver;
   readonly resolveSubAgentRoots: (workspaceRoot: string) => readonly SubAgentRootInput[];
+  readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
+  readonly resolveWorkspacePathAuthorization?: (input: {
+    readonly taskSoil: TaskSoil;
+    readonly workspaceRoot: string;
+  }) => LocalWorkspacePathAuthorization | undefined;
 };
 
 type AgentSessionWriterLease = {
@@ -174,6 +181,10 @@ export function createOrdinaryAgentRunResourceAcquirer(
           abortSignal: input.abortSignal,
         }) ?? [];
         const toolRuntime = { constraints: taskSoil.constraints };
+        const workspacePathAuthorization = options.resolveWorkspacePathAuthorization?.({
+          taskSoil,
+          workspaceRoot: resources.workspaceRoot,
+        });
         const toolMetrics = new OrdinaryToolMetricsCollector();
         const tokenCounter = (dependencies.createTokenCounter ?? createOpenAITokenCounter)(
           input.birth.config.model,
@@ -187,6 +198,8 @@ export function createOrdinaryAgentRunResourceAcquirer(
           taskSoil,
           outputTokenCounter: tokenCounter,
           metricsSink: toolMetrics,
+          contextAttachmentReadAuthorization: options.contextAttachmentReadAuthorization,
+          workspacePathAuthorization,
           contributions: [
             ...createHostAgentToolContributions({
               runtime: toolRuntime,
@@ -238,6 +251,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
           observedToolGateway,
           toolBoundary.allowedTools,
           toolBoundary.toolDefinitions,
+          workspacePathAuthorization,
         );
         const agentTools = await createSubAgentAgentTools({
           registry,
@@ -258,6 +272,7 @@ export function createOrdinaryAgentRunResourceAcquirer(
           modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
           workspaceRoot: resources.workspaceRoot,
           resolveManagedAttachmentPath: resources.resolveManagedAttachmentPath,
+          readAuthorization: options.contextAttachmentReadAuthorization,
         });
         executionEnvironment = (dependencies.createExecutionEnvironment ??
           ((cwd: string) => new NodeExecutionEnv({ cwd })))(resources.workspaceRoot);
@@ -431,6 +446,7 @@ function ordinaryToolBoundary(
   gateway: AgentLoopToolBoundary["gateway"],
   allowedTools: readonly string[],
   definitions: AgentLoopToolBoundary["definitions"],
+  workspacePathAuthorization?: LocalWorkspacePathAuthorization,
 ): AgentLoopToolBoundary {
   return {
     definitions,
@@ -439,6 +455,8 @@ function ordinaryToolBoundary(
       callerAgentId: definition.agentId,
       traceId: input.runId,
       goalId: input.runId,
+      conversationId: input.conversationId,
+      resourceScope: workspacePathAuthorization?.resourceScope,
       confirmationPolicy: input.birth.toolConfirmationPolicy,
     },
     permission: {

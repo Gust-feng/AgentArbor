@@ -16,6 +16,12 @@ export type ContextAttachmentToolOptions = {
   readonly workspaceRoot?: string;
   readonly supportsVisionInput?: boolean;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly readAuthorization?: ContextAttachmentReadAuthorization;
+};
+
+/** Optional run-scoped live deny layered over the frozen Task Soil grant. */
+export type ContextAttachmentReadAuthorization = {
+  assertReadAllowed(attachmentId: string): void | Promise<void>;
 };
 
 export type AttachmentEntry = {
@@ -77,7 +83,7 @@ export function attachmentSummary(entry: AttachmentEntry): Readonly<Record<strin
     available: entry.ref.metadata?.available,
     previewTruncated: entry.ref.metadata?.truncated === true || entry.ref.readonlyPreview?.truncated === true,
     authorized: entry.authorized,
-    ref: modelSafeRef(entry.ref.ref),
+    ref: modelSafeRef(entry.ref.ref, entry.authorized && entry.ref.pathGranted === true),
     canReadText: capabilities.canReadText,
     canReadPdfText: capabilities.canReadPdfText,
     canReadImage: capabilities.canReadImage,
@@ -121,7 +127,9 @@ export async function resolveAttachmentTarget(input: {
   readonly requireFile: boolean;
   readonly projectPathRequired: boolean;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly readAuthorization?: ContextAttachmentReadAuthorization;
 }): Promise<AttachmentTarget> {
+  await input.readAuthorization?.assertReadAllowed(input.entry.attachmentId);
   const root = await resolveAttachmentRoot(
     input.entry.ref,
     input.workspaceRoot,
@@ -388,10 +396,13 @@ function isTextExtension(extension: string): boolean {
   );
 }
 
-function modelSafeRef(ref: string): string | undefined {
+function modelSafeRef(ref: string, pathGranted: boolean): string | undefined {
   const normalized = ref.toLowerCase();
-  return normalized.startsWith("local-file:") || normalized.startsWith("local-project:") ||
-    normalized.startsWith("uploaded-attachment:") ? undefined : ref;
+  if (normalized.startsWith("uploaded-attachment:")) return undefined;
+  if (normalized.startsWith("local-file:") || normalized.startsWith("local-project:")) {
+    return pathGranted ? ref : undefined;
+  }
+  return ref;
 }
 
 

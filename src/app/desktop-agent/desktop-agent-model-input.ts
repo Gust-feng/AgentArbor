@@ -137,7 +137,7 @@ function attachmentBlock(
   if (!isModelVisibleContextRef(ref, taskSoil)) {
     return undefined;
   }
-  const safeRef = modelSafeContextRef(ref.ref);
+  const safeRef = modelSafeContextRef(ref.ref, ref.pathGranted === true);
   return [
     "User-provided attachment:",
     `attachment_id=${normalizeModelFacingText(ref.attachmentId ?? safeRef ?? `attachment-${index}`)}`,
@@ -165,7 +165,16 @@ function isModelVisibleContextRef(
   return ref.kind === "workspace" || ref.kind === "file" || ref.kind === "project" || ref.kind === "web";
 }
 
-function modelSafeContextRef(ref: string): string | undefined {
+function modelSafeContextRef(
+  ref: string,
+  pathGranted: boolean,
+): string | undefined {
+  // A granted path is an explicit user authorization, and the model can only call
+  // Read/Glob/Grep/Write/Edit if it sees the real absolute path behind it. Ungranted
+  // local paths carry no such authorization, so they stay hidden.
+  if (pathGranted) {
+    return ref;
+  }
   const normalized = ref.toLowerCase();
   return normalized.startsWith("local-file:") || normalized.startsWith("local-project:")
     ? undefined

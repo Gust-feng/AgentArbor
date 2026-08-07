@@ -126,6 +126,7 @@ function record(
         `.${path.basename(sourcePath)}.agentarbor-delete-${deletionId}-0`,
       ),
     }],
+    ownedAssetIds: [],
     createdAt: "2026-08-02T00:00:00.000Z",
   };
 }

@@ -1269,6 +1269,7 @@ export function createOrdinaryAgentFeature(input: {
       recordModelRequest(runId, "initial");
       outcome = await input.execution.execute({
         runId,
+        conversationId: document.state.turn.conversationId,
         sessionRef,
         birth: document.state.birth,
         runInput: document.state.input,
@@ -1983,9 +1984,15 @@ export function createOrdinaryAgentFeature(input: {
   async function submitTurn(submitInput: SubmitOrdinaryTurnInput): Promise<SubmitOrdinaryTurnResult> {
     assertLive();
     await readyPromise;
+    if (submitInput.conversationId !== undefined && submitInput.newConversationId !== undefined) {
+      throw new OrdinaryFeatureError(
+        "ordinary_submission_conflict",
+        "conversationId and newConversationId are mutually exclusive",
+      );
+    }
     const submissionId = normalizedSubmissionId(submitInput.submissionId);
     const submissionTurnId = submissionId === undefined ? undefined : `submission:${submissionId}`;
-    const conversationId = submitInput.conversationId ?? (
+    const conversationId = submitInput.conversationId ?? submitInput.newConversationId ?? (
       submissionId === undefined ? idFactory("conversation") : `conversation:${submissionId}`
     );
     return enqueue(`conversation:${conversationId}`, async () => {
@@ -2039,6 +2046,7 @@ export function createOrdinaryAgentFeature(input: {
           conversationId,
           createdAt,
           sessionRef,
+          ...(submitInput.owner === undefined ? {} : { owner: submitInput.owner }),
         };
         pendingUncommittedConversationBirths.set(conversationId, { sessionRef });
         try {
@@ -2840,6 +2848,11 @@ export function createOrdinaryAgentFeature(input: {
         await readyPromise;
         const control = await loadConversationControl(conversationId);
         return control === undefined ? undefined : clone(await conversationView(control));
+      },
+      async getConversationOwner(conversationId) {
+        await readyPromise;
+        const control = await loadConversationControl(conversationId);
+        return control === undefined ? undefined : control.state.owner;
       },
       async listConversations(limit = 50) {
         await readyPromise;

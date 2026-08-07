@@ -291,7 +291,7 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
   const parsedProfiles = dedupeProfiles((settings.modelProfiles.length === 0 ? [legacyProfile] : settings.modelProfiles)
     .map((profile) => normalizeModelProfile(profile, profileFallback)));
   const parsedCatalogs = normalizeModelCatalogs(settings.modelCatalogs ?? [], parsedProfiles, now);
-  const profiles = normalizeBuiltInModelProviderProfiles(parsedProfiles, parsedCatalogs, now);
+  const profiles = normalizeBuiltInModelProviderProfiles(parsedProfiles, now);
   const modelCatalogs = normalizeModelCatalogs(settings.modelCatalogs ?? [], profiles, now);
   const activeProfile =
     profiles.find((profile) => profile.profileId === settings.activeModelProfileId) ??

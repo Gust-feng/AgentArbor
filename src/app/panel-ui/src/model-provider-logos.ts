@@ -124,7 +124,6 @@ export function resolveModelProviderLogo(input: ModelProviderLogoInput): ModelPr
 export function builtinProviderPresetId(input: {
   readonly profileId?: string;
   readonly presetId?: string;
-  readonly baseUrl?: string;
 }): string | undefined {
   const explicitPreset = normalizeProviderSignal(input.presetId);
   if (explicitPreset.length > 0) {
@@ -134,25 +133,6 @@ export function builtinProviderPresetId(input: {
   const aliasedProfile = builtinProviderPresetAliases.get(normalizedProfileId);
   if (aliasedProfile !== undefined) {
     return presetIdFromIdentity(aliasedProfile);
-  }
-  const normalizedBaseUrl = normalizeProviderSignal(input.baseUrl);
-  if (normalizedBaseUrl.length === 0) {
-    return undefined;
-  }
-  if (normalizedBaseUrl === "https://api.openai.com" || normalizedBaseUrl === "https://api.openai.com/v1") {
-    return "openai";
-  }
-  if (normalizedBaseUrl === "https://api.deepseek.com") {
-    return "deepseek";
-  }
-  if (normalizedBaseUrl === "https://api.moonshot.cn/v1") {
-    return "moonshot";
-  }
-  if (normalizedBaseUrl === "https://open.bigmodel.cn/api/paas/v4") {
-    return "glm";
-  }
-  if (normalizedBaseUrl === "https://api.minimaxi.com/v1") {
-    return "minimax";
   }
   return undefined;
 }

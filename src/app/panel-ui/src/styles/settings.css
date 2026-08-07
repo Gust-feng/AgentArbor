@@ -49,7 +49,7 @@
   justify-content: center;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  color: var(--muted);
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
   margin: 0 var(--space-4) var(--space-3);
   transition:
     border-color var(--motion-interaction-duration) var(--motion-ease-standard),
@@ -77,11 +77,11 @@
   border: 1px solid var(--list-row-border);
   border-left: var(--list-row-marker-width) solid transparent;
   border-radius: var(--list-row-radius);
-  padding: 0 var(--space-5);
-  color: var(--muted);
+  padding: 0 22px;
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
   text-align: left;
-  font-size: 13px;
-  font-weight: var(--weight-body);
+  font-size: 14px;
+  font-weight: 550;
   transition:
     background-color var(--motion-interaction-duration) var(--motion-ease-standard),
     border-color var(--motion-interaction-duration) var(--motion-ease-standard),
@@ -118,20 +118,20 @@
 
 .settings-main > header {
   display: flex;
-  height: 56px;
+  height: 58px;
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   border-bottom: var(--border-width-thin) solid var(--border);
-  padding: 0 var(--space-6);
+  padding: 0 28px;
 }
 
 .settings-main h2 {
   min-width: 0;
   overflow: hidden;
   margin: 0;
-  font-size: 17px;
+  font-size: 19px;
   font-weight: var(--weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -152,6 +152,15 @@
 .settings-content.model-settings-content {
   overflow: hidden;
   padding: 0;
+}
+
+.settings-panel-slot {
+  min-width: 0;
+  min-height: 0;
+}
+
+.settings-content.model-settings-content > .model-settings-slot {
+  height: 100%;
 }
 
 @media (max-width: 620px) {

@@ -77,6 +77,7 @@ import {
   toSanitizedWebSearchConfig,
   toSanitizedWorkspaceConfig,
 } from "./projections.js";
+import { builtinPresetForProfileId } from "./model-provider-profile-settings.js";
 import { normalizeFilePickerInitialDirectory, normalizeWorkspaceDirectory } from "./workspace-settings.js";
 
 export { WorkspaceDirectoryValidationError } from "./workspace-settings.js";
@@ -285,7 +286,6 @@ export class ConfigCenter {
     }
     const protectedBuiltInProfile = builtinPresetForProtectedProfile({
       profileId,
-      baseUrl: input.baseUrl ?? existing.baseUrl,
     });
     const effectiveInput = protectedBuiltInProfile === undefined
       ? input
@@ -903,18 +903,11 @@ function createModelProviderProfileFallback(
 }
 
 function builtinPresetForProtectedProfile(
-  profile: Pick<ModelProviderProfileSettings, "profileId" | "baseUrl">
+  profile: Pick<ModelProviderProfileSettings, "profileId">
 ): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
-  if (profile.profileId.startsWith("custom_")) return undefined;
-  const presets = listBuiltinModelProviderPresets();
-  const baseUrl = normalizeBaseUrl(profile.baseUrl);
-  if (baseUrl === undefined) {
-    const profileId = profile.profileId.trim().toLowerCase();
-    return profileId === "default"
-      ? presets.find((preset: ReturnType<typeof listBuiltinModelProviderPresets>[number]) => preset.presetId === "openai")
-      : undefined;
-  }
-  return presets.find((preset: ReturnType<typeof listBuiltinModelProviderPresets>[number]) => normalizeBaseUrl(preset.baseUrl) === baseUrl);
+  // Built-in identity is carried by profileId. Base URL is user-editable
+  // transport configuration and must not protect a custom profile.
+  return builtinPresetForProfileId(profile.profileId);
 }
 
 function clearProfileModelOutsideCatalog(

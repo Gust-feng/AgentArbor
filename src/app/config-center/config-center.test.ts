@@ -318,8 +318,18 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.createModelProviderProfile({
+      profileId: "custom_local",
+      label: "本地路由",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.example.com/v1",
+      defaultAiMode: "openai-compatible",
+    });
+    await configCenter.activateModelProviderProfile("custom_local");
 
     const sanitized = await configCenter.updateModelProviderConfig({
+      profileId: "custom_local",
       baseUrl: "https://example.test/",
       model: "demo-model",
       defaultAiMode: "openai-compatible",
@@ -426,8 +436,18 @@ test("ConfigCenter persists custom model provider label and logo", async () => {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.createModelProviderProfile({
+      profileId: "custom_openai_router",
+      label: "初始路由",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.example.com/v1",
+      defaultAiMode: "openai-compatible",
+    });
+    await configCenter.activateModelProviderProfile("custom_openai_router");
 
     const saved = await configCenter.updateModelProviderConfig({
+      profileId: "custom_openai_router",
       label: "OpenAI Router",
       logoDataUrl,
       baseUrl: "https://openrouter.ai/api/v1",
@@ -512,8 +532,11 @@ test("ConfigCenter does not restore an active profile logo into a cleared custom
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
 
-    await configCenter.updateModelProviderConfig({
+    await configCenter.createModelProviderProfile({
+      profileId: "custom_history",
       label: "历史厂商",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
       logoDataUrl: historicalLogo,
       baseUrl: "https://history.example/v1",
       defaultAiMode: "openai-compatible",
@@ -533,7 +556,7 @@ test("ConfigCenter does not restore an active profile logo into a cleared custom
     const restored = await new ConfigCenter({ settingsStore, secretStore }).listModelProviderProfiles();
 
     assert.equal(cleared.logoDataUrl, undefined);
-    assert.equal(restored.find((profile) => profile.profileId === "default")?.logoDataUrl, historicalLogo);
+    assert.equal(restored.find((profile) => profile.profileId === "custom_history")?.logoDataUrl, historicalLogo);
     assert.equal(restored.find((profile) => profile.profileId === "custom_fresh")?.logoDataUrl, undefined);
   } finally {
     await removeTestDirectory(directory);
@@ -648,8 +671,17 @@ test("ConfigCenter keeps built-in provider label and logo immutable", async () =
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.createModelProviderProfile({
+      profileId: "custom_openai_router",
+      label: "自定义路由",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://openrouter.ai/api/v1",
+      defaultAiMode: "openai-compatible",
+    });
 
     const saved = await configCenter.updateModelProviderConfig({
+      profileId: "custom_openai_router",
       label: "OpenAI Router",
       logoDataUrl,
       baseUrl: "https://openrouter.ai/api/v1",
@@ -672,6 +704,31 @@ test("ConfigCenter keeps built-in provider label and logo immutable", async () =
     assert.equal(revertedToBuiltin.baseUrl, "https://api.openai.com/v1");
     assert.equal(reloaded.label, "OpenAI");
     assert.equal(reloaded.logoDataUrl, undefined);
+  } finally {
+    await removeTestDirectory(directory);
+  }
+});
+
+test("ConfigCenter allows a built-in profile to override Base URL without changing its identity", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-builtin-base-url-override-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const updated = await configCenter.updateModelProviderConfig({
+      profileId: "default",
+      label: "OpenAI Proxy",
+      logoDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+      baseUrl: "https://proxy.example.com/v1",
+      protocolKind: "openai_compatible_chat_completions",
+      defaultAiMode: "openai-compatible",
+    });
+
+    assert.equal(updated.profileId, "default");
+    assert.equal(updated.label, "OpenAI");
+    assert.equal(updated.logoDataUrl, undefined);
+    assert.equal(updated.baseUrl, "https://proxy.example.com/v1");
+    assert.equal(updated.protocolKind, "openai_responses");
   } finally {
     await removeTestDirectory(directory);
   }
@@ -1004,10 +1061,10 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
 
     assert.equal(active.profileId, "default");
     assert.equal(openai?.label, "OpenAI");
-    assert.equal(openai?.baseUrl, "https://api.openai.com/v1");
+    assert.equal(openai?.baseUrl, "https://api.deepseek.com");
     assert.equal(openai?.protocolKind, "openai_responses");
     assert.equal(openai?.defaultAiMode, "openai-responses");
-    assert.equal(openai?.model, undefined);
+    assert.equal(openai?.model, "deepseek-v4-pro");
     assert.equal(deepseek?.model, "deepseek-v4-pro");
     assert.equal(deepseek?.protocolKind, "openai_compatible_chat_completions");
     assert.equal(glmAlias?.label, "智谱 AI");

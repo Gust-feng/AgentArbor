@@ -190,8 +190,13 @@ export function SettingsDialog(props: {
             <h2>{activeInfo.label}</h2>
           </header>
           <div className={`settings-content ${visibleActiveGroup === "models" ? "model-settings-content" : ""}`}>
-            {visibleActiveGroup === "models" && (
+            <div
+              className="settings-panel-slot model-settings-slot"
+              hidden={visibleActiveGroup !== "models"}
+              aria-hidden={visibleActiveGroup !== "models"}
+            >
               <ModelSettings
+                active={visibleActiveGroup === "models"}
                 config={props.config}
                 modelForm={props.modelForm}
                 setModelForm={props.setModelForm}
@@ -205,7 +210,7 @@ export function SettingsDialog(props: {
                 onRevealModelApiKey={props.onRevealModelApiKey}
                 modelCatalogs={props.modelCatalogs}
               />
-            )}
+            </div>
             {visibleActiveGroup === "basicCapabilities" && (
               <BasicCapabilitiesSettings
                 config={props.config}

@@ -215,6 +215,25 @@
   outline-offset: 2px;
 }
 
+/* Nested field inputs use the surrounding field as the focus target. */
+.aa-workbench-root .settings-content .provider-search input:focus-visible,
+.aa-workbench-root .settings-content .model-search-field input:focus-visible,
+.aa-workbench-root .settings-content .api-key-field input:focus-visible,
+.aa-workbench-root .settings-content .provider-base-url-field input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  outline-offset: 0;
+}
+
+/* Search is a passive filter; keep its field boundary stable without a focus halo. */
+.aa-workbench-root .settings-content .provider-search:focus-within,
+.aa-workbench-root .settings-content .model-search-field:focus-within {
+  border-color: var(--field-border);
+  background: var(--field-bg);
+  box-shadow: none;
+}
+
 @keyframes modal-card-enter {
   from {
     opacity: 0;

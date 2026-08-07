@@ -2,7 +2,6 @@ import type {
   AgentArborLocalSettings,
   ConfiguredModelProtocolKind,
   ConfiguredModelRuntimeMode,
-  ModelProviderModelCatalog,
   ModelProviderProfileSettings,
 } from "../../domain/config/index.js";
 import { listBuiltinModelProviderPresets } from "../../domain/config/index.js";
@@ -29,6 +28,9 @@ const BUILTIN_PROFILE_PRESET_ALIASES = new Map<string, string>([
   ["moonshot", "moonshot"],
   ["kimi", "moonshot"],
   ["glm", "glm"],
+  // "ai" was emitted by an older configuration migration and remains a
+  // stable built-in alias. It is identity data, not endpoint inference.
+  ["ai", "glm"],
   ["zhipu", "glm"],
   ["zai", "glm"],
   ["minimax", "minimax"],
@@ -124,7 +126,6 @@ export function normalizeModelProfile(
 
 export function normalizeBuiltInModelProviderProfiles(
   profiles: readonly ModelProviderProfileSettings[],
-  catalogs: readonly ModelProviderModelCatalog[],
   now: string
 ): readonly ModelProviderProfileSettings[] {
   return profiles.map((profile) => {
@@ -136,9 +137,9 @@ export function normalizeBuiltInModelProviderProfiles(
     const protocolKind = normalizeBuiltInProfileProtocol(profile, preset);
     const defaultAiMode = normalizeProfileAiModeForProtocol(protocolKind);
     const baseUrl = normalizeBuiltInProfileBaseUrl(profile, preset);
-    const model = shouldClearBuiltInProfileModel(profile, preset.presetId, catalogs)
-      ? undefined
-      : profile.model;
+    // Model validity comes from the profile's /models catalog. Provider
+    // identity and Base URL are not model-name inference signals.
+    const model = profile.model;
     const clearBuiltInLogo = shouldClearBuiltInProfileLogo(profile, preset.presetId);
     const next: ModelProviderProfileSettings = {
       ...profile,
@@ -157,12 +158,7 @@ function shouldClearBuiltInProfileLogo(
   profile: ModelProviderProfileSettings,
   presetId: string
 ): boolean {
-  if (isGeneratedCustomProfileId(profile.profileId)) return false;
-  const baseUrl = normalizeBaseUrl(profile.baseUrl);
-  if (baseUrl === undefined) {
-    return BUILTIN_PROFILE_PRESET_ALIASES.get(profile.profileId) === presetId;
-  }
-  return builtInPresetIdForCanonicalBaseUrl(baseUrl) === presetId;
+  return builtinPresetForProfileId(profile.profileId)?.presetId === presetId;
 }
 
 function parseModelProviderKind(value: unknown): AgentArborLocalSettings["modelProvider"]["providerKind"] {
@@ -210,17 +206,21 @@ function normalizeProfileAiModeForProtocol(
 }
 
 function builtInPresetForProfile(profile: ModelProviderProfileSettings): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
-  if (isGeneratedCustomProfileId(profile.profileId)) return undefined;
-  const presets = listBuiltinModelProviderPresets();
-  const presetId = BUILTIN_PROFILE_PRESET_ALIASES.get(profile.profileId);
-  if (presetId !== undefined) {
-    return presets.find((preset) => preset.presetId === presetId);
-  }
-  const baseUrl = normalizeBaseUrl(profile.baseUrl);
-  const canonicalOwner = baseUrl === undefined ? undefined : builtInPresetIdForCanonicalBaseUrl(baseUrl);
-  return canonicalOwner === undefined
-    ? undefined
-    : presets.find((preset) => preset.presetId === canonicalOwner);
+  return builtinPresetForProfileId(profile.profileId);
+}
+
+/**
+ * Resolves the built-in slot from its stable profile identity only.
+ * Base URLs are transport configuration and must never turn a custom
+ * profile into a protected built-in profile.
+ */
+export function builtinPresetForProfileId(
+  profileId: string
+): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
+  if (isGeneratedCustomProfileId(profileId)) return undefined;
+  const presetId = BUILTIN_PROFILE_PRESET_ALIASES.get(profileId.trim().toLowerCase());
+  if (presetId === undefined) return undefined;
+  return listBuiltinModelProviderPresets().find((preset) => preset.presetId === presetId);
 }
 
 function isGeneratedCustomProfileId(profileId: string): boolean {
@@ -249,21 +249,9 @@ function normalizeBuiltInProfileProtocol(
   profile: ModelProviderProfileSettings,
   preset: ReturnType<typeof listBuiltinModelProviderPresets>[number]
 ): ConfiguredModelProtocolKind {
-  const currentBaseUrl = normalizeBaseUrl(profile.baseUrl);
-  const currentCanonicalOwner =
-    currentBaseUrl === undefined ? undefined : builtInPresetIdForCanonicalBaseUrl(currentBaseUrl);
-  if (currentCanonicalOwner !== undefined && currentCanonicalOwner !== preset.presetId) {
-    return normalizeProfileProtocol(preset.protocolKind);
-  }
-  if (preset.presetId !== "openai") {
-    return normalizeProfileProtocol(preset.protocolKind);
-  }
-  if (currentBaseUrl !== undefined && !isOfficialOpenAIBaseUrl(currentBaseUrl)) {
-    return profile.protocolKind === "openai_responses"
-      ? "openai_compatible_chat_completions"
-      : normalizeProfileProtocol(profile.protocolKind);
-  }
-  return normalizeProfileProtocol(profile.protocolKind);
+  // Protocol selection belongs to custom profiles. Built-in profiles expose
+  // the protocol declared by their preset, regardless of a custom Base URL.
+  return normalizeProfileProtocol(preset.protocolKind);
 }
 
 function normalizeBuiltInProfileBaseUrl(
@@ -275,57 +263,11 @@ function normalizeBuiltInProfileBaseUrl(
   if (currentBaseUrl === undefined) {
     return canonicalBaseUrl;
   }
-  if (preset.presetId === "openai" && currentBaseUrl === "https://api.openai.com") {
-    return canonicalBaseUrl;
-  }
-  const currentCanonicalOwner = builtInPresetIdForCanonicalBaseUrl(currentBaseUrl);
-  if (currentCanonicalOwner !== undefined && currentCanonicalOwner !== preset.presetId) {
-    return canonicalBaseUrl;
-  }
   return currentBaseUrl;
-}
-
-function shouldClearBuiltInProfileModel(
-  profile: ModelProviderProfileSettings,
-  presetId: string,
-  catalogs: readonly ModelProviderModelCatalog[]
-): boolean {
-  const model = normalizeOptionalString(profile.model);
-  if (model === undefined) {
-    return false;
-  }
-  const ownCatalog = catalogs.find((catalog) => catalog.profileId === profile.profileId);
-  if (ownCatalog?.models.some((item) => item.id === model) === true) {
-    return false;
-  }
-  const modelSignalOwner = builtInPresetIdForModelSignal(model);
-  if (modelSignalOwner === undefined || modelSignalOwner === presetId) {
-    return false;
-  }
-  const currentBaseUrl = normalizeBaseUrl(profile.baseUrl);
-  return currentBaseUrl === undefined || builtInPresetIdForCanonicalBaseUrl(currentBaseUrl) !== undefined;
-}
-
-function builtInPresetIdForCanonicalBaseUrl(baseUrl: string): string | undefined {
-  if (isOfficialOpenAIBaseUrl(baseUrl)) {
-    return "openai";
-  }
-  const preset = listBuiltinModelProviderPresets().find((item) => normalizeBaseUrl(item.baseUrl) === baseUrl);
-  return preset?.presetId;
 }
 
 function isOfficialOpenAIBaseUrl(baseUrl: string): boolean {
   return baseUrl === "https://api.openai.com" || baseUrl === "https://api.openai.com/v1";
-}
-
-function builtInPresetIdForModelSignal(model: string): string | undefined {
-  const normalized = model.trim().toLowerCase();
-  if (normalized.includes("deepseek")) return "deepseek";
-  if (normalized.includes("kimi") || normalized.includes("moonshot")) return "moonshot";
-  if (normalized.includes("glm") || normalized.includes("zhipu") || normalized.includes("bigmodel")) return "glm";
-  if (normalized.includes("minimax")) return "minimax";
-  if (normalized.includes("gpt") || normalized.includes("openai")) return "openai";
-  return undefined;
 }
 
 function sameModelProfile(left: ModelProviderProfileSettings, right: ModelProviderProfileSettings): boolean {

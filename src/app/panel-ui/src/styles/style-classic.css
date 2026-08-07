@@ -118,13 +118,15 @@ html[data-style="classic"] {
     inset 0 1px 0 color-mix(in oklch, white 30%, transparent);
   --list-row-radius: 0;
   --list-row-marker-width: var(--border-width-thick);
-  --list-row-border: transparent;
-  --list-row-hover-border: transparent;
+  --list-row-border: color-mix(in oklch, var(--border-strong) 22%, var(--border));
+  --list-row-hover-border: color-mix(in oklch, var(--border-strong) 44%, var(--border));
   --list-row-hover-marker: color-mix(in oklch, var(--border-strong) 64%, transparent);
   --list-row-hover-shadow: none;
-  --list-row-active-border: transparent;
+  --list-row-active-border: color-mix(in oklch, var(--accent-strong) 66%, var(--border));
   --list-row-active-marker: var(--accent);
-  --list-row-active-shadow: none;
+  --list-row-active-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 14%, transparent),
+    inset 3px 0 0 color-mix(in oklch, var(--accent-strong) 70%, var(--accent-border));
   --list-pane-bg: var(--classic-sidebar-bg, color-mix(in oklch, var(--surface-subtle) 84%, var(--bg)));
   --detail-pane-bg: var(--classic-paper-bg, color-mix(in oklch, var(--surface) 90%, var(--bg)));
   --field-bg: var(--classic-panel-surface, color-mix(in oklch, var(--surface) 92%, var(--surface-subtle)));

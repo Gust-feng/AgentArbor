@@ -261,7 +261,6 @@ export function ModelProviderList(props: {
   return (
     <aside className="provider-list-pane" aria-label="模型服务">
       <div className="provider-list-header">
-        <span>模型服务</span>
         <label className="provider-search">
           <Search size={14} />
           <input

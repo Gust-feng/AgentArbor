@@ -1185,6 +1185,36 @@ test("shows owned conversations inside the Space page left rail", async () => {
   expect(onOpenConversation).toHaveBeenCalledWith("conversation-1");
 });
 
+test("opens a Space conversation as a preview in the right pane", async () => {
+  const user = userEvent.setup();
+  const onPreviewConversation = vi.fn(async (conversationId: string) => ({
+    conversationId,
+    title: "Rust 学习",
+    turns: [
+      { turnId: "turn-1", role: "user" as const, title: "Rust 学习", content: "帮我看看错误", status: "completed" },
+      { turnId: "turn-2", role: "assistant" as const, title: "Rust 学习", content: "错误在 main.rs 第 3 行", status: "completed" },
+    ],
+    workspaceFolder: undefined,
+    queuedRunIds: [],
+  }));
+  renderWorkbench({
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [{ conversationId: "conversation-1", title: "Rust 学习" }],
+    }],
+    onPreviewConversation,
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click(await screen.findByRole("button", { name: "Rust 学习" }));
+
+  expect(onPreviewConversation).toHaveBeenCalledWith("conversation-1");
+  expect(await screen.findByText("错误在 main.rs 第 3 行")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "打开完整对话" })).toBeTruthy();
+});
+
 test("exposes model, context usage, and reasoning controls in the workbench composer", async () => {
   const user = userEvent.setup();
   const onModelSelect = vi.fn();

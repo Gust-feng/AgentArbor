@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
-  FileText,
   Home,
   Settings2,
   Layers,
@@ -22,7 +21,6 @@ import {
   SidebarNavRow,
   SidebarSectionLabel,
 } from './SidebarRows'
-import { SidebarInlineRenameField } from './SidebarInlineRenameField'
 import { ActionConfirmationDialog } from './ActionConfirmationDialog'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
@@ -469,118 +467,38 @@ function WorkspaceRow(props: {
               暂无对话
             </div>
           )}
-          <div className="space-y-1 pl-2 pr-1 pt-1">
+          <div className="pl-3 space-y-0.5">
             {props.conversations.map((conversation, index) => (
-              <WorkspaceConversationTabRow
+              <SidebarListRow
                 key={conversation.conversationId}
-                conversation={conversation}
-                dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
                 active={(props.view === 'conv-active' || props.view === 'conv-done') && props.activeConversationId === conversation.conversationId}
-                pending={props.pendingConversationIds.has(conversation.conversationId)}
-                renaming={props.renamingConversationId === conversation.conversationId}
-                onOpen={() => props.openConversation(conversation.conversationId)}
-                onStartRename={() => props.onStartRenameConversation(conversation.conversationId)}
+                onClick={() => props.openConversation(conversation.conversationId)}
+                dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
+                label={conversation.title}
+                editing={props.renamingConversationId === conversation.conversationId}
+                editSelectAll={false}
                 onRename={(title) => {
                   props.onRenameConversation(conversation.conversationId, title)
                   props.onCancelRenameConversation()
                 }}
                 onCancelRename={props.onCancelRenameConversation}
-                onTogglePinned={(pinned) => void props.onToggleConversationPinned(conversation.conversationId, pinned)}
-                onDelete={() => void props.onDeleteConversation(conversation.conversationId)}
+                actions={[
+                  {
+                    label: conversation.pinnedAt !== undefined ? '取消置顶' : '置顶',
+                    icon: conversation.pinnedAt !== undefined ? <PinOff size={12}/> : <Pin size={12}/>,
+                    onClick: () => void props.onToggleConversationPinned(
+                      conversation.conversationId,
+                      conversation.pinnedAt === undefined,
+                    ),
+                  },
+                  { label: '重命名', icon: <Pencil size={12}/>, onClick: () => props.onStartRenameConversation(conversation.conversationId) },
+                  { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => void props.onDeleteConversation(conversation.conversationId) },
+                ]}
+                pending={props.pendingConversationIds.has(conversation.conversationId)}
               />
             ))}
           </div>
         </SidebarConversationScrollArea>
-      )}
-    </div>
-  )
-}
-
-/** 工作区下的会话以 tab 形态呈现（页面图标 + 圆角标签样式），与工作区行形成主次层级。 */
-function WorkspaceConversationTabRow(props: {
-  readonly conversation: ConversationSummary
-  readonly dot: string
-  readonly active: boolean
-  readonly pending: boolean
-  readonly renaming: boolean
-  readonly onOpen: () => void
-  readonly onStartRename: () => void
-  readonly onRename: (title: string) => void
-  readonly onCancelRename: () => void
-  readonly onTogglePinned: (pinned: boolean) => void
-  readonly onDelete: () => void
-}) {
-  const [hovered, setHovered] = useState(false)
-  return (
-    <div
-      role="button"
-      className="group/row relative flex items-center gap-2 rounded-lg cursor-pointer text-sm"
-      style={{
-        height: 30,
-        paddingLeft: 10,
-        paddingRight: 8,
-        color: props.active ? 'var(--aa-accent)' : 'var(--aa-text-2)',
-        background: props.active
-          ? 'var(--aa-accent-bg)'
-          : hovered
-            ? 'rgba(45,40,34,0.05)'
-            : 'rgba(45,40,34,0.025)',
-        borderLeft: `3px solid ${props.active ? 'var(--aa-accent)' : props.dot}`,
-        transition: 'background 120ms ease, color 120ms ease',
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onClick={() => { if (!props.renaming && !props.pending) props.onOpen() }}
-    >
-      <FileText size={11} style={{ flexShrink: 0, color: 'var(--aa-text-3)' }} aria-hidden="true" />
-      {props.renaming ? (
-        <SidebarInlineRenameField
-          value={props.conversation.title}
-          onCommit={props.onRename}
-          onCancel={props.onCancelRename}
-          selectAll={false}
-        />
-      ) : (
-        <>
-          <span className="flex-1 truncate">{props.conversation.title}</span>
-          {props.pending && (
-            <span aria-label="处理中" className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full" style={{ border: '1.5px solid var(--aa-text-3)', borderTopColor: 'transparent' }} />
-          )}
-          {!props.pending && hovered && (
-            <span className="flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()}>
-              <button
-                type="button"
-                aria-label={props.conversation.pinnedAt !== undefined ? '取消置顶' : '置顶'}
-                title={props.conversation.pinnedAt !== undefined ? '取消置顶' : '置顶'}
-                onClick={() => props.onTogglePinned(props.conversation.pinnedAt === undefined)}
-                className="flex items-center justify-center rounded hover:bg-black/10"
-                style={{ width: 18, height: 18, color: 'var(--aa-text-3)' }}
-              >
-                {props.conversation.pinnedAt !== undefined ? <PinOff size={11} /> : <Pin size={11} />}
-              </button>
-              <button
-                type="button"
-                aria-label="重命名"
-                title="重命名"
-                onClick={props.onStartRename}
-                className="flex items-center justify-center rounded hover:bg-black/10"
-                style={{ width: 18, height: 18, color: 'var(--aa-text-3)' }}
-              >
-                <Pencil size={11} />
-              </button>
-              <button
-                type="button"
-                aria-label="删除"
-                title="删除"
-                onClick={props.onDelete}
-                className="flex items-center justify-center rounded hover:bg-black/10"
-                style={{ width: 18, height: 18, color: 'var(--aa-text-3)' }}
-              >
-                <Trash2 size={11} />
-              </button>
-            </span>
-          )}
-        </>
       )}
     </div>
   )

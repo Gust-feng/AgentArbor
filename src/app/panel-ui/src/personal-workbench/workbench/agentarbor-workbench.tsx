@@ -57,6 +57,8 @@ export type PersonalWorkbenchProps = {
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly onStartNewConversation: (owner?: { readonly kind: "space" | "workspace"; readonly id: string }) => Promise<boolean>;
   readonly onOpenConversation: (conversationId: string) => boolean | Promise<boolean>;
+  /** 空间页右侧预览对话内容（不跳转对话页）。 */
+  readonly onPreviewConversation?: (conversationId: string) => Promise<Conversation | undefined>;
   readonly pendingConversationIds?: ReadonlySet<string>;
   readonly onRenameConversation: (conversationId: string, title: string) => void | Promise<void>;
   readonly onToggleConversationPinned: (conversationId: string, pinned: boolean) => void | Promise<void>;
@@ -456,6 +458,7 @@ function renderView(input: {
       }}
       onOpenItem={input.props.onOpenSpaceItem}
       onOpenConversation={input.props.onOpenConversation}
+      onPreviewConversation={input.props.onPreviewConversation}
       onRenameConversation={input.props.onRenameConversation}
       onToggleConversationPinned={input.props.onToggleConversationPinned}
       onDeleteConversation={input.props.onDeleteConversation}

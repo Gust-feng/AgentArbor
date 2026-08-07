@@ -22,8 +22,10 @@ import {
   Trash2,
   Unlink,
   GripVertical,
+  X,
 } from 'lucide-react'
 import { type View } from './Sidebar'
+import type { Conversation } from '../../../../contracts/conversation'
 import type {
   PersonalSpaceActions,
   PersonalSpaceProjection,
@@ -290,6 +292,8 @@ interface SpacePageProps {
   currentConversation?: { conversationId: string; title: string }
   onOpenItem?: (spaceId: string, itemId: string) => void | Promise<void>
   onOpenConversation?: (conversationId: string) => boolean | Promise<boolean>
+  /** 空间页右侧预览对话内容（不跳转对话页）。 */
+  onPreviewConversation?: (conversationId: string) => Promise<Conversation | undefined>
   onRenameConversation?: (conversationId: string, title: string) => void | Promise<void>
   onToggleConversationPinned?: (conversationId: string, pinned: boolean) => void | Promise<void>
   onDeleteConversation?: (conversationId: string) => void | Promise<void>
@@ -318,6 +322,7 @@ export function SpacePage({
   currentConversation,
   onOpenItem,
   onOpenConversation,
+  onPreviewConversation,
   onRenameConversation,
   onToggleConversationPinned,
   onDeleteConversation,
@@ -362,6 +367,7 @@ export function SpacePage({
   const [creatingNoteId, setCreatingNoteId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null)
+  const [previewedConversation, setPreviewedConversation] = useState<Conversation | undefined>(undefined)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
   const [pendingSpaceConfirmation, setPendingSpaceConfirmation] = useState<PendingSpaceConfirmation | null>(null)
@@ -608,6 +614,15 @@ export function SpacePage({
     if (opened !== false) onNavigate('conv-done')
   }
 
+  async function handlePreviewConversation(conversationId: string) {
+    if (onPreviewConversation === undefined) {
+      await handleOpenConversation(conversationId)
+      return
+    }
+    const conversation = await onPreviewConversation(conversationId)
+    if (conversation !== undefined) setPreviewedConversation(conversation)
+  }
+
   async function runSpaceAction(operation: () => void | Promise<void>) {
     setActionError(null)
     try {
@@ -846,7 +861,7 @@ export function SpacePage({
                   conversation={conversation}
                   dot={SPACE_CONVERSATION_DOT_PALETTE[index % SPACE_CONVERSATION_DOT_PALETTE.length] ?? SPACE_CONVERSATION_DOT_PALETTE[0]}
                   renaming={renamingConversationId === conversation.conversationId}
-                  onOpen={() => void handleOpenConversation(conversation.conversationId)}
+                  onOpen={() => void handlePreviewConversation(conversation.conversationId)}
                   onStartRename={() => setRenamingConversationId(conversation.conversationId)}
                   onRename={(title) => {
                     void onRenameConversation?.(conversation.conversationId, title)
@@ -875,6 +890,12 @@ export function SpacePage({
               }}
             />
         </DeferredSurfaceBoundary>
+      ) : previewedConversation !== undefined ? (
+        <ConversationPreview
+          conversation={previewedConversation}
+          onOpenFull={() => void handleOpenConversation(previewedConversation.conversationId)}
+          onClose={() => setPreviewedConversation(undefined)}
+        />
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {selectedItem?.type !== 'folder' && selectedItem ? (
@@ -1204,6 +1225,72 @@ function CenteredCard({ children }: { children: ReactNode }) {
 }
 
 const SPACE_CONVERSATION_DOT_PALETTE = ['#6865a7', '#6f9279', '#c18a42', '#6f84a5', '#a66f66'] as const
+
+/** 空间页右侧的对话预览：只读展示最近几轮内容，完整对话需打开对话页。 */
+function ConversationPreview(props: {
+  readonly conversation: Conversation
+  readonly onOpenFull: () => void
+  readonly onClose: () => void
+}) {
+  const turns = props.conversation.turns ?? []
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--aa-border, #e3ddd4)' }}>
+        <div className="flex min-w-0 items-center gap-2">
+          <MessageSquare size={14} style={{ color: 'var(--aa-accent, #6865a7)' }} />
+          <span className="truncate text-sm font-medium" style={{ color: 'var(--aa-text-1, #292722)' }}>
+            {props.conversation.title}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={props.onOpenFull}
+            className="rounded-md px-2.5 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90"
+            style={{ background: 'var(--aa-accent, #6865a7)' }}
+          >
+            打开完整对话
+          </button>
+          <button
+            type="button"
+            aria-label="关闭对话预览"
+            title="关闭预览"
+            onClick={props.onClose}
+            className="flex h-6 w-6 items-center justify-center rounded hover:bg-black/5"
+            style={{ color: 'var(--aa-text-3, #aba39b)' }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        {turns.length === 0 && (
+          <div className="text-sm" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
+            暂无消息
+          </div>
+        )}
+        {turns.map((turn) => (
+          <div key={turn.turnId} className="flex gap-3">
+            <span
+              className="mt-1 h-5 w-5 shrink-0 rounded-full text-center text-[10px] leading-5 text-white"
+              style={{ background: turn.role === 'user' ? 'var(--aa-accent, #6865a7)' : '#8a7fa8' }}
+            >
+              {turn.role === 'user' ? '我' : 'A'}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p
+                className="text-sm whitespace-pre-wrap break-words"
+                style={{ color: 'var(--aa-text-1, #292722)' }}
+              >
+                {turn.content.length > 4000 ? `${turn.content.slice(0, 4000)}\n…（内容较长，打开完整对话查看）` : turn.content}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 /** 空间页左侧"对话"Section 的会话行：随机色点标识 + 行内重命名 + hover 操作。 */
 function SpaceConversationRow(props: {

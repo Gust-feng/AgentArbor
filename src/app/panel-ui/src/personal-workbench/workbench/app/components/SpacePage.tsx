@@ -26,6 +26,8 @@ import {
 } from 'lucide-react'
 import { type View } from './Sidebar'
 import type { Conversation } from '../../../../contracts/conversation'
+import { projectChatActiveView } from '../../../../chat-active-view'
+import { ConversationTranscript } from './ConversationTranscript'
 import type {
   PersonalSpaceActions,
   PersonalSpaceProjection,
@@ -1226,13 +1228,16 @@ function CenteredCard({ children }: { children: ReactNode }) {
 
 const SPACE_CONVERSATION_DOT_PALETTE = ['#6865a7', '#6f9279', '#c18a42', '#6f84a5', '#a66f66'] as const
 
-/** 空间页右侧的对话预览：只读展示最近几轮内容，完整对话需打开对话页。 */
+/** 空间页右侧的对话预览：复用正式对话渲染（ConversationTranscript），完整对话需打开对话页。 */
 function ConversationPreview(props: {
   readonly conversation: Conversation
   readonly onOpenFull: () => void
   readonly onClose: () => void
 }) {
-  const turns = props.conversation.turns ?? []
+  const projection = useMemo(() => projectChatActiveView({
+    conversation: props.conversation,
+    transcriptNodes: [],
+  }), [props.conversation])
   return (
     <div className="flex-1 flex flex-col overflow-hidden min-w-0">
       <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--aa-border, #e3ddd4)' }}>
@@ -1263,30 +1268,27 @@ function ConversationPreview(props: {
           </button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-        {turns.length === 0 && (
-          <div className="text-sm" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
+      <div className="flex-1 overflow-y-auto">
+        {projection.hasVisibleContent ? (
+          <ConversationTranscript
+            conversationId={props.conversation.conversationId}
+            projectedTurns={projection.workline.turns}
+            turns={props.conversation.turns ?? []}
+            currentRunId={projection.currentRunId}
+            currentRunNodes={projection.currentRunProjection.nodes}
+            currentRunToolResults={[]}
+            showModelUsage={false}
+            developerModeEnabled={false}
+            models={[]}
+            selectedModelId=""
+            onDecision={() => undefined}
+            confirmationBusy={false}
+          />
+        ) : (
+          <div className="px-5 py-4 text-sm" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
             暂无消息
           </div>
         )}
-        {turns.map((turn) => (
-          <div key={turn.turnId} className="flex gap-3">
-            <span
-              className="mt-1 h-5 w-5 shrink-0 rounded-full text-center text-[10px] leading-5 text-white"
-              style={{ background: turn.role === 'user' ? 'var(--aa-accent, #6865a7)' : '#8a7fa8' }}
-            >
-              {turn.role === 'user' ? '我' : 'A'}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p
-                className="text-sm whitespace-pre-wrap break-words"
-                style={{ color: 'var(--aa-text-1, #292722)' }}
-              >
-                {turn.content.length > 4000 ? `${turn.content.slice(0, 4000)}\n…（内容较长，打开完整对话查看）` : turn.content}
-              </p>
-            </div>
-          </div>
-        ))}
       </div>
     </div>
   )

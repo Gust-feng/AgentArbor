@@ -456,6 +456,9 @@ function renderView(input: {
       }}
       onOpenItem={input.props.onOpenSpaceItem}
       onOpenConversation={input.props.onOpenConversation}
+      onRenameConversation={input.props.onRenameConversation}
+      onToggleConversationPinned={input.props.onToggleConversationPinned}
+      onDeleteConversation={input.props.onDeleteConversation}
     />;
   }
   if (input.view === "brain") {

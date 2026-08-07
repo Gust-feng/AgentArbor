@@ -11,6 +11,8 @@ import {
   AlertCircle,
   RotateCcw,
   FolderOpen,
+  Pin,
+  PinOff,
 } from 'lucide-react'
 import { SidebarAnimation } from './SidebarAnimation'
 import {
@@ -269,7 +271,6 @@ export function Sidebar({
               editSelectAll={renamingId === s.id && renameSelectAll}
               onRename={(t) => { renameSpace(s.id, t); finishRename() }}
               onCancelRename={finishRename}
-              meta={<ChevronRight size={11} style={{ color: 'var(--aa-text-3)' }}/>}
               actions={[
                 { label: '重命名', icon: <Pencil size={12}/>, onClick: () => { setRenameSelectAll(false); setRenamingId(s.id) } },
                 { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => setPendingSpaceDeletion({ id: s.id, label: s.label }) },
@@ -314,6 +315,15 @@ export function Sidebar({
               view={view}
               openConversation={openConversation}
               pendingConversationIds={pendingConversationIds}
+              renamingConversationId={renamingId}
+              onStartRenameConversation={(conversationId) => { setRenameSelectAll(false); setRenamingId(conversationId) }}
+              onRenameConversation={(conversationId, title) => {
+                void onRenameConversation(conversationId, title)
+                finishRename()
+              }}
+              onCancelRenameConversation={finishRename}
+              onToggleConversationPinned={(conversationId, pinned) => void onToggleConversationPinned(conversationId, pinned)}
+              onDeleteConversation={(conversationId) => void onDeleteConversation(conversationId)}
             />
           ))}
           {workspaceLoadState?.error !== undefined && (
@@ -415,6 +425,12 @@ function WorkspaceRow(props: {
   readonly view: View
   readonly openConversation: (conversationId: string) => void
   readonly pendingConversationIds: ReadonlySet<string>
+  readonly renamingConversationId: string | null
+  readonly onStartRenameConversation: (conversationId: string) => void
+  readonly onRenameConversation: (conversationId: string, title: string) => void
+  readonly onCancelRenameConversation: () => void
+  readonly onToggleConversationPinned: (conversationId: string, pinned: boolean) => void
+  readonly onDeleteConversation: (conversationId: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   return (
@@ -458,10 +474,33 @@ function WorkspaceRow(props: {
               onClick={() => props.openConversation(conversation.conversationId)}
               dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
               label={conversation.title}
-              editing={false}
-              onRename={() => undefined}
-              onCancelRename={() => undefined}
-              actions={[]}
+              editing={props.renamingConversationId === conversation.conversationId}
+              editSelectAll={false}
+              onRename={(title) => {
+                props.onRenameConversation(conversation.conversationId, title)
+                props.onCancelRenameConversation()
+              }}
+              onCancelRename={props.onCancelRenameConversation}
+              meta={
+                <span
+                  className="rounded px-1 py-px text-[9px] leading-none"
+                  style={{ color: 'var(--aa-text-3)', background: 'var(--aa-accent-bg)' }}
+                >
+                  会话
+                </span>
+              }
+              actions={[
+                {
+                  label: conversation.pinnedAt !== undefined ? '取消置顶' : '置顶',
+                  icon: conversation.pinnedAt !== undefined ? <PinOff size={12}/> : <Pin size={12}/>,
+                  onClick: () => void props.onToggleConversationPinned(
+                    conversation.conversationId,
+                    conversation.pinnedAt === undefined,
+                  ),
+                },
+                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => props.onStartRenameConversation(conversation.conversationId) },
+                { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => void props.onDeleteConversation(conversation.conversationId) },
+              ]}
               pending={props.pendingConversationIds.has(conversation.conversationId)}
             />
           ))}

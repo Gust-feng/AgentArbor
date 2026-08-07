@@ -18,6 +18,7 @@ import {
   Brain,
   MoreHorizontal,
   Pencil,
+  Pin,
   Trash2,
   Unlink,
   GripVertical,
@@ -289,6 +290,9 @@ interface SpacePageProps {
   currentConversation?: { conversationId: string; title: string }
   onOpenItem?: (spaceId: string, itemId: string) => void | Promise<void>
   onOpenConversation?: (conversationId: string) => boolean | Promise<boolean>
+  onRenameConversation?: (conversationId: string, title: string) => void | Promise<void>
+  onToggleConversationPinned?: (conversationId: string, pinned: boolean) => void | Promise<void>
+  onDeleteConversation?: (conversationId: string) => void | Promise<void>
   /** 从搜索等入口跳转时,要求空间预先选中并打开的对象 id。 */
   targetId?: string | null
 }
@@ -314,6 +318,9 @@ export function SpacePage({
   currentConversation,
   onOpenItem,
   onOpenConversation,
+  onRenameConversation,
+  onToggleConversationPinned,
+  onDeleteConversation,
 }: SpacePageProps) {
   const noteStore = useNotes()
   const spaceId = space?.spaceId
@@ -354,6 +361,7 @@ export function SpacePage({
   // 书写为中心:默认打开最近编辑的笔记(有 targetId 则优先)。
   const [creatingNoteId, setCreatingNoteId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
   const [pendingSpaceConfirmation, setPendingSpaceConfirmation] = useState<PendingSpaceConfirmation | null>(null)
@@ -828,18 +836,26 @@ export function SpacePage({
               暂无对话
             </div>
           ) : (
-            <div className="space-y-0.5">
-              {space!.conversations!.map((conversation) => (
-                <button
+            <div
+              className="space-y-0.5 overflow-y-auto"
+              style={{ maxHeight: 260, scrollbarWidth: 'none' }}
+            >
+              {space!.conversations!.map((conversation, index) => (
+                <SpaceConversationRow
                   key={conversation.conversationId}
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-black/5"
-                  style={{ color: 'var(--aa-text-2, #6b655d)' }}
-                  onClick={() => void handleOpenConversation(conversation.conversationId)}
-                >
-                  <MessageSquare size={12} style={{ color: 'var(--aa-text-3, #aba39b)' }} />
-                  <span className="flex-1 truncate">{conversation.title}</span>
-                </button>
+                  conversation={conversation}
+                  dot={SPACE_CONVERSATION_DOT_PALETTE[index % SPACE_CONVERSATION_DOT_PALETTE.length] ?? SPACE_CONVERSATION_DOT_PALETTE[0]}
+                  renaming={renamingConversationId === conversation.conversationId}
+                  onOpen={() => void handleOpenConversation(conversation.conversationId)}
+                  onStartRename={() => setRenamingConversationId(conversation.conversationId)}
+                  onRename={(title) => {
+                    void onRenameConversation?.(conversation.conversationId, title)
+                    setRenamingConversationId(null)
+                  }}
+                  onCancelRename={() => setRenamingConversationId(null)}
+                  onTogglePinned={(pinned) => void onToggleConversationPinned?.(conversation.conversationId, pinned)}
+                  onDelete={() => void onDeleteConversation?.(conversation.conversationId)}
+                />
               ))}
             </div>
           )}
@@ -1184,6 +1200,62 @@ function RowMenu({
 function CenteredCard({ children }: { children: ReactNode }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">{children}</div>
+  )
+}
+
+const SPACE_CONVERSATION_DOT_PALETTE = ['#6865a7', '#6f9279', '#c18a42', '#6f84a5', '#a66f66'] as const
+
+/** 空间页左侧"对话"Section 的会话行：随机色点标识 + 行内重命名 + hover 操作。 */
+function SpaceConversationRow(props: {
+  readonly conversation: { readonly conversationId: string; readonly title: string }
+  readonly dot: string
+  readonly renaming: boolean
+  readonly onOpen: () => void
+  readonly onStartRename: () => void
+  readonly onRename: (title: string) => void
+  readonly onCancelRename: () => void
+  readonly onTogglePinned: (pinned: boolean) => void
+  readonly onDelete: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div
+      role="button"
+      className="group/row flex items-center gap-2 rounded-lg cursor-pointer text-sm transition-colors"
+      style={{
+        height: 30,
+        paddingLeft: 10,
+        paddingRight: 8,
+        color: 'var(--aa-text-2, #6b655d)',
+        background: hovered ? 'var(--aa-surface-hover, #eeebe6)' : 'transparent',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={() => { if (!props.renaming) props.onOpen() }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: props.dot, flexShrink: 0 }} />
+      {props.renaming ? (
+        <InlineName
+          value={props.conversation.title}
+          label={`重命名${props.conversation.title}`}
+          onCommit={(title) => props.onRename(title)}
+          onCancel={props.onCancelRename}
+        />
+      ) : (
+        <span className="flex-1 truncate">{props.conversation.title}</span>
+      )}
+      {!props.renaming && (
+        <RowMenu
+          label={`${props.conversation.title}操作`}
+          visible={hovered}
+          actions={[
+            { label: '置顶', icon: <Pin size={12} />, onClick: () => props.onTogglePinned(true) },
+            { label: '重命名', icon: <Pencil size={12} />, onClick: props.onStartRename },
+            { label: '删除', icon: <Trash2 size={12} />, danger: true, onClick: props.onDelete },
+          ]}
+        />
+      )}
+    </div>
   )
 }
 

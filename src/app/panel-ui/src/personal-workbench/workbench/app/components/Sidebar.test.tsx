@@ -118,6 +118,6 @@ test('expands a Workspace row to reveal its owned conversations', () => {
   expect(screen.getByText('Rust 学习')).toBeTruthy()
   expect(screen.getByText('整理笔记')).toBeTruthy()
 
-  fireEvent.click(screen.getByRole('button', { name: /^Rust 学习$/u }))
+  fireEvent.click(screen.getByRole('button', { name: /^Rust 学习会话$/u }))
   expect(onOpenConversation).toHaveBeenCalledWith('conversation-1')
 })

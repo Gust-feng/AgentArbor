@@ -90,8 +90,8 @@ const persistedRecordSchema = z.object({
     if (record.ownerKind === undefined || record.ownerId === undefined) {
       context.addIssue({ code: "custom", message: "birth records require canonical owner identity" });
     }
-    if (record.ownerKind === "space" && (record.spaceId === undefined || record.referenceItemId === undefined)) {
-      context.addIssue({ code: "custom", message: "space birth records require Space and reference identities" });
+    if (record.ownerKind === "space" && record.spaceId === undefined) {
+      context.addIssue({ code: "custom", message: "space birth records require the Space identity" });
     }
     if (record.phase !== "prepared" && record.phase !== "owner_linked" && record.phase !== "conversation_created") {
       context.addIssue({ code: "custom", path: ["phase"], message: "birth record has an invalid phase" });

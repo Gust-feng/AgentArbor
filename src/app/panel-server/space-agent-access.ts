@@ -23,16 +23,25 @@ type AgentAccessibleSpaceReferenceItem = SpaceReferenceItem & {
  * Resolves the unique Space owning a conversation and freezes that Space's
  * local references into this turn's Task Soil. Later additions affect only
  * later turns; removals are enforced separately by the live deny overlay.
+ *
+ * Owner 优先取 Ordinary canonical owner（ADR-0035 §8.1）；v2 旧对话没有
+ * canonical owner 时回退 Space 树引用。
  */
 export async function resolveConversationSpaceAccess(
   spaces: Pick<SpaceFeature, "commands" | "queries">,
+  ordinaryOwner: ((conversationId: string) => Promise<{ readonly kind: "space" | "workspace"; readonly id: string } | undefined>) | undefined,
   conversationId: string | undefined,
   taskSoilInput: DesktopTaskSoilInput | undefined,
   requestedSpaceId?: string,
 ): Promise<ConversationSpaceAccess> {
   const owner = conversationId === undefined
     ? (requestedSpaceId === undefined ? undefined : { spaceId: requestedSpaceId })
-    : await spaces.queries.findConversationOwner(conversationId);
+    : await (ordinaryOwner === undefined
+        ? Promise.resolve(undefined)
+        : ordinaryOwner(conversationId)).then(async (canonical) => {
+          if (canonical !== undefined && canonical.kind === "space") return { spaceId: canonical.id };
+          return await spaces.queries.findConversationOwner(conversationId);
+        });
   if (owner === undefined) return { taskSoilInput };
   if (conversationId !== undefined && requestedSpaceId !== undefined && owner.spaceId !== requestedSpaceId) {
     throw new Error(`Conversation ${conversationId} belongs to Space ${owner.spaceId}, not ${requestedSpaceId}.`);

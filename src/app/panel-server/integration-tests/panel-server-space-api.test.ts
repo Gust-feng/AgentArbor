@@ -71,7 +71,7 @@ test("Panel streams feature and filesystem invalidations for Agent-side mutation
   }
 });
 
-test("Space API exposes Conversation ownership created by the conversation workflow", async () => {
+test("Space API exposes the canonical Conversation owner created by the conversation workflow", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
   try {
@@ -85,15 +85,16 @@ test("Space API exposes Conversation ownership created by the conversation workf
     });
     assert.equal(createdConversation.status, 202);
     const conversationId = createdConversation.body.conversation.conversationId as string;
+    assert.deepEqual(createdConversation.body.conversation.owner, { kind: "space", id: spaceId });
 
+    // 新对话不再写入 Space 树引用；owner 是 Ordinary canonical fact。
     const tree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
     assert.equal(tree.status, 200);
-    assert.equal(tree.body.tree.entries[0].kind, "reference");
-    assert.equal(tree.body.tree.entries[0].item.reference.conversationId, conversationId);
+    assert.equal(tree.body.tree.entries.some((entry: { item: { reference: { conversationId?: string } } }) =>
+      entry.item.reference.conversationId === conversationId), false);
 
     const deleted = await requestJson(baseUrl, `/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
     assert.equal(deleted.status, 200);
-    assert.equal((await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`)).body.tree.entries.length, 0);
     assert.equal((await runtime.ordinaryAgentFeature.queries.listConversations()).length, 0);
   } finally {
     await closePanelServer(httpServer, runtime);

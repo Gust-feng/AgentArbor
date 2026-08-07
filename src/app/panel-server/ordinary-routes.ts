@@ -177,6 +177,7 @@ async function submitTurn(
     : runInput.submissionId;
   const spaceAccess = await resolveConversationSpaceAccess(
     runtime.spaceFeature,
+    (conversationId) => runtime.ordinaryAgentFeature.queries.getConversationOwner(conversationId),
     conversationId,
     runInput.taskSoilInput,
     selectedSpaceId,

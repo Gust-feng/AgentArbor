@@ -118,7 +118,7 @@ test("Ordinary Panel entry submits directly to the feature and exposes the canon
   }
 });
 
-test("new Conversation creation keeps one Space owner across an idempotent retry", async () => {
+test("new Conversation creation keeps one canonical Space owner across an idempotent retry", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-space-owner-retry-"));
   const server = await startLocalPanelServer({
     port: 0,
@@ -136,11 +136,13 @@ test("new Conversation creation keeps one Space owner across an idempotent retry
     assert.equal(second.status, 202);
     assert.equal(first.body.conversation.conversationId, "conversation:owner-retry");
     assert.equal(second.body.conversation.conversationId, first.body.conversation.conversationId);
+    assert.deepEqual(first.body.conversation.owner, { kind: "space", id: spaceId });
+    // 新对话不再写入 Space 树引用（owner 是 Ordinary canonical fact）。
     const tree = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}`);
     const owners = tree.body.tree.entries.filter((entry: { item: { reference: { kind: string; conversationId?: string } } }) =>
       entry.item.reference.kind === "conversation" && entry.item.reference.conversationId === "conversation:owner-retry",
     );
-    assert.equal(owners.length, 1);
+    assert.equal(owners.length, 0);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

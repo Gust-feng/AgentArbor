@@ -54,6 +54,11 @@ test("Space deletion stops owned processes before deleting conversations and Spa
       commands: {
         async deleteConversation(conversationId) { operations.push(`delete-conversation:${conversationId}`); },
       },
+      queries: {
+        async listConversationsByOwner() {
+          return [{ conversationId: "conversation-1" } as never];
+        },
+      },
     },
     personalKnowledge: {
       commands: {
@@ -102,6 +107,11 @@ test("unresolved process cleanup blocks Space and Conversation deletion", async 
       },
       ordinary: {
         commands: { async deleteConversation() { operations.push("delete-conversation"); } },
+        queries: {
+          async listConversationsByOwner() {
+            return [{ conversationId: "conversation-1" } as never];
+          },
+        },
       },
       personalKnowledge: {
         commands: { async cleanupSpace() { operations.push("cleanup-knowledge"); } },
@@ -195,6 +205,11 @@ test("startup recovery resumes after Conversation tombstones without repeating c
       commands: {
         async deleteConversation() { conversationDeletes += 1; },
       },
+      queries: {
+        async listConversationsByOwner() {
+          return [{ conversationId: "conversation-1" } as never];
+        },
+      },
     },
     personalKnowledge: {
       commands: {
@@ -223,10 +238,8 @@ test("startup recovery resumes after Conversation tombstones without repeating c
   assert.equal(recovered.isDeleting("space-1"), false);
 });
 
-test("birth recovery unlinks an incomplete owner without replaying the failed Ordinary submission", async () => {
+test("birth recovery clears an incomplete submission without replaying the failed Ordinary turn", async () => {
   const journal = memoryLinkJournal();
-  let owner: { readonly spaceId: string; readonly referenceItemId: string } | undefined;
-  let unlinkFails = true;
   let submissionAttempts = 0;
   const ports = {
     journal,
@@ -237,17 +250,10 @@ test("birth recovery unlinks an incomplete owner without replaying the failed Or
       },
     },
     spaces: {
-      queries: { async findConversationOwner() { return owner; } },
+      queries: { async findConversationOwner() { return undefined; } },
       commands: {
-        async linkConversationOwner(request: { readonly id?: string; readonly spaceId: string }) {
-          if (request.id === undefined) throw new Error("expected a deterministic reference id");
-          owner = { spaceId: request.spaceId, referenceItemId: request.id };
-          return {} as never;
-        },
-        async unlinkConversationReferenceItem(referenceItemId: string) {
-          if (unlinkFails) throw new Error("Space repository unavailable");
-          if (owner?.referenceItemId === referenceItemId) owner = undefined;
-        },
+        async linkConversationOwner() { throw new Error("new space births never create a tree link"); },
+        async unlinkConversationReferenceItem() { throw new Error("not used"); },
       },
     },
     ordinary: {
@@ -274,18 +280,8 @@ test("birth recovery unlinks an incomplete owner without replaying the failed Or
       runInput: {} as never,
       birth: {} as never,
     }),
-    /could not be reconciled/,
+    /Ordinary repository unavailable/,
   );
-  assert.equal(submissionAttempts, 1);
-  assert.deepEqual((await journal.list()).map((record) => ({ operation: record.operation, phase: record.phase })), [
-    { operation: "birth", phase: "owner_linked" },
-  ]);
-
-  unlinkFails = false;
-  const restarted = createSpaceConversationLinkCoordinator(ports);
-  await restarted.ready();
-
-  assert.equal(owner, undefined);
   assert.equal(submissionAttempts, 1);
   assert.deepEqual(await journal.list(), []);
 });

@@ -110,11 +110,23 @@ export function createSpaceConversationLinkCoordinator(input: {
       await input.journal.delete(initial.operationId);
       return;
     }
+    if (initial.referenceItemId === undefined) {
+      // 新格式出生记录不写 Space 树引用；只对账 Ordinary conversation。
+      const conversation = await input.ordinary.queries.getConversation(initial.conversationId);
+      if (conversation !== undefined) {
+        const committed = await saveBirthCheckpoint(input.journal, initial, "conversation_created", now());
+        await input.journal.delete(committed.operationId);
+        return;
+      }
+      await input.journal.delete(initial.operationId);
+      return;
+    }
+    // 旧格式出生记录带 Space 树引用：保留回退清理。
     const [owner, conversation] = await Promise.all([
       input.spaces.queries.findConversationOwner(initial.conversationId),
       input.ordinary.queries.getConversation(initial.conversationId),
     ]);
-    if (initial.spaceId === undefined || initial.referenceItemId === undefined) {
+    if (initial.spaceId === undefined) {
       throw new Error(`Space birth record ${initial.operationId} is missing Space identities.`);
     }
     if (owner !== undefined && (owner.spaceId !== initial.spaceId || owner.referenceItemId !== initial.referenceItemId)) {
@@ -270,19 +282,10 @@ export function createSpaceConversationLinkCoordinator(input: {
           conversationId,
           owner: submission.owner,
           spaceId: submission.owner.id,
-          referenceItemId: `space-conversation:${submission.submissionId}`,
           now: now(),
         });
         await input.journal.save(record);
         try {
-          await input.spaces.commands.linkConversationOwner({
-            id: record.referenceItemId!,
-            spaceId: record.spaceId!,
-            title: boundedTitle(submission.title),
-            conversationId,
-            conversationTitle: submission.title,
-          });
-          const linked = await saveBirthCheckpoint(input.journal, record, "owner_linked", now());
           const submitted = await input.ordinary.commands.submitTurn({
             newConversationId: conversationId,
             owner: submission.owner,
@@ -290,7 +293,7 @@ export function createSpaceConversationLinkCoordinator(input: {
             input: submission.runInput,
             birth: submission.birth,
           });
-          const committed = await saveBirthCheckpoint(input.journal, linked, "conversation_created", now());
+          const committed = await saveBirthCheckpoint(input.journal, record, "conversation_created", now());
           await input.journal.delete(committed.operationId);
           return submitted;
         } catch (error) {
@@ -357,6 +360,7 @@ export function createSpaceConversationDeletionCoordinator(input: {
   };
   readonly ordinary: {
     readonly commands: Pick<OrdinaryAgentFeature["commands"], "deleteConversation">;
+    readonly queries: Pick<OrdinaryAgentFeature["queries"], "listConversationsByOwner">;
   };
   readonly personalKnowledge: {
     readonly commands: Pick<PersonalKnowledgeFeature["commands"], "cleanupSpace">;
@@ -485,10 +489,8 @@ export function createSpaceConversationDeletionCoordinator(input: {
             deletingSpaceIds.delete(spaceId);
             throw new PanelHttpError(404, "space_not_found", `Space ${spaceId} was not found.`);
           }
-          const conversationIds = tree.entries
-            .map((entry) => entry.item.reference)
-            .filter((reference): reference is Extract<typeof reference, { readonly kind: "conversation" }> => reference.kind === "conversation")
-            .map((reference) => reference.conversationId);
+          const conversations = await input.ordinary.queries.listConversationsByOwner({ kind: "space", id: spaceId });
+          const conversationIds = conversations.map((conversation) => conversation.conversationId);
           record = newSpaceConversationDeletionRecord({
             spaceId,
             conversationIds,

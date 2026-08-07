@@ -39,7 +39,7 @@ test("conversation Space access freezes only the owning Space local references",
     reference: { kind: "managed_folder", path: "C:/space-two" },
   });
 
-  const access = await resolveConversationSpaceAccess(spaces, "conversation-1", {
+  const access = await resolveConversationSpaceAccess(spaces, undefined, "conversation-1", {
     contextRefs: [{ attachmentId: `space-reference:${firstFile.id}`, ref: "local-file:C:/forged.md", kind: "file" }],
     permissionBoundaryRefs: ["read:web"],
   });
@@ -92,7 +92,7 @@ test("Run access freezes stored paths without scanning or mutating missing refer
     title: "对话",
     conversationId: "conversation-1",
   });
-  const access = await resolveConversationSpaceAccess(spaces, "conversation-1", undefined);
+  const access = await resolveConversationSpaceAccess(spaces, undefined, "conversation-1", undefined);
 
   assert.deepEqual(access.taskSoilInput?.contextRefs?.map((ref) => ref.attachmentId), [
     "space-reference:" + present.id,
@@ -118,11 +118,35 @@ test("Space ownership remains frozen even when the Space has no local references
   });
   const space = await spaces.commands.createSpace({ title: "空空间" });
 
-  const access = await resolveConversationSpaceAccess(spaces, undefined, undefined, space.id);
+  const access = await resolveConversationSpaceAccess(spaces, undefined, undefined, undefined, space.id);
 
   assert.equal(access.spaceId, space.id);
   assert.deepEqual(access.taskSoilInput?.contextRefs, []);
   assert.deepEqual(access.taskSoilInput?.permissionBoundaryRefs, [`scope:space:${space.id}`]);
+});
+
+test("canonical conversation owner wins over the legacy Space tree link", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] };
+  const spaces = createSpaceFeature({
+    repository: {
+      async read() { return structuredClone(snapshot); },
+      async write(value) { snapshot = structuredClone(value); },
+    },
+  });
+  const first = await spaces.commands.createSpace({ title: "一" });
+  const second = await spaces.commands.createSpace({ title: "二" });
+  await spaces.commands.linkConversationOwner({
+    spaceId: first.id,
+    title: "旧对话",
+    conversationId: "conversation-1",
+  });
+  const access = await resolveConversationSpaceAccess(
+    spaces,
+    async () => ({ kind: "space" as const, id: second.id }),
+    "conversation-1",
+    undefined,
+  );
+  assert.equal(access.spaceId, second.id);
 });
 
 test("unassigned conversations keep their submitted Task Soil unchanged", async () => {
@@ -133,7 +157,7 @@ test("unassigned conversations keep their submitted Task Soil unchanged", async 
     },
   });
   const submitted = { permissionBoundaryRefs: ["read:web"] } as const;
-  assert.deepEqual(await resolveConversationSpaceAccess(spaces, "conversation-1", submitted), {
+  assert.deepEqual(await resolveConversationSpaceAccess(spaces, undefined, "conversation-1", submitted), {
     taskSoilInput: submitted,
   });
 });

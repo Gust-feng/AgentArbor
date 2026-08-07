@@ -92,10 +92,45 @@ test("Space API exposes the canonical Conversation owner created by the conversa
     assert.equal(tree.status, 200);
     assert.equal(tree.body.tree.entries.some((entry: { item: { reference: { conversationId?: string } } }) =>
       entry.item.reference.conversationId === conversationId), false);
+    // 关联对话 read-model 包含 canonical owner 对话。
+    assert.equal(tree.body.conversations.some((conversation: { conversationId: string }) =>
+      conversation.conversationId === conversationId), true);
 
     const deleted = await requestJson(baseUrl, `/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
     assert.equal(deleted.status, 200);
     assert.equal((await runtime.ordinaryAgentFeature.queries.listConversations()).length, 0);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Space API read-model merges legacy tree-linked conversations", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-legacy-"));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const first = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "一" } });
+    const second = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "二" } });
+    const firstSpaceId = first.body.space.id as string;
+    const secondSpaceId = second.body.space.id as string;
+    // 对话 canonical owner 是第一个空间；第二个空间只有 v2 风格的树引用。
+    const createdConversation = await requestJson(baseUrl, "/api/conversations", {
+      method: "POST",
+      body: { goal: "旧机制对话", submissionId: "legacy-linked", spaceId: firstSpaceId },
+    });
+    assert.equal(createdConversation.status, 202);
+    const conversationId = createdConversation.body.conversation.conversationId as string;
+    await runtime.spaceFeature.commands.linkConversationOwner({
+      spaceId: secondSpaceId,
+      title: "旧机制对话",
+      conversationId,
+      conversationTitle: "旧机制对话",
+    });
+
+    const tree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(secondSpaceId)}`);
+    assert.equal(tree.status, 200);
+    const ids = (tree.body.conversations as readonly { readonly conversationId: string }[]).map((item) => item.conversationId);
+    assert.equal(ids.includes(conversationId), true);
   } finally {
     await closePanelServer(httpServer, runtime);
     await removeTemporaryTree(directory);

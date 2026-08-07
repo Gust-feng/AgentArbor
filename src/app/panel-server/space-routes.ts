@@ -70,16 +70,35 @@ export async function handlePanelSpaceRoute(
     const known = await feature.queries.getTree(spaceId);
     if (known === undefined) throw new PanelHttpError(404, "space_not_found", "未找到空间。");
     const tree = known;
-    // 关联对话是组合根生成的 read-model（ADR-0035 §8.1）；新对话不再写入 Space 树引用。
-    const ownerConversations = await runtime.ordinaryAgentFeature.queries.listConversationsByOwner({ kind: "space", id: spaceId });
+    // 关联对话是组合根生成的 read-model（ADR-0035 §8.1）：canonical owner 对话为主，
+    // v2 旧对话（owner 只存在于 Space 树引用）回退合并，按 conversationId 去重。
+    const canonicalConversations = await runtime.ordinaryAgentFeature.queries.listConversationsByOwner({ kind: "space", id: spaceId });
+    const legacyIds = new Set(
+      tree.entries
+        .map((entry) => entry.item.reference)
+        .filter((reference): reference is Extract<typeof reference, { readonly kind: "conversation" }> => reference.kind === "conversation")
+        .map((reference) => reference.conversationId),
+    );
+    const canonicalIds = new Set(canonicalConversations.map((conversation) => conversation.conversationId));
+    const legacyConversations = await Promise.all(
+      [...legacyIds].filter((conversationId) => !canonicalIds.has(conversationId)).map(async (conversationId) => {
+        const conversation = await runtime.ordinaryAgentFeature.queries.getConversation(conversationId);
+        return conversation === undefined
+          ? undefined
+          : { conversationId, title: conversation.title, updatedAt: conversation.updatedAt };
+      }),
+    );
     writeJson(response, 200, {
       ok: true,
       tree,
-      conversations: ownerConversations.map((conversation) => ({
-        conversationId: conversation.conversationId,
-        title: conversation.title,
-        updatedAt: conversation.updatedAt,
-      })),
+      conversations: [
+        ...canonicalConversations.map((conversation) => ({
+          conversationId: conversation.conversationId,
+          title: conversation.title,
+          updatedAt: conversation.updatedAt,
+        })),
+        ...legacyConversations.filter((item): item is { readonly conversationId: string; readonly title: string; readonly updatedAt: string } => item !== undefined),
+      ],
     });
     return true;
   }

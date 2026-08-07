@@ -88,3 +88,40 @@ test('offers rename and an in-workbench confirmation for Space deletion', () => 
   fireEvent.click(screen.getByRole('button', { name: '删除空间' }))
   expect(onDeleteSpace).toHaveBeenCalledWith('space-project')
 })
+
+test('expands a Space row to reveal its owned conversations', () => {
+  const onOpenConversation = vi.fn()
+  render(
+    <Sidebar
+      view="home"
+      onNavigate={vi.fn()}
+      onOpenSettings={vi.fn()}
+      collapsed={false}
+      conversations={[]}
+      spaces={[{
+        spaceId: 'space-1',
+        title: '学习空间',
+        items: [],
+        conversations: [
+          { conversationId: 'conversation-1', title: 'Rust 学习' },
+          { conversationId: 'conversation-2', title: '整理笔记' },
+        ],
+      }]}
+      activeSpaceId={null}
+      onOpenConversation={onOpenConversation}
+      pendingConversationIds={new Set()}
+      onRenameConversation={vi.fn()}
+      onToggleConversationPinned={vi.fn()}
+      onDeleteConversation={vi.fn()}
+      onActiveSpaceChange={vi.fn()}
+    />,
+  )
+
+  expect(screen.queryByText('Rust 学习')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '展开学习空间对话' }))
+  expect(screen.getByText('Rust 学习')).toBeTruthy()
+  expect(screen.getByText('整理笔记')).toBeTruthy()
+
+  fireEvent.click(screen.getByRole('button', { name: /^Rust 学习$/u }))
+  expect(onOpenConversation).toHaveBeenCalledWith('conversation-1')
+})

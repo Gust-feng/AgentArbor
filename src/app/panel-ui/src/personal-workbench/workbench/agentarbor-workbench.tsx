@@ -11,6 +11,7 @@ import type { Conversation, ConversationSummary } from "../../contracts/conversa
 import type { PendingConfirmation } from "../../contracts/run";
 import type { ConfirmationProjection } from "./app/components/ConfirmationCard";
 import type { PersonalSpaceActions, PersonalSpaceProjection } from "../space";
+import { useWorkspaceProjection } from "../../app-workspace-state";
 import { ConversationPage } from "./app/components/ConversationPage";
 import { BrainPage } from "./app/components/BrainPage";
 import { DeferredSurfaceBoundary } from "./app/components/DeferredSurfaceBoundary";
@@ -109,6 +110,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   const activeConversation = props.conversation;
   const conversationProjection = projectConversationSurface(props, activeConversation);
   const conversationState = projectLiveConversationState(conversationProjection, props);
+  const workspaceProjection = useWorkspaceProjection(true);
   const hasAttention = requiresImmediateConversationView(props);
   const surfaceTitle = view === "space"
     ? props.spaces?.find((space) => space.spaceId === activeSpaceId)?.title ?? "空间"
@@ -259,6 +261,14 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
         conversations={props.conversations}
         spaces={props.spaces ?? []}
         spaceLoadState={props.spaceLoadState}
+        workspaces={workspaceProjection.workspaces}
+        workspaceLoadState={{
+          loading: workspaceProjection.loading,
+          mutationPending: workspaceProjection.mutationPending,
+          error: workspaceProjection.error,
+          onRetry: workspaceProjection.refresh,
+        }}
+        onAddWorkspace={workspaceProjection.addWorkspace}
         activeSpaceId={activeSpaceId}
         activeConversationId={props.conversation?.conversationId}
         onNavigate={navigate}

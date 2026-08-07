@@ -177,6 +177,7 @@ export type PanelRuntime = {
   readonly resolveManagedAttachmentPath: (attachmentId: string) => Promise<string | undefined>;
   readonly agentNotesFeature: AgentNotesFeature;
   readonly spaceFeature: SpaceFeature;
+  readonly workspaceFeature: WorkspaceFeature;
   readonly spaceConversationLink: SpaceConversationLinkCoordinator;
   readonly spaceConversationDeletion: SpaceConversationDeletionCoordinator;
   readonly personalKnowledgeFeature: PersonalKnowledgeFeature<import("../panel-api-contracts.js").DocumentPreview>;
@@ -749,6 +750,7 @@ function assemblePanelRuntime(input: {
     resolveManagedAttachmentPath,
     agentNotesFeature,
     spaceFeature,
+    workspaceFeature,
     spaceConversationLink,
     spaceConversationDeletion,
     personalKnowledgeFeature,

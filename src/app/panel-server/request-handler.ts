@@ -38,6 +38,8 @@ import {
   handlePanelExperienceCandidateRoute,
 } from "./experience-candidate-routes.js";
 import { handlePanelSpaceRoute, spaceFeatureHttpError } from "./space-routes.js";
+import { WorkspaceFeatureError } from "../workspaces/index.js";
+import { handlePanelWorkspaceRoute, workspaceFeatureHttpError } from "./workspace-routes.js";
 import { PersonalKnowledgeError } from "../personal-knowledge/index.js";
 import { handlePanelPersonalKnowledgeRoute, personalKnowledgeHttpError } from "./personal-knowledge-routes.js";
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
@@ -166,6 +168,10 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         writePanelError(response, spaceFeatureHttpError(error));
         return;
       }
+      if (error instanceof WorkspaceFeatureError) {
+        writePanelError(response, workspaceFeatureHttpError(error));
+        return;
+      }
       if (error instanceof PersonalKnowledgeError) {
         writePanelError(response, personalKnowledgeHttpError(error));
         return;
@@ -278,6 +284,10 @@ async function handlePanelRequest(
   }
 
   if (await handlePanelSpaceRoute(runtime, request, response, url)) {
+    return;
+  }
+
+  if (await handlePanelWorkspaceRoute(runtime, request, response, url)) {
     return;
   }
 

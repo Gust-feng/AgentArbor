@@ -7,11 +7,10 @@ import {
   Library,
   Pencil,
   Trash2,
-  Pin,
-  PinOff,
   Plus,
   AlertCircle,
   RotateCcw,
+  FolderOpen,
 } from 'lucide-react'
 import { SidebarAnimation } from './SidebarAnimation'
 import {
@@ -23,6 +22,7 @@ import {
 import { ActionConfirmationDialog } from './ActionConfirmationDialog'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
+import type { PersonalWorkspaceProjection } from '../../../workspace'
 
 export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'brain'
 
@@ -39,6 +39,14 @@ interface SidebarProps {
     readonly error?: string
     readonly onRetry: () => void | Promise<void>
   }
+  workspaces?: readonly PersonalWorkspaceProjection[]
+  workspaceLoadState?: {
+    readonly loading: boolean
+    readonly mutationPending?: boolean
+    readonly error?: string
+    readonly onRetry: () => void | Promise<void>
+  }
+  onAddWorkspace?: () => void | Promise<void>
   activeSpaceId: string | null
   activeConversationId?: string
   onOpenConversation: (conversationId: string) => boolean | Promise<boolean>
@@ -68,13 +76,13 @@ export function Sidebar({
   conversations,
   spaces,
   spaceLoadState,
+  workspaces = [],
+  workspaceLoadState,
+  onAddWorkspace,
   activeSpaceId,
   activeConversationId,
   onOpenConversation,
   pendingConversationIds,
-  onRenameConversation,
-  onToggleConversationPinned,
-  onDeleteConversation,
   onOpenSpace,
   onActiveSpaceChange,
   onCreateSpace,
@@ -278,51 +286,44 @@ export function Sidebar({
         </div>
         </div>
 
-        {/* Recent conversations */}
-        <div className="group/convs">
+        {/* Workspaces */}
+        <div className="group/workspaces">
         <SidebarSectionLabel
-          label="最近对话"
+          label="工作区"
           labelsVisible={labelsVisible}
+          leadingIcon={<FolderOpen size={12}/>}
+          action={
+            <button
+              type="button"
+              onClick={() => void onAddWorkspace?.()}
+              disabled={onAddWorkspace === undefined || workspaceLoadState?.mutationPending === true}
+              aria-label="添加工作区"
+              title="添加工作区"
+              className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/workspaces:opacity-50 hover:!opacity-100"
+              style={{ width: 18, height: 18, color: 'var(--aa-text-3)', marginRight: -3 }}
+            >
+              <Plus size={12}/>
+            </button>
+          }
         />
-        <SidebarConversationScrollArea maxHeight={170}>
-          {orderedConversations.map((conversation, index) => (
-            <SidebarListRow
-              key={conversation.conversationId}
-            active={(view === 'conv-active' || view === 'conv-done') && activeConversationId === conversation.conversationId}
-              onClick={() => void openConversation(conversation.conversationId)}
-              dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
-              label={conversation.title}
-              editing={renamingId === conversation.conversationId}
-              editSelectAll={false}
-              onRename={(title) => {
-                void onRenameConversation(conversation.conversationId, title)
-                finishRename()
-              }}
-              onCancelRename={finishRename}
-              meta={
-                <span className="flex items-center gap-1">
-                  {conversation.pinnedAt !== undefined && (
-                    <Pin size={9} style={{ color: 'var(--aa-accent)' }}/>
-                  )}
-                  <span className="text-[10px]" style={{ color: 'var(--aa-text-3)' }}>{conversationTimeLabel(conversation.updatedAt)}</span>
-                </span>
-              }
-              actions={[
-                {
-                  label: conversation.pinnedAt !== undefined ? '取消置顶' : '置顶',
-                  icon: conversation.pinnedAt !== undefined ? <PinOff size={12}/> : <Pin size={12}/>,
-                  onClick: () => void onToggleConversationPinned(
-                    conversation.conversationId,
-                    conversation.pinnedAt === undefined,
-                  ),
-                },
-                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => { setRenameSelectAll(false); setRenamingId(conversation.conversationId) } },
-                { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => void onDeleteConversation(conversation.conversationId) },
-              ]}
-              pending={openingConversationId === conversation.conversationId || pendingConversationIds.has(conversation.conversationId)}
+        <div className="space-y-0.5">
+          {workspaceLoadState?.loading === true && workspaces.length === 0 && <WorkspaceLoadingRows />}
+          {workspaces.map((workspace) => (
+            <WorkspaceRow
+              key={workspace.workspaceId}
+              workspace={workspace}
+              conversations={orderedConversations.filter((conversation) =>
+                conversation.owner?.kind === 'workspace' && conversation.owner.id === workspace.workspaceId)}
+              activeConversationId={activeConversationId}
+              view={view}
+              openConversation={openConversation}
+              pendingConversationIds={pendingConversationIds}
             />
           ))}
-        </SidebarConversationScrollArea>
+          {workspaceLoadState?.error !== undefined && (
+            <SpaceLoadFailure message={workspaceLoadState.error} onRetry={workspaceLoadState.onRetry} />
+          )}
+        </div>
         </div>
 
         {/* 知识库 */}
@@ -400,6 +401,80 @@ function SpaceLoadingRows() {
   )
 }
 
+function WorkspaceLoadingRows() {
+  return (
+    <div className="space-y-2 px-3 py-1" role="status" aria-label="正在加载工作区">
+      <span className="block h-2.5 w-24 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+      <span className="block h-2.5 w-16 animate-pulse rounded" style={{ background: 'var(--aa-surface-hover)' }} />
+    </div>
+  )
+}
+
+const WORKSPACE_DOT = '#8a7fa8'
+
+function WorkspaceRow(props: {
+  readonly workspace: PersonalWorkspaceProjection
+  readonly conversations: readonly ConversationSummary[]
+  readonly activeConversationId?: string
+  readonly view: View
+  readonly openConversation: (conversationId: string) => void
+  readonly pendingConversationIds: ReadonlySet<string>
+}) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="space-y-0.5">
+      <SidebarListRow
+        active={false}
+        onClick={() => setExpanded((current) => !current)}
+        dot={WORKSPACE_DOT}
+        label={props.workspace.title}
+        editing={false}
+        onRename={() => undefined}
+        onCancelRename={() => undefined}
+        actions={[]}
+        meta={
+          <span className="flex items-center gap-1">
+            {props.workspace.status === 'disconnected' && (
+              <AlertCircle size={9} style={{ color: 'var(--aa-status-warning)' }} />
+            )}
+            <ChevronRight
+              size={11}
+              style={{
+                color: 'var(--aa-text-3)',
+                transform: expanded ? 'rotate(90deg)' : undefined,
+                transition: 'transform 160ms ease',
+              }}
+            />
+          </span>
+        }
+      />
+      {expanded && (
+        <SidebarConversationScrollArea maxHeight={220}>
+          {props.conversations.length === 0 && (
+            <div className="px-3 py-1.5 text-[11px]" style={{ color: 'var(--aa-text-3)' }}>
+              暂无对话
+            </div>
+          )}
+          {props.conversations.map((conversation, index) => (
+            <SidebarListRow
+              key={conversation.conversationId}
+              active={(props.view === 'conv-active' || props.view === 'conv-done') && props.activeConversationId === conversation.conversationId}
+              onClick={() => props.openConversation(conversation.conversationId)}
+              dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
+              label={conversation.title}
+              editing={false}
+              onRename={() => undefined}
+              onCancelRename={() => undefined}
+              actions={[]}
+              pending={props.pendingConversationIds.has(conversation.conversationId)}
+            />
+          ))}
+        </SidebarConversationScrollArea>
+      )}
+    </div>
+  )
+}
+
 function SpaceLoadFailure(props: {
   readonly message: string
   readonly onRetry: () => void | Promise<void>
@@ -431,16 +506,6 @@ function compareConversations(left: ConversationSummary, right: ConversationSumm
     if (pinnedOrder !== 0) return pinnedOrder
   }
   return timestampValue(right.updatedAt) - timestampValue(left.updatedAt)
-}
-
-function conversationTimeLabel(value: string | undefined): string {
-  const timestamp = timestampValue(value)
-  if (timestamp === 0) return ''
-  const elapsed = Math.max(0, Date.now() - timestamp)
-  if (elapsed < 60_000) return '刚刚'
-  if (elapsed < 3_600_000) return `${Math.max(1, Math.floor(elapsed / 60_000))}分钟前`
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}小时前`
-  return new Date(timestamp).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
 
 function timestampValue(value: string | undefined): number {

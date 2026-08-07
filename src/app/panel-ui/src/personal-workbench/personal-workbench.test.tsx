@@ -1092,58 +1092,73 @@ test("uses Home as the only non-destructive empty-state entry in the primary sid
   expect((screen.getByPlaceholderText("想从哪里开始？") as HTMLTextAreaElement).value).toBe("尚未提交的想法");
 });
 
-test("renders and opens backend conversation projections in pinned and updated order", async () => {
+test("renders and opens workspace conversation projections in updated order", async () => {
   const user = userEvent.setup();
   const onOpenConversation = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request) => {
+    if (String(path).startsWith("/api/workspaces")) {
+      return jsonResponse({ ok: true, workspaces: [{ id: "workspace-1", title: "AgentArbor", status: "available", currentMount: { rootPath: "Z:\\AgentArbor" }, linkCount: 0 }] });
+    }
+    return jsonResponse({ ok: true });
+  }));
   renderWorkbench({
     conversations: [
-      { conversationId: "older", title: "较早对话", updatedAt: "2026-07-20T00:00:00.000Z" },
-      { conversationId: "pinned", title: "置顶对话", pinnedAt: "2026-07-10T00:00:00.000Z", updatedAt: "2026-07-10T00:00:00.000Z" },
-      { conversationId: "newer", title: "较新对话", updatedAt: "2026-07-28T00:00:00.000Z" },
+      { conversationId: "older", title: "较早对话", updatedAt: "2026-07-20T00:00:00.000Z", owner: { kind: "workspace", id: "workspace-1" } },
+      { conversationId: "newer", title: "较新对话", updatedAt: "2026-07-28T00:00:00.000Z", owner: { kind: "workspace", id: "workspace-1" } },
     ],
     onOpenConversation,
   });
 
   const sidebar = within(screen.getByRole("complementary"));
-  const pinned = sidebar.getByText("置顶对话");
+  await user.click(await sidebar.findByText("AgentArbor"));
   const newer = sidebar.getByText("较新对话");
   const older = sidebar.getByText("较早对话");
-  expect(pinned.compareDocumentPosition(newer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 
   await user.click(older);
   expect(onOpenConversation).toHaveBeenCalledWith("older");
 });
 
-test("keeps a long conversation history inside the workbench scroll section", () => {
+test("keeps a long workspace conversation history inside the workbench scroll section", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request) => {
+    if (String(path).startsWith("/api/workspaces")) {
+      return jsonResponse({ ok: true, workspaces: [{ id: "workspace-1", title: "AgentArbor", status: "available", currentMount: { rootPath: "Z:\\AgentArbor" }, linkCount: 0 }] });
+    }
+    return jsonResponse({ ok: true });
+  }));
   renderWorkbench({
     conversations: Array.from({ length: 12 }, (_, index) => ({
       conversationId: `conversation-${index}`,
       title: `对话 ${index + 1}`,
       updatedAt: new Date(Date.UTC(2026, 6, 29, 0, 0, index)).toISOString(),
+      owner: { kind: "workspace", id: "workspace-1" },
     })),
   });
 
+  const sidebar = within(screen.getByRole("complementary"));
+  await user.click(await sidebar.findByText("AgentArbor"));
   const scrollArea = document.querySelector<HTMLElement>("[data-conversation-scroll]");
   expect(scrollArea).not.toBeNull();
-  expect(scrollArea?.style.maxHeight).toBe("170px");
+  expect(scrollArea?.style.maxHeight).toBe("220px");
   expect(scrollArea?.className).toContain("overflow-y-auto");
   expect(within(scrollArea!).getAllByText(/^对话 \d+$/u)).toHaveLength(12);
 });
 
-test("routes sidebar conversation pin actions to backend commands", async () => {
-  const user = userEvent.setup();
-  const onToggleConversationPinned = vi.fn();
+test("keeps space-owned conversations out of the primary sidebar list", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request) => {
+    if (String(path).startsWith("/api/workspaces")) {
+      return jsonResponse({ ok: true, workspaces: [] });
+    }
+    return jsonResponse({ ok: true });
+  }));
   renderWorkbench({
-    conversations: [{ conversationId: "conversation-1", title: "真实会话" }],
-    onToggleConversationPinned,
+    conversations: [{ conversationId: "conversation-1", title: "真实会话", owner: { kind: "space", id: "space-study" } }],
   });
 
-  fireEvent.mouseEnter(screen.getByRole("button", { name: "真实会话" }));
-  await user.click(screen.getByRole("button", { name: "更多操作" }));
-  await user.click(screen.getByRole("button", { name: "置顶" }));
-
-  expect(onToggleConversationPinned).toHaveBeenCalledWith("conversation-1", true);
+  const sidebar = within(screen.getByRole("complementary"));
+  expect(sidebar.queryByText("真实会话")).toBeNull();
+  expect(sidebar.getByText("工作区")).toBeTruthy();
 });
 
 test("exposes model, context usage, and reasoning controls in the workbench composer", async () => {

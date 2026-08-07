@@ -258,7 +258,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
           {durableSaveState.startsWith('error:') ? '保存失败' : saved && durableSaveState === 'saved' ? '已保存' : '保存中…'}
         </span>
         <div className="flex-1" />
-        <button onClick={toggleSourceMode} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: sourceMode ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }} title={sourceMode ? '返回所见即所得' : '查看 Markdown 源码'}>
+        <button onClick={toggleSourceMode} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: sourceMode ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}>
           <Code2 size={12} />{sourceMode ? '编辑' : '源码'}
         </button>
         {onOpenFocus && <button onClick={onOpenFocus} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: 'var(--aa-text-2, #87827c)' }}><Maximize2 size={12} />专注</button>}

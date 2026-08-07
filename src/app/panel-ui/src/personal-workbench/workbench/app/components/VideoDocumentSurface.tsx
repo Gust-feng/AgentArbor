@@ -329,16 +329,16 @@ export function VideoDocumentSurface({ url, title, poster, duration: durationLab
               />
             </div>
             <div className="aa-video-document__control-row">
-              <button className="aa-video-document__control" type="button" aria-label={playing ? '暂停' : '播放'} title={playing ? '暂停' : '播放'} disabled={surfaceState === 'error'} onClick={() => void togglePlayback()}>
+              <button className="aa-video-document__control" type="button" aria-label={playing ? '暂停' : '播放'} disabled={surfaceState === 'error'} onClick={() => void togglePlayback()}>
                 {playing ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
               </button>
               <span className="aa-video-document__time">{formatVideoTime(currentTime)} / {resolvedDuration}</span>
               <span className="aa-video-document__control-spacer" />
-              <button className="aa-video-document__control" type="button" aria-label={volumeMuted ? '取消静音' : '静音'} title={volumeMuted ? '取消静音' : '静音'} onClick={toggleMute}>
+              <button className="aa-video-document__control" type="button" aria-label={volumeMuted ? '取消静音' : '静音'} onClick={toggleMute}>
                 {volumeMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
               </button>
               <input className="aa-video-document__volume" type="range" aria-label="音量" min={0} max={1} step="0.05" value={muted ? 0 : volume} onChange={changeVolume} />
-              <button className="aa-video-document__control" type="button" aria-label={fullscreen ? '退出全屏' : '全屏'} title={fullscreen ? '退出全屏' : '全屏'} onClick={() => void toggleFullscreen()}>
+              <button className="aa-video-document__control" type="button" aria-label={fullscreen ? '退出全屏' : '全屏'} onClick={() => void toggleFullscreen()}>
                 {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
               </button>
             </div>

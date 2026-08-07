@@ -23,7 +23,7 @@ export function ResponsivenessDiagnostics(): React.ReactElement {
           <h3>界面响应</h3>
         </div>
         {incidents.length > 0 && (
-          <button type="button" onClick={clearResponsivenessIncidents} aria-label="清空界面响应记录" title="清空界面响应记录">
+          <button type="button" onClick={clearResponsivenessIncidents} aria-label="清空界面响应记录">
             <Trash2 size={14} />
           </button>
         )}

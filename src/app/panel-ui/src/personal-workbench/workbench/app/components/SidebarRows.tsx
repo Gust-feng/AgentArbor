@@ -7,14 +7,13 @@ export interface SidebarNavRowProps {
   readonly onClick: () => void
   readonly labelsVisible: boolean
   readonly collapsed: boolean
-  readonly tooltip?: string
   readonly icon: ReactNode
   readonly label: string
   readonly meta?: ReactNode
 }
 
 /** Fixed-geometry navigation row used by the workbench rail. */
-export function SidebarNavRow({ active, onClick, labelsVisible, collapsed, tooltip, icon, label, meta }: SidebarNavRowProps) {
+export function SidebarNavRow({ active, onClick, labelsVisible, collapsed, icon, label, meta }: SidebarNavRowProps) {
   const [hovered, setHovered] = useState(false)
 
   return (
@@ -22,7 +21,6 @@ export function SidebarNavRow({ active, onClick, labelsVisible, collapsed, toolt
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      title={!labelsVisible ? tooltip : undefined}
       className="relative w-full text-sm"
       style={{
         display: 'block',

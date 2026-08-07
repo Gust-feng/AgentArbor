@@ -135,7 +135,6 @@ export function TopBar({
                   <button
                     type="button"
                     onClick={onEnterFocus}
-                    title="专注阅读"
                     aria-label="专注阅读"
                     className="topbar-focus-button"
                   >

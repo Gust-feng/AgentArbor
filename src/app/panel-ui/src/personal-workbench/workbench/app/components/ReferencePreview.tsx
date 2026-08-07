@@ -360,13 +360,13 @@ function ReferenceHeader({ rootTitle, relativePath, source, actions, canOpen, on
           </span>
         )}
         {sourceMode !== undefined && onToggleSourceMode !== undefined && (
-          <button type="button" onClick={onToggleSourceMode} title={sourceMode ? '返回阅读视图' : '编辑 Markdown 源码'}>
+          <button type="button" onClick={onToggleSourceMode}>
             <Code2 size={13} />{sourceMode ? '阅读' : '源码'}
           </button>
         )}
         {actions}
         {canOpen && (
-          <button type="button" onClick={onOpen} title="在系统中打开">
+          <button type="button" onClick={onOpen}>
             <ExternalLink size={13} />
             在系统中打开
           </button>

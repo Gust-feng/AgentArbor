@@ -82,7 +82,6 @@ export function ConversationScrollArea(props: {
           className="aa-conversation-jump-to-latest"
           onClick={jumpToLatest}
           aria-label="跳到最新回答"
-          title="跳到最新回答"
         >
           <ArrowDown size={16} strokeWidth={2} aria-hidden="true" />
         </button>

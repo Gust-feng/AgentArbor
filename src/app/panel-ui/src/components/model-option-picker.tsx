@@ -96,7 +96,6 @@ export function ModelOptionPicker(props: {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? popoverId : undefined}
-        title={selected === undefined ? undefined : `${selected.providerLabel} / ${selected.name}`}
         onClick={() => setOpen((current) => !current)}
         disabled={props.disabled === true}
       >

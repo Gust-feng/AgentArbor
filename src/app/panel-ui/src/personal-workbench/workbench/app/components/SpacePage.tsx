@@ -1033,7 +1033,6 @@ function NoteRow({
         onClick={(e) => e.stopPropagation()}
         className="flex items-center justify-center shrink-0 cursor-move"
         style={{ width: 12, color: 'var(--aa-text-3, #aba39b)', opacity: hovered && !editing ? 1 : 0 }}
-        title=""
       >
         <GripVertical size={12} />
       </span>

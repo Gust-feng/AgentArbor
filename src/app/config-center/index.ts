@@ -77,7 +77,7 @@ import {
   toSanitizedWebSearchConfig,
   toSanitizedWorkspaceConfig,
 } from "./projections.js";
-import { normalizeWorkspaceDirectory } from "./workspace-settings.js";
+import { normalizeFilePickerInitialDirectory, normalizeWorkspaceDirectory } from "./workspace-settings.js";
 
 export { WorkspaceDirectoryValidationError } from "./workspace-settings.js";
 
@@ -662,14 +662,22 @@ export class ConfigCenter {
     return toSanitizedSkillTriggerConfig(settings.skillTrigger, { now: settings.updatedAt });
   }
 
+  /**
+   * 更新文件选择器初始目录偏好（ADR-0035 §2.4）。
+   *
+   * 该值不再参与任何运行授权：不创建目录、不驱动 cwd/文件工具/Notes/Skills。
+   * 旧 updateWorkspaceConfig 是同一语义的兼容别名。
+   */
   async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput): Promise<SanitizedWorkspaceConfig> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
-    const workspaceDirectory = await normalizeWorkspaceDirectory(input.workspaceDirectory);
+    const initialDirectory = input.workspaceDirectory === undefined
+      ? undefined
+      : normalizeFilePickerInitialDirectory(input.workspaceDirectory);
     const next: AgentArborLocalSettings = {
       ...current,
       version: 3,
-      workspaceDirectory,
+      ...(initialDirectory === undefined ? {} : { workspaceDirectory: initialDirectory }),
       updatedAt: now,
     };
     await this.options.settingsStore.writeSettings(next);

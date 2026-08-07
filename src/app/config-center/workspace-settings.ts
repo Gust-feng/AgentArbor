@@ -16,6 +16,14 @@ export async function normalizeWorkspaceDirectory(value: string | undefined): Pr
   return normalized;
 }
 
+/**
+ * 文件选择器初始目录偏好（ADR-0035 §2.4）：只做路径规范化，不创建目录、
+ * 不参与任何运行授权。兼容期保留旧字段名。
+ */
+export function normalizeFilePickerInitialDirectory(value: string | undefined): string {
+  return path.resolve(normalizeOptionalString(value) ?? resolveDefaultWorkspaceDirectory());
+}
+
 export function normalizeConfiguredWorkspaceDirectory(value: string | undefined): string {
   return path.resolve(normalizeOptionalString(value) ?? resolveDefaultWorkspaceDirectory());
 }

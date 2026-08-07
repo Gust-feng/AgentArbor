@@ -46,12 +46,12 @@ export function WorkspaceSettings(props: {
   return (
     <div className="workspace-settings-stack">
       <section className="settings-card">
-        <h3>默认文件夹</h3>
+        <h3>文件选择器初始目录</h3>
         <SettingRow label="路径">
           <div className="workspace-directory-field">
             <input
               value={props.workspaceDirectory}
-              placeholder="留空使用默认文件夹"
+              placeholder="留空使用默认位置"
               spellCheck={false}
               autoComplete="off"
               autoCorrect="off"
@@ -84,6 +84,9 @@ export function WorkspaceSettings(props: {
             </div>
           </div>
         </SettingRow>
+        <p className="settings-card-hint">
+          仅作为打开文件选择器时的初始位置，不影响 Agent 的工作目录与文件权限。
+        </p>
       </section>
       <CommandShellSelection
         commandShell={props.commandShell}

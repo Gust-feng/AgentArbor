@@ -302,11 +302,9 @@ export class CapabilityCenter {
   }
 
   private async effectiveSkillRootInput(input: CapabilitySkillRootsInput): Promise<CapabilitySkillRootsInput> {
-    if (input.workspaceDirectory !== undefined || this.options.resolveSkillRoots === undefined) {
-      return input;
-    }
-    const workspace = await this.options.configCenter.getWorkspaceConfig();
-    return { workspaceDirectory: workspace.workspaceDirectory };
+    // 全局 workspaceDirectory 已退役（ADR-0035 §2.4）：它只是文件选择器初始位置，
+    // 不再作为 skill/sub-agent roots 的来源。未显式传入时由解析器回退 cwd。
+    return input;
   }
 
   private skillRootsFor(input: CapabilitySkillRootsInput): readonly SkillRootInput[] {
@@ -314,11 +312,8 @@ export class CapabilityCenter {
   }
 
   private async effectiveSubAgentRootInput(input: CapabilitySubAgentRootsInput): Promise<CapabilitySubAgentRootsInput> {
-    if (input.workspaceDirectory !== undefined || this.options.resolveSubAgentRoots === undefined) {
-      return input;
-    }
-    const workspace = await this.options.configCenter.getWorkspaceConfig();
-    return { workspaceDirectory: workspace.workspaceDirectory };
+    // 全局 workspaceDirectory 已退役（ADR-0035 §2.4）：不再注入 sub-agent roots。
+    return input;
   }
 
   private subAgentRootsFor(input: CapabilitySubAgentRootsInput): readonly SubAgentRootInput[] {

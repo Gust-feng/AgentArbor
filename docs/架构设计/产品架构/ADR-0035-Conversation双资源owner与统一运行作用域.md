@@ -287,17 +287,15 @@ managed_root=C:\...\spaces\<spaceId>\files
 [Workspace references in this space]
 You can access the following external resources by their name or full path:
 
-- "RustBook" or "学习教材"
+- "RustBook"
   Full path: C:\Users\xzf28\Documents\RustBook
   Status: Available
-  Description: Rust 官方教材中文版
-  
-- "rust-practice" or "练习项目"
+
+- "rust-practice"
   Full path: C:\Users\xzf28\Code\rust-practice
   Status: Available
-  Description: 日常练习代码仓库
 
-When the user mentions these names or descriptions, use the corresponding full path to access files.
+When the user mentions these names, use the corresponding full path to access files.
 The managed_root is your default working directory for this space.
 ~~~
 
@@ -313,15 +311,17 @@ path=Z:\AgentArbor
 **关键要求**：
 
 1. Space owner 必须注入 managedRoot，即使没有任何外部引用。
-2. Space 引用的 Workspace 必须列出：名称、路径、状态、可选的描述或别名。
+2. Space 引用的 Workspace 必须列出：名称（title，用户可改名）、路径、状态。
 3. 模型需要能够：
    - 理解用户提到的"RustBook"、"练习项目"等指代，映射到对应的真实路径。
    - 知道 managedRoot 是默认工作目录。
+
+**不建设用户维护的别名与说明字段**。引用名称就是用户可改名的 `title`，文件夹名通常已足够语义化；自然语言指代到真实路径的映射是模型的职责，工程侧只保证把名称、真实路径和状态注入上下文，不要求用户为引用维护额外元数据，避免增加用户心智负担。
    - 使用真实绝对路径调用文件工具，但在与用户交流时可以使用简称。
 
 ### 6.3 引用的智能映射
 
-Agent 必须能够根据用户的自然语言描述，匹配到对应的 Workspace 引用：
+Agent 必须能够根据用户的自然语言描述，匹配到对应的 Workspace 引用。这是模型自身的能力：上下文中的引用名称（可改名的 title）与真实路径足够让模型理解指代，工程侧不维护别名或描述字段（见 §6.2）。
 
 **示例对话**：
 
@@ -492,8 +492,6 @@ type SpaceWorkspaceReference = {
   name: string;
   path: string;
   status: "available" | "disconnected";
-  description?: string;
-  alias?: string;
 };
 ~~~
 
@@ -575,11 +573,10 @@ AgentArbor · 工作区
 
 **Space 详情页增强**：
 
-1. **引用列表**：显示所有引用的 Workspace，包括名称、路径、状态、描述
-2. **引用别名**：用户可以给引用起一个容易记忆的名称（如"学习教材"、"练习项目"）
-3. **引用说明**：用户可以添加说明文字，描述这个资源的用途
-4. **最近使用**：显示哪些 Conversation 使用了这个引用
-5. **快速添加**：便捷的添加引用按钮，打开文件选择器
+1. **引用列表**：显示所有引用的 Workspace，包括名称、路径、状态
+2. **引用改名**：复用现有引用改名机制；不提供独立的别名或说明编辑（见 §6.2，避免用户为引用维护额外元数据）
+3. **最近使用**：显示哪些 Conversation 使用了这个引用
+4. **快速添加**：便捷的添加引用按钮，打开文件选择器
 
 **引用状态指示**：
 
@@ -671,14 +668,14 @@ AgentArbor · 工作区
 1. 将”我的空间”和 managedRoot 的创建并入现有 `initializeInitialWorkbenchData` 初始化入口，复用同一初始化互斥、幂等和重试机制；不得新增平行初始化器。已有 Space 或用户数据存在时不重复创建，不覆盖现有资产。
 2. 首页改为 Space/Workspace 统一选择器，清楚显示每个 Space 包含的引用资源。
 3. 左侧增加独立 Spaces、Workspaces 管理入口。
-4. 对话顶栏显示固定 owner，支持展开查看 Space 的引用详情（名称、路径、状态、描述）。
+4. 对话顶栏显示固定 owner，支持展开查看 Space 的引用详情（名称、路径、状态）。
 5. 拆分前端 selection state，删除全局 activeSpaceId 的跨职责复用。
-6. Space 详情页增加引用管理功能：别名、说明、最近使用、快速添加。
+6. Space 详情页增加引用管理功能：改名、最近使用、快速添加（不建设别名/说明字段，见 §6.2）。
 7. 实现首次使用引导，解释 Space 与 Workspace 的区别和用途。
 
 ### 阶段七：模型上下文与智能映射
 
-1. 实现 Space owner 的完整模型上下文注入：owner 信息、managedRoot、引用列表（含名称、路径、状态、描述）。
+1. 实现 Space owner 的完整模型上下文注入：owner 信息、managedRoot、引用列表（名称、路径、状态）。
 2. 实现模型对用户自然语言的引用映射能力（”RustBook”、”练习项目” → 真实路径）。
 3. 工具调用使用真实绝对路径 + 权限校验，日志和用户消息使用友好显示路径。
 4. 确保空 Space 也能正确注入 owner 和 managedRoot 到模型上下文。
@@ -715,7 +712,7 @@ AgentArbor · 工作区
 
 ### 模型智能与上下文
 
-- Space owner 的模型上下文必须包含：owner 信息、managedRoot、完整的引用列表（名称、路径、状态、描述）。
+- Space owner 的模型上下文必须包含：owner 信息、managedRoot、完整的引用列表（名称、路径、状态）。
 - 模型能够理解用户提到的"RustBook"、"练习项目"等自然语言，映射到对应的真实路径。
 - 工具调用使用真实绝对路径，日志和用户消息使用友好的显示路径（如 `[RustBook] chapter3.md`）。
 - 空 Space（无引用）也能正确注入 owner 区块到模型上下文。
@@ -735,7 +732,7 @@ AgentArbor · 工作区
 - 对话顶部显示固定 owner（如"学习 Rust · 空间"）。
 - Space owner 的对话顶部可展开，显示 managedRoot 和引用列表。
 - 引用状态（可用/已断开/已删除）清楚标示。
-- Space 详情页支持引用别名、说明编辑。
+- Space 详情页支持引用改名（复用现有机制），不提供别名/说明编辑。
 - 首次使用时显示引导，解释 Space 与 Workspace 的区别。
 
 ### Shell、工具和进程

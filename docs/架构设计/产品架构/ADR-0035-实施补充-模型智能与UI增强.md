@@ -21,23 +21,21 @@ managed_root={absolutePath}
 [Workspace references in this space]
 You can access the following external resources by their name or full path:
 
-- "{primaryName}" or "{alias}"
+- "{primaryName}"
   Full path: {absolutePath}
   Status: {Available|Disconnected}
-  Description: {userDescription}
-  
-- "{primaryName2}" or "{alias2}"
+
+- "{primaryName2}"
   Full path: {absolutePath2}
   Status: {Available|Disconnected}
-  Description: {userDescription2}
 
-When the user mentions these names or descriptions, use the corresponding full path to access files.
+When the user mentions these names, use the corresponding full path to access files.
 The managed_root is your default working directory for this space.
 ```
 
 **关键要求**：
 1. 即使 Space 没有任何引用，也必须注入 owner 信息和 managedRoot
-2. 引用必须包含主名称、可选别名、完整路径、状态、描述
+2. 引用必须包含名称（可改名的 title）、完整路径、状态；不建设用户维护的别名或描述字段（ADR-0035 §6.2，避免增加用户心智负担）
 3. 明确告知模型 managedRoot 是默认工作目录
 4. 明确告知模型如何映射用户提到的名称到路径
 
@@ -78,19 +76,17 @@ You can work with files in the managed_root directory.
 
 ### 3.1 映射规则
 
-模型需要能够将用户的自然语言描述映射到实际路径：
+模型需要能够将用户的自然语言描述映射到实际路径。这是模型自身能力，不依赖用户维护的别名/描述字段：
 
 | 用户表述 | 映射目标 | 使用路径 |
 |---------|---------|---------|
-| "RustBook" | 引用主名称 | C:\Users\...\Documents\RustBook |
-| "学习教材" | 引用别名 | C:\Users\...\Documents\RustBook |
-| "Rust 官方教材" | 引用描述关键词 | C:\Users\...\Documents\RustBook |
-| "练习项目" | 引用别名 | C:\Users\...\Code\rust-practice |
-| "rust-practice" | 引用主名称 | C:\Users\...\Code\rust-practice |
+| "RustBook" | 引用名称 | C:\Users\...\Documents\RustBook |
+| "Rust 练习项目" | 引用名称/目录语义 | C:\Users\...\Code\rust-practice |
+| "rust-practice" | 引用名称 | C:\Users\...\Code\rust-practice |
 
 **实现要求**：
-1. 模型应该从上下文中的引用列表进行模糊匹配
-2. 优先匹配主名称，其次别名，最后描述
+1. 模型应该从上下文中的引用列表（名称 + 真实路径）进行模糊匹配
+2. 引用名称来自用户可改名的 title；不再提供别名/说明字段
 3. 如果有歧义，应该列出可能的选项让用户选择
 
 ### 3.2 工具调用示例
@@ -222,40 +218,26 @@ You can work with files in the managed_root directory.
 │ ┌─ RustBook ─────────────────────┐ │
 │ │ 状态：✓ 可用                    │ │
 │ │ 路径：C:\Users\...\RustBook    │ │
-│ │ 别名：学习教材                  │ │
-│ │ 说明：Rust 官方教材中文版       │ │
 │ │ 最近使用：2 小时前在"语法学习" │ │
-│ │ [编辑] [打开] [取消引用]        │ │
+│ │ [改名] [打开] [取消引用]        │ │
 │ └───────────────────────────────┘ │
 │                                       │
 │ ┌─ rust-practice ────────────────┐ │
 │ │ 状态：✓ 可用                    │ │
 │ │ 路径：C:\Users\...\rust-practice│ │
-│ │ 别名：练习项目                  │ │
-│ │ 说明：日常练习代码仓库          │ │
 │ │ 最近使用：昨天在"错误排查"      │ │
-│ │ [编辑] [打开] [取消引用]        │ │
+│ │ [改名] [打开] [取消引用]        │ │
 │ └───────────────────────────────┘ │
 │                                       │
 │ [➕ 添加引用]                         │
 └───────────────────────────────────┘
 ```
 
-**编辑引用弹窗**：
+**编辑引用弹窗**（仅改名，复用现有引用改名机制；不提供别名/说明字段）：
 ```
-┌─ 编辑引用 ─────────────────┐
+┌─ 重命名引用 ──────────────┐
 │                             │
-│ 名称：RustBook              │
-│ （不可修改，来自文件夹名）  │
-│                             │
-│ 别名：[学习教材        ]    │
-│ 帮助 Agent 理解这个资源     │
-│                             │
-│ 说明：                      │
-│ ┌─────────────────────────┐│
-│ │Rust 官方教材中文版      ││
-│ │                         ││
-│ └─────────────────────────┘│
+│ 名称：[RustBook        ]    │
 │                             │
 │ [取消] [保存]               │
 └─────────────────────────────┘
@@ -315,10 +297,10 @@ You can work with files in the managed_root directory.
 
 ### 5.1 模型上下文
 
-- [ ] Space owner 注入完整引用列表（名称、别名、路径、状态、描述）
+- [ ] Space owner 注入完整引用列表（名称、路径、状态）
 - [ ] Workspace owner 注入名称和路径
 - [ ] 空 Space 也正确注入 owner 区块
-- [ ] 模型能理解用户提到的引用名称/别名/描述
+- [ ] 模型能理解用户提到的引用名称并映射到真实路径
 - [ ] 工具调用使用真实绝对路径
 - [ ] 用户可见消息使用友好路径
 
@@ -330,7 +312,7 @@ You can work with files in the managed_root directory.
 - [ ] Space 对话顶部支持展开引用详情
 - [ ] 引用状态清楚标示（可用/断开/删除）
 - [ ] Space 详情页支持引用管理
-- [ ] 支持编辑引用别名和说明
+- [ ] Space 详情页支持引用改名（复用现有机制），不提供别名/说明编辑
 - [ ] 显示引用最近使用情况
 - [ ] 首次使用引导已实现
 
@@ -341,7 +323,7 @@ You can work with files in the managed_root directory.
 - [ ] 权限校验使用后端解析的身份，不依赖模型提供的路径字符串或伪造授权字段
 - [ ] 用户可见的日志使用友好路径
 - [ ] 空 Space 的对话能正常工作
-- [ ] 引用别名和描述正确传递给模型
+- [ ] 引用名称与真实路径正确传递给模型（不建设别名/描述字段）
 
 ## 6. 常见问题
 
@@ -353,13 +335,13 @@ A: Space 是"主题工作台"，不是"项目切换器"。managedRoot 是工作�
 
 A: 不需要。模型通过智能映射，能理解"RustBook"、"练习项目"等自然语言，自动使用对应的完整路径。用户和模型交流时可以用简称。
 
-**Q: 引用别名和描述是必填的吗？**
+**Q: 文件夹名不好懂（如 "project-2024-backup"），模型理解不了怎么办？**
 
-A: 不是必填。但建议用户填写，这样模型更容易理解引用的含义。特别是当引用的文件夹名不够语义化时（如"project-2024-backup"）。
+A: 改名。引用名称就是可改名的 title（复用现有改名机制），用户主动把引用改成语义化名称即可；不需要也不提供单独的别名/说明字段，避免用户为每个引用维护额外元数据。模型从名称与真实路径自然理解指代。
 
 **Q: 如果 Space 引用了 10 个项目，模型上下文会不会太长？**
 
-A: 每个引用只占几行文本（名称、路径、描述），10 个引用约 200-300 token，影响很小。如果确实有问题，可以考虑只注入最近使用的引用，或者让用户整理不需要的引用。
+A: 每个引用只占几行文本（名称、路径、状态），10 个引用约 200 token，影响很小。如果确实有问题，可以考虑只注入最近使用的引用，或者让用户整理不需要的引用。
 
 **Q: 能不能让 Space 对话"切换"到某个引用项目，让那个项目变成 cwd？**
 

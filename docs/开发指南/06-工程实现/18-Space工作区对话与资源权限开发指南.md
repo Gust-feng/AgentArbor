@@ -134,7 +134,7 @@ name=AgentArbor
 path=Z:\AgentArbor
 ```
 
-即使 Space 没有任何外部引用，也必须注入 owner 和 managedRoot。Space owner 的引用列表至少包含名称、路径、状态和可选描述/别名，模型可以按名称或简称映射到真实绝对路径。工具入参只使用真实绝对路径；`workspaceId / linkId / mountVersion` 由后端从 Run snapshot 解析后附加到执行事实，绝不作为模型参数暴露。
+即使 Space 没有任何外部引用，也必须注入 owner 和 managedRoot。Space owner 的引用列表至少包含名称（可改名的 title）、路径和状态；不建设用户维护的别名/说明字段，模型按名称或简称映射到真实绝对路径（见 ADR-0035 §6.2）。工具入参只使用真实绝对路径；`workspaceId / linkId / mountVersion` 由后端从 Run snapshot 解析后附加到执行事实，绝不作为模型参数暴露。
 
 ### 4.2 规范化与解析
 
@@ -432,7 +432,7 @@ Workbench Shell
 
 ### 阶段六：模型、工具与 Panel
 
-1. 注入 owner 区块和引用列表（名称、路径、状态、描述、别名）；工具入参真实路径，授权由后端解析。
+1. 注入 owner 区块和引用列表（名称、路径、状态）；工具入参真实路径，授权由后端解析。不建设别名/说明字段（ADR-0035 §6.2）。
 2. 模型是创建/重命名 Space 的一等操作者；Workspace 注册经用户选择，Space-Workspace link 确认一次。
 3. 侧边栏按"首页/空间/工作区/知识库/设置"重构：最近对话归首页、空间不挂会话、工作区展开直属会话；对话顶部显示固定 owner。
 4. 拆分前端 selection state，删除全局 activeSpaceId 的跨职责复用；实现首次引导。

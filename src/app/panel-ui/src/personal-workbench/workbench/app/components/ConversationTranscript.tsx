@@ -9,6 +9,7 @@
  */
 import React, { useCallback, useMemo, useSyncExternalStore, useState } from "react";
 import {
+  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -227,11 +228,9 @@ function ConversationAssistantMessage(props: {
       {workflow.segments.map((segment, index) => {
         if (segment.kind === "activity") {
           return (
-            <ConversationActivityTimeline
+            <ConversationActivitySegment
               key={segment.segmentKey}
-              timeline={segment.timeline}
-              collapsed={segment.collapsed}
-              lifecycle={segment.lifecycle}
+              segment={segment}
               onDecision={props.onDecision}
               confirmationBusy={props.confirmationBusy === true}
               toolResultsByRunId={props.toolResultsByRunId}
@@ -291,11 +290,9 @@ function ConversationFailureMessage(props: {
       </div>
       {activitySegments.map((segment) => (
         segment.kind === "activity" ? (
-          <ConversationActivityTimeline
+          <ConversationActivitySegment
             key={segment.segmentKey}
-            timeline={segment.timeline}
-            collapsed={segment.collapsed}
-            lifecycle={segment.lifecycle}
+            segment={segment}
             onDecision={props.onDecision}
             confirmationBusy={props.confirmationBusy}
             toolResultsByRunId={props.toolResultsByRunId}
@@ -343,6 +340,94 @@ function ConversationPendingDots() {
 }
 
 /* ─── 工具活动时间线 ─── */
+
+/**
+ * 一个活动段由两部分组成：独立的思考块（模型推理过程）与工具工作流时间线。
+ * 思考不属于工具调用过程，展示上与工具条目分开。
+ */
+function ConversationActivitySegment(props: {
+  readonly segment: Extract<
+    AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>["segments"][number],
+    { readonly kind: "activity" }
+  >;
+  readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
+  readonly confirmationBusy: boolean;
+  readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
+  readonly developerModeEnabled: boolean;
+}) {
+  const { thinkingItems, processTimeline } = splitThinkingTimeline(props.segment.timeline);
+  return (
+    <>
+      {thinkingItems.length > 0 && <ConversationThinkingBlock items={thinkingItems} />}
+      <ConversationActivityTimeline
+        timeline={processTimeline}
+        collapsed={props.segment.collapsed}
+        lifecycle={props.segment.lifecycle}
+        onDecision={props.onDecision}
+        confirmationBusy={props.confirmationBusy}
+        toolResultsByRunId={props.toolResultsByRunId}
+        developerModeEnabled={props.developerModeEnabled}
+      />
+    </>
+  );
+}
+
+function splitThinkingTimeline(timeline: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>): {
+  readonly thinkingItems: readonly ActivityItem[];
+  readonly processTimeline: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
+} {
+  const visibleItems = timeline.items.filter(isVisibleOrdinaryActivityItem);
+  const thinkingItems = visibleItems.filter((item) => item.tone === "thinking");
+  const processItems = visibleItems.filter((item) => item.tone !== "thinking");
+  return {
+    thinkingItems,
+    processTimeline: {
+      ...timeline,
+      items: processItems,
+      hasContent: processItems.length > 0 || timeline.confirmation.current !== undefined,
+    },
+  };
+}
+
+/* ─── 思考块 ─── */
+
+/**
+ * 模型推理过程的专门展示：独立于工具工作流，默认展开显示推理内容。
+ */
+function ConversationThinkingBlock(props: { readonly items: readonly ActivityItem[] }) {
+  const [open, setOpen] = useState(true);
+  const text = props.items
+    .map((item) => item.copy.expandedDetail ?? item.copy.detail)
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+    .join("\n\n");
+  if (text.length === 0) return null;
+  return (
+    <div className="aa-thinking-block">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-label={open ? "收起思考" : "展开思考"}
+        className="flex w-full items-center gap-2 text-left"
+        style={{ color: "var(--aa-text-2)" }}
+      >
+        <Brain size={12} className="shrink-0" style={{ color: "var(--aa-text-3)" }} />
+        <span className="text-[12px] font-medium tracking-wide">思考</span>
+        <span className="ml-auto" style={{ color: "var(--aa-text-3)" }}>
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </span>
+      </button>
+      {open && (
+        <div
+          className="aa-thinking-content mt-1.5 border-l-2 pl-3 text-[12px] leading-[1.75]"
+          style={{ borderColor: "var(--aa-border)", color: "var(--aa-text-2)", whiteSpace: "pre-wrap" }}
+        >
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ConversationActivityTimeline(props: {
   readonly timeline: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;

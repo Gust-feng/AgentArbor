@@ -111,6 +111,64 @@ test("conversation transcript keeps normal tool evidence while hiding the canoni
   expect(screen.queryByText("tool-fact-1")).toBeNull();
 });
 
+test("conversation transcript renders thinking separately from the tool workflow", () => {
+  const turns: readonly ConversationTurn[] = [{
+    turnId: "user-1",
+    role: "user",
+    content: "读取 README",
+    status: "completed",
+  }];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = [{
+    turn: turns[0]!,
+    claimedCurrentRun: false,
+  }];
+  const thinkingNode: TranscriptNode = {
+    nodeId: "thinking-node-1",
+    runId: "run-1",
+    sequence: 1,
+    eventType: "model.reasoning.completed",
+    kind: "thinking",
+    phase: "completed",
+    title: "思考",
+    text: "先确认用户意图，再读取文件。",
+    summary: "先确认用户意图，再读取文件。",
+    timestamp: "2026-07-31T00:00:00.000Z",
+    refs: [{ kind: "model_call", id: "model-1" }],
+  };
+  const nodes = [thinkingNode, toolNode()];
+
+  render(<ConversationTranscript
+    conversationId="conversation-thinking"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunId="run-1"
+    currentRunNodes={nodes}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    standaloneRun={{
+      currentRunId: "run-1",
+      runStatus: "completed",
+      runProjection: { nodes },
+    }}
+    models={[]}
+    selectedModelId=""
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  // 思考拥有独立展示块，正文直接可见。
+  expect(screen.getByRole("button", { name: /展开思考|收起思考/ })).toBeTruthy();
+  expect(screen.getByText("先确认用户意图，再读取文件。")).toBeTruthy();
+
+  // 工具工作流只统计工具条目，思考不再计入“操作”。
+  expect(screen.getByText("完成 1 项操作")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /完成 1 项操作/ }));
+  const timeline = document.querySelector(".aa-activity-timeline");
+  expect(timeline?.textContent).not.toContain("先确认用户意图");
+  expect(timeline?.textContent).toContain("运行 终端");
+});
+
 test("conversation transcript uses the shared markdown renderer without hover layout shifts", () => {
   const turns: readonly ConversationTurn[] = [
     { turnId: "user-1", role: "user", content: "整理工具", status: "completed" },

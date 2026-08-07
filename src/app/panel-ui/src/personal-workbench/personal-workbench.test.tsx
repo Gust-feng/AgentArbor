@@ -1161,6 +1161,30 @@ test("keeps space-owned conversations out of the primary sidebar list", async ()
   expect(sidebar.getByText("工作区")).toBeTruthy();
 });
 
+test("shows owned conversations inside the Space page left rail", async () => {
+  const user = userEvent.setup();
+  const onOpenConversation = vi.fn();
+  renderWorkbench({
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [
+        { conversationId: "conversation-1", title: "Rust 学习" },
+        { conversationId: "conversation-2", title: "整理笔记" },
+      ],
+    }],
+    onOpenConversation,
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  expect(await screen.findByText("Rust 学习")).toBeTruthy();
+  expect(screen.getByText("整理笔记")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Rust 学习" }));
+  expect(onOpenConversation).toHaveBeenCalledWith("conversation-1");
+});
+
 test("exposes model, context usage, and reasoning controls in the workbench composer", async () => {
   const user = userEvent.setup();
   const onModelSelect = vi.fn();

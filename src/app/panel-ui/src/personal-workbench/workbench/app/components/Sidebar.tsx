@@ -83,6 +83,9 @@ export function Sidebar({
   activeConversationId,
   onOpenConversation,
   pendingConversationIds,
+  onRenameConversation,
+  onToggleConversationPinned,
+  onDeleteConversation,
   onOpenSpace,
   onActiveSpaceChange,
   onCreateSpace,
@@ -98,7 +101,6 @@ export function Sidebar({
     id: space.spaceId,
     label: space.title,
     dot: space.color ?? SPACE_DOT_FALLBACK,
-    conversations: space.conversations ?? [],
   })), [spaces])
   const orderedConversations = useMemo(
     () => [...conversations].sort(compareConversations),
@@ -257,21 +259,21 @@ export function Sidebar({
         <div className="space-y-0.5">
           {spaceLoadState?.loading === true && projectedSpaces.length === 0 && <SpaceLoadingRows />}
           {projectedSpaces.map((s) => (
-            <SpaceRow
+            <SidebarListRow
               key={s.id}
-              space={s}
               active={view === 'space' && activeSpaceId === s.id}
-              renaming={renamingId === s.id}
-              renameSelectAll={renamingId === s.id && renameSelectAll}
-              onRenameSpace={(id, label) => { renameSpace(id, label); finishRename() }}
+              onClick={() => selectSpace(s.id)}
+              dot={s.dot}
+              label={s.label}
+              editing={renamingId === s.id}
+              editSelectAll={renamingId === s.id && renameSelectAll}
+              onRename={(t) => { renameSpace(s.id, t); finishRename() }}
               onCancelRename={finishRename}
-              onStartRename={(id) => { setRenameSelectAll(false); setRenamingId(id) }}
-              onDeleteSpace={(id, label) => setPendingSpaceDeletion({ id, label })}
-              onOpenSpace={(id) => selectSpace(id)}
-              activeConversationId={activeConversationId}
-              view={view}
-              openConversation={openConversation}
-              pendingConversationIds={pendingConversationIds}
+              meta={<ChevronRight size={11} style={{ color: 'var(--aa-text-3)' }}/>}
+              actions={[
+                { label: '重命名', icon: <Pencil size={12}/>, onClick: () => { setRenameSelectAll(false); setRenamingId(s.id) } },
+                { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => setPendingSpaceDeletion({ id: s.id, label: s.label }) },
+              ]}
             />
           ))}
           {spaceLoadState?.error !== undefined && (
@@ -405,87 +407,6 @@ function WorkspaceLoadingRows() {
 }
 
 const WORKSPACE_DOT = '#8a7fa8'
-
-type SpaceRowConversation = { readonly conversationId: string; readonly title: string }
-
-function SpaceRow(props: {
-  readonly space: { readonly id: string; readonly label: string; readonly dot: string; readonly conversations: readonly SpaceRowConversation[] }
-  readonly active: boolean
-  readonly renaming: boolean
-  readonly renameSelectAll: boolean
-  readonly onRenameSpace: (id: string, label: string) => void
-  readonly onCancelRename: () => void
-  readonly onStartRename: (id: string) => void
-  readonly onDeleteSpace: (id: string, label: string) => void
-  readonly onOpenSpace: (id: string) => void
-  readonly activeConversationId?: string
-  readonly view: View
-  readonly openConversation: (conversationId: string) => void
-  readonly pendingConversationIds: ReadonlySet<string>
-}) {
-  const [expanded, setExpanded] = useState(false)
-  return (
-    <div className="space-y-0.5">
-      <SidebarListRow
-        active={props.active}
-        onClick={() => props.onOpenSpace(props.space.id)}
-        dot={props.space.dot}
-        label={props.space.label}
-        editing={props.renaming}
-        editSelectAll={props.renameSelectAll}
-        onRename={(t) => props.onRenameSpace(props.space.id, t)}
-        onCancelRename={props.onCancelRename}
-        meta={
-          <span className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label={expanded ? `收起${props.space.label}对话` : `展开${props.space.label}对话`}
-              title={expanded ? '收起对话' : '展开对话'}
-              onClick={(event) => { event.stopPropagation(); setExpanded((current) => !current) }}
-              className="flex items-center justify-center rounded hover:bg-black/10"
-              style={{ width: 18, height: 18, color: 'var(--aa-text-3)' }}
-            >
-              <ChevronRight
-                size={11}
-                style={{
-                  transform: expanded ? 'rotate(90deg)' : undefined,
-                  transition: 'transform 160ms ease',
-                }}
-              />
-            </button>
-          </span>
-        }
-        actions={[
-          { label: '重命名', icon: <Pencil size={12}/>, onClick: () => props.onStartRename(props.space.id) },
-          { label: '删除', icon: <Trash2 size={12}/>, danger: true, onClick: () => props.onDeleteSpace(props.space.id, props.space.label) },
-        ]}
-      />
-      {expanded && (
-        <SidebarConversationScrollArea maxHeight={220}>
-          {props.space.conversations.length === 0 && (
-            <div className="px-3 py-1.5 text-[11px]" style={{ color: 'var(--aa-text-3)' }}>
-              暂无对话
-            </div>
-          )}
-          {props.space.conversations.map((conversation, index) => (
-            <SidebarListRow
-              key={conversation.conversationId}
-              active={(props.view === 'conv-active' || props.view === 'conv-done') && props.activeConversationId === conversation.conversationId}
-              onClick={() => props.openConversation(conversation.conversationId)}
-              dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
-              label={conversation.title}
-              editing={false}
-              onRename={() => undefined}
-              onCancelRename={() => undefined}
-              actions={[]}
-              pending={props.pendingConversationIds.has(conversation.conversationId)}
-            />
-          ))}
-        </SidebarConversationScrollArea>
-      )}
-    </div>
-  )
-}
 
 function WorkspaceRow(props: {
   readonly workspace: PersonalWorkspaceProjection

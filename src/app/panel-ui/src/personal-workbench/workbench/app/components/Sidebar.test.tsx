@@ -89,7 +89,7 @@ test('offers rename and an in-workbench confirmation for Space deletion', () => 
   expect(onDeleteSpace).toHaveBeenCalledWith('space-project')
 })
 
-test('expands a Space row to reveal its owned conversations', () => {
+test('expands a Workspace row to reveal its owned conversations', () => {
   const onOpenConversation = vi.fn()
   render(
     <Sidebar
@@ -97,16 +97,12 @@ test('expands a Space row to reveal its owned conversations', () => {
       onNavigate={vi.fn()}
       onOpenSettings={vi.fn()}
       collapsed={false}
-      conversations={[]}
-      spaces={[{
-        spaceId: 'space-1',
-        title: '学习空间',
-        items: [],
-        conversations: [
-          { conversationId: 'conversation-1', title: 'Rust 学习' },
-          { conversationId: 'conversation-2', title: '整理笔记' },
-        ],
-      }]}
+      conversations={[
+        { conversationId: 'conversation-1', title: 'Rust 学习', owner: { kind: 'workspace', id: 'workspace-1' } },
+        { conversationId: 'conversation-2', title: '整理笔记', owner: { kind: 'workspace', id: 'workspace-1' } },
+      ]}
+      spaces={[]}
+      workspaces={[{ workspaceId: 'workspace-1', title: 'AgentArbor', status: 'available', linkCount: 0 }]}
       activeSpaceId={null}
       onOpenConversation={onOpenConversation}
       pendingConversationIds={new Set()}
@@ -118,7 +114,7 @@ test('expands a Space row to reveal its owned conversations', () => {
   )
 
   expect(screen.queryByText('Rust 学习')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: '展开学习空间对话' }))
+  fireEvent.click(screen.getByRole('button', { name: /^AgentArbor$/u }))
   expect(screen.getByText('Rust 学习')).toBeTruthy()
   expect(screen.getByText('整理笔记')).toBeTruthy()
 

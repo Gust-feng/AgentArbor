@@ -594,6 +594,12 @@ export function SpacePage({
     if (item.openUrl !== undefined) window.open(item.openUrl, '_blank', 'noopener,noreferrer')
   }
 
+  async function handleOpenConversation(conversationId: string) {
+    if (onOpenConversation === undefined) return
+    const opened = await onOpenConversation(conversationId)
+    if (opened !== false) onNavigate('conv-done')
+  }
+
   async function runSpaceAction(operation: () => void | Promise<void>) {
     setActionError(null)
     try {
@@ -810,6 +816,33 @@ export function SpacePage({
               />
             ))}
           </div>
+
+          {/* 对话（owner read-model，ADR-0035 §8.1） */}
+          <div className="flex items-center justify-between px-2.5 mt-4 mb-1">
+            <span className="text-xs font-medium" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
+              对话
+            </span>
+          </div>
+          {(space?.conversations?.length ?? 0) === 0 ? (
+            <div className="px-3 py-1 text-[11px]" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
+              暂无对话
+            </div>
+          ) : (
+            <div className="space-y-0.5">
+              {space!.conversations!.map((conversation) => (
+                <button
+                  key={conversation.conversationId}
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-black/5"
+                  style={{ color: 'var(--aa-text-2, #6b655d)' }}
+                  onClick={() => void handleOpenConversation(conversation.conversationId)}
+                >
+                  <MessageSquare size={12} style={{ color: 'var(--aa-text-3, #aba39b)' }} />
+                  <span className="flex-1 truncate">{conversation.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

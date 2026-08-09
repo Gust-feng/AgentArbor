@@ -49,7 +49,7 @@ test("startup theme snapshot accepts system color only for the default style", (
 });
 
 test("startup theme snapshot accepts valid style color pairs", () => {
-  assert.equal(createStartupThemeSnapshot("default", "dark").shellColor, "#151a22");
+  assert.equal(createStartupThemeSnapshot("default", "dark").shellColor, "#232227");
   assert.equal(createStartupThemeSnapshot("classic", "forest").borderColor, "#b9c7b7");
   assert.equal(createStartupThemeSnapshot("classic", "slate").borderColor, "#c9bab6");
   assert.equal(createStartupThemeSnapshot("glass", "ocean").textColor, "#132833");

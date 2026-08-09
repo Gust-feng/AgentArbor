@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, FileText, Send, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, FileText, Plus, X } from 'lucide-react'
 import type { ChatInputProps } from '../../../../contracts/composer'
+import { formatCompactTokenCount, formatContextUsagePercent } from '../../../../context-window-usage'
 import { ModelOptionPicker } from '../../../../components/model-option-picker'
-import { RADII, composerSurface } from './tokens'
+import { composerSurface } from './tokens'
 import { QueuedMessageList } from './QueuedMessageList'
 
 interface ConversationComposerProps {
@@ -20,7 +21,7 @@ export function ConversationComposer({ input, onCompositionChange }: Conversatio
     const textarea = ref.current
     if (textarea === null) return
     textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`
   }, [input.value])
 
   useEffect(() => {
@@ -79,28 +80,26 @@ export function ConversationComposer({ input, onCompositionChange }: Conversatio
           }
         }}
         placeholder={input.placeholder ?? runningPlaceholder(input)}
-        rows={2}
+        rows={1}
         disabled={!canEdit}
-        className="aa-conversation-composer__input w-full resize-none px-4 pt-3 outline-none disabled:cursor-not-allowed"
-        style={{ color: 'var(--aa-text-1)', background: 'transparent', lineHeight: 1.65 }}
+        className="aa-conversation-composer__input w-full resize-none px-3 pt-2 pb-1 outline-none disabled:cursor-not-allowed"
+        style={{ color: 'var(--aa-text-1)', background: 'transparent', lineHeight: 1.5 }}
       />
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5">
-        <div className="flex min-w-0 items-center gap-1.5">
+      <div className="aa-conversation-composer__toolbar">
+        <div className="aa-conversation-composer__toolbar-left">
           <button
             type="button"
             onClick={input.onSelectAttachment}
-            className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-black/5"
+            className="aa-conversation-composer__icon-button"
             style={{ color: 'var(--aa-text-3)' }}
+            aria-label="添加引用"
           >
-            <FileText size={11} />
-            添加引用
+            <Plus size={17} strokeWidth={1.8} aria-hidden="true" />
           </button>
-          <span className="h-3 w-px shrink-0" style={{ background: 'var(--aa-border)' }} aria-hidden="true" />
-          <ComposerModelSelect input={input} />
-          {input.contextUsage !== undefined && <ComposerContextUsage usage={input.contextUsage} />}
-          {input.reasoningEffortEnabled && <ComposerReasoningSelect input={input} />}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="aa-conversation-composer__toolbar-right">
+          {input.contextUsage !== undefined && <ComposerContextUsage usage={input.contextUsage} />}
+          <ComposerModelSelect input={input} />
           {input.running && input.onCancel !== undefined && (
             <button
               type="button"
@@ -116,15 +115,10 @@ export function ConversationComposer({ input, onCompositionChange }: Conversatio
             onClick={submit}
             disabled={!canSend}
             aria-label="发送"
-            className="flex h-7 w-7 items-center justify-center transition-all disabled:cursor-not-allowed"
-            style={{
-              borderRadius: RADII.md,
-              background: canSend ? 'var(--aa-accent)' : 'rgba(45,40,34,0.06)',
-              color: canSend ? '#fff' : 'var(--aa-text-3)',
-              transform: canSend ? 'scale(1)' : 'scale(0.9)',
-            }}
+            className="aa-conversation-composer__send disabled:cursor-not-allowed"
+            data-active={canSend}
           >
-            <Send size={11} />
+            <ArrowUp size={17} strokeWidth={2.2} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -153,29 +147,141 @@ function ComposerModelSelect({ input }: { readonly input: ChatInputProps }) {
 }
 
 function ComposerContextUsage({ usage }: { readonly usage: NonNullable<ChatInputProps['contextUsage']> }) {
-  const percent = usage.percent ?? usage.ringPercent
-  const warning = percent > 80
+  const progressColor = usage.tone === 'danger'
+    ? 'var(--aa-status-error)'
+    : usage.tone === 'warning'
+      ? 'var(--aa-status-wait)'
+      : usage.tone === 'muted'
+        ? 'var(--aa-border)'
+        : 'var(--aa-accent)'
   const progress = Math.min(100, Math.max(0, usage.ringPercent))
+  const [open, setOpen] = useState(false)
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!popoverRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div ref={popoverRef} className="aa-context-usage relative hidden shrink-0 sm:block">
+      <button
+        type="button"
+        className="aa-context-usage__trigger flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-black/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={usage.label}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ContextUsageRing progress={progress} color={progressColor} />
+      </button>
+      {open && <ContextUsagePopover usage={usage} onClose={() => setOpen(false)} />}
+    </div>
+  )
+}
+
+function ContextUsagePopover({
+  usage,
+  onClose,
+}: {
+  readonly usage: NonNullable<ChatInputProps['contextUsage']>
+  readonly onClose: () => void
+}) {
+  const percent = usage.percent === undefined ? undefined : formatContextUsagePercent(usage.percent)
+  const used = usage.usedTokens === undefined ? undefined : formatCompactTokenCount(usage.usedTokens)
+  const max = formatCompactTokenCount(usage.maxTokens)
+  const tone = usage.tone === 'danger' ? 'danger' : usage.tone === 'warning' ? 'warning' : 'normal'
   return (
     <div
-      className="hidden min-w-24 max-w-28 shrink items-center gap-1.5 sm:flex"
-      title={usage.label}
-      role="progressbar"
-      aria-label={usage.label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={usage.percent === undefined ? undefined : Math.round(percent)}
+      role="dialog"
+      aria-label="上下文用量"
+      aria-labelledby="aa-context-usage-title"
+      className="aa-context-usage__popover absolute bottom-[calc(100%+8px)] right-0 z-30 rounded-xl p-3.5"
     >
-      <span className="aa-conversation-composer__meta truncate" style={{ color: warning ? 'var(--aa-status-wait)' : 'var(--aa-text-3)' }}>
-        {usage.percent === undefined ? '上下文 --' : `上下文 ${Math.round(percent)}%`}
-      </span>
-      <span className="h-1 min-w-8 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--aa-surface-hover)' }}>
+      <div className="flex items-center justify-between gap-3">
+        <strong id="aa-context-usage-title" className="text-sm font-medium" style={{ color: 'var(--aa-text-1)' }}>上下文用量</strong>
+        <div className="flex items-center gap-2">
+          <span className="aa-context-usage__popover-percent" data-tone={tone}>
+            {percent === undefined ? '--' : `${percent}%`}
+          </span>
+          <button
+            type="button"
+            aria-label="关闭上下文用量"
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-black/5"
+            style={{ color: 'var(--aa-text-3)' }}
+            onClick={onClose}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      <div className="mt-2 flex items-baseline justify-between gap-3">
+        <span className="text-[11px]" style={{ color: 'var(--aa-text-3)' }}>
+          {used === undefined ? '暂无用量' : `已使用 ${used} / ${max}`}
+        </span>
+        <span className="text-[11px]" style={{ color: 'var(--aa-text-3)' }}>
+          {usage.source === 'provider_usage' ? '输入上下文' : '等待用量'}
+        </span>
+      </div>
+      <div
+        className="mt-3 h-1.5 overflow-hidden rounded-full"
+        role="progressbar"
+        aria-label="上下文已用比例"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={usage.percent === undefined ? undefined : Math.round(usage.percent)}
+        style={{ background: 'var(--aa-surface-hover)' }}
+      >
         <span
           className="block h-full rounded-full transition-[width,background-color] duration-200"
-          style={{ width: `${progress}%`, background: warning ? 'var(--aa-status-wait)' : 'var(--aa-accent)' }}
+          style={{
+            width: `${Math.min(100, Math.max(0, usage.ringPercent))}%`,
+            background: tone === 'danger' ? 'var(--aa-status-error)' : tone === 'warning' ? 'var(--aa-status-wait)' : 'var(--aa-accent)',
+          }}
         />
-      </span>
+      </div>
     </div>
+  )
+}
+
+function ContextUsageRing({ progress, color }: { readonly progress: number; readonly color: string }) {
+  const radius = 6
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference * (1 - progress / 100)
+  return (
+    <svg
+      className="aa-context-usage__ring"
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+    >
+      <circle className="aa-context-usage__ring-track" cx="8" cy="8" r={radius} fill="none" strokeWidth="2" />
+      <circle
+        className="aa-context-usage__ring-value"
+        cx="8"
+        cy="8"
+        r={radius}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+        strokeLinecap="round"
+        transform="rotate(-90 8 8)"
+      />
+    </svg>
   )
 }
 

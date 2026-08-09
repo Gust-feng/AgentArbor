@@ -96,6 +96,7 @@ export async function handlePanelSpaceRoute(
           conversationId: conversation.conversationId,
           title: conversation.title,
           updatedAt: conversation.updatedAt,
+          pinnedAt: conversation.pinnedAt,
         })),
         ...legacyConversations.filter((item): item is { readonly conversationId: string; readonly title: string; readonly updatedAt: string } => item !== undefined),
       ],

@@ -10,7 +10,6 @@ import { useAppWorkbenchTaskState } from "./app-workbench-task-state";
 import { workbenchInputPropsFrom } from "./app-workbench-input-props";
 import { createInitialAppState } from "./app-state";
 import { useSpaceProjection } from "./app-space-state";
-import type { Conversation } from "./contracts/conversation";
 
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
@@ -101,6 +100,7 @@ export function App(): React.ReactElement {
     selectedModelContextWindowTokens,
     agentClusterActive,
     setInputCloseSignal,
+    refreshSpaceConversations: spaceProjection.refreshSpace,
   });
   const {
     bootstrap,
@@ -214,16 +214,6 @@ export function App(): React.ReactElement {
     clearQueuedMessages();
     return openNormalConversation(conversationId);
   }, [clearQueuedMessages, openNormalConversation]);
-  const previewConversation = useCallback(async (conversationId: string): Promise<Conversation | undefined> => {
-    try {
-      const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`);
-      if (!response.ok) return undefined;
-      const body = await response.json() as { readonly conversation?: Conversation };
-      return body.conversation;
-    } catch {
-      return undefined;
-    }
-  }, []);
 
   const settingsDialogProps = workbenchSettingsDialogPropsFrom({
     settingsOpen,
@@ -281,7 +271,6 @@ export function App(): React.ReactElement {
       onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
       onStartNewConversation={startNewConversation}
       onOpenConversation={openConversation}
-      onPreviewConversation={previewConversation}
       pendingConversationIds={pendingConversationIds}
       onRenameConversation={sidebarActions.renameConversation}
       onToggleConversationPinned={sidebarActions.toggleConversationPinned}

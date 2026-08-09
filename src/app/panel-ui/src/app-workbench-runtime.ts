@@ -60,6 +60,8 @@ export type AppWorkbenchRuntimeOptions = {
   readonly selectedModelContextWindowTokens?: number;
   readonly agentClusterActive: boolean;
   readonly setInputCloseSignal: React.Dispatch<React.SetStateAction<number>>;
+  /** Owner 为空间的会话控制变更（置顶/重命名/删除）成功后刷新对应空间 read-model。 */
+  readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 };
 
 export type AppWorkbenchRuntime = {
@@ -302,6 +304,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     setGoal: options.setGoal,
     setAttachments: options.setAttachments,
     setLegacyConversationScreen: options.setLegacyConversationScreen,
+    refreshSpaceConversations: options.refreshSpaceConversations,
   }), [
     options.app,
     options.setApp,
@@ -309,6 +312,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setGoal,
     options.setInputCloseSignal,
     options.setLegacyConversationScreen,
+    options.refreshSpaceConversations,
     runController.resetChat,
   ]);
 

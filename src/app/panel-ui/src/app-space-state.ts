@@ -17,6 +17,7 @@ type SpaceTreeResponse = {
     readonly conversationId: string;
     readonly title: string;
     readonly updatedAt?: string;
+    readonly pinnedAt?: string;
   }[];
 };
 
@@ -36,6 +37,8 @@ export function useSpaceProjection(enabled = true): {
   readonly removeReference: (itemId: string) => Promise<void>;
   readonly openReference: (spaceId: string, itemId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
+  /** 会话控制变更后刷新单个空间的 owner read-model。 */
+  readonly refreshSpace: (spaceId: string) => Promise<void>;
   readonly loading: boolean;
   readonly mutationPending: boolean;
   readonly error?: string;
@@ -242,6 +245,12 @@ export function useSpaceProjection(enabled = true): {
     await postJson(`/api/spaces/references/${encodeURIComponent(itemId)}/open`, {});
   }, []);
 
+  // 会话控制变更（置顶/重命名/删除）不经过 Space 命令，但会改变 owner read-model；
+  // 由会话管理侧在成功后主动刷新对应空间。
+  const refreshSpace = useCallback(async (spaceId: string): Promise<void> => {
+    await refreshAffectedSpaces([spaceId]);
+  }, [refreshAffectedSpaces]);
+
   return {
     spaces,
     createSpace,
@@ -255,6 +264,7 @@ export function useSpaceProjection(enabled = true): {
     removeReference,
     openReference,
     refresh,
+    refreshSpace,
     loading,
     mutationPending: mutationPendingCount > 0,
     error,
@@ -296,6 +306,8 @@ function projectTree(tree: SpaceTree, conversations?: SpaceTreeResponse["convers
     ...(conversations === undefined ? {} : { conversations: conversations.map((conversation) => ({
       conversationId: conversation.conversationId,
       title: conversation.title,
+      ...(conversation.updatedAt === undefined ? {} : { updatedAt: conversation.updatedAt }),
+      ...(conversation.pinnedAt === undefined ? {} : { pinnedAt: conversation.pinnedAt }),
     })) }),
   };
 }

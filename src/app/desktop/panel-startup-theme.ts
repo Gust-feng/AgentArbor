@@ -39,10 +39,10 @@ const STARTUP_THEME_COLORS: Record<
     textColor: "#18212f",
   },
   dark: {
-    backgroundColor: "#0f131a",
-    shellColor: "#151a22",
-    borderColor: "#3a4656",
-    textColor: "#e7edf7",
+    backgroundColor: "#1b1b20",
+    shellColor: "#232227",
+    borderColor: "#3b393f",
+    textColor: "#e8e5e2",
   },
   warm: {
     backgroundColor: "#f1eee7",

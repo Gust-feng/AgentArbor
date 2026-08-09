@@ -100,7 +100,7 @@ function availableContextWindowUsage(input: {
   readonly maxTokens: number;
 }): ContextWindowUsage {
   const percent = (input.usedTokens / input.maxTokens) * 100;
-  const displayPercent = formatUsagePercent(percent);
+  const displayPercent = formatContextUsagePercent(percent);
   return {
     source: input.source,
     usedTokens: input.usedTokens,
@@ -118,7 +118,7 @@ function usageTone(percent: number): ContextWindowUsageTone {
   return "normal";
 }
 
-function formatUsagePercent(percent: number): string {
+export function formatContextUsagePercent(percent: number): string {
   if (percent > 0 && percent < 1) return "<1";
   return String(Math.round(percent));
 }
@@ -141,7 +141,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function formatCompactTokenCount(tokens: number): string {
+export function formatCompactTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) {
     return `${formatCompactNumber(tokens / 1_000_000)}M`;
   }

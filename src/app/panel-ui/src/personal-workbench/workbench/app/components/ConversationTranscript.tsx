@@ -7,7 +7,7 @@
  * 数据权威不变：projectConversationDisplayList 产出什么，这里就渲染什么。
  * 全量可见性不变：工具活动、确认流、失败归因、Sub-Agent 嵌套全部保留。
  */
-import React, { useCallback, useMemo, useSyncExternalStore, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useSyncExternalStore, useState } from "react";
 import {
   Brain,
   Check,
@@ -59,6 +59,11 @@ import {
   type AssistantFailureParts,
   type AssistantTerminalStatus,
 } from "../../../../../../panel-read-model/assistant/panel-assistant-failure";
+import {
+  assistantModelForTurn,
+  selectedComposerModel,
+  type ConversationModelBadge,
+} from "./conversation-model-badge";
 
 /* ─── 主入口 ─── */
 
@@ -148,6 +153,7 @@ export function ConversationTranscript(props: ConversationTranscriptProps): Reac
               key={item.key}
               failure={item.failure}
               terminalStatus={item.terminalStatus}
+              model={modelBadgeForItem(item, props.models, props.selectedModelId)}
               workflow={item.workflow}
               toolResultsByRunId={toolResultsByRunId}
               developerModeEnabled={props.developerModeEnabled}
@@ -160,6 +166,7 @@ export function ConversationTranscript(props: ConversationTranscriptProps): Reac
           <ConversationAssistantMessage
             key={item.key}
             live={item.live}
+            model={modelBadgeForItem(item, props.models, props.selectedModelId)}
             workflow={item.workflow}
             toolResultsByRunId={toolResultsByRunId}
             developerModeEnabled={props.developerModeEnabled}
@@ -211,8 +218,20 @@ const ConversationUserMessage = React.memo(function ConversationUserMessage(prop
 
 /* ─── 助手消息 ─── */
 
+function modelBadgeForItem(
+  item: Extract<ConversationDisplayItem<ConversationTurn, TranscriptNode, ConfirmationProjection>, { readonly kind: "assistant" }>,
+  models: readonly ChatModelOption[],
+  selectedModelId: string,
+): ConversationModelBadge | undefined {
+  if (item.source === "turn" && item.turn !== undefined) {
+    return assistantModelForTurn(item.turn, models, selectedModelId);
+  }
+  return selectedComposerModel(models, selectedModelId);
+}
+
 function ConversationAssistantMessage(props: {
   readonly live?: boolean;
+  readonly model?: ConversationModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
   readonly developerModeEnabled: boolean;
@@ -225,6 +244,7 @@ function ConversationAssistantMessage(props: {
   }
   return (
     <div className="aa-conversation-turn aa-conversation-turn--assistant space-y-3">
+      <ConversationModelLabel model={props.model} />
       {workflow.segments.map((segment, index) => {
         if (segment.kind === "activity") {
           return (
@@ -258,6 +278,7 @@ function ConversationAssistantMessage(props: {
 function ConversationFailureMessage(props: {
   readonly failure: AssistantFailureParts;
   readonly terminalStatus?: AssistantTerminalStatus;
+  readonly model?: ConversationModelBadge;
   readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly toolResultsByRunId: Readonly<Record<string, readonly ToolCallResult[]>>;
   readonly developerModeEnabled: boolean;
@@ -269,6 +290,7 @@ function ConversationFailureMessage(props: {
   const activitySegments = workflow?.segments.filter((s) => s.kind === "activity") ?? [];
   return (
     <div className="aa-conversation-turn aa-conversation-turn--assistant space-y-3">
+      <ConversationModelLabel model={props.model} />
       {bodySegments.map((segment, index) => {
         if (segment.kind === "awaiting") return <ConversationPendingDots key={`a-${index}`} />;
         return <ConversationAnswerBlock key={segment.segmentKey} text={segment.text} live={false} />;
@@ -304,6 +326,24 @@ function ConversationFailureMessage(props: {
   );
 }
 
+/* ─── 模型徽标 ─── */
+
+function ConversationModelLabel(props: { readonly model?: ConversationModelBadge }): React.ReactElement | null {
+  if (props.model === undefined) return null;
+  return (
+    <div className="aa-model-badge">
+      {props.model.iconSvg !== undefined && (
+        <span
+          className="aa-model-badge__icon"
+          aria-hidden="true"
+          dangerouslySetInnerHTML={{ __html: props.model.iconSvg }}
+        />
+      )}
+      <span className="aa-model-badge__name">{props.model.modelName}</span>
+    </div>
+  );
+}
+
 /* ─── 回答文本块 ─── */
 
 const ConversationAnswerBlock = React.memo(function ConversationAnswerBlock(props: {
@@ -317,7 +357,11 @@ const ConversationAnswerBlock = React.memo(function ConversationAnswerBlock(prop
       style={{ color: "var(--aa-text-1)", lineHeight: 1.85 }}
     >
       {props.live ? <StreamingRichText text={props.text} live /> : <RichText text={props.text} />}
-      {!props.live && <CopyActionButton value={props.text} label="复制回答" className="aa-answer-copy" />}
+      {!props.live && (
+        <div className="aa-answer-actions">
+          <CopyActionButton value={props.text} label="复制回答" className="aa-answer-copy" />
+        </div>
+      )}
     </div>
   );
 });
@@ -392,10 +436,16 @@ function splitThinkingTimeline(timeline: AgentWorkTimelineView<TranscriptNode, C
 /* ─── 思考块 ─── */
 
 /**
- * 模型推理过程的专门展示：独立于工具工作流，默认展开显示推理内容。
+ * 模型推理过程的专门展示：独立于工具工作流。思考进行中保持展开以实时显示
+ * 推理内容；思考一旦完成（终态条目），自动收起为「思考」标题行。
  */
 function ConversationThinkingBlock(props: { readonly items: readonly ActivityItem[] }) {
-  const [open, setOpen] = useState(true);
+  const thinkingInProgress = props.items.some((item) => item.phase !== "completed");
+  const [open, setOpen] = useState(thinkingInProgress);
+  useEffect(() => {
+    // 只在思考阶段切换时自动开合，不覆盖用户手动展开/收起。
+    setOpen(thinkingInProgress);
+  }, [thinkingInProgress]);
   const text = props.items
     .map((item) => item.copy.expandedDetail ?? item.copy.detail)
     .filter((value): value is string => value !== undefined && value.trim().length > 0)

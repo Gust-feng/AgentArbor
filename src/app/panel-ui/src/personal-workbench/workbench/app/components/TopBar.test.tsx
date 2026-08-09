@@ -117,6 +117,40 @@ test('keeps the conversation chrome stable while focus mode owns the surface', (
   expect(screen.getByRole('button', { name: '专注阅读' })).toBeTruthy()
 })
 
+test('shows the running conversation status on non-conversation views without forcing navigation', () => {
+  render(
+    <TopBar
+      view="home"
+      conversationState="working"
+      onNavigate={vi.fn()}
+      onSearch={vi.fn()}
+      sidebarCollapsed={false}
+      onToggleSidebar={vi.fn()}
+      brainFileTitle={null}
+      onBrainRoot={vi.fn()}
+    />,
+  )
+
+  expect(screen.getByText('处理中')).toBeTruthy()
+})
+
+test('shows the pending confirmation status on non-conversation views without forcing navigation', () => {
+  render(
+    <TopBar
+      view="brain"
+      conversationState="attention"
+      onNavigate={vi.fn()}
+      onSearch={vi.fn()}
+      sidebarCollapsed={false}
+      onToggleSidebar={vi.fn()}
+      brainFileTitle={null}
+      onBrainRoot={vi.fn()}
+    />,
+  )
+
+  expect(screen.getByText('需要确认')).toBeTruthy()
+})
+
 test('keeps terminal conversation outcomes out of the top bar', () => {
   const { rerender } = render(
     <TopBar

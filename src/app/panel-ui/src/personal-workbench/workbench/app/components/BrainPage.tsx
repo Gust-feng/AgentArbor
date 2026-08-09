@@ -99,6 +99,17 @@ export function BrainPage({
     [resolved, filter]
   )
 
+  // 「最近」= 时间维度筛选:最近活动的收藏(最近打开 ∪ 最近收藏,按最近活动时间倒序)。
+  // 与「全部 / 未归类 / 主题」共用同一展示契约(标题 + 计数 + 网格),切换导航只换内容集合,不改变布局。
+  const RECENT_PAGE_LIMIT = 12
+  const recentPages = useMemo(() => {
+    return [...cards]
+      .map((page) => ({ page, activityAt: Math.max(page.collectedAt, brain.openedAtOf(page.refId) ?? 0) }))
+      .sort((a, b) => b.activityAt - a.activityAt)
+      .slice(0, RECENT_PAGE_LIMIT)
+      .map(({ page }) => page)
+  }, [brain, cards])
+
   const selected = resolved.find((p) => p.refId === selectedId) ?? null
   const trailPages = trail.map((id) => byId.get(id)).filter((page): page is ResolvedPage => page !== undefined)
   const navigateStackPane = (index: number) => {
@@ -125,9 +136,6 @@ export function BrainPage({
     onSelect(refId)
   }
 
-  const resume = brain.recentlyOpened(6).map((id) => byId.get(id)).filter(Boolean) as ResolvedPage[]
-  const recent = brain.recentlyCollected(8).map((id) => byId.get(id)).filter(Boolean) as ResolvedPage[]
-
   // 当前左栏落点对应的卡片(搜索时右主区改由 results 接管)。
   const navCards =
     nav === 'all'
@@ -135,7 +143,7 @@ export function BrainPage({
       : nav === 'unclassified'
         ? cards.filter((c) => themeApi.themesOf(c.refId).length === 0)
         : nav === 'recent'
-          ? []
+          ? recentPages
           : cards.filter((c) => themeApi.themesOf(c.refId).includes(nav))
   const activeTheme = themeApi.themes.find((t) => t.id === nav) ?? null
 
@@ -233,21 +241,15 @@ export function BrainPage({
               themeApi={themeApi}
               onOpen={openCard}
             />
-          ) : nav === 'recent' ? (
-            <div className="space-y-10">
-              {resume.length > 0 && (
-                <Strip title="继续看" pages={resume} degreeOf={degreeOf} themeApi={themeApi} onOpen={openCard} />
-              )}
-              <Strip title="最近收藏" pages={recent} degreeOf={degreeOf} themeApi={themeApi} onOpen={openCard} />
-            </div>
           ) : (
             <div>
-              {/* 主区标题:全部 / 未归类 / 某主题(主题可改名、删) */}
+              {/* 主区标题:最近 / 全部 / 未归类 / 某主题(主题可改名、删)。
+                  所有导航落点共用同一展示契约,避免切换筛选时布局跳变。 */}
               {activeTheme ? (
                 <ThemeHeader theme={activeTheme} count={navCards.length} themeApi={themeApi} onDeleted={() => setNav('recent')} />
               ) : (
                 <h2 className="m-0 mb-5 text-sm font-semibold" style={{ color: 'var(--aa-text-2, #87827c)' }}>
-                  {nav === 'all' ? '全部' : '未归类'}
+                  {nav === 'all' ? '全部' : nav === 'recent' ? '最近' : '未归类'}
                   <span className="ml-2" style={{ color: 'var(--aa-text-3, #aba39b)', fontWeight: 400 }}>
                     {navCards.length}
                   </span>
@@ -892,35 +894,6 @@ function CardGrid({ children }: { children: ReactNode }) {
   return (
     <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
       {children}
-    </div>
-  )
-}
-
-/* ---------------------- 静息态:横排小条 ---------------------- */
-
-function Strip({
-  title,
-  pages,
-  degreeOf,
-  themeApi,
-  onOpen,
-}: {
-  title: string
-  pages: ResolvedPage[]
-  degreeOf: (refId: string) => number
-  themeApi: ReturnType<typeof useThemes>
-  onOpen: (refId: string) => void
-}) {
-  return (
-    <div>
-      <h2 className="m-0 mb-3 text-sm font-semibold" style={{ color: 'var(--aa-text-2, #87827c)' }}>
-        {title}
-      </h2>
-      <CardGrid>
-        {pages.map((p) => (
-          <Card key={p.refId} page={p} degree={degreeOf(p.refId)} themeApi={themeApi} onOpen={() => onOpen(p.refId)} />
-        ))}
-      </CardGrid>
     </div>
   )
 }

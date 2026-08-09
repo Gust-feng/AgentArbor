@@ -134,9 +134,14 @@ test('restores each knowledge navigation context scroll position', async () => {
 
   await user.click(screen.getByRole('button', { name: '知识库' }))
   await user.click(screen.getByRole('menuitemradio', { name: /浏览视图/u }))
-  await waitFor(() => expect(document.querySelector('[data-knowledge-nav-context="browse"]')).not.toBeNull())
-
-  expect(document.querySelector<HTMLElement>('[data-knowledge-nav-context="browse"]')?.scrollTop).toBe(72)
+  // 视图切换由菜单退出动画驱动,新 browse 节点出现后旧的 stack 节点可能仍在退出动画中
+  // (同一属性会短暂出现两个节点)。等待唯一 browse 节点稳定存在且滚动位置恢复,
+  // 避免动画时序抢跑造成 flaky。
+  await waitFor(() => {
+    const contexts = [...document.querySelectorAll<HTMLElement>('[data-knowledge-nav-context]')]
+    expect(contexts.filter((el) => el.getAttribute('data-knowledge-nav-context') === 'browse')).toHaveLength(1)
+    expect(document.querySelector<HTMLElement>('[data-knowledge-nav-context="browse"]')?.scrollTop).toBe(72)
+  })
 })
 
 test('keeps related files outside the document scroll area', async () => {
@@ -342,7 +347,8 @@ test('keeps the start picker underneath the first pane and reveals it from the p
   const knowledgeNav = screen.getByRole('navigation', { name: '知识库导航' })
   await user.click(within(knowledgeNav).getByRole('button', { name: '起点索引' }))
 
-  expect(scrollTo).toHaveBeenLastCalledWith({ left: 0, behavior: 'smooth' })
+  // 滚动通过 requestAnimationFrame 调度,等待动画帧执行后再断言。
+  await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({ left: 0, behavior: 'smooth' }))
   expect(document.querySelector('[data-wiki-pane="note-first"]')).not.toBeNull()
 })
 
@@ -368,4 +374,32 @@ test('updates the active path only after horizontal scrolling settles', async ()
 
   expect(thirdPath.getAttribute('aria-current')).toBe('page')
   await waitFor(() => expect(firstPath.getAttribute('aria-current')).toBe('page'))
+})
+
+test('keeps Recent on the same title + count + grid contract as All', async () => {
+  const user = userEvent.setup()
+  render(<BrainPage selectedId={null} onSelect={() => undefined} />)
+
+  // 默认落点「最近」与「全部」共用同一展示契约:标题(名称 + 计数)+ 卡片网格。
+  expect(screen.getByRole('heading', { name: '最近4' })).toBeTruthy()
+  expect(screen.queryByText('继续看')).toBeNull()
+  expect(screen.queryByText('最近收藏')).toBeNull()
+
+  await user.click(screen.getByRole('button', { name: /^全部/u }))
+  expect(screen.getByRole('heading', { name: '全部4' })).toBeTruthy()
+
+  await user.click(screen.getByRole('button', { name: '最近' }))
+  expect(screen.getByRole('heading', { name: '最近4' })).toBeTruthy()
+})
+
+test('orders Recent by the most recent activity, including reopened old collections', async () => {
+  const user = userEvent.setup()
+  render(<BrainPage selectedId={null} onSelect={() => undefined} />)
+
+  // 打开最旧的收藏(第一篇笔记,收藏时间 1):它应成为「最近」网格里最靠前的卡片。
+  await user.click(screen.getByRole('heading', { name: '第一篇笔记' }))
+
+  const cardTitles = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+  expect(cardTitles[0]).toBe('第一篇笔记')
+  expect(cardTitles).toEqual(['第一篇笔记', '第四篇笔记', '第三篇笔记', '第二篇笔记'])
 })

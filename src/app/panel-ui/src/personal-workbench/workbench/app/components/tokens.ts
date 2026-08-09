@@ -39,14 +39,16 @@ export const contentCard: CSSProperties = {
 /** The composer / input surface — the one element allowed a whisper of lift. */
 export function composerSurface(focused = false): CSSProperties {
   return {
-    background: '#ffffff',
+    background: 'var(--aa-composer, #ffffff)',
     border: `1px solid ${
-      focused ? 'rgba(104,101,167,0.35)' : 'var(--aa-border, rgba(45,40,34,0.09))'
+      focused
+        ? 'color-mix(in srgb, var(--aa-accent, #6865a7) 42%, var(--aa-border, rgba(45,40,34,0.09)))'
+        : 'var(--aa-border, rgba(45,40,34,0.09))'
     }`,
     borderRadius: RADII.lg,
     boxShadow: focused
-      ? '0 2px 12px rgba(45,40,34,0.05)'
-      : '0 1px 3px rgba(45,40,34,0.03)',
+      ? 'var(--aa-composer-shadow-focus, 0 2px 12px rgba(45,40,34,0.05))'
+      : 'var(--aa-composer-shadow, 0 1px 3px rgba(45,40,34,0.03))',
     transition: 'border-color 120ms ease, box-shadow 120ms ease',
   }
 }

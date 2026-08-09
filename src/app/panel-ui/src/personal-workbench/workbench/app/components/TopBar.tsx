@@ -145,6 +145,12 @@ export function TopBar({
             )}
           </>
         )}
+
+        {/* 非对话视图：运行中 / 待确认仍全局可见，但不劫持用户导航。
+            用户显式选择了首页 / 知识库 / 搜索时，只提醒、不强制回到对话页。 */}
+        {!isMinimal && conversationStatus !== undefined && (
+          <ConversationHeaderStatus state={conversationStatus} />
+        )}
       </div>
 
       <div className="topbar-drag-region flex-1 self-stretch" data-desktop-drag-region aria-hidden="true" />

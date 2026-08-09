@@ -157,8 +157,11 @@ test("conversation transcript renders thinking separately from the tool workflow
     confirmationBusy={false}
   />);
 
-  // 思考拥有独立展示块，正文直接可见。
-  expect(screen.getByRole("button", { name: /展开思考|收起思考/ })).toBeTruthy();
+  // 思考拥有独立展示块；思考完成后默认收起，点击可展开。
+  const toggle = screen.getByRole("button", { name: "展开思考" });
+  expect(toggle).toBeTruthy();
+  expect(screen.queryByText("先确认用户意图，再读取文件。")).toBeNull();
+  fireEvent.click(toggle);
   expect(screen.getByText("先确认用户意图，再读取文件。")).toBeTruthy();
 
   // 工具工作流只统计工具条目，思考不再计入“操作”。
@@ -167,6 +170,56 @@ test("conversation transcript renders thinking separately from the tool workflow
   const timeline = document.querySelector(".aa-activity-timeline");
   expect(timeline?.textContent).not.toContain("先确认用户意图");
   expect(timeline?.textContent).toContain("运行 终端");
+});
+
+test("conversation transcript keeps thinking open while the model is still reasoning", () => {
+  const turns: readonly ConversationTurn[] = [{
+    turnId: "user-1",
+    role: "user",
+    content: "读取 README",
+    status: "completed",
+  }];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = [{
+    turn: turns[0]!,
+    claimedCurrentRun: false,
+  }];
+  const thinkingNode: TranscriptNode = {
+    nodeId: "thinking-node-live",
+    runId: "run-1",
+    sequence: 1,
+    eventType: "model.reasoning.delta",
+    kind: "thinking",
+    phase: "noted",
+    title: "思考",
+    text: "正在分析目标…",
+    summary: "正在分析目标…",
+    timestamp: "2026-07-31T00:00:00.000Z",
+    refs: [{ kind: "model_call", id: "model-1" }],
+  };
+
+  render(<ConversationTranscript
+    conversationId="conversation-thinking-live"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunId="run-1"
+    currentRunNodes={[thinkingNode]}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    standaloneRun={{
+      currentRunId: "run-1",
+      runStatus: "running",
+      runProjection: { nodes: [thinkingNode] },
+    }}
+    models={[]}
+    selectedModelId=""
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  // 思考进行中：块默认展开，推理内容直接可见。
+  expect(screen.getByRole("button", { name: "收起思考" })).toBeTruthy();
+  expect(screen.getByText("正在分析目标…")).toBeTruthy();
 });
 
 test("conversation transcript uses the shared markdown renderer without hover layout shifts", () => {
@@ -230,6 +283,160 @@ test("confirmation keeps approval and denial behavior without legacy transcript 
   expect(document.querySelector(".confirmation-node-body")).toBeNull();
 });
 
+test("conversation transcript shows the answering model logo and name from the turn", () => {
+  const turns: readonly ConversationTurn[] = [
+    { turnId: "user-1", role: "user", content: "总结", status: "completed" },
+    {
+      turnId: "assistant-1",
+      role: "assistant",
+      content: "总结如下。",
+      status: "completed",
+      responseModel: { profileId: "deepseek", label: "DeepSeek", model: "deepseek-chat" },
+    },
+  ];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = turns.map((turn) => ({
+    turn,
+    claimedCurrentRun: false,
+  }));
+
+  render(<ConversationTranscript
+    conversationId="conversation-model-badge-turn"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunNodes={[]}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    models={[modelOption({
+      id: "matched-option",
+      profileId: "deepseek",
+      modelId: "deepseek-chat",
+      name: "DeepSeek Chat",
+      iconSvg: "<svg>deepseek-icon</svg>",
+    })]}
+    selectedModelId="other"
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  const badge = document.querySelector(".aa-model-badge");
+  expect(badge).not.toBeNull();
+  expect(badge?.querySelector(".aa-model-badge__icon")?.innerHTML).toContain("deepseek-icon");
+  expect(badge?.querySelector(".aa-model-badge__name")?.textContent).toBe("DeepSeek Chat");
+});
+
+test("conversation transcript resolves model logo identity when the turn model is unknown to the catalog", () => {
+  const turns: readonly ConversationTurn[] = [
+    { turnId: "user-1", role: "user", content: "总结", status: "completed" },
+    {
+      turnId: "assistant-1",
+      role: "assistant",
+      content: "总结如下。",
+      status: "completed",
+      responseModel: { profileId: "deepseek", label: "DeepSeek", model: "deepseek-r1" },
+    },
+  ];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = turns.map((turn) => ({
+    turn,
+    claimedCurrentRun: false,
+  }));
+
+  render(<ConversationTranscript
+    conversationId="conversation-model-badge-unmatched"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunNodes={[]}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    models={[]}
+    selectedModelId=""
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  const badge = document.querySelector(".aa-model-badge");
+  expect(badge).not.toBeNull();
+  expect(badge?.querySelector(".aa-model-badge__name")?.textContent).toBe("deepseek-r1");
+  expect(badge?.querySelector(".aa-model-badge__icon svg")?.innerHTML.length).toBeGreaterThan(0);
+});
+
+test("conversation transcript hides the model badge for synthetic response models", () => {
+  const turns: readonly ConversationTurn[] = [
+    { turnId: "user-1", role: "user", content: "总结", status: "completed" },
+    {
+      turnId: "assistant-1",
+      role: "assistant",
+      content: "总结如下。",
+      status: "completed",
+      responseModel: { profileId: "fake", label: "演示", model: "fake" },
+    },
+  ];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = turns.map((turn) => ({
+    turn,
+    claimedCurrentRun: false,
+  }));
+
+  render(<ConversationTranscript
+    conversationId="conversation-model-badge-synthetic"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunNodes={[]}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    models={[]}
+    selectedModelId=""
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  expect(screen.queryByText("总结如下。")).toBeTruthy();
+  expect(document.querySelector(".aa-model-badge")).toBeNull();
+});
+
+test("conversation transcript shows the composer model badge for the live standalone run", () => {
+  const turns: readonly ConversationTurn[] = [
+    { turnId: "user-1", role: "user", content: "运行检查", status: "completed" },
+  ];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = [{
+    turn: turns[0]!,
+    claimedCurrentRun: false,
+  }];
+  const nodes = [toolNode()];
+
+  render(<ConversationTranscript
+    conversationId="conversation-model-badge-standalone"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunId="run-1"
+    currentRunNodes={nodes}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    standaloneRun={{
+      currentRunId: "run-1",
+      runStatus: "completed",
+      runProjection: { nodes },
+    }}
+    models={[modelOption({
+      id: "selected-option",
+      profileId: "deepseek",
+      modelId: "deepseek-chat",
+      name: "DeepSeek Chat",
+      iconSvg: "<svg>deepseek-icon</svg>",
+    })]}
+    selectedModelId="selected-option"
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  const badge = document.querySelector(".aa-model-badge");
+  expect(badge).not.toBeNull();
+  expect(badge?.querySelector(".aa-model-badge__icon")?.innerHTML).toContain("deepseek-icon");
+  expect(badge?.querySelector(".aa-model-badge__name")?.textContent).toBe("DeepSeek Chat");
+});
+
 function toolNode(): TranscriptNode {
   return {
     nodeId: "tool-node-1",
@@ -248,5 +455,24 @@ function toolNode(): TranscriptNode {
       stdoutPreview: "29 tests passed",
     },
     refs: [{ kind: "tool_call", id: "tool-fact-1" }],
+  };
+}
+
+function modelOption(input: {
+  readonly id: string;
+  readonly profileId: string;
+  readonly modelId: string;
+  readonly name: string;
+  readonly iconSvg?: string;
+}) {
+  return {
+    id: input.id,
+    name: input.name,
+    label: "DeepSeek",
+    providerLabel: "DeepSeek",
+    providerIdentity: "deepseek" as const,
+    profileId: input.profileId,
+    modelId: input.modelId,
+    iconSvg: input.iconSvg,
   };
 }

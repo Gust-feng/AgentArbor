@@ -2,7 +2,6 @@ import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import type { ChatInputProps } from '../../../../contracts/composer'
-import type { ConversationSummary } from '../../../../contracts/conversation'
 import { HomePage } from './HomePage'
 import { selectHomeAmbientCopy } from './home-ambient-copy'
 import { HOME_AMBIENT_COPY_INPUT_DELAY_MS } from './HomeAmbientCopy'
@@ -17,9 +16,6 @@ test('presents one stable ambient line with the quiet task entry', () => {
   vi.setSystemTime(now)
   render(
     <HomePage
-      onNavigate={vi.fn()}
-      onOpenConversation={() => true}
-      conversations={[]}
       input={inputProps()}
       focusRequest={0}
     />,
@@ -34,55 +30,9 @@ test('presents one stable ambient line with the quiet task entry', () => {
   expect(screen.queryByLabelText('AgentArbor Agent')).toBeNull()
 })
 
-test('shows recent conversations with owner labels on the task entry surface', () => {
-  const onOpenConversation = vi.fn()
-  const conversations: ConversationSummary[] = [
-    {
-      conversationId: 'running',
-      title: '重构工具边界',
-      currentAction: '正在运行相关测试',
-      activeRunId: 'run-1',
-      updatedAt: '2026-07-30T12:00:00.000Z',
-      owner: { kind: 'space', id: 'space-study' },
-    },
-    {
-      conversationId: 'attention',
-      title: '更新模型配置',
-      nextStep: '确认配置写入',
-      requiresUserAction: true,
-      updatedAt: '2026-07-29T12:00:00.000Z',
-      owner: { kind: 'workspace', id: 'workspace-1' },
-    },
-  ]
-
-  render(
-    <HomePage
-      onNavigate={vi.fn()}
-      onOpenConversation={onOpenConversation}
-      conversations={conversations}
-      spaces={[{ spaceId: 'space-study', title: '学习空间' }]}
-      workspaces={[{ workspaceId: 'workspace-1', title: 'AgentArbor', status: 'available', linkCount: 0 }]}
-      input={inputProps()}
-      focusRequest={0}
-    />,
-  )
-
-  expect(screen.getByLabelText('最近对话')).toBeTruthy()
-  expect(screen.getByText('重构工具边界')).toBeTruthy()
-  expect(screen.getByText('更新模型配置')).toBeTruthy()
-  expect(screen.getByText('空间 · 学习空间')).toBeTruthy()
-  expect(screen.getByText('工作区 · AgentArbor')).toBeTruthy()
-
-  fireEvent.click(screen.getByText('重构工具边界'))
-  expect(onOpenConversation).toHaveBeenCalledWith('running')
-})
-
 test('hides context usage until the task entry becomes a conversation', () => {
   render(
     <HomePage
-      onNavigate={vi.fn()}
-      onOpenConversation={vi.fn()}
-      conversations={[]}
       input={inputProps({
         contextUsage: {
           source: 'provider_usage',
@@ -101,12 +51,65 @@ test('hides context usage until the task entry becomes a conversation', () => {
   expect(screen.queryByRole('progressbar', { name: '上下文已用 1%' })).toBeNull()
 })
 
+test('picks a space or workspace owner from the task entry context', () => {
+  const onOwnerChange = vi.fn()
+  render(
+    <HomePage
+      spaces={[{ spaceId: 'space-study', title: '学习空间' }]}
+      workspaces={[{ workspaceId: 'workspace-1', title: 'AgentArbor', status: 'available', linkCount: 0 }]}
+      ownerSelection={null}
+      onOwnerChange={onOwnerChange}
+      input={inputProps()}
+      focusRequest={0}
+    />,
+  )
+
+  const trigger = screen.getByRole('button', { name: '对话空间' })
+  expect(trigger.getAttribute('aria-expanded')).toBe('false')
+
+  fireEvent.click(trigger)
+  expect(screen.getByRole('option', { name: '学习空间' })).toBeTruthy()
+  expect(screen.getByRole('option', { name: 'AgentArbor' })).toBeTruthy()
+
+  fireEvent.click(screen.getByRole('option', { name: '学习空间' }))
+  expect(onOwnerChange).toHaveBeenCalledWith({ kind: 'space', id: 'space-study' })
+  expect(screen.queryByRole('option')).toBeNull()
+})
+
+test('shows the selected owner on the task entry trigger', () => {
+  render(
+    <HomePage
+      spaces={[{ spaceId: 'space-study', title: '学习空间' }]}
+      workspaces={[]}
+      ownerSelection={{ kind: 'space', id: 'space-study' }}
+      onOwnerChange={vi.fn()}
+      input={inputProps()}
+      focusRequest={0}
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: '对话空间' })).toBeTruthy()
+  expect(screen.getByText('学习空间')).toBeTruthy()
+})
+
+test('disables the owner picker when no space or workspace exists', () => {
+  render(
+    <HomePage
+      spaces={[]}
+      workspaces={[]}
+      ownerSelection={null}
+      onOwnerChange={vi.fn()}
+      input={inputProps()}
+      focusRequest={0}
+    />,
+  )
+
+  expect(screen.getByRole('button', { name: '对话空间' }).hasAttribute('disabled')).toBe(true)
+})
+
 test('enters the working state only after non-whitespace input', () => {
   vi.useFakeTimers()
   const props = {
-    onNavigate: vi.fn(),
-    onOpenConversation: vi.fn(),
-    conversations: [] as ConversationSummary[],
     focusRequest: 0,
   }
   const { container, rerender } = render(
@@ -136,9 +139,6 @@ test('enters the working state only after non-whitespace input', () => {
 test('waits for Chinese input to be committed before entering the working state', () => {
   vi.useFakeTimers()
   const props = {
-    onNavigate: vi.fn(),
-    onOpenConversation: vi.fn(),
-    conversations: [] as ConversationSummary[],
     focusRequest: 0,
   }
   const { container, rerender } = render(
@@ -161,9 +161,6 @@ test('waits for Chinese input to be committed before entering the working state'
 test('keeps committed draft state while composing additional Chinese input', () => {
   vi.useFakeTimers()
   const props = {
-    onNavigate: vi.fn(),
-    onOpenConversation: vi.fn(),
-    conversations: [] as ConversationSummary[],
     focusRequest: 0,
   }
   const { container, rerender } = render(

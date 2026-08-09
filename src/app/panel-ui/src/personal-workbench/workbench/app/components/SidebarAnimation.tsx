@@ -1,18 +1,11 @@
 /**
- * Sidebar scene — a full-height monoline ink drawing behind the whole rail.
- *
- * 意境: 山雾远岫 + 水月孤舟. Deliberately minimal — one large moon high in an
- * open sky, a single distant misty ridge, and (kept from before) still water
- * with the moon's broken reflection and a lone boat. Most of the canvas is
- * negative space so the nav reads cleanly on top.
- *
- * Layering, faint to strong:
- *   · a soft ink-wash tone (moon halo + sky/water glow) for depth (SVG gradients)
- *   · a faint distant-mountain wash (ink fading downward)
- *   · the monoline strokes themselves — one accent hue (moon + reflection).
+ * Theme-specific line art behind the rail. Light keeps the original landscape;
+ * dark uses a separate paper-distillation study so theme changes do not become palette
+ * swaps of the same illustration. Both scenes reserve the navigation band.
  */
 
 const INK = 'rgba(45,40,34,'
+const NIGHT_INK = 'rgba(236,235,243,'
 
 export function SidebarAnimation({ collapsed }: { collapsed: boolean }) {
   return (
@@ -31,6 +24,10 @@ export function SidebarAnimation({ collapsed }: { collapsed: boolean }) {
           : 'opacity 420ms ease 200ms, transform 520ms cubic-bezier(0.22,1,0.36,1) 200ms',
       }}
     >
+      <div
+        className="aa-sidebar-animation__scene aa-sidebar-animation__scene--light"
+        style={{ position: 'absolute', inset: 0 }}
+      >
       {/* ── upper scene: moonlit sky · one distant ridge ── */}
       <svg
         width="236"
@@ -152,6 +149,85 @@ export function SidebarAnimation({ collapsed }: { collapsed: boolean }) {
         <path d="M152 41 L152 31" stroke={INK + '0.4)'} strokeWidth="1.2" strokeLinecap="round" />
         <path d="M146 35 Q152 32 158 35" stroke={INK + '0.34)'} strokeWidth="1.2" strokeLinecap="round" />
       </svg>
+      </div>
+
+      <div
+        className="aa-sidebar-animation__scene aa-sidebar-animation__scene--dark"
+        style={{ position: 'absolute', inset: 0 }}
+      >
+        <svg
+          width="236"
+          height="226"
+          viewBox="0 0 236 226"
+          fill="none"
+          aria-hidden
+          style={{ position: 'absolute', left: 0, top: 0, display: 'block' }}
+        >
+          <defs>
+            <linearGradient id="aa-sidebar-night-paper" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#36333b" stopOpacity="0.34" />
+              <stop offset="1" stopColor="#242329" stopOpacity="0.025" />
+            </linearGradient>
+          </defs>
+
+          {/* Only a soft atmospheric wash remains behind the navigation. */}
+          <path
+            d="M236 0 L132 0 C152 36 141 64 112 88 C144 112 138 148 104 176 C130 194 152 210 164 226 L236 226 Z"
+            fill="url(#aa-sidebar-night-paper)"
+          />
+          <path
+            d="M0 104 C48 92 92 100 136 96 C176 92 208 98 236 92"
+            stroke={NIGHT_INK + '0.18)'}
+            strokeLinecap="round"
+            strokeWidth="0.9"
+          />
+          <path
+            d="M0 122 C52 112 96 120 142 114 C182 110 210 116 236 110"
+            stroke={NIGHT_INK + '0.12)'}
+            strokeLinecap="round"
+            strokeWidth="0.9"
+          />
+          <path
+            d="M34 46 L77 42 M42 54 L98 50"
+            stroke={NIGHT_INK + '0.1)'}
+            strokeLinecap="round"
+            strokeWidth="0.8"
+          />
+        </svg>
+
+        <svg
+          width="236"
+          height="190"
+          viewBox="0 0 236 190"
+          fill="none"
+          aria-hidden
+          style={{ position: 'absolute', left: 0, bottom: 42, display: 'block' }}
+        >
+          <path
+            d="M0 76 C52 66 100 74 145 68 C180 64 208 70 236 63 L236 112 C190 119 154 112 112 118 C68 124 31 114 0 125 Z"
+            fill="#34323a"
+            fillOpacity="0.2"
+          />
+          <path
+            d="M0 144 C48 134 90 144 132 138 C172 132 205 141 236 132"
+            stroke={NIGHT_INK + '0.16)'}
+            strokeLinecap="round"
+            strokeWidth="0.9"
+          />
+          <path
+            d="M8 164 C54 155 96 164 138 158 C175 153 207 161 228 155"
+            stroke={NIGHT_INK + '0.1)'}
+            strokeLinecap="round"
+            strokeWidth="0.9"
+          />
+          <path
+            d="M12 183 C52 176 96 185 134 178 C169 172 202 181 224 174"
+            stroke={NIGHT_INK + '0.08)'}
+            strokeLinecap="round"
+            strokeWidth="0.9"
+          />
+        </svg>
+      </div>
     </div>
   )
 }

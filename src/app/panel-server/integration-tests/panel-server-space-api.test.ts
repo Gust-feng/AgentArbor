@@ -96,6 +96,16 @@ test("Space API exposes the canonical Conversation owner created by the conversa
     assert.equal(tree.body.conversations.some((conversation: { conversationId: string }) =>
       conversation.conversationId === conversationId), true);
 
+    // 置顶状态随 owner read-model 透传，供空间资源页排序与分割展示。
+    const pinned = await requestJson(baseUrl, `/api/conversations/${encodeURIComponent(conversationId)}/pin`, {
+      method: "POST",
+      body: { pinned: true },
+    });
+    assert.equal(pinned.status, 200);
+    const pinnedTree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    assert.equal(pinnedTree.body.conversations.some((conversation: { conversationId: string; pinnedAt?: string }) =>
+      conversation.conversationId === conversationId && conversation.pinnedAt !== undefined), true);
+
     const deleted = await requestJson(baseUrl, `/api/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
     assert.equal(deleted.status, 200);
     assert.equal((await runtime.ordinaryAgentFeature.queries.listConversations()).length, 0);

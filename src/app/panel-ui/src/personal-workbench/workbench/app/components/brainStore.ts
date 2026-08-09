@@ -63,6 +63,10 @@ export function recentlyOpened(limit = 6): string[] {
   return Object.keys(value.recentlyOpened).filter((refId) => alive.has(refId))
     .sort((left, right) => value.recentlyOpened[right] - value.recentlyOpened[left]).slice(0, limit)
 }
+/** 某页面的最近打开时间(从未打开过则为 undefined)。 */
+export function openedAtOf(refId: string): number | undefined {
+  return getPersonalKnowledgeSnapshot().recentlyOpened[refId]
+}
 export function recentlyCollected(limit = 6): string[] { return getPages().slice(0, limit).map((page) => page.refId) }
 export function outgoing(refId: string): string[] { return getLinks().filter((link) => link.from === refId).map((link) => link.to) }
 export function backlinks(refId: string): string[] { return getLinks().filter((link) => link.to === refId).map((link) => link.from) }
@@ -179,6 +183,7 @@ export function useBrain() {
     getLinks,
     recentlyOpened: (limit = 6) => recentlyOpened(limit).filter((refId) => pageById.has(refId)),
     recentlyCollected: (limit = 6) => pages.slice(0, limit).map((page) => page.refId),
+    openedAtOf,
     outgoing,
     backlinks,
     resolvePage,

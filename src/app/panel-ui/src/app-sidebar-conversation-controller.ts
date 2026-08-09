@@ -29,31 +29,38 @@ export type AppSidebarConversationControllerOptions = {
   readonly setGoal: React.Dispatch<React.SetStateAction<string>>;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
   readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
+  /** Owner 为空间的会话控制变更成功后刷新对应空间 read-model；失败静默。 */
+  readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 };
 
 export function createAppSidebarConversationController(
   options: AppSidebarConversationControllerOptions,
 ): AppSidebarConversationController {
   async function renameConversation(conversationId: string, title: string): Promise<void> {
+    const spaceId = spaceIdOfConversation(options.appRef.current, conversationId);
     await runConversationMutation(conversationId, async () => {
       const response = await renameConversationTitle(conversationId, title);
       if (!options.mountedRef.current) return;
       applyConversationManagementResponse(response);
+      notifySpaceConversationChange(spaceId, options.refreshSpaceConversations);
     }, "重命名会话失败。");
   }
 
   async function toggleConversationPinned(conversationId: string, pinned: boolean): Promise<void> {
     const previousPinnedAt = conversationPinnedAt(options.appRef.current, conversationId);
     const optimisticPinnedAt = pinned ? new Date().toISOString() : undefined;
+    const spaceId = spaceIdOfConversation(options.appRef.current, conversationId);
     await runConversationMutation(conversationId, async () => {
       options.setApp((previous) => patchConversationPinnedAt(previous, conversationId, optimisticPinnedAt));
       const response = await updateConversationPinnedState(conversationId, pinned);
       if (!options.mountedRef.current) return;
       applyConversationManagementResponse(response);
+      notifySpaceConversationChange(spaceId, options.refreshSpaceConversations);
     }, "更新会话置顶失败。", (previous) => patchConversationPinnedAt(previous, conversationId, previousPinnedAt));
   }
 
   async function deleteConversation(conversationId: string): Promise<void> {
+    const spaceId = spaceIdOfConversation(options.appRef.current, conversationId);
     await runConversationMutation(conversationId, async () => {
       const response = await removeConversation(conversationId);
       if (!options.mountedRef.current) return;
@@ -65,6 +72,7 @@ export function createAppSidebarConversationController(
         conversations: (response.conversations ?? previous.conversations).filter((item) => item.conversationId !== conversationId),
         error: undefined,
       }));
+      notifySpaceConversationChange(spaceId, options.refreshSpaceConversations);
     }, "删除会话失败。", undefined, (error) => {
       if (isMissingConversationError(error)) {
         if (options.appRef.current.conversation?.conversationId === conversationId) {
@@ -137,6 +145,22 @@ function conversationPinnedAt(app: AppState, conversationId: string): string | u
   return app.conversation?.conversationId === conversationId
     ? app.conversation.pinnedAt
     : app.conversations.find((conversation) => conversation.conversationId === conversationId)?.pinnedAt;
+}
+
+/** 会话所属空间 id；owner 不是空间或无法定位时返回 undefined（如 v2 旧对话）。 */
+function spaceIdOfConversation(app: AppState, conversationId: string): string | undefined {
+  const owner = app.conversation?.conversationId === conversationId
+    ? app.conversation.owner
+    : app.conversations.find((conversation) => conversation.conversationId === conversationId)?.owner;
+  return owner?.kind === "space" ? owner.id : undefined;
+}
+
+function notifySpaceConversationChange(
+  spaceId: string | undefined,
+  refreshSpaceConversations: ((spaceId: string) => void | Promise<void>) | undefined,
+): void {
+  if (spaceId === undefined || refreshSpaceConversations === undefined) return;
+  void Promise.resolve(refreshSpaceConversations(spaceId)).catch(() => undefined);
 }
 
 function patchConversationPinnedAt(

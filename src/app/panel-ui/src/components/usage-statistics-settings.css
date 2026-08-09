@@ -170,18 +170,29 @@
 
 .usage-v3-card-grid { display: grid; flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(158px, 1fr)); gap: 12px; }
 .usage-v3-summary-card { display: flex; min-width: 0; min-height: 0; flex-direction: column; border: 1px solid var(--panel-card-border); border-radius: 10px; background: var(--surface); padding: 15px 18px; box-shadow: var(--shadow-soft); }
+.usage-v3-activity-card { overflow: hidden; }
 .usage-v3-card-heading { min-width: 0; gap: 10px; }
 .usage-v3-card-heading h4 { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .usage-v3-card-heading p { margin: 2px 0 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .usage-v3-card-context { margin-left: auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
 .usage-v3-card-icon--quiet { background: color-mix(in oklch, var(--surface-subtle) 76%, var(--surface)); color: var(--secondary); }
 .usage-v3-card-total { margin-left: auto; font-size: 25px; font-weight: 650; }
-.usage-v3-card-body-row { display: grid; grid-template-columns: auto minmax(140px, 1fr); align-items: end; gap: 24px; margin-top: 14px; }
+.usage-v3-card-body-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: end;
+  gap: 24px;
+  margin-top: 14px;
+}
 .usage-v3-activity-card .usage-v3-card-body-row { margin-top: auto; margin-bottom: 8px; }
+.usage-v3-primary-metrics,
+.usage-v3-mini-trend-wrap,
+.usage-v3-mini-trend { min-width: 0; }
 .usage-v3-primary-metrics { display: grid; grid-template-columns: repeat(2, minmax(74px, 1fr)); gap: 20px; }
 .usage-v3-primary-metrics .usage-v3-metric-pair strong { font-size: 28px; }
 .usage-v3-mini-trend-wrap { display: flex; height: 38px; align-items: flex-end; }
-.usage-v3-mini-trend { display: flex; width: 100%; height: 38px; align-items: flex-end; gap: 5px; border-bottom: 1px solid color-mix(in oklch, var(--border) 72%, transparent); padding: 0 2px 1px; }
+.usage-v3-mini-trend { display: flex; width: 100%; height: 38px; align-items: flex-end; gap: 5px; overflow: hidden; border-bottom: 1px solid color-mix(in oklch, var(--border) 72%, transparent); padding: 0 2px 1px; }
 .usage-v3-mini-trend i { flex: 1 1 0; min-width: 3px; max-width: 10px; border-radius: 3px 3px 1px 1px; background: color-mix(in oklch, var(--accent) 64%, var(--surface)); }
 .usage-v3-request-breakdown { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 10px; }
 .usage-v3-request-breakdown .usage-v3-metric-pair:not(:first-child) { border-left: 1px solid color-mix(in oklch, var(--border) 72%, transparent); padding-left: 14px; }

@@ -74,7 +74,13 @@ let desktopRestartTimer;
 let desktopRuntimeWatcher;
 let desktopRestarting = false;
 let desktopRestartRequested = false;
+// Windows 11 25H2/26200 上 V8 Maglev JIT 会让长期运行的 Node 进程以
+// STATUS_STACK_BUFFER_OVERRUN (0xC0000409) 原生崩溃（nodejs/node#62260），
+// dev 服务器会被无报错地杀掉。--no-maglev 是目前官方确认的规避手段，
+// 对 dev 工具链的热路径性能影响可忽略，因此统一应用到所有 Node 子进程。
+const maglevWorkaroundArgs = ["--no-maglev"];
 pushChild(spawnLabeled("tsc-watch", process.execPath, [
+    ...maglevWorkaroundArgs,
     tscBin,
     "-p",
     tsconfig,
@@ -84,6 +90,7 @@ pushChild(spawnLabeled("tsc-watch", process.execPath, [
   ]));
 if (shouldStartPanelApi) {
   pushChild(spawnLabeled("panel-api", process.execPath, [
+      ...maglevWorkaroundArgs,
       "--watch",
       panelEntry,
       "--host",
@@ -94,6 +101,7 @@ if (shouldStartPanelApi) {
     ], { env: childEnv }));
 }
 pushChild(spawnLabeled("vite", process.execPath, [
+    ...maglevWorkaroundArgs,
     viteBin,
     "--config",
     path.join(root, "vite.panel.config.ts"),

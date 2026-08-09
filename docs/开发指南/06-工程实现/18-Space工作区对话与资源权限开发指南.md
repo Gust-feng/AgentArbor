@@ -440,7 +440,7 @@ Workbench Shell
 ### 阶段七：旧实现退役
 
 1. 删除模型只能使用 opaque `referenceId` 的正式描述和测试。
-2. 将 `workspaceDirectory` 迁移为文件选择器初始目录偏好，停止对 run 能力快照的旁路影响。
+2. 删除全局 `workspaceDirectory` 配置、旧 API 和设置 UI；运行时只接受 owner execution root，目录选择器由具体业务动作按需提供上下文。
 3. 删除 route 直接操作 Space/进程内部状态的旁路。
 4. 更新 `CURRENT_RUNTIME_MODE.md`、owner 访问 adapter 和相关架构索引；不保留双重 owner、双重 Path resolver 或双重 Shell 执行器。
 

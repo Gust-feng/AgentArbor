@@ -162,8 +162,6 @@ function settingsDialogProps(
       apiKeyCleared: false,
     },
     setModelForm: () => undefined,
-    workspaceDirectory: "",
-    setWorkspaceDirectory: () => undefined,
     desktopAgentSystemPrompt: "You are the configured agent.",
     setDesktopAgentSystemPrompt: () => undefined,
     modelUsageDisplayEnabled: false,
@@ -183,8 +181,6 @@ function settingsDialogProps(
     onRevealModelApiKey: async () => undefined,
     skills: [],
     subAgents: [],
-    onSaveWorkspace: () => undefined,
-    onSelectWorkspaceDirectory: () => undefined,
     onSaveDesktopAgentSystemPrompt: async () => undefined,
     onResetDesktopAgentSystemPrompt: async () => undefined,
     toolForm: {

@@ -61,7 +61,7 @@ export type PanelDesktopDependencies = {
   readonly startPanelServer: (options: PanelServerOptions) => Promise<StartedPanelServer>;
   readonly createWindow: (options: PanelDesktopWindowOptions) => PanelDesktopWindowHandle;
   readonly appUpdateService?: PanelServerOptions["appUpdateService"];
-  readonly selectWorkspaceDirectory?: () => Promise<string | undefined>;
+  readonly selectDirectory?: () => Promise<string | undefined>;
   readonly selectContextAttachment?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly selectWorkbenchRestore?: () => Promise<string | undefined>;
   readonly openExternalResource?: (target: PanelExternalResourceTarget) => Promise<void>;
@@ -80,7 +80,7 @@ export async function startPanelDesktopSession(
     host: args.host,
     port: args.port,
     configDirectory: args.configDirectory,
-    workspaceDirectoryPicker: args.smoke ? undefined : dependencies.selectWorkspaceDirectory,
+    directoryPicker: args.smoke ? undefined : dependencies.selectDirectory,
     contextAttachmentPicker: args.smoke ? undefined : dependencies.selectContextAttachment,
     workbenchRestorePicker: args.smoke ? undefined : dependencies.selectWorkbenchRestore,
     externalResourceOpener: args.smoke ? undefined : dependencies.openExternalResource,

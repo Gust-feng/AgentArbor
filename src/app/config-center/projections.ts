@@ -6,7 +6,6 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
   SanitizedWebSearchConfig,
-  SanitizedWorkspaceConfig,
   ModelProviderProfileSettings,
 } from "../../domain/config/index.js";
 import {
@@ -15,7 +14,6 @@ import {
 } from "./model-provider-settings.js";
 import { normalizeInformationAccessSettings, webSearchProviderSettings } from "./settings-schema.js";
 import { toSanitizedDesktopAgentConfig as projectSanitizedDesktopAgentConfig } from "./desktop-agent-settings.js";
-import { normalizeConfiguredWorkspaceDirectory } from "./workspace-settings.js";
 
 export async function toSanitizedModelProviderConfig(input: {
   readonly settings: AgentArborLocalSettings;
@@ -114,13 +112,6 @@ export async function toSanitizedWebSearchConfig(input: {
         ? "ready"
         : "no-provider",
     updatedAt: informationAccess.webSearch.updatedAt,
-  };
-}
-
-export function toSanitizedWorkspaceConfig(settings: AgentArborLocalSettings): SanitizedWorkspaceConfig {
-  return {
-    workspaceDirectory: normalizeConfiguredWorkspaceDirectory(settings.workspaceDirectory),
-    updatedAt: settings.updatedAt,
   };
 }
 

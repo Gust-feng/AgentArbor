@@ -215,21 +215,6 @@ export async function saveModelCapabilityConfig(input: ModelCapabilityUpdateForm
   });
 }
 
-export async function saveWorkspaceDirectory(workspaceDirectory?: string): Promise<{ readonly workspaceDirectory?: string }> {
-  const response = await postJson<{ readonly workspace: { readonly workspaceDirectory?: string } }>("/api/config/workspace", {
-    workspaceDirectory: workspaceDirectory ?? "",
-  });
-  return response.workspace;
-}
-
-export async function selectWorkspaceDirectory(): Promise<{ readonly workspaceDirectory?: string }> {
-  const response = await postJson<{
-    readonly status?: "completed" | "cancelled";
-    readonly workspace: { readonly workspaceDirectory?: string };
-  }>("/api/config/workspace/select-directory", {});
-  return response.workspace;
-}
-
 export async function saveCommandShellConfig(kind: CommandShellKind | "auto"): Promise<ConfigResponse> {
   return postJson<ConfigResponse>("/api/config/command-shell", { kind });
 }

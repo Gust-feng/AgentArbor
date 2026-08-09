@@ -331,7 +331,6 @@ export type AgentArborLocalSettings = {
   readonly commandShell?: CommandShellSettings;
   readonly mcpServers?: readonly McpServerSettings[];
   readonly informationAccess?: InformationAccessSettings;
-  readonly workspaceDirectory?: string;
   readonly updatedAt: string;
 };
 
@@ -612,7 +611,7 @@ export type CapabilityMcpCatalogItem = {
   readonly updatedAt: string;
 };
 
-/** Run-born model, tool, MCP, workspace, and confirmation facts shared by Agent features. */
+/** Run-born model, tool, MCP, execution-root, and confirmation facts shared by Agent features. */
 export type AgentCapabilitySnapshot = {
   readonly snapshotId: string;
   readonly createdAt: string;
@@ -624,7 +623,7 @@ export type AgentCapabilitySnapshot = {
     readonly allowedTools: readonly string[];
   };
   readonly mcpCatalog: readonly CapabilityMcpCatalogItem[];
-  readonly workspace: SanitizedWorkspaceConfig;
+  readonly executionRoot: string;
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly toolConfirmation?: SanitizedToolConfirmationConfig;
   readonly securitySummary: string;
@@ -842,11 +841,6 @@ export type UpdateWebSearchConfigInput = {
   readonly googleEngineId?: string;
 };
 
-export type SanitizedWorkspaceConfig = {
-  readonly workspaceDirectory: string;
-  readonly updatedAt: string;
-};
-
 export type CommandShellAvailability = "available" | "missing";
 
 export type SanitizedCommandShellOption = {
@@ -881,17 +875,6 @@ export type SanitizedCommandShellConfig = {
   readonly availableShells: readonly SanitizedCommandShellOption[];
   readonly runtimeTools: readonly SanitizedRuntimeEnvironmentTool[];
   readonly updatedAt: string;
-};
-
-/**
- * 文件选择器初始目录偏好（ADR-0035 §2.4）。
- *
- * workspaceDirectory 已退役：它只是文件选择器的初始位置，不参与 Conversation
- * owner、文件工具授权、Shell 的 owner cwd、Agent Notes 作用域、Skills 或
- * Sub-Agent roots。兼容期保留旧字段名，新语义写入同一位置。
- */
-export type UpdateWorkspaceConfigInput = {
-  readonly workspaceDirectory?: string;
 };
 
 export type UpdateCommandShellConfigInput = {

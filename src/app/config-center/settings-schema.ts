@@ -245,7 +245,6 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
               updatedAt: optionalString(bing.updatedAt) ?? updatedAt,
             },
           },
-    workspaceDirectory: optionalString(record.workspaceDirectory),
     updatedAt,
   });
 }

@@ -25,7 +25,6 @@ import type {
   SanitizedModelProviderConfig,
   SanitizedSkillTriggerConfig,
   SanitizedToolConfirmationConfig,
-  SanitizedWorkspaceConfig,
   SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
   UpdateCommandShellConfigInput,
@@ -35,7 +34,6 @@ import type {
   UpdateToolConfirmationConfigInput,
   UpdateToolStateInput,
   UpsertMcpServerInput,
-  UpdateWorkspaceConfigInput,
   UpdateWebSearchConfigInput,
   ToolStateSettings,
 } from "../../domain/config/index.js";
@@ -75,12 +73,8 @@ import {
   toSanitizedModelProfile,
   toSanitizedModelProviderConfig,
   toSanitizedWebSearchConfig,
-  toSanitizedWorkspaceConfig,
 } from "./projections.js";
 import { builtinPresetForProfileId } from "./model-provider-profile-settings.js";
-import { normalizeFilePickerInitialDirectory, normalizeWorkspaceDirectory } from "./workspace-settings.js";
-
-export { WorkspaceDirectoryValidationError } from "./workspace-settings.js";
 
 export type ConfigCenterOptions = {
   readonly settingsStore: NormalSettingsStore;
@@ -637,11 +631,6 @@ export class ConfigCenter {
     });
   }
 
-  async getWorkspaceConfig(): Promise<SanitizedWorkspaceConfig> {
-    const settings = await this.readOrCreateSettings();
-    return toSanitizedWorkspaceConfig(settings);
-  }
-
   async getCommandShellConfig(): Promise<SanitizedCommandShellConfig> {
     const settings = await this.readOrCreateSettings();
     return toSanitizedCommandShellConfig(settings.commandShell, { now: settings.updatedAt });
@@ -660,28 +649,6 @@ export class ConfigCenter {
   async getSkillTriggerConfig(): Promise<SanitizedSkillTriggerConfig> {
     const settings = await this.readOrCreateSettings();
     return toSanitizedSkillTriggerConfig(settings.skillTrigger, { now: settings.updatedAt });
-  }
-
-  /**
-   * 更新文件选择器初始目录偏好（ADR-0035 §2.4）。
-   *
-   * 该值不再参与任何运行授权：不创建目录、不驱动 cwd/文件工具/Notes/Skills。
-   * 旧 updateWorkspaceConfig 是同一语义的兼容别名。
-   */
-  async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput): Promise<SanitizedWorkspaceConfig> {
-    const current = await this.readOrCreateSettings();
-    const now = new Date().toISOString();
-    const initialDirectory = input.workspaceDirectory === undefined
-      ? undefined
-      : normalizeFilePickerInitialDirectory(input.workspaceDirectory);
-    const next: AgentArborLocalSettings = {
-      ...current,
-      version: 3,
-      ...(initialDirectory === undefined ? {} : { workspaceDirectory: initialDirectory }),
-      updatedAt: now,
-    };
-    await this.options.settingsStore.writeSettings(next);
-    return toSanitizedWorkspaceConfig(next);
   }
 
   async updateCommandShellConfig(input: UpdateCommandShellConfigInput): Promise<SanitizedCommandShellConfig> {

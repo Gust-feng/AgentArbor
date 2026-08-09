@@ -461,10 +461,7 @@ function capabilitySnapshot(
         updatedAt: "2026-05-13T00:00:00.000Z",
       },
     ],
-    workspace: {
-      workspaceDirectory: "Z:/AgentArbor",
-      updatedAt: "2026-05-13T00:00:00.000Z",
-    },
+    executionRoot: "Z:/AgentArbor",
     securitySummary: "Safe capability snapshot.",
     warnings: [],
   };

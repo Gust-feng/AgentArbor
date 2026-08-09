@@ -745,10 +745,7 @@ function capabilitySnapshot(
     skillCatalog: [],
     subAgentCatalog,
     mcpCatalog,
-    workspace: {
-      workspaceDirectory: "Z:/AgentArbor",
-      updatedAt: "2026-06-08T00:00:00.000Z",
-    },
+    executionRoot: "Z:/AgentArbor",
     securitySummary: "Safe capability snapshot.",
     warnings: [],
   };

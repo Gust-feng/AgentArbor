@@ -366,11 +366,11 @@ test("panel desktop session injects host pickers only outside smoke mode", async
   const dependencies: PanelDesktopDependencies = {
     startPanelServer: async (options) => {
       calls.push({
-        hasWorkspacePicker: options.workspaceDirectoryPicker !== undefined,
+        hasWorkspacePicker: options.directoryPicker !== undefined,
         hasRestorePicker: options.workbenchRestorePicker !== undefined,
       });
-      if (options.workspaceDirectoryPicker !== undefined) {
-        const selected = await options.workspaceDirectoryPicker();
+      if (options.directoryPicker !== undefined) {
+        const selected = await options.directoryPicker();
         assert.equal(selected, "C:/picked-workspace");
       }
       if (options.workbenchRestorePicker !== undefined) {
@@ -383,7 +383,7 @@ test("panel desktop session injects host pickers only outside smoke mode", async
       };
     },
     createWindow: () => createFakePanelDesktopWindow(),
-    selectWorkspaceDirectory: async () => {
+    selectDirectory: async () => {
       pickerCalls += 1;
       return "C:/picked-workspace";
     },

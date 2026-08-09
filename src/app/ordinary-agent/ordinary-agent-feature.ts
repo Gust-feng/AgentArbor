@@ -1466,7 +1466,7 @@ export function createOrdinaryAgentFeature(input: {
       turn: state.turn,
       userMessage: state.input.userMessage,
       taskContextRefs: (state.input.taskSoil?.contextRefs ?? []).map((contextRef) => contextRef.ref),
-      workspaceRoot: state.birth.capabilitySnapshot.workspace.workspaceDirectory,
+      workspaceRoot: state.birth.capabilitySnapshot.executionRoot,
       workspaceSelection: state.birth.workspaceSelection ?? "default",
       executionStarted: state.timeline.some((event) => event.type === "run.started"),
       toolFacts: state.toolCalls
@@ -2039,7 +2039,7 @@ export function createOrdinaryAgentFeature(input: {
         const createdAt = now();
         const sessionRef = await input.sessionRepository.create({
           sessionId: idFactory("agent-session"),
-          sessionCwd: submitInput.birth.capabilitySnapshot.workspace.workspaceDirectory,
+          sessionCwd: submitInput.birth.capabilitySnapshot.executionRoot,
         });
         createdConversationSession = sessionRef;
         const state: OrdinaryConversationControlState = {

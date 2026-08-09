@@ -178,7 +178,17 @@ const configSchema = z.object({
   baseUrl: z.string(), defaultAiMode: z.enum(["openai-compatible", "openai-responses"]),
   secretRef: z.string(), secretConfigured: z.boolean(), updatedAt: z.string().min(1),
 }).passthrough();
-const capabilitySnapshotSchema = z.object({
+const capabilitySnapshotSchema = z.preprocess((value: unknown) => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (typeof record.executionRoot === "string") return value;
+  const legacyWorkspace = record.workspace;
+  if (typeof legacyWorkspace !== "object" || legacyWorkspace === null || Array.isArray(legacyWorkspace)) return value;
+  const legacyRoot = (legacyWorkspace as Record<string, unknown>).workspaceDirectory;
+  if (typeof legacyRoot !== "string") return value;
+  const { workspace: _legacyWorkspace, ...rest } = record;
+  return { ...rest, executionRoot: legacyRoot };
+}, z.object({
   snapshotId: z.string().min(1), createdAt: z.string().min(1), activeModel: configSchema,
   modelCapabilities: z.object({
     contextWindowTokens: z.number().positive(), maxOutputTokens: z.number().positive(), supportsToolCalling: z.boolean(),
@@ -200,8 +210,8 @@ const capabilitySnapshotSchema = z.object({
   skillCatalog: z.array(z.object({ id: z.string().min(1), name: z.string(), description: z.string(), enabled: z.boolean() }).passthrough()),
   subAgentCatalog: z.array(z.object({ id: z.string().min(1), name: z.string(), description: z.string(), enabled: z.boolean() }).passthrough()),
   mcpCatalog: z.array(z.object({ serverId: z.string().min(1), enabled: z.boolean(), availability: z.string() }).passthrough()),
-  workspace: z.object({ workspaceDirectory: z.string(), updatedAt: z.string().min(1) }).strict(), securitySummary: z.string(), warnings: z.array(z.string()),
-}).passthrough();
+  executionRoot: z.string().min(1), securitySummary: z.string(), warnings: z.array(z.string()),
+}).passthrough());
 const birthSchema = z.object({
   instructions: z.string(), aiMode: z.enum(["none", "fake", "openai-compatible", "openai-responses"]), config: configSchema,
   reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
@@ -250,7 +260,11 @@ const capabilityResolutionSchema = z.object({
       canReceiveToolCalls: z.boolean(),
       canRoundTripToolResults: z.boolean(),
     }).strict(),
-    modelCapabilities: capabilitySnapshotSchema.shape.modelCapabilities,
+    modelCapabilities: z.object({
+      contextWindowTokens: z.number().positive(), maxOutputTokens: z.number().positive(), supportsToolCalling: z.boolean(),
+      supportsParallelToolCalls: z.boolean(), supportsStructuredOutputs: z.boolean(), supportsStreaming: z.boolean(),
+      supportsVisionInput: z.boolean(), supportsReasoningEffort: z.boolean(), preferredApiStyle: z.string(), stability: z.string(),
+    }).passthrough(),
     canExposeModelTools: z.boolean(),
     tools: z.object({ canExposeToModel: z.boolean(), allowedTools: z.array(z.string()) }).strict().optional(),
     fileOperations: z.object({

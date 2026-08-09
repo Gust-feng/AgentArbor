@@ -37,7 +37,6 @@ import {
   type ToolRegistryFetchLike,
 } from "../tool-center/builtin-tool-runtime.js";
 import { applyAgentToolRegistryContributions, type AgentToolRegistryContribution } from "../tool-center/factory.js";
-import { normalizeWorkspaceDirectory } from "../config-center/workspace-settings.js";
 import {
   ToolRegistry,
   type ToolCatalogItem,
@@ -54,11 +53,11 @@ import { createMcpToolRegistryContribution } from "../mcp/mcp-tool-contribution.
 import { toolCatalogContractHash } from "./tool-definition-contract.js";
 
 export type CapabilitySkillRootsInput = {
-  readonly workspaceDirectory?: string;
+  readonly executionRoot?: string;
 };
 
 export type CapabilitySubAgentRootsInput = {
-  readonly workspaceDirectory?: string;
+  readonly executionRoot?: string;
 };
 
 export type CapabilityToolContributionsInput = {
@@ -83,7 +82,7 @@ export type CapabilityCenterOptions = {
 };
 
 export type CapabilityCenterSnapshotInput = {
-  readonly workspaceDirectory?: string;
+  readonly executionRoot?: string;
 };
 
 type CapabilityCenterSnapshotResult = {
@@ -164,7 +163,7 @@ export class CapabilityCenter {
   private async snapshotResult(
     input: CapabilityCenterSnapshotInput,
   ): Promise<CapabilityCenterSnapshotResult> {
-    if (input.workspaceDirectory !== undefined) {
+    if (input.executionRoot !== undefined) {
       return this.buildSnapshot(input);
     }
     if (this.snapshotPromise === undefined) {
@@ -181,27 +180,20 @@ export class CapabilityCenter {
   }
 
   private async buildSnapshot(input: CapabilityCenterSnapshotInput = {}): Promise<CapabilityCenterSnapshotResult> {
-    const [activeModel, overrides, toolStates, toolConfirmation, skillTrigger, configuredWorkspace, mcpServers, commandShell, env] = await Promise.all([
+    const [activeModel, overrides, toolStates, toolConfirmation, skillTrigger, mcpServers, commandShell, env] = await Promise.all([
       this.options.configCenter.getModelProviderConfig(),
       this.options.configCenter.listModelCapabilityOverrides(),
       this.options.configCenter.listToolStates(),
       this.options.configCenter.getToolConfirmationConfig(),
       this.options.configCenter.getSkillTriggerConfig(),
-      this.options.configCenter.getWorkspaceConfig(),
       this.options.configCenter.listMcpServers(),
       this.options.configCenter.getCommandShellConfig(),
       this.options.configCenter.createModelRuntimeEnvironment(),
     ]);
-    const workspace = input.workspaceDirectory === undefined
-      ? configuredWorkspace
-      : {
-          ...configuredWorkspace,
-          workspaceDirectory: await normalizeWorkspaceDirectory(input.workspaceDirectory),
-          updatedAt: nowIso(),
-    };
+    const executionRoot = path.resolve(input.executionRoot ?? process.cwd());
     const [skills, subAgents] = await Promise.all([
-      this.listSkills({ workspaceDirectory: workspace.workspaceDirectory }),
-      this.listSubAgents({ workspaceDirectory: workspace.workspaceDirectory }),
+      this.listSkills({ executionRoot }),
+      this.listSubAgents({ executionRoot }),
     ]);
     const connectableMcpServers = mcpServers.filter(isMcpServerConnectable);
     const cachedMcpServers = connectableMcpServers.filter(hasUsableMcpToolCache);
@@ -215,11 +207,11 @@ export class CapabilityCenter {
           }),
         });
     const modelCapabilities = (this.options.resolveModelCapabilities ?? resolveModelCapabilities)({ profile: activeModel, overrides });
-    const subAgentRoots = this.subAgentRootsFor({ workspaceDirectory: workspace.workspaceDirectory });
+    const subAgentRoots = this.subAgentRootsFor({ executionRoot });
     const toolRegistryOptions = {
       env,
       fetch: this.options.fetch,
-      workspaceRoot: workspace.workspaceDirectory,
+      workspaceRoot: executionRoot,
       playwrightAvailable: this.options.playwrightAvailable,
       toolStates,
       commandShell,
@@ -234,10 +226,10 @@ export class CapabilityCenter {
       createResearchToolRegistryContribution({
         env,
         fetch: this.options.fetch,
-        workspaceRoot: workspace.workspaceDirectory,
+        workspaceRoot: executionRoot,
       }),
       ...(this.options.resolveToolContributions?.({
-        workspaceRoot: workspace.workspaceDirectory,
+        workspaceRoot: executionRoot,
       }) ?? []),
     ];
     applyAgentToolRegistryContributions(registry, { toolStates }, hostContributions);
@@ -292,18 +284,16 @@ export class CapabilityCenter {
         mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem =>
           mcpCatalogItemForServer(server, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
         ),
-        workspace,
+        executionRoot,
         commandShell,
         toolConfirmation,
-        securitySummary: `本轮模型、工具、技能和工作区能力快照。确认策略：${toolConfirmation.label}。`,
+        securitySummary: `本轮模型、工具、技能和执行根能力快照。确认策略：${toolConfirmation.label}。`,
         warnings,
       },
     };
   }
 
   private async effectiveSkillRootInput(input: CapabilitySkillRootsInput): Promise<CapabilitySkillRootsInput> {
-    // 全局 workspaceDirectory 已退役（ADR-0035 §2.4）：它只是文件选择器初始位置，
-    // 不再作为 skill/sub-agent roots 的来源。未显式传入时由解析器回退 cwd。
     return input;
   }
 
@@ -312,7 +302,6 @@ export class CapabilityCenter {
   }
 
   private async effectiveSubAgentRootInput(input: CapabilitySubAgentRootsInput): Promise<CapabilitySubAgentRootsInput> {
-    // 全局 workspaceDirectory 已退役（ADR-0035 §2.4）：不再注入 sub-agent roots。
     return input;
   }
 

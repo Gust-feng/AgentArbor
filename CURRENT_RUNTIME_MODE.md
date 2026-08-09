@@ -6,7 +6,7 @@
 
 当前产品架构以一个 Workbench 和 Ordinary Agent 为主线；Sub-Agent 是 Ordinary Agent 的工具能力。Multi-Agent 的现有源码保留为延期重构参考，不属于当前生产功能。当前事实源是 ADR-0028，延期边界见《Multi-Agent 延期模块边界》。
 
-Space/Workspace/Conversation 资源权限的目标事实源是 [ADR-0035](docs/架构设计/产品架构/ADR-0035-Conversation双资源owner与统一运行作用域.md)、[ADR-0034](docs/架构设计/产品架构/ADR-0034-Space工作区引用与对话资源生命周期.md) 和 [工程指南](docs/开发指南/06-工程实现/18-Space工作区对话与资源权限开发指南.md)。ADR-0035 已接受：Conversation 只有一个 owner（Space 或 Workspace），创建后冻结不可切换；Run 出生前由 Host 解析统一运行作用域（cwd、managedRoot、workspaceGrants、confirmationPolicy）。**当前实现仍处于向该目标迁移中**：Conversation owner 目前仍通过 Space 树引用表达（尚未迁移为 Ordinary canonical fact），run cwd 与文件工具边界仍以全局 `workspaceDirectory` 为主要来源；迁移阶段与验收矩阵见 ADR-0035 第 10、11 节，未完成前以下段落描述的是当前真实行为。ADR-0034 的机械边界继续有效：Space 维护自己的软件资产并引用外部 Workspace，模型看到真实路径，后端保留 `referenceId` 和首次添加时捕获的文件系统来源身份，普通 Shell 每次确认，`full_access` 同时覆盖 Shell 和文件路径。来源身份只用于执行授权，不进入模型正文。系统不轮询或后台扫描外部 Workspace；只有打开、预览、读取、修改、附件交付或文件工具实际解析路径时才检查引用根，确认根消失、类型改变或同一路径已换成另一文件系统对象后立即移除当前引用，重新添加才产生新身份。本文其余段落中的 `workspaceRoot` 与 Task Soil 表述都按这一口径理解，不存在第二套并行口径。
+Space/Workspace/Conversation 资源权限的目标事实源是 [ADR-0035](docs/架构设计/产品架构/ADR-0035-Conversation双资源owner与统一运行作用域.md)、[ADR-0034](docs/架构设计/产品架构/ADR-0034-Space工作区引用与对话资源生命周期.md) 和 [工程指南](docs/开发指南/06-工程实现/18-Space工作区对话与资源权限开发指南.md)。Conversation 只有一个 owner（Space 或 Workspace），创建后冻结不可切换；Run 出生前由 Host 解析统一运行作用域（cwd、managedRoot、workspaceGrants、confirmationPolicy）。生产提交入口要求 owner，run cwd、Agent Notes、Skills、Sub-Agent roots 与文件工具边界统一来自该 owner 的 execution root，不再读取全局默认目录。ADR-0034 的机械边界继续有效：Space 维护自己的软件资产并引用外部 Workspace，模型看到真实路径，后端保留 `referenceId` 和首次添加时捕获的文件系统来源身份，普通 Shell 每次确认，`full_access` 同时覆盖 Shell 和文件路径。来源身份只用于执行授权，不进入模型正文。系统不轮询或后台扫描外部 Workspace；只有打开、预览、读取、修改、附件交付或文件工具实际解析路径时才检查引用根，确认根消失、类型改变或同一路径已换成另一文件系统对象后立即移除当前引用，重新添加才产生新身份。本文其余段落中的 `workspaceRoot` 与 Task Soil 表述都按这一口径理解，不存在第二套并行口径。
 
 删除普通会话后，Host 通过 Conversation coordinator 删除对应的 Space owner link；该动作只删除 Conversation 及其运行资产，不删除 Space 仍在使用的软件资产或外部 Workspace。删除 owner（当前实现为 Space；目标口径含 Workspace，见 ADR-0035）才会级联清理其软件资产和 Conversation。
 
@@ -40,7 +40,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - `/api/conversations` 是普通 `agent` 的唯一提交入口；旧 `/api/desktop/runs` 已删除
 - 当前 Ordinary 通过 Pi provider/model binding 使用冻结的模型协议能力；自定义 OpenAI-compatible endpoint 仍由 provider binding 接入，fake provider 仅供测试。Chat binding 把 DeepSeek、Kimi、GLM、MiniMax 的冻结请求方言映射到 Pi `compat` 与公开 payload hook，并按冻结能力声明视觉输入；未知模型默认关闭视觉输入，只有已核验定义或显式 capability override 才能开启。动态 API key 每次请求重新解析，清空后不会回退旧 key。普通 Agent 的语义 Skills 路由使用同一 Pi Models/provider binding 的窄无工具通道，并保留现有 JSON 校验与确定性 fallback。仓库通过 pnpm patch 固化 pi-ai 0.80.10 的必要上游补齐：Chat/Responses `stream:false`、refusal diagnostic、Responses hosted output continuation 与 `incomplete_details.reason`、MiniMax 累计 delta 和文本 `reasoning_details`；Responses provider-native Web Search 由冻结 binding 注入 hosted tool，并只在 provider/API/model 相同的 Session 后续轮次回放 opaque output item。provider error、refusal、content filter、输出截断与 context overflow 都形成 Ordinary 可观察失败。Pi 公共消息契约仍不能无损表达普通 file/audio 与 URL/file-id 附件，provider transport 也没有 Host 自定义 fetch 注入口；相关旧 Chat/Responses transport 只作为延期 Multi-Agent 的源码依赖保留，不进入当前生产组合根
 - Panel 首页目前只选择已有 Space 创建对话；目标口径（ADR-0035）为 Space/Workspace 统一 owner 选择器，迁移中。Conversation 创建后固定属于所选 owner，不能在对话中切换 Space 或 Workspace；Run 冻结当时资源快照，模型上下文展示真实绝对路径。
-- 设置中的 `workspaceDirectory` 已退役为"文件选择器初始目录"偏好（ADR-0035 §2.4）：只作为打开文件选择器时的初始位置，不参与 Conversation owner、文件工具授权、Shell 的 owner cwd、Agent Notes 作用域、Skills 或 Sub-Agent roots。Run 的 cwd 与工具授权由 owner 作用域决定（Space → `runtime/spaces/<id>/files`；Workspace → 当前 mount 根目录）。旧字段保留为兼容读，新语义写入同一位置。
+- 全局 `workspaceDirectory` 设置、设置 API 与“文件选择器初始目录”界面已经退役。旧设置文件中的同名字段只在读取时被忽略并由规范化写回清除，不能产生 Workspace、Conversation owner、Run 权限或选择器默认位置。Run 的 cwd 与工具授权由 owner 作用域决定（Space → `runtime/spaces/<id>/files`；Workspace → 当前 mount 根目录）；目录选择器由具体 Workspace/Space/附件动作调用，没有上下文默认位置时交给系统选择器。
 - `/api/deep/*` 已停用；旧 `/api/underground/*` 已删除。Deep 及其 run-tree 契约仅作为未来重构的代码基础保留
 
 ## 当前真实工作方式
@@ -147,7 +147,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 - 普通 `agent` 的本轮模型配置事实来自 run 创建时冻结的 `capabilitySnapshot.activeModel`；执行、持久化、恢复和用户可见 read-model 不能再用当前全局模型配置覆盖它
 - 普通 `agent` 的本轮模型能力事实来自 run 创建时冻结的 `capabilitySnapshot.modelCapabilities`；直接调用参数里的临时 `modelCapabilities` 只能服务没有冻结快照的测试或兼容调用，不能覆盖已创建 run 的上下文窗口、输出预算、工具调用能力或流式能力
 - 普通 `agent` 的附件读图工具只在本轮模型能力支持视觉输入时进入可用工具集合；支持的图片字节会进入 Ordinary durable Pi Session，并在后续轮次重新构建模型上下文，不进入事件、ordinary run snapshot 或 Panel read-model，工具 JSON 结果仍只保留图片元数据和本轮模型输入状态
-- 普通 `agent` 的本轮工作区事实来自 run 创建时冻结的 `capabilitySnapshot.workspace`；Conversation 请求不再接受第二套 `workspaceDirectory` 上下文，设置页保存的 Host 默认工作区只作为中性能力的默认根，不改变 Space 引用的对话权限语义
+- 普通 `agent` 的本轮执行根来自 run 创建时冻结的 `capabilitySnapshot.executionRoot`；Conversation 请求不接受第二套 `workspaceDirectory` 上下文，也不存在设置页 Host 默认工作区
 - 普通 `agent` 的 Space 文件权限来自 Conversation 唯一 Space owner 在 Run 创建时生成的资源快照；不同 Space 的引用不会合并，新增引用只影响新 Run，`status` 非 `available` 的引用不进入冻结授权。标准 `Read / Glob / Grep / Write / Edit` 每次执行都经过 Host 注入的路径授权，模型看到真实绝对路径，后端保存 `referenceId`。取消引用的 live deny overlay 会立即阻止活动 Run 的后续附件读取和标准文件工具调用；`full_access` 解除引用集合外路径限制，但不能绕过已撤销引用。
 - 普通 `agent` 在请求未显式指定 `aiMode` 时，默认 `aiMode` 也从本轮 `capabilitySnapshot.activeModel.defaultAiMode` 派生；入口层不得为了默认值提前读取当前全局模型配置
 - 普通 `agent` 执行阶段只能消费 run 创建时冻结的 `capabilitySnapshot`；执行资源不得在运行中重新向 `CapabilityCenter` 获取当前快照来替代本轮事实

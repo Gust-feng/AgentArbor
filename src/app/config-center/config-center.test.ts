@@ -140,33 +140,22 @@ test("command shell settings keep runtime environment detection split", async ()
   assert.equal(runtimeEnvironmentDetection.includes("function findExecutableInPath"), true);
 });
 
-test("ConfigCenter keeps projections and workspace validation split from orchestration", async () => {
-  const [configCenter, projections, workspaceSettings] = await Promise.all([
+test("ConfigCenter keeps projections split from orchestration", async () => {
+  const [configCenter, projections] = await Promise.all([
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "index.ts"), "utf8"),
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "projections.ts"), "utf8"),
-    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "workspace-settings.ts"), "utf8"),
   ]);
 
   assert.equal(configCenter.includes('from "./projections.js"'), true);
-  assert.equal(configCenter.includes('from "./workspace-settings.js"'), true);
+  assert.equal(configCenter.includes('from "./workspace-settings.js"'), false);
   assert.equal(configCenter.includes("private async toSanitizedConfig"), false);
   assert.equal(configCenter.includes("private async toSanitizedModelProfile"), false);
   assert.equal(configCenter.includes("private async toSanitizedInformationAccessConfig"), false);
   assert.equal(configCenter.includes("private async toSanitizedWebSearchConfig"), false);
-  assert.equal(configCenter.includes("private toSanitizedWorkspaceConfig"), false);
-  assert.equal(configCenter.includes("async function normalizeWorkspaceDirectory"), false);
-  assert.equal(configCenter.includes("async function ensureWorkspaceReady"), false);
-  assert.equal(configCenter.includes("function normalizeConfiguredWorkspaceDirectory"), false);
-  assert.equal(configCenter.includes("function resolveDefaultWorkspaceDirectory"), false);
-  assert.equal(configCenter.includes("class WorkspaceDirectoryValidationError"), false);
   assert.equal(projections.includes("export async function toSanitizedModelProviderConfig"), true);
   assert.equal(projections.includes("export async function toSanitizedModelProfile"), true);
   assert.equal(projections.includes("export async function toSanitizedInformationAccessConfig"), true);
   assert.equal(projections.includes("export async function toSanitizedWebSearchConfig"), true);
-  assert.equal(projections.includes("export function toSanitizedWorkspaceConfig"), true);
-  assert.equal(workspaceSettings.includes("export class WorkspaceDirectoryValidationError"), true);
-  assert.equal(workspaceSettings.includes("export async function normalizeWorkspaceDirectory"), true);
-  assert.equal(workspaceSettings.includes("export function normalizeConfiguredWorkspaceDirectory"), true);
 });
 
 test("command shell auto mode prefers Windows shells that avoid cmd quoting traps", async () => {
@@ -1805,29 +1794,27 @@ test("ConfigCenter preserves MCP server order when updating existing servers", a
   }
 });
 
-test("ConfigCenter stores and validates workspace directory", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-config-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-root-"));
+test("ConfigCenter does not persist a global execution directory", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-no-global-root-"));
   try {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
 
-    const defaultWorkspace = await configCenter.getWorkspaceConfig();
-    const updated = await configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
-    const reset = await configCenter.updateWorkspaceConfig({ workspaceDirectory: "   " });
-    const missing = path.join(workspace, "child", "missing");
-    const autoCreated = await configCenter.updateWorkspaceConfig({ workspaceDirectory: missing });
-    const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as { workspaceDirectory?: string };
+    await configCenter.getModelProviderConfig();
+    const created = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as Record<string, unknown>;
+    assert.equal("workspaceDirectory" in created, false);
 
-    assert.equal(defaultWorkspace.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
-    assert.equal(updated.workspaceDirectory, path.resolve(workspace));
-    assert.equal(reset.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
-    assert.equal(autoCreated.workspaceDirectory, path.resolve(missing));
-    assert.equal(settingsRaw.workspaceDirectory, path.resolve(missing));
+    await fs.writeFile(settingsStore.settingsPath, JSON.stringify({
+      ...created,
+      workspaceDirectory: "Z:/retired-global-workspace",
+    }, null, 2), "utf8");
+    await configCenter.getModelProviderConfig();
+
+    const normalized = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as Record<string, unknown>;
+    assert.equal("workspaceDirectory" in normalized, false);
   } finally {
     await removeTestDirectory(directory);
-    await removeTestDirectory(workspace);
   }
 });
 

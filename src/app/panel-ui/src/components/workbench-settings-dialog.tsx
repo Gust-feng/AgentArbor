@@ -9,8 +9,6 @@ import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settin
 type WorkbenchSettingsDialogFormState = {
   readonly modelForm: ModelForm;
   readonly setModelForm: (form: ModelForm) => void;
-  readonly workspaceDirectory: string;
-  readonly setWorkspaceDirectory: (value: string) => void;
   readonly desktopAgentSystemPrompt: string;
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly toolForm: ToolForm;
@@ -59,8 +57,6 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       appUpdate={props.app.appUpdate}
       modelForm={props.forms.modelForm}
       setModelForm={props.forms.setModelForm}
-      workspaceDirectory={props.forms.workspaceDirectory}
-      setWorkspaceDirectory={props.forms.setWorkspaceDirectory}
       desktopAgentSystemPrompt={props.forms.desktopAgentSystemPrompt}
       setDesktopAgentSystemPrompt={props.forms.setDesktopAgentSystemPrompt}
       modelUsageDisplayEnabled={props.preferences.modelUsageDisplayEnabled}
@@ -86,8 +82,6 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       modelCatalogs={props.modelCatalogs}
       skills={props.app.skills}
       subAgents={props.app.subAgents}
-      onSaveWorkspace={(nextWorkspaceDirectory) => void props.actions.saveWorkspace(nextWorkspaceDirectory)}
-      onSelectWorkspaceDirectory={() => void props.actions.selectWorkspace()}
       onSaveDesktopAgentSystemPrompt={props.actions.saveDesktopAgentSystemPrompt}
       onResetDesktopAgentSystemPrompt={props.actions.resetDesktopAgentSystemPrompt}
       tools={props.app.tools}

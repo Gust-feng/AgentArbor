@@ -191,7 +191,7 @@ export function projectOrdinaryPanelConversation(input: {
     activeRunId: input.conversation.activeRunId,
     latestRunId: input.conversation.latestRunId,
     workspaceFolder: workspaceFolderSummaryFromPath(
-      input.workspaceRun?.birth.capabilitySnapshot.workspace.workspaceDirectory,
+      input.workspaceRun?.birth.capabilitySnapshot.executionRoot,
       input.workspaceRun?.birth.workspaceSelection ?? "default",
     ),
     requiresUserAction: pendingAction !== undefined,

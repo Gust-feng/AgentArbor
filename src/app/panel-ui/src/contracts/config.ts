@@ -20,9 +20,6 @@ export type ConfigResponse = {
   readonly modelProviderMarket?: {
     readonly presets?: readonly ModelProviderPreset[];
   };
-  readonly workspace?: {
-    readonly workspaceDirectory?: string;
-  };
   readonly commandShell?: CommandShellConfig;
   readonly toolConfirmation?: ToolConfirmationConfig;
   readonly desktopAgent?: DesktopAgentConfig;

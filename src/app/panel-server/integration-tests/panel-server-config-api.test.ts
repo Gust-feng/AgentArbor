@@ -1116,81 +1116,57 @@ test("panel MCP test connection failure returns connection error and leaves syst
   }
 });
 
-test("panel workspace config route stores and returns the workspace directory", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-config-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-root-"));
+test("panel config exposes no global workspace directory setting", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-no-global-workspace-config-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
-    const initial = await requestJson(server.url, "/api/config");
-    const update = await requestJson(server.url, "/api/config/workspace", {
-      method: "POST",
-      body: { workspaceDirectory: workspace },
-    });
-    const after = await requestJson(server.url, "/api/config");
-    const created = await requestJson(server.url, "/api/config/workspace", {
-      method: "POST",
-      body: { workspaceDirectory: path.join(workspace, "created", "child") },
-    });
-    const reset = await requestJson(server.url, "/api/config/workspace", {
-      method: "POST",
-      body: { workspaceDirectory: "" },
-    });
-    const implicitDefault = await requestJson(server.url, "/api/config/workspace", {
-      method: "POST",
-      body: {},
-    });
+    const config = await requestJson(server.url, "/api/config");
+    const retiredUpdate = await requestJson(server.url, "/api/config/workspace", { method: "POST", body: {} });
+    const retiredPicker = await requestJson(server.url, "/api/config/workspace/select-directory", { method: "POST" });
 
-    assert.equal(initial.status, 200);
-    assert.equal(typeof initial.body.workspace.workspaceDirectory, "string");
-    assert.equal(update.status, 200);
-    assert.equal(update.body.workspace.workspaceDirectory, path.resolve(workspace));
-    assert.equal(after.body.workspace.workspaceDirectory, path.resolve(workspace));
-    assert.equal(created.status, 200);
-    assert.equal(created.body.workspace.workspaceDirectory, path.resolve(workspace, "created", "child"));
-    assert.equal(reset.status, 200);
-    assert.equal(reset.body.workspace.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
-    assert.equal(implicitDefault.status, 200);
-    assert.equal(implicitDefault.body.workspace.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
+    assert.equal(config.status, 200);
+    assert.equal("workspace" in config.body, false);
+    assert.equal(retiredUpdate.status, 404);
+    assert.equal(retiredPicker.status, 404);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
-    await removeTemporaryTree(workspace);
   }
 });
 
-test("panel workspace picker route handles success cancellation and unavailable desktop picker", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-picker-"));
-  const cancelDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-picker-cancel-"));
-  const browserDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-picker-browser-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-picked-workspace-"));
+test("panel task directory picker handles success cancellation and unavailable desktop picker without global config", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-task-directory-picker-"));
+  const cancelDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-task-directory-picker-cancel-"));
+  const browserDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-task-directory-picker-browser-"));
+  const selectedDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-picked-directory-"));
   const server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    workspaceDirectoryPicker: async () => workspace,
+    directoryPicker: async () => selectedDirectory,
   });
   const cancelServer = await startLocalPanelServer({
     port: 0,
     configDirectory: cancelDirectory,
-    workspaceDirectoryPicker: async () => undefined,
+    directoryPicker: async () => undefined,
   });
   const browserServer = await startLocalPanelServer({
     port: 0,
     configDirectory: browserDirectory,
   });
   try {
-    const selected = await requestJson(server.url, "/api/config/workspace/select-directory", { method: "POST" });
-    const cancelled = await requestJson(cancelServer.url, "/api/config/workspace/select-directory", { method: "POST" });
-    const unavailable = await requestJson(browserServer.url, "/api/config/workspace/select-directory", { method: "POST" });
+    const selected = await requestJson(server.url, "/api/context/workspace/select-directory", { method: "POST" });
+    const cancelled = await requestJson(cancelServer.url, "/api/context/workspace/select-directory", { method: "POST" });
+    const unavailable = await requestJson(browserServer.url, "/api/context/workspace/select-directory", { method: "POST" });
+    const config = await requestJson(server.url, "/api/config");
 
     assert.equal(selected.status, 200);
     assert.equal(selected.body.status, "completed");
-    assert.equal(selected.body.workspace.workspaceDirectory, path.resolve(workspace));
+    assert.equal(selected.body.directory, path.resolve(selectedDirectory));
     assert.equal(cancelled.status, 200);
     assert.equal(cancelled.body.status, "cancelled");
-    assert.equal(typeof cancelled.body.workspace.workspaceDirectory, "string");
     assert.equal(unavailable.status, 501);
     assert.equal(unavailable.body.error.code, "workspace_picker_unavailable");
-    assert.equal(unavailable.body.error.message.includes("手动输入默认文件夹路径"), true);
+    assert.equal("workspace" in config.body, false);
   } finally {
     await server.close();
     await cancelServer.close();
@@ -1198,38 +1174,7 @@ test("panel workspace picker route handles success cancellation and unavailable 
     await removeTemporaryTree(directory);
     await removeTemporaryTree(cancelDirectory);
     await removeTemporaryTree(browserDirectory);
-    await removeTemporaryTree(workspace);
-  }
-});
-
-test("panel task workspace picker returns a transient directory without updating the default workspace", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-task-workspace-picker-"));
-  const defaultWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-default-workspace-"));
-  const selectedWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-task-workspace-"));
-  const server = await startLocalPanelServer({
-    port: 0,
-    configDirectory: directory,
-    workspaceDirectoryPicker: async () => selectedWorkspace,
-  });
-  try {
-    const configured = await requestJson(server.url, "/api/config/workspace", {
-      method: "POST",
-      body: { workspaceDirectory: defaultWorkspace },
-    });
-    const selected = await requestJson(server.url, "/api/context/workspace/select-directory", { method: "POST" });
-    const after = await requestJson(server.url, "/api/config");
-
-    assert.equal(configured.status, 200);
-    assert.equal(configured.body.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
-    assert.equal(selected.status, 200);
-    assert.equal(selected.body.status, "completed");
-    assert.equal(selected.body.workspaceDirectory, path.resolve(selectedWorkspace));
-    assert.equal(after.body.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
-  } finally {
-    await server.close();
-    await removeTemporaryTree(directory);
-    await removeTemporaryTree(defaultWorkspace);
-    await removeTemporaryTree(selectedWorkspace);
+    await removeTemporaryTree(selectedDirectory);
   }
 });
 

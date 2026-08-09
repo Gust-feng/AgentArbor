@@ -8,7 +8,6 @@ import { CapabilityCenter } from "../capability/capability-center.js";
 import {
   ConfigCenter,
   ConfigCenterValidationError,
-  WorkspaceDirectoryValidationError,
 } from "../config-center/index.js";
 import type { ToolCatalogSnapshot } from "../tool-center/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
@@ -29,7 +28,6 @@ import {
   parseToolConfirmationUpdate,
   parseToolStateUpdate,
   parseWebSearchUpdate,
-  parseWorkspaceUpdate,
 } from "./request-parsers.js";
 import { checkPanelMcpEnvironment, installPanelMcpEnvironment, listPanelMcpReferences, testPanelMcpServer } from "./mcp-management-service.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch } from "./types.js";
@@ -44,7 +42,6 @@ export type PanelConfigRouteRuntime = {
   };
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
-  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
 };
 
 type PanelToolsConfig = {
@@ -83,7 +80,6 @@ export async function handlePanelConfigRoute(
       product: productInfoPayload(runtime),
       capabilities,
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
-      workspace: await runtime.configCenter.getWorkspaceConfig(),
       commandShell: await runtime.configCenter.getCommandShellConfig(),
       toolConfirmation: await runtime.configCenter.getToolConfirmationConfig(),
       desktopAgent: await runtime.configCenter.getDesktopAgentConfig(),
@@ -690,25 +686,6 @@ export async function handlePanelConfigRoute(
     return true;
   }
 
-  if (request.method === "POST" && url.pathname === "/api/config/workspace") {
-    const body = await readJsonBody(request);
-    try {
-      const workspace = await runtime.configCenter.updateWorkspaceConfig(parseWorkspaceUpdate(body));
-      invalidateCapabilityCache(runtime);
-      writeJson(response, 200, {
-        ok: true,
-        status: "completed",
-        workspace,
-      });
-      return true;
-    } catch (error) {
-      if (error instanceof WorkspaceDirectoryValidationError) {
-        throw new PanelHttpError(400, "invalid_workspace_directory", "默认文件夹必须是有效文件夹。");
-      }
-      throw error;
-    }
-  }
-
   if (request.method === "POST" && url.pathname === "/api/config/command-shell") {
     const body = await readJsonBody(request);
     try {
@@ -772,37 +749,6 @@ export async function handlePanelConfigRoute(
       return true;
     } catch (error) {
       throw configCenterHttpError(error);
-    }
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/workspace/select-directory") {
-    if (runtime.workspaceDirectoryPicker === undefined) {
-      throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器，请手动输入默认文件夹路径。");
-    }
-    const selectedDirectory = await runtime.workspaceDirectoryPicker();
-    if (selectedDirectory === undefined) {
-      writeJson(response, 200, {
-        ok: true,
-        status: "cancelled",
-        message: "已取消选择文件夹。",
-        workspace: await runtime.configCenter.getWorkspaceConfig(),
-      });
-      return true;
-    }
-    try {
-      const workspace = await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: selectedDirectory });
-      invalidateCapabilityCache(runtime);
-      writeJson(response, 200, {
-        ok: true,
-        status: "completed",
-        workspace,
-      });
-      return true;
-    } catch (error) {
-      if (error instanceof WorkspaceDirectoryValidationError) {
-        throw new PanelHttpError(400, "invalid_workspace_directory", "默认文件夹必须是有效文件夹。");
-      }
-      throw error;
     }
   }
 

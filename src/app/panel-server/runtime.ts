@@ -163,7 +163,7 @@ export type PanelRuntime = {
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
-  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly directoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly externalResourceOpener?: (target: PanelExternalResourceTarget) => Promise<void>;
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
@@ -207,11 +207,11 @@ export type PanelRuntime = {
 };
 
 type PanelSkillRootsInput = {
-  readonly workspaceDirectory?: string;
+  readonly executionRoot?: string;
 };
 
 type PanelSubAgentRootsInput = {
-  readonly workspaceDirectory?: string;
+  readonly executionRoot?: string;
 };
 
 export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
@@ -228,7 +228,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
       modelCatalogFetch: options.modelCatalogFetch,
-      workspaceDirectoryPicker: options.workspaceDirectoryPicker,
+      directoryPicker: options.directoryPicker,
       contextAttachmentPicker: options.contextAttachmentPicker,
       workbenchRestorePicker: options.workbenchRestorePicker,
       externalResourceOpener: options.externalResourceOpener,
@@ -254,7 +254,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
     modelCatalogFetch: options.modelCatalogFetch,
-    workspaceDirectoryPicker: options.workspaceDirectoryPicker,
+    directoryPicker: options.directoryPicker,
     contextAttachmentPicker: options.contextAttachmentPicker,
     workbenchRestorePicker: options.workbenchRestorePicker,
     externalResourceOpener: options.externalResourceOpener,
@@ -344,7 +344,7 @@ function assemblePanelRuntime(input: {
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
-  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly directoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly workbenchRestorePicker?: () => Promise<string | undefined>;
   readonly externalResourceOpener?: (target: PanelExternalResourceTarget) => Promise<void>;
@@ -633,7 +633,7 @@ function assemblePanelRuntime(input: {
         onInvalidReference: unlinkSpaceExternalReference,
       }),
     resolveSubAgentRoots: (workspaceRoot) =>
-      input.resolveSubAgentRoots?.({ workspaceDirectory: workspaceRoot }) ?? input.subAgentRoots,
+      input.resolveSubAgentRoots?.({ executionRoot: workspaceRoot }) ?? input.subAgentRoots,
   });
   const ordinaryAgentFeature = createOrdinaryAgentFeature({
     repository: createFileSystemOrdinaryRunRepository(ordinaryRuntimeRoot),
@@ -756,7 +756,7 @@ function assemblePanelRuntime(input: {
     configDirectory: input.configDirectory,
     providerFetch: input.providerFetch,
     modelCatalogFetch: input.modelCatalogFetch,
-    workspaceDirectoryPicker: input.workspaceDirectoryPicker,
+    directoryPicker: input.directoryPicker,
     contextAttachmentPicker: input.contextAttachmentPicker,
     externalResourceOpener: input.externalResourceOpener,
     contextAttachmentMedia,
@@ -1020,7 +1020,7 @@ async function prepareOrdinaryRunBirth(
   conversationId?: string,
 ): Promise<OrdinaryRunBirth> {
   // 先解析 owner 作用域：能力快照（Skill/Sub-Agent roots、工具 fallback）与
-  // workspace 字段都要以 owner 根为准（ADR-0035 §3.1/§3.2）。
+  // execution root 与能力快照都要以 owner 根为准（ADR-0035 §3.1/§3.2）。
   const scope = await resolveConversationExecutionScope(runtime, input, conversationId);
   const [informationAccess, toolConfirmation, baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
     runtime.configCenter.getInformationAccessConfig(),
@@ -1033,21 +1033,8 @@ async function prepareOrdinaryRunBirth(
     input.reasoningEffort,
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
-  const ownerContext = scope.owner === undefined
-    ? undefined
-    : await formatOwnerContext(runtime, {
-        owner: scope.owner,
-        cwd: scope.cwd ?? capabilitySnapshot.workspace.workspaceDirectory,
-        managedRoot: scope.managedRoot,
-      });
-  const effectiveCapabilitySnapshot = scope.cwd === undefined
-    ? capabilitySnapshot
-    : {
-        ...capabilitySnapshot,
-        workspace: { ...capabilitySnapshot.workspace, workspaceDirectory: scope.cwd },
-      };
-  const workspaceRoot = effectiveCapabilitySnapshot.workspace.workspaceDirectory;
-  const noteSnapshot = await runtime.agentNotesFeature.queries.startupSnapshot(workspaceRoot);
+  const ownerContext = await formatOwnerContext(runtime, scope);
+  const noteSnapshot = await runtime.agentNotesFeature.queries.startupSnapshot(capabilitySnapshot.executionRoot);
   // The injected note is frozen with this run's definition. This preserves the
   // existing definition/hash invariant: a restarted run uses exactly the notes
   // it saw at birth, while the next run sees any later model-written revision.
@@ -1056,13 +1043,13 @@ async function prepareOrdinaryRunBirth(
   runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), definition);
   return {
     instructions: definition.prompt.systemPrompt,
-    aiMode: input.aiMode ?? effectiveCapabilitySnapshot.activeModel.defaultAiMode,
-    config: effectiveCapabilitySnapshot.activeModel,
+    aiMode: input.aiMode ?? capabilitySnapshot.activeModel.defaultAiMode,
+    config: capabilitySnapshot.activeModel,
     reasoningEffort: input.reasoningEffort,
     agentDefinitionRef,
-    capabilitySnapshot: effectiveCapabilitySnapshot,
+    capabilitySnapshot,
     agentNoteVersions: noteSnapshot.versions,
-    workspaceSelection: scope.owner === undefined ? "default" : "explicit",
+    workspaceSelection: "explicit",
     ownerContext,
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
@@ -1100,20 +1087,21 @@ async function formatOwnerContext(
  *   Workspace current mount root）。
  * - Existing conversation: the canonical owner stored on the Ordinary document.
  *
- * When no owner is resolvable（legacy submission paths）, the scope is empty and
- * the run keeps the legacy global workspaceDirectory behavior; it is still
- * reported as the default selection.
+ * Missing owner is a contract violation. Production routes reject it before
+ * run birth; this guard protects internal callers and restart paths.
  */
 async function resolveConversationExecutionScope(
   runtime: PanelRuntime,
   input: PanelRunInput,
   conversationId: string | undefined,
-): Promise<{ readonly owner?: ConversationOwner; readonly cwd?: string; readonly managedRoot?: string }> {
+): Promise<{ readonly owner: ConversationOwner; readonly cwd: string; readonly managedRoot?: string }> {
   const requestedOwner = input.owner ?? (input.spaceId === undefined ? undefined : { kind: "space" as const, id: input.spaceId });
   const owner = requestedOwner ?? (conversationId === undefined
     ? undefined
     : await runtime.ordinaryAgentFeature.queries.getConversationOwner(conversationId));
-  if (owner === undefined) return {};
+  if (owner === undefined) {
+    throw new Error("Conversation owner is required before run birth.");
+  }
   if (owner.kind === "workspace") {
     const workspace = await runtime.workspaceFeature.queries.get(owner.id);
     const mount = workspace?.mounts.find((entry) => entry.status === "active");
@@ -1193,11 +1181,9 @@ async function modelProviderConfigForRun(
 async function capabilitySnapshotForRun(
   runtime: PanelRuntime,
   override: PanelRunInput["modelOverride"],
-  ownerCwd?: string,
+  executionRoot: string,
 ): Promise<import("../../domain/config/index.js").BasicAgentCapabilitySnapshot> {
-  // owner 作用域（ADR-0035 §3.1）：Skill/Sub-Agent roots 与工具 fallback 以
-  // owner 根为准；无 owner（遗留/测试路径）复用缓存快照。
-  const snapshot = await runtime.capabilityCenter.snapshot(ownerCwd === undefined ? {} : { workspaceDirectory: ownerCwd });
+  const snapshot = await runtime.capabilityCenter.snapshot({ executionRoot });
   if (override === undefined) {
     return snapshot;
   }
@@ -1218,7 +1204,7 @@ function resolveSkillRoots(
     return options.skillRoots;
   }
   return [
-    ...resolveDefaultPanelSkillRoots({ workspaceDirectory: input.workspaceDirectory }),
+    ...resolveDefaultPanelSkillRoots({ executionRoot: input.executionRoot }),
     ...(options.additionalSkillRoots ?? []),
   ];
 }
@@ -1231,7 +1217,7 @@ function resolveSubAgentRoots(
     return options.subAgentRoots;
   }
   return [
-    ...resolveDefaultPanelSubAgentRoots({ workspaceDirectory: input.workspaceDirectory }),
+    ...resolveDefaultPanelSubAgentRoots({ executionRoot: input.executionRoot }),
     ...(options.additionalSubAgentRoots ?? []),
   ];
 }
@@ -1239,9 +1225,9 @@ function resolveSubAgentRoots(
 export function resolveDefaultPanelSkillRoots(input: {
   readonly cwd?: string;
   readonly home?: string;
-  readonly workspaceDirectory?: string;
+  readonly executionRoot?: string;
 } = {}): readonly SkillRootInput[] {
-  const projectBase = input.workspaceDirectory ?? input.cwd ?? process.cwd();
+  const projectBase = input.executionRoot ?? input.cwd ?? process.cwd();
   const projectRoot = path.join(projectBase, ".agents", "skills");
   const userRoot = path.join(input.home ?? homeDirectory(), ".agents", "skills");
   if (path.resolve(projectRoot) === path.resolve(userRoot)) {
@@ -1272,10 +1258,10 @@ export function resolveDefaultPanelSubAgentRoots(input: {
   readonly cwd?: string;
   readonly home?: string;
   readonly builtinRoot?: string;
-  readonly workspaceDirectory?: string;
+  readonly executionRoot?: string;
 } = {}): readonly SubAgentRootInput[] {
   const builtinRoot = input.builtinRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "sub-agents", "builtin");
-  const projectBase = input.workspaceDirectory ?? input.cwd ?? process.cwd();
+  const projectBase = input.executionRoot ?? input.cwd ?? process.cwd();
   const projectRoot = path.join(projectBase, ".agents", "sub-agents");
   const userRoot = path.join(input.home ?? homeDirectory(), ".agents", "sub-agents");
   const roots: SubAgentRootInput[] = [

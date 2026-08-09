@@ -165,9 +165,7 @@ async function submitTurn(
     throw new PanelHttpError(400, "conversation_run_mode_not_supported", "对话入口只支持普通 Agent。");
   }
   const explicitOwner = runInput.owner ?? (runInput.spaceId === undefined ? undefined : { kind: "space" as const, id: runInput.spaceId });
-  const owner = conversationId === undefined && explicitOwner === undefined
-    ? await soleOwnerFallback(runtime)
-    : explicitOwner;
+  const owner = explicitOwner;
   const selectedSpaceId = owner?.kind === "space" ? owner.id : undefined;
   if (conversationId === undefined && owner === undefined) {
     throw new PanelHttpError(400, "conversation_owner_required", "开始新对话前请选择空间或工作区。");
@@ -190,6 +188,7 @@ async function submitTurn(
   }
   const effectiveRunInput = {
     ...runInput,
+    ...(owner === undefined ? {} : { owner }),
     taskSoilInput: spaceAccess.taskSoilInput,
   };
   const birth = await runtime.prepareOrdinaryRunBirth(effectiveRunInput, conversationId);
@@ -220,11 +219,6 @@ async function submitTurn(
     }),
     run: run.view.run,
   });
-}
-
-async function soleOwnerFallback(runtime: PanelRuntime): Promise<{ readonly kind: "space"; readonly id: string } | undefined> {
-  const spaces = await runtime.spaceFeature.queries.list();
-  return spaces.length === 1 ? { kind: "space", id: spaces[0]!.id } : undefined;
 }
 
 async function assertConversationMutationAvailable(runtime: PanelRuntime, conversationId: string): Promise<void> {

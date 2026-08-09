@@ -206,7 +206,7 @@ async function prepareAgentHostRunResourcesWithEnvironment<
     capabilitySnapshot,
     informationAccess: input.informationAccess,
     aiEnvironment,
-    workspaceRoot: capabilitySnapshot.workspace.workspaceDirectory,
+    workspaceRoot: capabilitySnapshot.executionRoot,
     commandShell: capabilitySnapshot.commandShell,
     toolStates: toolStatesFromCapabilitySnapshot(capabilitySnapshot),
     toolCatalogNames: toolCatalogNamesFromCapabilitySnapshot(capabilitySnapshot),

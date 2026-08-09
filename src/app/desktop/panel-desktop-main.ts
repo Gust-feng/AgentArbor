@@ -199,7 +199,7 @@ async function main(): Promise<void> {
         startupAnimationEnabled: readStartupAnimationPreference(),
       }),
       appUpdateService,
-      selectWorkspaceDirectory: selectWorkspaceDirectory,
+      selectDirectory: selectDirectory,
       selectContextAttachment: selectContextAttachment,
       selectWorkbenchRestore: selectWorkbenchRestore,
       openExternalResource: openExternalResource,
@@ -293,7 +293,7 @@ function configureDesktopAppIdentity(): void {
   }
 }
 
-async function selectWorkspaceDirectory(): Promise<string | undefined> {
+async function selectDirectory(): Promise<string | undefined> {
   await app.whenReady();
   const window = currentPanelDialogWindow();
   const options: OpenDialogOptions = {

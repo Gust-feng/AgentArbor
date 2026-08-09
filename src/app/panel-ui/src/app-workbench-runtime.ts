@@ -48,7 +48,6 @@ export type AppWorkbenchRuntimeOptions = {
   readonly modelForm: ModelForm;
   readonly setModelForm: React.Dispatch<React.SetStateAction<ModelForm>>;
   readonly setModelCatalogs: React.Dispatch<React.SetStateAction<Record<string, ModelProviderModelCatalog>>>;
-  readonly workspaceDirectory: string;
   readonly setDesktopAgentSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
   readonly toolForm: ToolForm;
   readonly setToolForm: React.Dispatch<React.SetStateAction<ToolForm>>;
@@ -76,7 +75,7 @@ export type AppWorkbenchRuntime = {
   readonly pendingConversationIds: ReadonlySet<string>;
 
   readonly savingModel: boolean;
-  readonly savingWorkspace: boolean;
+  readonly savingEnvironment: boolean;
   readonly savingDesktopAgent: boolean;
   readonly savingTools: boolean;
   readonly runActions: Pick<
@@ -121,7 +120,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const [confirmationBusy, setConfirmationBusy] = useState(false);
   const [contextBusy, setContextBusy] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
-  const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [savingEnvironment, setSavingEnvironment] = useState(false);
   const [savingDesktopAgent, setSavingDesktopAgent] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | undefined>(undefined);
@@ -320,7 +319,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     modelForm: options.modelForm,
     setModelForm: options.setModelForm,
     setModelCatalogs: options.setModelCatalogs,
-    workspaceDirectory: options.workspaceDirectory,
     setDesktopAgentSystemPrompt: options.setDesktopAgentSystemPrompt,
     toolForm: options.toolForm,
     setToolForm: options.setToolForm,
@@ -333,7 +331,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mcpToolUpdateVersionRef,
     mcpToolCatalogDraftRef,
     setSavingModel,
-    setSavingWorkspace,
+    setSavingEnvironment,
     setSavingDesktopAgent,
     setSavingTools,
   }), [
@@ -348,7 +346,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setModelForm,
     options.setToolForm,
     options.toolForm,
-    options.workspaceDirectory,
   ]);
 
   const composerController = useMemo(() => createAppComposerController({
@@ -391,7 +388,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     pendingConversationIds,
 
     savingModel,
-    savingWorkspace,
+    savingEnvironment,
     savingDesktopAgent,
     savingTools,
     runActions: {

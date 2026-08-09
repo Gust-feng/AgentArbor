@@ -44,7 +44,7 @@ import { SubAgentSettings } from "./sub-agent-settings";
 import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
 import { ResponsivenessDiagnostics } from "./responsiveness-diagnostics";
 import { PathMemorySettings } from "./path-memory-settings";
-import { WorkspaceSettings } from "./workspace-settings";
+import { RuntimeSettings } from "./runtime-settings";
 import { ReleaseNotes } from "./release-notes";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
@@ -57,8 +57,6 @@ export function SettingsDialog(props: {
   readonly appUpdate?: AppUpdateInfo;
   readonly modelForm: ModelForm;
   readonly setModelForm: (form: ModelForm) => void;
-  readonly workspaceDirectory: string;
-  readonly setWorkspaceDirectory: (value: string) => void;
   readonly desktopAgentSystemPrompt: string;
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly modelUsageDisplayEnabled: boolean;
@@ -89,8 +87,6 @@ export function SettingsDialog(props: {
   readonly modelCatalogs?: Readonly<Record<string, ModelProviderModelCatalog>>;
   readonly skills: readonly SkillDefinition[];
   readonly subAgents: readonly SubAgentDefinition[];
-  readonly onSaveWorkspace: (workspaceDirectory?: string) => void;
-  readonly onSelectWorkspaceDirectory: () => void;
   readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
   readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
   readonly tools?: ToolsResponse;
@@ -261,12 +257,8 @@ export function SettingsDialog(props: {
               />
             )}
             {visibleActiveGroup === "workspace" && (
-              <WorkspaceSettings
+              <RuntimeSettings
                 commandShell={props.config?.commandShell}
-                workspaceDirectory={props.workspaceDirectory}
-                setWorkspaceDirectory={props.setWorkspaceDirectory}
-                onSave={props.onSaveWorkspace}
-                onSelectDirectory={props.onSelectWorkspaceDirectory}
                 savingCommandShell={props.savingWorkspace}
                 onSaveCommandShell={props.onSaveCommandShell}
               />
@@ -315,7 +307,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "subAgents", label: "Sub Agent", icon: <Bot size={15} /> },
-  { id: "workspace", label: "工作区", icon: <Database size={15} /> },
+  { id: "workspace", label: "运行环境", icon: <Database size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
   { id: "pathMemory", label: "路径记忆", icon: <Route size={15} /> },

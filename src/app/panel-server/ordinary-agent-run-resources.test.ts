@@ -462,7 +462,7 @@ test("Ordinary resources pass through Chat Completions configuration and clean H
       ...base.capabilitySnapshot.modelCapabilities,
       supportsVisionInput: false,
     },
-    workspace: { ...base.capabilitySnapshot.workspace, workspaceDirectory: process.cwd() },
+    executionRoot: process.cwd(),
   };
   let hostReleases = 0;
   let received: AgentSessionLoopOptions | undefined;
@@ -778,7 +778,7 @@ function capabilitySnapshot(
     toolCatalog: { scope: "desktop-basic", tools, allowedTools: tools.map((item) => item.name) },
     mcpCatalog: [mcpServerCatalog(mcpLookup)],
     subAgentCatalog,
-    workspace: { ...base.workspace, workspaceDirectory: workspaceRoot },
+    executionRoot: workspaceRoot,
   };
 }
 

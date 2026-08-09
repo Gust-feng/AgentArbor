@@ -13,7 +13,7 @@ export type PanelServerOptions = {
   readonly configCenter?: ConfigCenter;
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
-  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly directoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly workbenchRestorePicker?: () => Promise<string | undefined>;
   readonly externalResourceOpener?: (target: PanelExternalResourceTarget) => Promise<void>;

@@ -16,7 +16,6 @@ import type {
   UpdateSkillTriggerConfigInput,
   UpdateToolConfirmationConfigInput,
   UpdateWebSearchConfigInput,
-  UpdateWorkspaceConfigInput,
   UpsertMcpServerInput,
 } from "../../domain/config/index.js";
 import { normalizeModelCatalogDisplayName } from "../../domain/config/index.js";
@@ -421,13 +420,6 @@ export function parseMcpServerImport(raw: unknown): readonly UpsertMcpServerInpu
     throw new PanelHttpError(400, "empty_mcp_import", "没有可导入的 MCP server。");
   }
   return imported;
-}
-
-export function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
-  const record = parseRequestRecord(raw);
-  return {
-    workspaceDirectory: typeof record.workspaceDirectory === "string" ? record.workspaceDirectory : undefined,
-  };
 }
 
 export function parseCommandShellUpdate(raw: unknown): UpdateCommandShellConfigInput {

@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ContextAttachment } from "../../domain/basic-agent/index.js";
-import type { ConfigCenter } from "../config-center/index.js";
 import {
   ContextAttachmentPreviewError,
   createContextAttachmentPreview,
@@ -15,9 +14,8 @@ import type { PanelContextAttachmentMediaEntry, PanelContextAttachmentSelection 
 import type { OrdinaryAgentFeature } from "../ordinary-agent/index.js";
 
 export type PanelContextRouteRuntime = {
-  readonly configCenter: ConfigCenter;
   readonly configDirectory?: string;
-  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly directoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
   readonly ordinaryAgentFeature: Pick<OrdinaryAgentFeature, "commands" | "queries">;
@@ -50,10 +48,9 @@ export async function handlePanelContextRoute(
 
   if (request.method === "POST" && url.pathname === "/api/context/attachments/preview") {
     const body = await readJsonBody(request);
-    const workspace = await runtime.configCenter.getWorkspaceConfig();
     const attachment = await createContextAttachmentPreview({
       raw: parseContextAttachmentPreviewRequest(body),
-      workspaceRoot: workspace.workspaceDirectory,
+      workspaceRoot: process.cwd(),
     }).catch((error: unknown) => {
       if (error instanceof ContextAttachmentPreviewError) {
         throw new PanelHttpError(400, error.code, error.message);
@@ -62,7 +59,7 @@ export async function handlePanelContextRoute(
     });
     writeJson(response, 200, {
       ok: true,
-      attachment: await attachMediaPreview(runtime, attachment, workspace.workspaceDirectory),
+      attachment: await attachMediaPreview(runtime, attachment, process.cwd()),
     });
     return true;
   }
@@ -146,10 +143,10 @@ export async function handlePanelContextRoute(
   }
 
   if (request.method === "POST" && url.pathname === "/api/context/workspace/select-directory") {
-    if (runtime.workspaceDirectoryPicker === undefined) {
+    if (runtime.directoryPicker === undefined) {
       throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器。");
     }
-    const selectedDirectory = await runtime.workspaceDirectoryPicker();
+    const selectedDirectory = await runtime.directoryPicker();
     if (selectedDirectory === undefined) {
       writeJson(response, 200, {
         ok: true,
@@ -161,7 +158,7 @@ export async function handlePanelContextRoute(
     writeJson(response, 200, {
       ok: true,
       status: "completed",
-      workspaceDirectory: path.resolve(selectedDirectory),
+      directory: path.resolve(selectedDirectory),
     });
     return true;
   }

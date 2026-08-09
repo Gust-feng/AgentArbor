@@ -8,9 +8,7 @@
 
 ## 1. 背景与问题
 
-当前实现已经能够把首页选择的 spaceId 写入新 Conversation，并把 Space 的外部引用加入本轮 Task Soil。但是 Run 的执行环境、Agent Notes、Skills、Sub-Agent roots 和部分 Panel 投影仍从全局 workspaceDirectory 推导。
-
-因此当前行为是“Conversation 记录属于 Space，但 Agent 仍在默认工作区运行”。空 Space 更明显：后台有一个 Space 权限标记，模型正文却没有 Space 名称、空间文件目录或当前 owner 描述。用户选择 Space 后无法判断模型是否真正落在该 Space。
+当前实现已把首页选择的 owner 写入新 Conversation，并在 Run 出生前统一解析 execution root。Run 的执行环境、Agent Notes、Skills、Sub-Agent roots、文件工具和 Panel 投影均从冻结 owner scope 推导，不再从全局 workspaceDirectory 推导。
 
 根因不是某个选择框的状态同步，而是缺少统一的 ConversationExecutionScope。owner、cwd、模型上下文、文件路径授权、Shell、进程和 UI 目前没有共同的出生事实。
 
@@ -85,16 +83,11 @@ AgentArborData/
 
 ### 2.4 没有全局默认 Workspace
 
-系统不再使用一个全局默认 Workspace 作为 Conversation 的第二上下文。设置中的默认目录最多作为文件选择器的初始位置，不参与 Conversation owner、文件工具授权、Shell 的 owner cwd、Agent Notes 作用域、Skills 或 Sub-Agent roots。
+系统不再使用一个全局默认 Workspace 作为 Conversation 的第二上下文，也不再持久化全局文件选择器初始目录。具体 Workspace/Space/附件动作可以按自身上下文向系统选择器提供 `defaultPath`；没有上下文时交给系统选择器。
 
 首页记住上次选择的 owner 只是 UI 偏好，不是权限事实。
 
-现有 `config-center.updateWorkspaceConfig` 是兼容期设置入口，不再拥有“默认工作区”语义。迁移完成后它应改名为等价的文件选择器初始目录命令（建议字段名为 `filePickerInitialDirectory`），并遵守以下规则：
-
-- 旧 `workspaceDirectory` 只在一次设置迁移中读取，并转换为文件选择器初始目录偏好；它不能自动注册 Workspace，也不能给任何 Conversation 或 Run 授权。
-- 兼容期的读接口可以继续返回旧字段，但返回值必须明确标为 picker preference；新的 Conversation、Run、Notes、Skills、Sub-Agent roots 和后台进程不得消费该字段。
-- 写入旧字段时只能更新文件选择器偏好，不能改变活动 Run 或新建 Conversation 的 owner/cwd。迁移完成并经过兼容窗口后，删除旧字段、旧设置 UI 和 `updateWorkspaceConfig` 入口，避免留下第二个默认工作区事实源。
-- 清空该偏好只恢复系统文件选择器默认位置，不创建或删除 Workspace。用户必须通过 WorkspaceFeature 的显式注册流程添加真实工作区。
+旧 `workspaceDirectory` 只在设置文件读取时被忽略，并由规范化写回清除；不再提供 `updateWorkspaceConfig`、配置路由或设置 UI。它不能自动注册 Workspace，也不能给任何 Conversation、Run、Notes、Skills、Sub-Agent roots 或后台进程授权。目录选择器只由具体业务动作调用，不建立全局偏好事实源。
 
 ## 3. 统一 Run 作用域
 
@@ -682,7 +675,7 @@ AgentArbor · 工作区
 
 ### 阶段八：旧语义退役
 
-1. 将 `workspaceDirectory` 兼容字段迁移为文件选择器初始目录偏好，停止 `config-center.updateWorkspaceConfig` 对 Conversation/Run 能力快照的旁路影响；兼容窗口结束后删除旧字段、旧 API 和旧设置文案。
+1. 删除 `workspaceDirectory` 兼容字段、`config-center.updateWorkspaceConfig`、旧配置路由和旧设置文案；读取旧设置时忽略该字段并在规范化写回时清除。
 2. 删除 workspaceFolder 作为 owner 的旧投影。
 3. 清理只接受 opaque referenceId 的旧模型描述和测试。
 4. 清理双重 Path resolver、全局默认 cwd 和旁路进程状态。
@@ -755,7 +748,7 @@ AgentArbor · 工作区
 4. 对无法证明来源身份的外部引用标记为需要重新添加。
 5. 保留 Conversation、工具事实和知识副本。
 6. 对旧字段只读一次，写入新 schema 后停止双写。
-7. 将旧 `workspaceDirectory` 设置值一次性迁移为文件选择器初始目录偏好；不得因为该值创建 Workspace、Conversation owner 或 Run 权限。
+7. 丢弃旧 `workspaceDirectory` 设置值；不得因为该值创建 Workspace、Conversation owner 或 Run 权限。
 8. 将旧的 root-keyed Workspace Notes 仅在能通过现有身份事实证明归属时迁移到 `workspaceId`；无法证明的 Notes 保留为待处理资产，不自动合并到新 Workspace。
 
 ## 13. 非目标

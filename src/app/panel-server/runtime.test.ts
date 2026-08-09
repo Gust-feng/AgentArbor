@@ -326,8 +326,10 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
     runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const workspace = path.join(directory, "project");
     await fs.mkdir(workspace, { recursive: true });
-    await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
-    runtime.capabilityCenter.invalidate();
+    const { workspace: ownerWorkspace } = await runtime.workspaceFeature.commands.registerWorkspace({
+      rootPath: workspace,
+      sourceIdentity: "dev:agent-notes",
+    });
     await replaceAgentNote(runtime, { kind: "global" }, "- Reply in Chinese.");
     await replaceAgentNote(
       runtime,
@@ -335,15 +337,18 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
       "- Build this project with pnpm build.",
     );
 
-    const birth = await runtime.prepareOrdinaryRunBirth({ goal: "check notes" });
+    const birth = await runtime.prepareOrdinaryRunBirth({
+      goal: "check notes",
+      owner: { kind: "workspace", id: ownerWorkspace.id },
+    });
 
     assert.match(birth.instructions, /<agent_notes>/u);
     assert.match(birth.instructions, /Reply in Chinese/u);
     assert.match(birth.instructions, /Build this project with pnpm build/u);
     assert.match(birth.agentDefinitionRef.promptRef, /agent-notes/u);
     assert.match(birth.agentDefinitionRef.promptVersion, /notes-/u);
-    assert.equal(birth.workspaceSelection, "default");
-    assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory, path.resolve(workspace));
+    assert.equal(birth.workspaceSelection, "explicit");
+    assert.equal(birth.capabilitySnapshot.executionRoot.toLowerCase(), path.resolve(workspace).toLowerCase());
     assert.deepEqual(birth.agentNoteVersions, {
       global: agentNoteContentVersion("- Reply in Chinese."),
       workspace: agentNoteContentVersion("- Build this project with pnpm build."),
@@ -367,7 +372,7 @@ test("Space owner run birth uses the Space managedRoot as cwd", async () => {
     });
 
     const expectedRoot = path.join(directory, "runtime", "spaces", space.id, "files");
-    assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory, path.resolve(expectedRoot));
+    assert.equal(birth.capabilitySnapshot.executionRoot, path.resolve(expectedRoot));
     assert.equal(birth.workspaceSelection, "explicit");
     assert.equal((await fs.stat(expectedRoot)).isDirectory(), true);
     assert.match(birth.ownerContext ?? "", /kind=space/u);
@@ -423,7 +428,7 @@ test("Workspace owner run birth uses the current mount root as cwd", async () =>
       owner: { kind: "workspace", id: workspace.id },
     });
 
-    assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory.toLowerCase(), path.resolve(project).toLowerCase());
+    assert.equal(birth.capabilitySnapshot.executionRoot.toLowerCase(), path.resolve(project).toLowerCase());
     assert.equal(birth.workspaceSelection, "explicit");
     assert.match(birth.ownerContext ?? "", /kind=workspace/u);
     assert.match(birth.ownerContext ?? "", /name=project/u);

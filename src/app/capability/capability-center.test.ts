@@ -34,30 +34,25 @@ test("CapabilityCenter exposes the shared tool-output reader when the Host provi
   }
 });
 
-test("CapabilityCenter freezes transient run workspace without changing the default workspace", async () => {
+test("CapabilityCenter freezes an explicit execution root without changing the default catalog root", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-workspace-"));
-  const defaultWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-default-workspace-"));
   const runWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-run-workspace-"));
   try {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
-    await configCenter.updateWorkspaceConfig({ workspaceDirectory: defaultWorkspace });
     const center = new CapabilityCenter({ configCenter, skillRoots: [] });
 
     const defaultSnapshot = await center.snapshot();
-    const runSnapshot = await center.snapshot({ workspaceDirectory: runWorkspace });
+    const runSnapshot = await center.snapshot({ executionRoot: runWorkspace });
     const cachedDefaultSnapshot = await center.snapshot();
-    const persistedWorkspace = await configCenter.getWorkspaceConfig();
 
-    assert.equal(defaultSnapshot.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
-    assert.equal(runSnapshot.workspace.workspaceDirectory, path.resolve(runWorkspace));
+    assert.equal(defaultSnapshot.executionRoot, path.resolve(process.cwd()));
+    assert.equal(runSnapshot.executionRoot, path.resolve(runWorkspace));
     assert.equal(cachedDefaultSnapshot.snapshotId, defaultSnapshot.snapshotId);
-    assert.equal(cachedDefaultSnapshot.workspace.workspaceDirectory, path.resolve(defaultWorkspace));
-    assert.equal(persistedWorkspace.workspaceDirectory, path.resolve(defaultWorkspace));
+    assert.equal(cachedDefaultSnapshot.executionRoot, path.resolve(process.cwd()));
   } finally {
     await removeTestDirectory(directory);
-    await removeTestDirectory(defaultWorkspace);
     await removeTestDirectory(runWorkspace);
   }
 });
@@ -96,7 +91,7 @@ test("CapabilityCenter freezes Host-injected feature contributions for the effec
         resolvedWorkspaces.push(workspaceRoot);
         return [contribution];
       },
-    }).snapshot({ workspaceDirectory: workspace });
+    }).snapshot({ executionRoot: workspace });
 
     assert.deepEqual(resolvedWorkspaces, [path.resolve(workspace)]);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("FeatureOwnedTool"), true);
@@ -152,18 +147,17 @@ test("CapabilityCenter discovers project skills from the effective workspace", a
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
-    await configCenter.updateWorkspaceConfig({ workspaceDirectory: defaultWorkspace });
     const center = new CapabilityCenter({
       configCenter,
-      skillRoots: skillRootsForWorkspace(userSkillRoot, defaultWorkspace),
-      resolveSkillRoots: (input) => skillRootsForWorkspace(
+      skillRoots: skillRootsForExecutionRoot(userSkillRoot, defaultWorkspace),
+      resolveSkillRoots: (input) => skillRootsForExecutionRoot(
         userSkillRoot,
-        input.workspaceDirectory ?? defaultWorkspace
+        input.executionRoot ?? defaultWorkspace
       ),
     });
 
     const defaultSkills = await center.listSkills();
-    const runSnapshot = await center.snapshot({ workspaceDirectory: runWorkspace });
+    const runSnapshot = await center.snapshot({ executionRoot: runWorkspace });
 
     assert.deepEqual(defaultSkills.map((skill) => `${skill.name}:${skill.sourceKind}`).sort(), [
       "default-helper:project",
@@ -200,18 +194,17 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
-    await configCenter.updateWorkspaceConfig({ workspaceDirectory: defaultWorkspace });
     const center = new CapabilityCenter({
       configCenter,
       skillRoots: [],
       resolveSubAgentRoots: (input) =>
-        subAgentRootsForWorkspace(input.workspaceDirectory ?? defaultWorkspace),
+        subAgentRootsForExecutionRoot(input.executionRoot ?? defaultWorkspace),
       playwrightAvailable: false,
     });
 
     const defaultSubAgents = await center.listSubAgents();
-    const runSnapshot = await center.snapshot({ workspaceDirectory: runWorkspace });
-    const panelCatalog = await center.toolCatalog({ workspaceDirectory: runWorkspace });
+    const runSnapshot = await center.snapshot({ executionRoot: runWorkspace });
+    const panelCatalog = await center.toolCatalog({ executionRoot: runWorkspace });
 
     assert.deepEqual(defaultSubAgents.map((subAgent) => `${subAgent.name}:${subAgent.sourceKind}`), [
       "default-helper:project",
@@ -513,7 +506,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.toolConfirmation?.shellCommandRequiresConfirmation, true);
     assert.equal(snapshot.skillTrigger?.mode, "keyword");
     assert.equal(snapshot.skillTrigger?.modelRouterEnabled, false);
-    assert.equal(snapshot.securitySummary, "本轮模型、工具、技能和工作区能力快照。确认策略：标准访问。");
+    assert.equal(snapshot.securitySummary, "本轮模型、工具、技能和执行根能力快照。确认策略：标准访问。");
     assert.equal(snapshot.securitySummary.includes("prompt"), false);
     assert.equal(snapshot.securitySummary.includes("raw"), false);
     assert.equal(text.includes("sk-capability-secret"), false);
@@ -756,7 +749,7 @@ test("CapabilityCenter keeps MCP connection error summaries in snapshot without 
   }
 });
 
-function skillRootsForWorkspace(userSkillRoot: string, workspaceDirectory: string): readonly SkillRootInput[] {
+function skillRootsForExecutionRoot(userSkillRoot: string, executionRoot: string): readonly SkillRootInput[] {
   return [
     {
       rootPath: userSkillRoot,
@@ -765,7 +758,7 @@ function skillRootsForWorkspace(userSkillRoot: string, workspaceDirectory: strin
       precedence: 10,
     },
     {
-      rootPath: path.join(workspaceDirectory, ".agents", "skills"),
+      rootPath: path.join(executionRoot, ".agents", "skills"),
       sourceKind: "project",
       sourceRootId: "project",
       precedence: 100,
@@ -773,10 +766,10 @@ function skillRootsForWorkspace(userSkillRoot: string, workspaceDirectory: strin
   ];
 }
 
-function subAgentRootsForWorkspace(workspaceDirectory: string): readonly SubAgentRootInput[] {
+function subAgentRootsForExecutionRoot(executionRoot: string): readonly SubAgentRootInput[] {
   return [
     {
-      rootPath: path.join(workspaceDirectory, ".agents", "sub-agents"),
+      rootPath: path.join(executionRoot, ".agents", "sub-agents"),
       sourceKind: "project",
       sourceRootId: "project",
       precedence: 100,

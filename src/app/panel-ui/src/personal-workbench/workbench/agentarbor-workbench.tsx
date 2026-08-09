@@ -96,6 +96,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   const [homeOwnerSelection, setHomeOwnerSelection] = useState<{ readonly kind: "space" | "workspace"; readonly id: string } | null>(null);
   const [homeFocusRequest, setHomeFocusRequest] = useState(0);
   const observedViewRef = useRef(view);
+  const navigationIntentRef = useRef(view);
   const focusTransitionRef = useRef<FocusModeTransitionHandle | null>(null);
   const knowledgeLoadState = useSyncExternalStore(
     subscribePersonalKnowledge,
@@ -112,7 +113,6 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   const conversationProjection = projectConversationSurface(props, activeConversation);
   const conversationState = projectLiveConversationState(conversationProjection, props);
   const workspaceProjection = useWorkspaceProjection(true);
-  const hasAttention = requiresImmediateConversationView(props);
   const surfaceTitle = view === "space"
     ? props.spaces?.find((space) => space.spaceId === activeSpaceId)?.title ?? "空间"
     : isConversationView(view)
@@ -167,13 +167,6 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
     void refreshPersonalKnowledge().catch(() => undefined);
   }, [knowledgeLoadState.status, props.personalKnowledgePersistenceEnabled, view]);
 
-  useEffect(() => {
-    const conversationBelongsToActiveSpace = view === "space"
-      && activeConversation?.owner?.kind === "space"
-      && activeConversation.owner.id === activeSpaceId;
-    if (hasAttention && !isConversationView(view) && !conversationBelongsToActiveSpace) setView("conv-active");
-  }, [activeConversation?.owner, activeSpaceId, hasAttention, view]);
-
   useEffect(() => () => {
     focusTransitionRef.current?.cancel();
     focusTransitionRef.current = null;
@@ -200,6 +193,9 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   };
 
   const navigate = (target: View): void => {
+    // Record explicit intent synchronously so an already-resolving home
+    // submission cannot navigate back after the user chose another surface.
+    navigationIntentRef.current = target;
     const updateNavigation = (): void => {
       if (target === "search") setPreviousView(view);
       // Only search navigation sets a target explicitly. Normal navigation must
@@ -234,8 +230,9 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
     onSubmit: () => {
       if (props.inputProps.value.trim().length === 0) return;
       void props.onStartNewConversation(homeOwnerSelection ?? undefined).then((started) => {
-        if (observedViewRef.current !== "home") return;
+        if (navigationIntentRef.current !== "home") return;
         if (started) {
+          navigationIntentRef.current = "conv-active";
           setView("conv-active");
         } else {
           setHomeFocusRequest((current) => current + 1);
@@ -313,7 +310,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
           onToggleSidebar={props.onToggleSidebar}
           surfaceTitle={surfaceTitle}
           surfaceOwner={surfaceOwner}
-          conversationState={isConversationView(view) ? conversationState : undefined}
+          conversationState={conversationState}
           onEnterFocus={isConversationView(view) && conversationMode === "normal"
             ? () => setConversationMode("focus")
             : undefined}
@@ -639,6 +636,12 @@ function confirmationGuidanceInput(
   };
 }
 
+/**
+ * 初始视图选择（仅启动挂载，此时尚无用户导航意图）：
+ * 有运行中的 run 或待确认时直接恢复对话视图；否则进入首页空态。
+ * 用户显式导航（首页/知识库/搜索/空间）后不再强制跳回对话页——
+ * 运行与待确认状态由 TopBar 全局徽标提醒，不劫持用户选择。
+ */
 function initialView(props: Pick<PersonalWorkbenchProps, "currentRun" | "pendingConfirmation">): View {
   return requiresImmediateConversationView(props) ? "conv-active" : "home";
 }

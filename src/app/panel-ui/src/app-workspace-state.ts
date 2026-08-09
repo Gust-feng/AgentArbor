@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 
 import { selectTaskWorkspaceDirectory } from "./app-workspace-selection";
@@ -35,15 +35,24 @@ export function useWorkspaceProjection(enabled: boolean): WorkspaceProjectionSta
   const [loading, setLoading] = useState(false);
   const [mutationPending, setMutationPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const refreshAbortRef = useRef<AbortController | undefined>(undefined);
+  const refreshEpochRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!enabled) return;
+    const epoch = ++refreshEpochRef.current;
+    refreshAbortRef.current?.abort();
+    const abortController = new AbortController();
+    refreshAbortRef.current = abortController;
     setLoading(true);
     try {
-      const response = await fetch("/api/workspaces", { signal: AbortSignal.timeout(15_000) });
+      const response = await fetch("/api/workspaces", {
+        signal: AbortSignal.any([abortController.signal, AbortSignal.timeout(15_000)]),
+      });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const parsed = workspacesResponseSchema.safeParse(await response.json());
       if (!parsed.success) throw new Error("工作区数据无效。");
+      if (epoch !== refreshEpochRef.current) return;
       setWorkspaces(parsed.data.workspaces.map((workspace) => ({
         workspaceId: workspace.id,
         title: workspace.title,
@@ -53,9 +62,13 @@ export function useWorkspaceProjection(enabled: boolean): WorkspaceProjectionSta
       })));
       setError(undefined);
     } catch (requestError) {
+      if (epoch !== refreshEpochRef.current || isAbortError(requestError)) return;
       setError(workspaceErrorText(requestError, "加载工作区失败。"));
     } finally {
-      setLoading(false);
+      if (epoch === refreshEpochRef.current) {
+        setLoading(false);
+        if (refreshAbortRef.current === abortController) refreshAbortRef.current = undefined;
+      }
     }
   }, [enabled]);
 
@@ -102,8 +115,19 @@ export function useWorkspaceProjection(enabled: boolean): WorkspaceProjectionSta
   }, [enabled, mutationPending, refresh]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      refreshEpochRef.current += 1;
+      refreshAbortRef.current?.abort();
+      refreshAbortRef.current = undefined;
+      setLoading(false);
+      return;
+    }
     void refresh();
+    return () => {
+      refreshEpochRef.current += 1;
+      refreshAbortRef.current?.abort();
+      refreshAbortRef.current = undefined;
+    };
   }, [enabled, refresh]);
 
   return { workspaces, loading, mutationPending, error, refresh, addWorkspace, deleteWorkspace };
@@ -111,5 +135,11 @@ export function useWorkspaceProjection(enabled: boolean): WorkspaceProjectionSta
 
 function workspaceErrorText(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
 }
 

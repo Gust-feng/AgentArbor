@@ -2,19 +2,20 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Home,
-  Settings2,
   Layers,
   Library,
   Pencil,
   Trash2,
   Plus,
   AlertCircle,
+  AlertTriangle,
   RotateCcw,
   FolderOpen,
   Pin,
   PinOff,
 } from 'lucide-react'
 import { SidebarAnimation } from './SidebarAnimation'
+import { SidebarFooter } from './SidebarFooter'
 import {
   SidebarConversationScrollArea,
   SidebarListRow,
@@ -22,6 +23,7 @@ import {
   SidebarSectionLabel,
 } from './SidebarRows'
 import { ActionConfirmationDialog } from './ActionConfirmationDialog'
+import { conversationStatusMarker } from '../../../../conversation-status-marker'
 import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
 import type { PersonalWorkspaceProjection } from '../../../workspace'
@@ -115,21 +117,35 @@ export function Sidebar({
   const [renameSelectAll, setRenameSelectAll] = useState(false)
   const pendingSpaceIdsRef = useRef<Set<string> | null>(null)
   const [openingConversationId, setOpeningConversationId] = useState<string | null>(null)
+  const conversationOpenRequestRef = useRef(0)
   const [pendingSpaceDeletion, setPendingSpaceDeletion] = useState<{ readonly id: string; readonly label: string } | null>(null)
   const [pendingWorkspaceDeletion, setPendingWorkspaceDeletion] = useState<{ readonly id: string; readonly label: string } | null>(null)
 
   async function openConversation(conversationId: string) {
     if (openingConversationId === conversationId || pendingConversationIds.has(conversationId)) return
+    const requestId = ++conversationOpenRequestRef.current
     setOpeningConversationId(conversationId)
     try {
       const opened = await onOpenConversation(conversationId)
+      if (conversationOpenRequestRef.current !== requestId) return
       if (opened !== false) onNavigate('conv-active')
     } catch {
       // The runtime owns the visible load error; the sidebar only prevents a false navigation.
     } finally {
-      setOpeningConversationId((current) => current === conversationId ? null : current)
+      if (conversationOpenRequestRef.current === requestId) {
+        setOpeningConversationId((current) => current === conversationId ? null : current)
+      }
     }
   }
+
+  // Conversation metadata becomes active before historical runs finish
+  // loading. Navigate on that authoritative state change instead of keeping
+  // the previous surface mounted until the full load promise settles.
+  useEffect(() => {
+    if (openingConversationId === null || activeConversationId !== openingConversationId) return
+    onNavigate('conv-active')
+    setOpeningConversationId(null)
+  }, [activeConversationId, onNavigate, openingConversationId])
 
   useEffect(() => {
     const previousIds = pendingSpaceIdsRef.current
@@ -359,39 +375,7 @@ export function Sidebar({
         </div>
       </nav>
 
-      {/* Settings remains available independently of any future account/profile feature. */}
-      <footer
-        className="shrink-0 flex items-center"
-        style={{
-          borderTop: '1px solid var(--aa-border)',
-          padding: '8px',
-        }}
-      >
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          aria-label="打开设置"
-          className="flex h-8 w-full items-center rounded-lg text-sm hover:bg-black/5"
-          style={{
-            gap: 8,
-            padding: '0 10px',
-            color: 'var(--aa-text-2)',
-          }}
-        >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">
-            <Settings2 size={14}/>
-          </span>
-          <span
-            className="truncate"
-            style={{
-              opacity: labelsVisible ? 1 : 0,
-              transition: 'opacity 160ms ease',
-            }}
-          >
-            设置
-          </span>
-        </button>
-      </footer>
+      <SidebarFooter onOpenSettings={onOpenSettings} />
       </div>
 
       <ActionConfirmationDialog
@@ -508,6 +492,7 @@ function WorkspaceRow(props: {
                 dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}
                 dotShape="square"
                 label={conversation.title}
+                status={<ConversationStatusIndicator conversation={conversation} />}
                 editing={props.renamingConversationId === conversation.conversationId}
                 editSelectAll={false}
                 onRename={(title) => {
@@ -565,6 +550,30 @@ function SpaceLoadFailure(props: {
         <RotateCcw size={11} />
       </button>
     </div>
+  )
+}
+
+/**
+ * 会话行尾的运行状态标志：处理中/排队用循环圆环，等待用户决定用强调点，
+ * 失败用三角感叹号，完成用安静小圆点。idle 与用户主动取消不显示任何标志。
+ * 只消费后端 read-model 的 ConversationSummary 状态，不本地猜测。
+ */
+function ConversationStatusIndicator({ conversation }: { readonly conversation: ConversationSummary }) {
+  const marker = conversationStatusMarker(conversation)
+  if (marker === undefined) return null
+  const content = marker.kind === 'working' ? (
+    <span aria-hidden="true" className="block animate-spin" style={{ width: 11, height: 11, borderRadius: '50%', border: '1.5px solid var(--aa-accent, #6865a7)', borderTopColor: 'transparent' }} />
+  ) : marker.kind === 'attention' ? (
+    <span aria-hidden="true" className="block" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--aa-status-wait, #D49020)' }} />
+  ) : marker.kind === 'failed' ? (
+    <AlertTriangle size={12} aria-hidden="true" style={{ color: 'var(--aa-status-error, #C84040)' }} />
+  ) : (
+    <span aria-hidden="true" className="block" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--aa-text-3, #aba39b)' }} />
+  )
+  return (
+    <span role="img" aria-label={marker.label}>
+      {content}
+    </span>
   )
 }
 

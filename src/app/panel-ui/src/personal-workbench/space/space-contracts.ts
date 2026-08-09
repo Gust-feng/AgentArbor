@@ -58,4 +58,6 @@ export type PersonalSpaceRenameTarget = {
 export type PersonalSpaceConversationContext = {
   readonly conversationId: string;
   readonly title: string;
+  readonly updatedAt?: string;
+  readonly pinnedAt?: string;
 };

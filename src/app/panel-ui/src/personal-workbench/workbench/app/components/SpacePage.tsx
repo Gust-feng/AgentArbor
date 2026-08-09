@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { DndProvider, useDrag, useDrop } from 'react-dnd'
 import { HTML5Backend, getEmptyImage } from 'react-dnd-html5-backend'
 import {
@@ -16,20 +16,17 @@ import {
   Search,
   NotebookPen,
   Brain,
-  MoreHorizontal,
   Pencil,
   Pin,
+  PinOff,
   Trash2,
   Unlink,
   GripVertical,
-  X,
 } from 'lucide-react'
 import { type View } from './Sidebar'
-import type { Conversation } from '../../../../contracts/conversation'
-import { projectChatActiveView } from '../../../../chat-active-view'
-import { ConversationTranscript } from './ConversationTranscript'
 import type {
   PersonalSpaceActions,
+  PersonalSpaceConversationContext,
   PersonalSpaceProjection,
 } from '../../../space'
 import { ReferencePreview, type ReferencePreviewHandle } from './ReferencePreview'
@@ -51,6 +48,7 @@ import {
   ActionConfirmationDialog,
   type ActionConfirmationRequest,
 } from './ActionConfirmationDialog'
+import { FloatingMenu } from '../../../../components/floating-menu'
 
 /**
  * Space —— VS Code 式分栏:左侧资源管理器(软件资产 + 外部数据源),右侧书写/查看。
@@ -223,7 +221,7 @@ function TreeNode({
         )}
 
         {!editing && (canCreateExternalEntry || canRename || canUnlink || canRemove) && (
-          <RowMenu
+          <FloatingMenu
             label={`${item.name}操作`}
             visible={hovered}
             actions={[
@@ -291,11 +289,11 @@ interface SpacePageProps {
   onNavigate: (v: View) => void
   space?: PersonalSpaceProjection
   actions?: PersonalSpaceActions
-  currentConversation?: { conversationId: string; title: string }
   onOpenItem?: (spaceId: string, itemId: string) => void | Promise<void>
   onOpenConversation?: (conversationId: string) => boolean | Promise<boolean>
-  /** 空间页右侧预览对话内容（不跳转对话页）。 */
-  onPreviewConversation?: (conversationId: string) => Promise<Conversation | undefined>
+  /** 当前正式对话的右侧工作台内容，由 Workbench 组合根提供。 */
+  conversationContent?: ReactNode
+  activeConversationId?: string
   onRenameConversation?: (conversationId: string, title: string) => void | Promise<void>
   onToggleConversationPinned?: (conversationId: string, pinned: boolean) => void | Promise<void>
   onDeleteConversation?: (conversationId: string) => void | Promise<void>
@@ -321,10 +319,10 @@ export function SpacePage({
   targetId,
   space,
   actions,
-  currentConversation,
   onOpenItem,
   onOpenConversation,
-  onPreviewConversation,
+  conversationContent,
+  activeConversationId,
   onRenameConversation,
   onToggleConversationPinned,
   onDeleteConversation,
@@ -369,9 +367,30 @@ export function SpacePage({
   const [creatingNoteId, setCreatingNoteId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null)
-  const [previewedConversation, setPreviewedConversation] = useState<Conversation | undefined>(undefined)
+  // 置顶会话优先，置顶组内部按置顶时间倒序；其余按最近更新倒序，与工作区列表一致。
+  const orderedSpaceConversations = useMemo(
+    () => [...(space?.conversations ?? [])].sort(compareSpaceConversations),
+    [space],
+  )
+  const pinnedSpaceConversationCount = orderedSpaceConversations.reduce(
+    (count, conversation) => count + (conversation.pinnedAt !== undefined ? 1 : 0),
+    0,
+  )
+  const [openConversationId, setOpenConversationId] = useState<string | null>(() => (
+    activeConversationId !== undefined
+      && space?.conversations?.some((conversation) => conversation.conversationId === activeConversationId)
+      ? activeConversationId
+      : null
+  ))
+  // Keep the currently visible surface mounted while the host loads the next
+  // conversation.  Clearing the open id first lets the note fallback render
+  // for one or more frames (the host also loads historical runs in the
+  // background), which is the visible "flash back to notes" during switching.
+  const [pendingConversationId, setPendingConversationId] = useState<string | null>(null)
+  const conversationSwitchRequestRef = useRef(0)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingReferenceFile, setCreatingReferenceFile] = useState<{ referenceId: string; parentId: string; parentPath: string } | null>(null)
+  const referenceCreationRequestRef = useRef(0)
   const [pendingSpaceConfirmation, setPendingSpaceConfirmation] = useState<PendingSpaceConfirmation | null>(null)
   const explorerRef = useRef<HTMLDivElement>(null)
   const referencePreviewRef = useRef<ReferencePreviewHandle>(null)
@@ -393,6 +412,9 @@ export function SpacePage({
 
   function selectItem(id: string) {
     setActionError(null)
+    conversationSwitchRequestRef.current += 1
+    setPendingConversationId(null)
+    setOpenConversationId(null)
     setSelectedId(id)
   }
 
@@ -434,10 +456,11 @@ export function SpacePage({
   }, [expandedIds, memoryKey, selectedId])
   useEffect(() => {
     if (targetId !== null && targetId !== undefined) return
+    if (openConversationId !== null || pendingConversationId !== null) return
     if (selectedStillExists) return
     const nextId = notes[0]?.id ?? tree[0]?.id ?? null
     setSelectedId(nextId)
-  }, [selectedStillExists, targetId, notes, tree])
+  }, [openConversationId, pendingConversationId, selectedStillExists, targetId, notes, tree])
   useLayoutEffect(() => {
     const explorer = explorerRef.current
     if (explorer !== null) explorer.scrollTop = spaceViewMemory.get(memoryKey)?.scrollTop ?? 0
@@ -445,13 +468,40 @@ export function SpacePage({
 
   // 外部要求打开某个对象(搜索跳转)。
   useEffect(() => {
-    if (targetId) setSelectedId(targetId)
+    if (targetId) {
+      conversationSwitchRequestRef.current += 1
+      setPendingConversationId(null)
+      setOpenConversationId(null)
+      setSelectedId(targetId)
+    }
   }, [targetId])
+
+  // The host updates activeConversationId as soon as the conversation
+  // metadata is available, before historical run loading finishes. Commit
+  // the local selection at that point so the right pane never falls through
+  // to the note/material branch while the rest of the conversation hydrates.
+  useEffect(() => {
+    if (pendingConversationId === null || activeConversationId !== pendingConversationId) return
+    setOpenConversationId(pendingConversationId)
+    setPendingConversationId(null)
+  }, [activeConversationId, pendingConversationId])
+
+  useEffect(() => {
+    if (openConversationId === null) return
+    if (space?.conversations?.some((conversation) => conversation.conversationId === openConversationId) === true) return
+    setOpenConversationId(null)
+  }, [openConversationId, space?.conversations])
 
   const selectedNote = notes.find((n) => n.id === selectedId)
   const selectedItem = selectedId ? getItem(tree, selectedId) : null
   const selectedReferenceRoot = selectedItem?.referenceId === undefined ? undefined : getItem(tree, selectedItem.referenceId)
   const itemCount = notes.length + (space?.itemCount ?? countItems(projectedTree))
+  const conversationSurfaceVisible = conversationContent !== undefined && (
+    (openConversationId !== null && openConversationId === activeConversationId)
+    || (pendingConversationId !== null && (
+      openConversationId !== null || activeConversationId === pendingConversationId
+    ))
+  )
 
   function handleCreateNote() {
     if (notes.length === 0) {
@@ -599,8 +649,7 @@ export function SpacePage({
 
   async function handleOpenReference(item: SpaceItem) {
     if (item.conversationId !== undefined && onOpenConversation !== undefined) {
-      const opened = await onOpenConversation(item.conversationId)
-      if (opened !== false) onNavigate('conv-done')
+      await openConversation(item.conversationId)
       return
     }
     if (space !== undefined && onOpenItem !== undefined) {
@@ -610,19 +659,26 @@ export function SpacePage({
     if (item.openUrl !== undefined) window.open(item.openUrl, '_blank', 'noopener,noreferrer')
   }
 
-  async function handleOpenConversation(conversationId: string) {
+  async function openConversation(conversationId: string) {
     if (onOpenConversation === undefined) return
-    const opened = await onOpenConversation(conversationId)
-    if (opened !== false) onNavigate('conv-done')
-  }
-
-  async function handlePreviewConversation(conversationId: string) {
-    if (onPreviewConversation === undefined) {
-      await handleOpenConversation(conversationId)
-      return
+    setActionError(null)
+    const requestId = conversationSwitchRequestRef.current + 1
+    conversationSwitchRequestRef.current = requestId
+    setPendingConversationId(conversationId)
+    try {
+      const opened = await onOpenConversation(conversationId)
+      if (conversationSwitchRequestRef.current !== requestId) return
+      if (opened === false) {
+        setPendingConversationId(null)
+        return
+      }
+      setOpenConversationId(conversationId)
+      setPendingConversationId(null)
+    } catch (error) {
+      if (conversationSwitchRequestRef.current !== requestId) return
+      setPendingConversationId(null)
+      setActionError(actionErrorMessage(error))
     }
-    const conversation = await onPreviewConversation(conversationId)
-    if (conversation !== undefined) setPreviewedConversation(conversation)
   }
 
   async function runSpaceAction(operation: () => void | Promise<void>) {
@@ -672,20 +728,27 @@ export function SpacePage({
     }
     const referenceId = parent.referenceId ?? parent.id
     mountedTree.expandItem(parent)
+    referenceCreationRequestRef.current += 1
     setCreatingReferenceFile({ referenceId, parentId: parent.id, parentPath: parent.relativePath ?? '' })
   }
 
   async function finishCreateReferenceFile(name: string) {
     const target = creatingReferenceFile
     if (target === null) return
+    const requestId = ++referenceCreationRequestRef.current
+    const selectedIdAtStart = selectedId
     setCreatingReferenceFile(null)
     setActionError(null)
     try {
       const relativePath = await createSpaceReferenceEntry(target.referenceId, target.parentPath, name)
       await mountedTree.refreshByReference(target.referenceId, target.parentPath)
       await fetchDocumentPreview(target.referenceId, relativePath)
-      setSelectedId(referenceChildId(target.referenceId, relativePath))
+      if (referenceCreationRequestRef.current !== requestId) return
+      setSelectedId((current) => current === selectedIdAtStart
+        ? referenceChildId(target.referenceId, relativePath)
+        : current)
     } catch (error) {
+      if (referenceCreationRequestRef.current !== requestId) return
       setActionError(actionErrorMessage(error))
     }
   }
@@ -780,8 +843,8 @@ export function SpacePage({
             <span className="text-xs font-medium" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
               资料
             </span>
-            {space !== undefined && hasMaterialCreateAction(actions, currentConversation) && (
-              <RowMenu
+            {space !== undefined && hasMaterialCreateAction(actions) && (
+              <FloatingMenu
                 label="添加资料"
                 visible
                 trigger={<Plus size={13} />}
@@ -837,7 +900,10 @@ export function SpacePage({
                 onPrefetch={prefetchTreeItem}
                 creatingEntry={creatingReferenceFile ?? undefined}
                 onCreateEntryCommit={(name) => void finishCreateReferenceFile(name)}
-                onCreateEntryCancel={() => setCreatingReferenceFile(null)}
+                onCreateEntryCancel={() => {
+                  referenceCreationRequestRef.current += 1
+                  setCreatingReferenceFile(null)
+                }}
               />
             ))}
           </div>
@@ -857,30 +923,45 @@ export function SpacePage({
               className="space-y-0.5 overflow-y-auto"
               style={{ maxHeight: 260, scrollbarWidth: 'none' }}
             >
-              {space!.conversations!.map((conversation, index) => (
-                <SpaceConversationRow
-                  key={conversation.conversationId}
-                  conversation={conversation}
-                  dot={SPACE_CONVERSATION_DOT_PALETTE[index % SPACE_CONVERSATION_DOT_PALETTE.length] ?? SPACE_CONVERSATION_DOT_PALETTE[0]}
-                  renaming={renamingConversationId === conversation.conversationId}
-                  onOpen={() => void handlePreviewConversation(conversation.conversationId)}
-                  onStartRename={() => setRenamingConversationId(conversation.conversationId)}
-                  onRename={(title) => {
-                    void onRenameConversation?.(conversation.conversationId, title)
-                    setRenamingConversationId(null)
-                  }}
-                  onCancelRename={() => setRenamingConversationId(null)}
-                  onTogglePinned={(pinned) => void onToggleConversationPinned?.(conversation.conversationId, pinned)}
-                  onDelete={() => void onDeleteConversation?.(conversation.conversationId)}
-                />
+              {orderedSpaceConversations.map((conversation, index) => (
+                <Fragment key={conversation.conversationId}>
+                  <SpaceConversationRow
+                    conversation={conversation}
+                    dot={SPACE_CONVERSATION_DOT_PALETTE[index % SPACE_CONVERSATION_DOT_PALETTE.length] ?? SPACE_CONVERSATION_DOT_PALETTE[0]}
+                    selected={(pendingConversationId ?? openConversationId) === conversation.conversationId}
+                    renaming={renamingConversationId === conversation.conversationId}
+                    onOpen={() => void openConversation(conversation.conversationId)}
+                    onStartRename={() => setRenamingConversationId(conversation.conversationId)}
+                    onRename={(title) => {
+                      void onRenameConversation?.(conversation.conversationId, title)
+                      setRenamingConversationId(null)
+                    }}
+                    onCancelRename={() => setRenamingConversationId(null)}
+                    onTogglePinned={(pinned) => void onToggleConversationPinned?.(conversation.conversationId, pinned)}
+                    onDelete={() => void onDeleteConversation?.(conversation.conversationId)}
+                  />
+                  {index === pinnedSpaceConversationCount - 1
+                    && pinnedSpaceConversationCount > 0
+                    && pinnedSpaceConversationCount < orderedSpaceConversations.length && (
+                    <div
+                      className="aa-conversation-divider mx-2 my-1 border-t"
+                      style={{ borderColor: 'var(--aa-border, rgba(45,40,34,0.09))' }}
+                      aria-hidden="true"
+                    />
+                  )}
+                </Fragment>
               ))}
             </div>
           )}
         </div>
       </div>
 
-      {/* 右侧预览 / 编辑主区 */}
-      {selectedNote ? (
+      {/* 右侧资料 / 笔记 / 正式对话主区 */}
+      {conversationSurfaceVisible ? (
+        <div className="flex min-w-0 flex-1 overflow-hidden" data-space-conversation>
+          {conversationContent}
+        </div>
+      ) : selectedNote ? (
         <DeferredSurfaceBoundary resetKey={selectedNote.id} label="笔记编辑器暂时无法打开">
             <NoteEditor
               note={selectedNote}
@@ -892,12 +973,6 @@ export function SpacePage({
               }}
             />
         </DeferredSurfaceBoundary>
-      ) : previewedConversation !== undefined ? (
-        <ConversationPreview
-          conversation={previewedConversation}
-          onOpenFull={() => void handleOpenConversation(previewedConversation.conversationId)}
-          onClose={() => setPreviewedConversation(undefined)}
-        />
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {selectedItem?.type !== 'folder' && selectedItem ? (
@@ -1057,7 +1132,7 @@ function NoteRow({
         </span>
       )}
       {!editing && (
-        <RowMenu
+        <FloatingMenu
           label={`${title}操作`}
           visible={hovered}
           actions={[
@@ -1154,71 +1229,6 @@ function InlineName({
   )
 }
 
-/** 行尾「⋯」菜单:悬停时浮现,点开一个小下拉。 */
-function RowMenu({
-  label,
-  visible,
-  actions,
-  trigger,
-}: {
-  label: string
-  visible: boolean
-  actions: { label: string; icon: ReactNode; danger?: boolean; onClick: () => void }[]
-  trigger?: ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
-  return (
-    <div ref={ref} className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
-        aria-label={label}
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-center rounded transition-colors hover:bg-black/10"
-        style={{ width: 20, height: 20, color: 'var(--aa-text-3, #aba39b)', opacity: visible || open ? 1 : 0 }}
-      >
-        {trigger ?? <MoreHorizontal size={14} />}
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg"
-          style={{
-            minWidth: 120,
-            width: 'max-content',
-            maxWidth: 220,
-            background: 'var(--aa-surface, #fff)',
-            border: '1px solid var(--aa-border, rgba(45,40,34,0.09))',
-            boxShadow: '0 6px 20px rgba(45,40,34,0.14)',
-          }}
-        >
-          {actions.map((a) => (
-            <button
-              key={a.label}
-              onClick={() => {
-                setOpen(false)
-                a.onClick()
-              }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors hover:bg-black/5"
-              style={{ color: a.danger ? '#b3543f' : 'var(--aa-text-1, #292722)', whiteSpace: 'nowrap' }}
-            >
-              {a.icon}
-              {a.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function CenteredCard({ children }: { children: ReactNode }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">{children}</div>
@@ -1227,76 +1237,11 @@ function CenteredCard({ children }: { children: ReactNode }) {
 
 const SPACE_CONVERSATION_DOT_PALETTE = ['#6865a7', '#6f9279', '#c18a42', '#6f84a5', '#a66f66'] as const
 
-/** 空间页右侧的对话预览：复用正式对话渲染（ConversationTranscript），完整对话需打开对话页。 */
-function ConversationPreview(props: {
-  readonly conversation: Conversation
-  readonly onOpenFull: () => void
-  readonly onClose: () => void
-}) {
-  const projection = useMemo(() => projectChatActiveView({
-    conversation: props.conversation,
-    transcriptNodes: [],
-  }), [props.conversation])
-  return (
-    <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'var(--aa-border, #e3ddd4)' }}>
-        <div className="flex min-w-0 items-center gap-2">
-          <MessageSquare size={14} style={{ color: 'var(--aa-accent, #6865a7)' }} />
-          <span className="truncate text-sm font-medium" style={{ color: 'var(--aa-text-1, #292722)' }}>
-            {props.conversation.title}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={props.onOpenFull}
-            className="rounded-md px-2.5 py-1 text-xs font-medium text-white transition-opacity hover:opacity-90"
-            style={{ background: 'var(--aa-accent, #6865a7)' }}
-          >
-            打开完整对话
-          </button>
-          <button
-            type="button"
-            aria-label="关闭对话预览"
-            title="关闭预览"
-            onClick={props.onClose}
-            className="flex h-6 w-6 items-center justify-center rounded hover:bg-black/5"
-            style={{ color: 'var(--aa-text-3, #aba39b)' }}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto">
-        {projection.hasVisibleContent ? (
-          <ConversationTranscript
-            conversationId={props.conversation.conversationId}
-            projectedTurns={projection.workline.turns}
-            turns={props.conversation.turns ?? []}
-            currentRunId={projection.currentRunId}
-            currentRunNodes={projection.currentRunProjection.nodes}
-            currentRunToolResults={[]}
-            showModelUsage={false}
-            developerModeEnabled={false}
-            models={[]}
-            selectedModelId=""
-            onDecision={() => undefined}
-            confirmationBusy={false}
-          />
-        ) : (
-          <div className="px-5 py-4 text-sm" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
-            暂无消息
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 /** 空间页左侧"对话"Section 的会话行：随机色点标识 + 行内重命名 + hover 操作。 */
 function SpaceConversationRow(props: {
-  readonly conversation: { readonly conversationId: string; readonly title: string }
+  readonly conversation: PersonalSpaceConversationContext
   readonly dot: string
+  readonly selected: boolean
   readonly renaming: boolean
   readonly onOpen: () => void
   readonly onStartRename: () => void
@@ -1306,6 +1251,7 @@ function SpaceConversationRow(props: {
   readonly onDelete: () => void
 }) {
   const [hovered, setHovered] = useState(false)
+  const pinned = props.conversation.pinnedAt !== undefined
   return (
     <div
       role="button"
@@ -1315,8 +1261,9 @@ function SpaceConversationRow(props: {
         paddingLeft: 10,
         paddingRight: 8,
         color: 'var(--aa-text-2, #6b655d)',
-        background: hovered ? 'var(--aa-surface-hover, #eeebe6)' : 'transparent',
+        background: props.selected || hovered ? 'var(--aa-surface-hover, #eeebe6)' : 'transparent',
       }}
+      aria-current={props.selected ? 'true' : undefined}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={() => { if (!props.renaming) props.onOpen() }}
@@ -1339,11 +1286,11 @@ function SpaceConversationRow(props: {
         <span className="flex-1 truncate">{props.conversation.title}</span>
       )}
       {!props.renaming && (
-        <RowMenu
+        <FloatingMenu
           label={`${props.conversation.title}操作`}
           visible={hovered}
           actions={[
-            { label: '置顶', icon: <Pin size={12} />, onClick: () => props.onTogglePinned(true) },
+            { label: pinned ? '取消置顶' : '置顶', icon: pinned ? <PinOff size={12} /> : <Pin size={12} />, onClick: () => props.onTogglePinned(!pinned) },
             { label: '重命名', icon: <Pencil size={12} />, onClick: props.onStartRename },
             { label: '删除', icon: <Trash2 size={12} />, danger: true, onClick: props.onDelete },
           ]}
@@ -1353,13 +1300,27 @@ function SpaceConversationRow(props: {
   )
 }
 
-function hasMaterialCreateAction(
-  actions: PersonalSpaceActions | undefined,
-  _currentConversation: SpacePageProps['currentConversation'],
-): boolean {
+function hasMaterialCreateAction(actions: PersonalSpaceActions | undefined): boolean {
   return actions?.createManagedFolder !== undefined
     || actions?.addLocalFile !== undefined
     || actions?.addWorkspaceFolder !== undefined
+}
+
+function compareSpaceConversations(left: PersonalSpaceConversationContext, right: PersonalSpaceConversationContext): number {
+  const leftPinned = left.pinnedAt !== undefined
+  const rightPinned = right.pinnedAt !== undefined
+  if (leftPinned !== rightPinned) return rightPinned ? 1 : -1
+  if (leftPinned && rightPinned) {
+    const pinnedOrder = timestampValue(right.pinnedAt) - timestampValue(left.pinnedAt)
+    if (pinnedOrder !== 0) return pinnedOrder
+  }
+  return timestampValue(right.updatedAt) - timestampValue(left.updatedAt)
+}
+
+function timestampValue(value: string | undefined): number {
+  if (value === undefined) return 0
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : 0
 }
 
 /**

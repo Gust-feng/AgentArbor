@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { LoaderCircle, MoreHorizontal } from 'lucide-react'
+import { LoaderCircle } from 'lucide-react'
+import { FloatingMenu, type FloatingMenuAction } from '../../../../components/floating-menu'
 import { SidebarInlineRenameField } from './SidebarInlineRenameField'
 
 export interface SidebarNavRowProps {
@@ -94,13 +95,6 @@ export function SidebarNavRow({ active, onClick, labelsVisible, collapsed, icon,
   )
 }
 
-export interface SidebarRowAction {
-  readonly label: string
-  readonly icon: ReactNode
-  readonly danger?: boolean
-  readonly onClick: () => void
-}
-
 export interface SidebarListRowProps {
   readonly active: boolean
   readonly onClick: () => void
@@ -109,16 +103,19 @@ export interface SidebarListRowProps {
   readonly dotShape?: 'circle' | 'square'
   readonly label: string
   readonly meta?: ReactNode
+  /** 行尾运行状态标志（处理中 / 需要确认 / 失败 / 完成）。悬停时保持可见，
+   *  不参与 meta 的淡出；存在时替代打开中的临时 spinner，避免两个转圈。 */
+  readonly status?: ReactNode
   readonly editing: boolean
   readonly editSelectAll?: boolean
   readonly onRename: (value: string) => void
   readonly onCancelRename: () => void
-  readonly actions: readonly SidebarRowAction[]
+  readonly actions: readonly FloatingMenuAction[]
   readonly pending?: boolean
 }
 
 /** Conversation and space row with stable geometry and delayed actions. */
-export function SidebarListRow({ active, onClick, dot, dotShape = 'circle', label, meta, editing, editSelectAll, onRename, onCancelRename, actions, pending = false }: SidebarListRowProps) {
+export function SidebarListRow({ active, onClick, dot, dotShape = 'circle', label, meta, status, editing, editSelectAll, onRename, onCancelRename, actions, pending = false }: SidebarListRowProps) {
   const [hovered, setHovered] = useState(false)
 
   return (
@@ -149,7 +146,12 @@ export function SidebarListRow({ active, onClick, dot, dotShape = 'circle', labe
       ) : (
         <span className="flex-1 text-left truncate">{label}</span>
       )}
-      {!editing && pending && (
+      {!editing && status !== undefined && (
+        <span style={{ flexShrink: 0, opacity: hovered && actions.length > 0 ? 0.65 : 1, transition: 'opacity 120ms ease' }}>
+          {status}
+        </span>
+      )}
+      {!editing && pending && status === undefined && (
         <LoaderCircle aria-label="处理中" size={13} className="animate-spin shrink-0" />
       )}
       {!editing && !pending && (
@@ -160,67 +162,11 @@ export function SidebarListRow({ active, onClick, dot, dotShape = 'circle', labe
             </span>
           )}
           {actions.length > 0 && (
-            <SidebarRowMenu actions={actions} visible={hovered}/>
+            <span className="absolute right-2" style={{ top: '50%', transform: 'translateY(-50%)' }}>
+              <FloatingMenu label={`${label}操作`} visible={hovered} actions={actions} />
+            </span>
           )}
         </>
-      )}
-    </div>
-  )
-}
-
-function SidebarRowMenu({ actions, visible }: { readonly actions: readonly SidebarRowAction[]; readonly visible: boolean }) {
-  const [open, setOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-  const shown = visible || open
-
-  useEffect(() => {
-    if (!open) return
-    const onDocumentMouseDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocumentMouseDown)
-    return () => document.removeEventListener('mousedown', onDocumentMouseDown)
-  }, [open])
-
-  return (
-    <div
-      ref={menuRef}
-      className="absolute right-2 shrink-0"
-      style={{ opacity: shown ? 1 : 0, pointerEvents: shown ? 'auto' : 'none' }}
-      onClick={(event) => event.stopPropagation()}
-    >
-      <button
-        onClick={() => setOpen((value) => !value)}
-        aria-label="更多操作"
-        aria-hidden={!shown}
-        tabIndex={shown ? 0 : -1}
-        className="flex items-center justify-center rounded transition-colors hover:bg-black/10"
-        style={{ width: 20, height: 20, color: 'var(--aa-text-3)' }}
-      >
-        <MoreHorizontal size={14}/>
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full mt-1 z-20 py-1 rounded-lg"
-          style={{
-            minWidth: 128,
-            background: 'var(--aa-surface)',
-            border: '1px solid var(--aa-border)',
-            boxShadow: '0 6px 20px rgba(45,40,34,0.14)',
-          }}
-        >
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              onClick={() => { setOpen(false); action.onClick() }}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors hover:bg-black/5"
-              style={{ color: action.danger ? '#b3543f' : 'var(--aa-text-1)' }}
-            >
-              {action.icon}
-              {action.label}
-            </button>
-          ))}
-        </div>
       )}
     </div>
   )

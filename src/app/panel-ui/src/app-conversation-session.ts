@@ -172,27 +172,51 @@ export async function loadConversationSession(
   const historicalRunIds = runIdsForTurnWindow(response.conversation.turns, initialVisibleWindow.startIndex)
     .filter((id) => id !== latestRunId);
   if (historicalRunIds.length > 0) {
-    try {
-      const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds, abortController.signal);
-      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return false;
-      const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
-      const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
-      for (const entry of entries) {
-        nodesByRunId[entry.runId] = entry.nodes;
-        toolResultsByRunId[entry.runId] = entry.toolResults;
-      }
-      updateTranscriptRunCache(response.conversation.conversationId, { nodesByRunId, toolResultsByRunId });
-    } finally {
-      if (options.conversationLoadAbortRef.current === abortController) {
-        options.conversationLoadAbortRef.current = undefined;
-      }
-    }
+    // Historical runs fill the external transcript cache without blocking the
+    // navigation contract. A slow or failed backfill must not turn an already
+    // active conversation into a failed open operation.
+    void hydrateHistoricalTranscript({
+      conversationId: response.conversation.conversationId,
+      runIds: historicalRunIds,
+      epoch,
+      abortController,
+      options,
+    });
   } else {
     if (options.conversationLoadAbortRef.current === abortController) {
       options.conversationLoadAbortRef.current = undefined;
     }
   }
   return true;
+}
+
+async function hydrateHistoricalTranscript(input: {
+  readonly conversationId: string;
+  readonly runIds: readonly string[];
+  readonly epoch: number;
+  readonly abortController: AbortController;
+  readonly options: ConversationSessionControllerOptions;
+}): Promise<void> {
+  const { conversationId, runIds, epoch, abortController, options } = input;
+  try {
+    const entries = await loadHistoricalTranscriptRunEntries(runIds, abortController.signal);
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return;
+    const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
+    const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
+    for (const entry of entries) {
+      nodesByRunId[entry.runId] = entry.nodes;
+      toolResultsByRunId[entry.runId] = entry.toolResults;
+    }
+    updateTranscriptRunCache(conversationId, { nodesByRunId, toolResultsByRunId });
+  } catch {
+    // The conversation is already active. Historical backfill is best effort;
+    // a later open or transcript refresh can retry it without changing the
+    // visible navigation state.
+  } finally {
+    if (options.conversationLoadAbortRef.current === abortController) {
+      options.conversationLoadAbortRef.current = undefined;
+    }
+  }
 }
 
 function isMissingConversationError(error: unknown): boolean {

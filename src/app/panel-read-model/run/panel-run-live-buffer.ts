@@ -139,7 +139,9 @@ export function appendLiveRunEvent(
     return withLiveModelTurn(nextRun, {
       ...turn,
       reasoning: appendCompletedReasoningSnapshot(turn.reasoning, event),
-      reasoningSequence: Math.max(turn.reasoningSequence ?? 0, event.sequence),
+      // 思考的展示位置由首次出现（流式 delta）决定；完成的持久事实只是同一
+      // 事实的终态，其记录时间可能晚于正文/工具，不能把思考挤到后面。
+      reasoningSequence: (turn.reasoningSequence ?? 0) > 0 ? (turn.reasoningSequence ?? 0) : event.sequence,
       reasoningCompleted: true,
       modelRefs,
       updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),

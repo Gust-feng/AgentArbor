@@ -3138,9 +3138,57 @@ function durableActivities(
     });
   }
   return pending
-    .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) ||
-      left.priority - right.priority || left.insertion - right.insertion)
+    .sort((left, right) => durableMessageOrder(left, right) ||
+      left.recordedAt.localeCompare(right.recordedAt) ||
+      left.priority - right.priority ||
+      left.insertion - right.insertion)
     .map((item, index) => ({ ...item.activity, sequence: index + 1 }));
+}
+
+/**
+ * 同一模型请求的思考完成事实必须排在同请求的消息正文检查点之前：原始流中
+ * 思考先于正文出现，而检查点与思考完成可能在不同时刻落库（记录顺序不反映
+ * 内容顺序）。不同请求之间仍按 recordedAt 排序。
+ */
+function durableMessageOrder(
+  left: { readonly activity: OrdinaryRunActivity },
+  right: { readonly activity: OrdinaryRunActivity },
+): number {
+  const leftReasoning = durableReasoningCompletedActivity(left.activity);
+  const rightReasoning = durableReasoningCompletedActivity(right.activity);
+  if (!leftReasoning && !rightReasoning) return 0;
+  const leftOutput = durableOutputCompletedActivity(left.activity);
+  const rightOutput = durableOutputCompletedActivity(right.activity);
+  if (leftReasoning && rightOutput &&
+    sameDurableModelRequest(left.activity, right.activity)) return -1;
+  if (leftOutput && rightReasoning &&
+    sameDurableModelRequest(left.activity, right.activity)) return 1;
+  return 0;
+}
+
+function sameDurableModelRequest(
+  left: OrdinaryRunActivity,
+  right: OrdinaryRunActivity,
+): boolean {
+  const leftRequestId = durableModelRequestId(left);
+  const rightRequestId = durableModelRequestId(right);
+  return leftRequestId !== undefined && leftRequestId === rightRequestId;
+}
+
+function durableModelRequestId(activity: OrdinaryRunActivity): string | undefined {
+  if (activity.type === "run.transition") {
+    return "modelRequestId" in activity.event ? activity.event.modelRequestId : undefined;
+  }
+  return "modelRequestId" in activity ? activity.modelRequestId : undefined;
+}
+
+function durableReasoningCompletedActivity(activity: OrdinaryRunActivity): boolean {
+  return activity.type === "run.transition" &&
+    activity.event.type === "model.reasoning.completed";
+}
+
+function durableOutputCompletedActivity(activity: OrdinaryRunActivity): boolean {
+  return activity.type === "model.output.completed";
 }
 
 export function durableOrdinaryRunReplayFromState(

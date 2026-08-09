@@ -134,8 +134,9 @@ test("transcript cache merges live and settled reasoning with different node ids
   ]);
 
   assert.equal(updated["run-1"]?.length, 1);
-  assert.equal(updated["run-1"]?.[0]?.nodeId, "run-1:event:9:model.reasoning.completed");
-  assert.equal(updated["run-1"]?.[0]?.sequence, 9);
+  // 终态事实保留权威内容，身份槽与序列保持首次出现的流式节点。
+  assert.equal(updated["run-1"]?.[0]?.nodeId, "run-1:live:model-1:thinking");
+  assert.equal(updated["run-1"]?.[0]?.sequence, 1);
   assert.equal(updated["run-1"]?.[0]?.text, "The user is asking me to demonstrate capabilities and inspect the workspace.");
 });
 
@@ -194,8 +195,9 @@ test("transcript cache merges live and settled body nodes with different ids", (
     }),
   ]);
 
-  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["body-settled"]);
+  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["body-live"]);
   assert.equal(updated["run-1"]?.[0]?.text, "Let me showcase my capabilities.");
+  assert.equal(updated["run-1"]?.[0]?.sequence, 2);
 });
 
 function node(nodeId: string, runId: string, sequence: number, text: string): TestNode {

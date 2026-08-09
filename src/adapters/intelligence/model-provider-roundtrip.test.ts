@@ -163,6 +163,10 @@ test("model provider round trip normalizes cumulative MiniMax deltas behind a pr
   assert.equal(result.status === "completed" ? result.finalText : undefined, "Hello");
   assert.deepEqual(textDeltas, ["Hel", "lo"]);
   assert.deepEqual(completedReasoning, ["Think"]);
+  assert.deepEqual(provider.requests[0]?.body.stream_options, { include_usage: true });
+  assert.equal(result.status === "completed" ? result.usage.inputTokens : undefined, 11);
+  assert.equal(result.status === "completed" ? result.usage.outputTokens : undefined, 7);
+  assert.equal(result.status === "completed" ? result.usage.totalTokens : undefined, 18);
   await loop.release();
 });
 
@@ -404,6 +408,7 @@ function chatStream(deltas: readonly Readonly<Record<string, unknown>>[]): strin
     created: 1,
     model: "proxy-alias",
     choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+    usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
   });
   return `${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`;
 }

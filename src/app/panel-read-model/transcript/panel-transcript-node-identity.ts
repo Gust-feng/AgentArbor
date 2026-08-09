@@ -63,7 +63,10 @@ export function sameTranscriptNodeIdentity(
 /**
  * Reconciles two observations of one structurally identified fact. Content is
  * never spliced or selected by textual similarity: terminal facts outrank live
- * facts, then the newer sequence wins.
+ * facts, then the newer sequence wins. The reconciled node keeps the first
+ * observation's identity slot and earliest sequence so the fact stays at the
+ * position where it first appeared in the raw stream (e.g. thinking deltas
+ * recorded before a later durable completion transition).
  */
 export function mergeTranscriptNodes<TNode extends TranscriptNodeIdentityLike>(
   previous: TNode,
@@ -76,6 +79,8 @@ export function mergeTranscriptNodes<TNode extends TranscriptNodeIdentityLike>(
   const loser = winner === incoming ? previous : incoming;
   return {
     ...winner,
+    nodeId: loser.nodeId,
+    sequence: Math.min(previous.sequence, incoming.sequence),
     modelUsage: winner.modelUsage ?? loser.modelUsage,
     refs: mergeTranscriptRefs(winner.refs ?? [], loser.refs ?? []),
   } as TNode;

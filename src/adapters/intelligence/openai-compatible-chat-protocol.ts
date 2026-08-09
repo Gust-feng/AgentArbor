@@ -47,7 +47,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
           reasoningControl: "kimi_k3_reasoning_effort",
           preserveFullAssistantMessage: true,
           supportsStreaming: true,
-          supportsStreamUsage: false,
+          supportsStreamUsage: true,
           streamDeltaMode: "incremental",
         };
       }
@@ -56,7 +56,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "thinking_enabled_disabled",
         preserveFullAssistantMessage: true,
         supportsStreaming: true,
-        supportsStreamUsage: false,
+        supportsStreamUsage: true,
         streamDeltaMode: "incremental",
       };
     case "glm":
@@ -66,6 +66,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
           reasoningControl: "thinking_enabled_disabled",
           preserveFullAssistantMessage: true,
           supportsStreaming: true,
+          // Z.AI includes usage on the terminal chunk without stream_options.
           supportsStreamUsage: false,
           streamDeltaMode: "incremental",
         };
@@ -84,7 +85,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "reasoning_split",
         preserveFullAssistantMessage: true,
         supportsStreaming: true,
-        supportsStreamUsage: false,
+        supportsStreamUsage: true,
         streamDeltaMode: "cumulative",
       };
     default:

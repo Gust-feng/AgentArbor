@@ -208,7 +208,7 @@ function createProviderCompat(
         supportsStore: false,
         supportsDeveloperRole: false,
         supportsReasoningEffort: false,
-        supportsUsageInStreaming: false,
+        supportsUsageInStreaming: true,
         normalizeCumulativeDeltas: false,
         maxTokensField: "max_tokens",
         supportsStrictMode: false,
@@ -224,6 +224,8 @@ function createProviderCompat(
         supportsStore: false,
         supportsDeveloperRole: false,
         supportsReasoningEffort: false,
+        // Z.AI returns usage on the terminal stream chunk without requiring
+        // the OpenAI stream_options request extension.
         supportsUsageInStreaming: false,
         normalizeCumulativeDeltas: false,
         thinkingFormat: "zai",
@@ -236,7 +238,7 @@ function createProviderCompat(
         supportsStore: false,
         supportsDeveloperRole: false,
         supportsReasoningEffort: false,
-        supportsUsageInStreaming: false,
+        supportsUsageInStreaming: true,
         normalizeCumulativeDeltas: true,
         maxTokensField: "max_tokens",
         supportsStrictMode: false,

@@ -79,7 +79,7 @@ test("assistant activity segment identity keeps tool identity when earlier think
   assert.equal(activitySegmentKey(withLateEarlierThinking), activitySegmentKey(withoutThinking));
 });
 
-test("assistant activity segment identity groups adjacent canonical activity after the body", () => {
+test("assistant activity segment identity keeps thinking at its raw position before the body", () => {
   const structure = projectAssistantMessageStructure({
     transcriptNodes: [
       node({
@@ -122,12 +122,14 @@ test("assistant activity segment identity groups adjacent canonical activity aft
 
   const segments = activitySegments(structure);
 
-  assert.equal(segments.length, 1);
+  // 思考终态保留在首次出现的流式位置（正文之前），正文之后的工具单独成段。
+  assert.equal(segments.length, 2);
   assert.deepEqual(
     segments.flatMap((segment) => segment.timeline.items.map((item) => item.nodeId)),
-    ["thinking-settled", "tool-completed-1"],
+    ["thinking-live", "tool-completed-1"],
   );
-  assert.equal(segments[0]?.segmentKey, "activity:tool-call:run-1:tool-call-1");
+  assert.equal(segments[0]?.segmentKey, "activity:narrative:run-1:model-call-1");
+  assert.equal(segments[1]?.segmentKey, "activity:tool-call:run-1:tool-call-1");
 });
 
 test("assistant activity segment identity stays stable when raw model narrative settles", () => {

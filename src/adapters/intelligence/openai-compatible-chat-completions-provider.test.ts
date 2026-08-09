@@ -1283,28 +1283,33 @@ test("OpenAI-compatible Chat adapter sends Kimi thinking as a provider extension
 });
 
 test("OpenAI-compatible Chat adapter streams Kimi reasoning chunks exactly", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
   const deltas: Array<{ kind: string | undefined; delta: string }> = [];
-  const fetch: FetchLike = async () => ({
-    ok: true,
-    status: 200,
-    body: sseChunks([
-      {
-        model: "kimi-k2.6",
-        choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      body: sseChunks([
+        {
+          model: "kimi-k2.6",
+          choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+        },
+        {
+          model: "kimi-k2.6",
+          choices: [{ delta: { reasoning_content: " user is simply greeting" }, finish_reason: null }],
+        },
+        {
+          model: "kimi-k2.6",
+          choices: [{ delta: { content: "你好！" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 23, completion_tokens: 9, total_tokens: 32 },
+        },
+      ]),
+      json: async () => {
+        throw new Error("Streaming response should not be read through json().");
       },
-      {
-        model: "kimi-k2.6",
-        choices: [{ delta: { reasoning_content: " user is simply greeting" }, finish_reason: null }],
-      },
-      {
-        model: "kimi-k2.6",
-        choices: [{ delta: { content: "你好！" }, finish_reason: "stop" }],
-      },
-    ]),
-    json: async () => {
-      throw new Error("Streaming response should not be read through json().");
-    },
-  });
+    };
+  };
   const provider = new OpenAICompatibleChatCompletionsProvider({
     baseUrl: "https://api.moonshot.cn/v1",
     apiKey: "sk-test-secret-token",
@@ -1328,6 +1333,10 @@ test("OpenAI-compatible Chat adapter streams Kimi reasoning chunks exactly", asy
   assert.equal(response.status, "completed");
   assert.equal(response.reasoningOutput?.content, "The user is simply greeting");
   assert.equal(response.textOutput, "你好！");
+  assert.deepEqual(calls[0]?.body.stream_options, { include_usage: true });
+  assert.equal(response.usage?.inputTokens, 23);
+  assert.equal(response.usage?.outputTokens, 9);
+  assert.equal(response.usage?.totalTokens, 32);
   assert.deepEqual(deltas, [
     { kind: "reasoning", delta: "The" },
     { kind: "reasoning", delta: " user is simply greeting" },
@@ -1452,6 +1461,7 @@ test("OpenAI-compatible Chat adapter enables modern GLM thinking and streaming",
         {
           model: "glm-5.1",
           choices: [{ delta: { content: "结果是 1573。" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 17, completion_tokens: 8, total_tokens: 25 },
         },
       ]),
       json: async () => {
@@ -1482,6 +1492,10 @@ test("OpenAI-compatible Chat adapter enables modern GLM thinking and streaming",
   assert.equal(response.status, "completed");
   assert.deepEqual(calls[0]?.body.thinking, { type: "enabled" });
   assert.equal(calls[0]?.body.stream, true);
+  assert.equal(calls[0]?.body.stream_options, undefined);
+  assert.equal(response.usage?.inputTokens, 17);
+  assert.equal(response.usage?.outputTokens, 8);
+  assert.equal(response.usage?.totalTokens, 25);
   assert.deepEqual(deltas, [
     { kind: "reasoning", delta: "先计算乘法再加法。" },
     { kind: "output", delta: "结果是 1573。" },
@@ -1555,6 +1569,7 @@ test("OpenAI-compatible Chat adapter streams MiniMax reasoning_details as reason
         {
           model: "MiniMax-M2.7",
           choices: [{ delta: { content: "二分查找要求有序数组。" }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 31, completion_tokens: 14, total_tokens: 45 },
         },
       ]),
       json: async () => {
@@ -1592,6 +1607,10 @@ test("OpenAI-compatible Chat adapter streams MiniMax reasoning_details as reason
     content: "需要先说明前提。",
     truncated: false,
   });
+  assert.deepEqual(calls[0]?.body.stream_options, { include_usage: true });
+  assert.equal(response.usage?.inputTokens, 31);
+  assert.equal(response.usage?.outputTokens, 14);
+  assert.equal(response.usage?.totalTokens, 45);
   assert.deepEqual(deltas, [
     { kind: "reasoning", delta: "需要" },
     { kind: "reasoning", delta: "先说明前提。" },

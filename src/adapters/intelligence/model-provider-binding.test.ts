@@ -187,6 +187,41 @@ test("model provider binding keeps unconditional Chat dialect controls without r
       ?.normalizeCumulativeDeltas,
     true,
   );
+  assert.equal(
+    (minimax.selectedModel.compat as { readonly supportsUsageInStreaming?: boolean } | undefined)
+      ?.supportsUsageInStreaming,
+    true,
+  );
+});
+
+test("model provider binding declares the built-in streaming usage contracts", () => {
+  const moonshot = createModelProviderBinding({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: "https://api.moonshot.ai/v1",
+    profileId: "moonshot-usage-profile",
+    providerProfileId: "moonshot",
+    apiKey: "key",
+    model: "kimi-k3",
+  }, { createChatCompletionsTransport: fauxStreams });
+  const glm = createModelProviderBinding({
+    protocol: "openai_compatible_chat_completions",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    profileId: "glm-usage-profile",
+    providerProfileId: "glm",
+    apiKey: "key",
+    model: "glm-5.1",
+  }, { createChatCompletionsTransport: fauxStreams });
+
+  assert.equal(
+    (moonshot.selectedModel.compat as { readonly supportsUsageInStreaming?: boolean } | undefined)
+      ?.supportsUsageInStreaming,
+    true,
+  );
+  assert.equal(
+    (glm.selectedModel.compat as { readonly supportsUsageInStreaming?: boolean } | undefined)
+      ?.supportsUsageInStreaming,
+    false,
+  );
 });
 
 test("model provider binding preserves non-streaming and hosted web search in provider payloads", () => {

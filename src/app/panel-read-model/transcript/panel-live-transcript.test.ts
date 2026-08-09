@@ -25,7 +25,9 @@ test("withLiveTranscriptNodes reconciles reasoning by model_call identity", () =
   }));
 
   assert.equal(merged.length, 1);
-  assert.equal(merged[0]?.nodeId, "run-1:live:model-1:thinking");
+  // 终态事实保留权威内容，身份槽与序列保持首次出现的节点。
+  assert.equal(merged[0]?.nodeId, "reasoning-existing");
+  assert.equal(merged[0]?.sequence, 1);
   assert.equal(merged[0]?.text, "先分析目标，再检查约束");
   assert.equal(merged[0]?.eventType, "model.reasoning.completed");
 });
@@ -218,7 +220,8 @@ test("withLiveTranscriptNodes keeps completed body text stable across live to se
   }));
 
   assert.equal(merged.length, 1);
-  assert.equal(merged[0]?.nodeId, "body-existing");
+  // 终态事实保留权威内容，身份槽与序列保持首次出现的流式节点。
+  assert.equal(merged[0]?.nodeId, "run-1:live:model-1:body");
   assert.equal(merged[0]?.eventType, "model.output.completed");
   assert.equal(merged[0]?.phase, "completed");
   assert.equal(merged[0]?.text, "The user is asking");
@@ -242,7 +245,8 @@ test("withLiveTranscriptNodes gives an equal-sequence durable terminal fact auth
   }));
 
   assert.equal(merged.length, 1);
-  assert.equal(merged[0]?.nodeId, "reasoning-durable");
+  // 终态事实保留权威内容，身份槽与序列保持首次出现的流式节点。
+  assert.equal(merged[0]?.nodeId, "run-1:live:model-1:thinking");
   assert.equal(merged[0]?.text, "权威完整思考");
 });
 

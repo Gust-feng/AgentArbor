@@ -1466,6 +1466,13 @@ async function projectHarnessEvent(
   if (event.message.role === "assistant") {
     const message = modelMessageFromAssistant(event.message);
     const toolCalls = message.toolCalls ?? [];
+    // 先落思考完成事实，再落消息正文检查点：模型在同一轮里先思考、后输出正文、
+    // 再调用工具，思考的持久位置必须保持在正文与工具之前（尊重原始流顺序）。
+    const reasoning = event.message.content
+      .filter((block) => block.type === "thinking")
+      .map((block) => block.thinking)
+      .join("\n");
+    if (reasoning.length > 0) await input.onReasoningCompleted?.(reasoning);
     if (toolCalls.length > 0) {
       const toolCallIds = toolCalls.map((call) => call.callId);
       await input.onSessionWriteCheckpoint?.({
@@ -1488,11 +1495,6 @@ async function projectHarnessEvent(
     }
     state.usage = mergeUsage(state.usage, modelUsageFromProvider(event.message.usage));
     state.usage = applyCompletedProviderTiming(state, event.message.usage.output);
-    const reasoning = event.message.content
-      .filter((block) => block.type === "thinking")
-      .map((block) => block.thinking)
-      .join("\n");
-    if (reasoning.length > 0) await input.onReasoningCompleted?.(reasoning);
     return;
   }
 }

@@ -39,7 +39,10 @@ test("reasoning identity uses model_call and terminal durable content replaces l
   const merged = mergeTranscriptNodeLists([live], [durable]);
 
   assert.equal(transcriptNodeIdentityKey(live), "run-1:reasoning:model-1");
-  assert.deepEqual(merged.map((item) => item.nodeId), ["reasoning-durable"]);
+  // 终态事实取权威内容，但身份槽与序列保持首次出现（流式位置），
+  // 使思考在展示中始终排在它真实出现的位置。
+  assert.deepEqual(merged.map((item) => item.nodeId), ["reasoning-live"]);
+  assert.equal(merged[0]?.sequence, 1);
   assert.equal(merged[0]?.text, "权威完整思考");
 });
 
@@ -125,7 +128,11 @@ test("body reconciles by model_call while tool active and terminal facts remain 
     }),
   ]);
 
-  assert.deepEqual(merged.map((item) => item.nodeId), ["body-durable", "tool-requested", "tool-completed"]);
+  // body 终态事实取权威内容，但身份槽保留首次出现的流式节点，序列取最早位置。
+  assert.deepEqual(merged.map((item) => item.nodeId), ["body-live", "tool-requested", "tool-completed"]);
+  const body = merged[0];
+  assert.equal(body?.eventType, "model.output.completed");
+  assert.equal(body?.sequence, 1);
 });
 
 test("replacing merge does not retain facts absent from the current canonical input", () => {

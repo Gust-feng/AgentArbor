@@ -71,8 +71,9 @@ test("assistant message structure uses the terminal reasoning fact for one model
     ],
   });
 
-  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["body", "activity"]);
-  assert.deepEqual(activityNodeIds(structure), ["thinking-settled"]);
+  // 思考终态保留在首次出现的流式位置（正文之前），正文单独成段。
+  assert.deepEqual(structure.segments.map((segment) => segment.kind), ["activity", "body"]);
+  assert.deepEqual(activityNodeIds(structure), ["thinking-live"]);
 });
 
 test("assistant message structure keeps tool activity after body alongside reasoning", () => {

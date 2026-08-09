@@ -7,6 +7,7 @@
 - `agentarbor-ui-redesign.design`：原型页面清单与设计工具元数据。
 - `colors_and_type.css`：原型使用的颜色与字体变量。
 - `pages/empty-state.html`：空状态首页。
+- `pages/night-workbench.html`：静夜工作台深色主题视觉 Demo（独立原型，不接入运行时）。
 - `pages/chat-active.html`：对话进行中页面。
 - `pages/settings.html`：设置面板。
 - `pages/tool-display-preview.html`：工具展示预览页面。

@@ -45,7 +45,6 @@ Workbench
 - [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)：被 ADR-0028 部分取代；保留长期能力边界和历史判断。
 - [ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界](ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界.md)：历史 Profile 方案。
 - [ADR-0018-AgentArbor原生概念树架构](ADR-0018-AgentArbor原生概念树架构.md)：历史概念树与植物语义来源。
-
 目录中的其他 ADR 保留其注明的历史、协议或局部决策价值，不能覆盖 ADR-0028 的当前产品和模块边界。
 
 ## 相关文档

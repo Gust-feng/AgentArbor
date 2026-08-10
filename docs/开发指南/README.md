@@ -31,7 +31,7 @@ AgentArbor 是一个桌面通用 Agent Workbench。当前用户直接使用 Ordi
 
 ## 架构原则
 
-- 用户只面对一个 Workbench；当前生产 surface 是 Ordinary。首页是新 Conversation 的唯一入口，Conversation 创建后固定属于一个 Space，不能在对话中切换 Space 或 Workspace。
+- 用户只面对一个 Workbench；当前生产 surface 是 Ordinary。首页是新 Conversation 的唯一入口，Conversation 创建后固定属于一个直接 owner（Space 或 Workspace），不能在对话中切换 owner。
 - Desktop Shell 包含 Task Inbox、Workspace Context、Main Canvas、Artifact Area 和 Observation Panel。
 - Task Soil 保存当前任务目标、文件引用、项目上下文、网页材料、临时约束、权限边界和本轮运行材料。
 - Agent Notes 与 PathDependencyFeature 分别保存声明性记忆和模型主动提炼的方法论；Global Soil、Capability Asset、Path Bias 与治理后的长期事实仍是未来按需能力，不是当前记忆回流链。

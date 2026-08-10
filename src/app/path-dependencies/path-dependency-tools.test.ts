@@ -175,7 +175,7 @@ test("MemoryRead refuses an oversized body instead of returning a summary", asyn
   await feature.release();
 });
 
-test("path dependency save preserves supplied verification evidence", async () => {
+test("path dependency save keeps evidence as the canonical provenance field", async () => {
   const feature = createPathDependencyFeature({
     repository: createInMemoryPathDependencyRepository(),
     idFactory: () => "path-dependency:verification-evidence",
@@ -196,7 +196,11 @@ test("path dependency save preserves supplied verification evidence", async () =
   assert.equal(result.status, "created");
   assert.deepEqual(
     (await feature.queries.get(result.dependency?.id ?? ""))?.verification,
-    { status: "observed", evidenceRefs: ["tool-evidence:verification"] },
+    { status: "observed" },
+  );
+  assert.deepEqual(
+    (await feature.queries.get(result.dependency?.id ?? ""))?.evidenceRefs,
+    ["tool-evidence:verification"],
   );
   const updatedTools = toolSet({
     dependencies: feature,
@@ -211,10 +215,10 @@ test("path dependency save preserves supplied verification evidence", async () =
     methodology: "方法正文（校准）",
     verification: "user_confirmed",
   }, context) as { readonly status: string };
-  assert.equal(updated.status, "updated");
+  assert.equal(updated.status, "invalid_input");
   assert.deepEqual(
     (await feature.queries.get(result.dependency?.id ?? ""))?.verification,
-    { status: "user_confirmed", evidenceRefs: ["tool-evidence:verification"] },
+    { status: "observed" },
   );
   await feature.release();
 });

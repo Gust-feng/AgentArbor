@@ -27,8 +27,7 @@ const sourceRefSchema = z.object({
 }).strict();
 
 const verificationSchema = z.object({
-  status: z.enum(["not_recorded", "observed", "user_confirmed"]),
-  evidenceRefs: z.array(z.string().min(1)),
+  status: z.enum(["not_recorded", "observed"]),
 }).strict();
 
 const dependencySchema = z.object({

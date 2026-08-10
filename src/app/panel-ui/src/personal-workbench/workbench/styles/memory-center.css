@@ -286,11 +286,6 @@
   background: var(--aa-surface-hover, #eeebe6);
 }
 
-.memory-center__verification[data-status="user_confirmed"] {
-  color: var(--memory-accent);
-  background: var(--aa-accent-bg, rgba(104, 101, 167, 0.08));
-}
-
 .memory-center__dependency-excerpt {
   display: -webkit-box;
   margin: 10px 0 12px;

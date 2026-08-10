@@ -294,19 +294,14 @@ function normalizeVerification(
 ): PathDependencyVerification {
   if (value !== undefined &&
       (typeof value !== "object" || value === null ||
-        (value.status !== "not_recorded" && value.status !== "observed" && value.status !== "user_confirmed"))) {
+        (value.status !== "not_recorded" && value.status !== "observed"))) {
     throw new PathDependencyFeatureError(
       "path_dependency_invalid_input",
-      "verification.status must be not_recorded, observed, or user_confirmed.",
+      "verification.status must be not_recorded or observed.",
     );
   }
   return {
     status: value?.status ?? current?.status ?? "not_recorded",
-    evidenceRefs: boundedRefs(
-      value?.evidenceRefs ?? current?.evidenceRefs ?? [],
-      PATH_DEPENDENCY_MAX_EVIDENCE_REFS,
-      "verification.evidenceRefs",
-    ),
   };
 }
 

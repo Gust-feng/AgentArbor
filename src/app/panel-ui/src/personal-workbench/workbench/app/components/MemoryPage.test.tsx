@@ -185,7 +185,8 @@ test("路径依赖详情允许修订并在冲突时保留草稿，删除先展�
     methodology: "先跑类型检查，再跑窄范围测试。",
     excerpt: "先跑类型检查，再跑窄范围测试。",
     revision: 3,
-    verification: { status: "observed", evidenceRefs: ["run-1"] },
+    verification: { status: "observed" },
+    evidenceRefs: ["run-1"],
     sourceRunRefs: [{ runId: "run-1", title: "修复构建" }],
     tags: ["typescript"],
     readCount: 2,
@@ -212,4 +213,35 @@ test("路径依赖详情允许修订并在冲突时保留草稿，删除先展�
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "删除" }));
   expect(screen.getByText(/删除后不可撤销/u)).toBeTruthy();
   expect(screen.getByRole("button", { name: "确认永久删除" })).toBeTruthy();
+});
+
+test("路径依赖详情刷新返回较晚时不覆盖用户正在编辑的草稿", async () => {
+  const dependency = {
+    id: "memory-race",
+    owner: { kind: "global" },
+    title: "延迟详情",
+    methodology: "初始方法论",
+    excerpt: "初始方法论",
+    revision: 1,
+    verification: { status: "observed" },
+    evidenceRefs: [],
+    sourceRunRefs: [],
+    tags: [],
+  };
+  let resolveDetail: ((response: Response) => void) | undefined;
+  fetchMock
+    .mockResolvedValueOnce(json(snapshot({ pathDependencies: [dependency] })))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+      resolveDetail = resolve;
+    }));
+
+  render(<MemoryPage />);
+  fireEvent.click(await screen.findByRole("button", { name: /延迟详情/u }));
+  const methodology = await screen.findByRole("textbox", { name: "方法论" });
+  fireEvent.change(methodology, { target: { value: "用户正在编辑的方法论" } });
+
+  resolveDetail?.(json({ ok: true, dependency: { ...dependency, methodology: "服务端较新的方法论" } }));
+
+  await waitFor(() => expect(screen.getByDisplayValue("用户正在编辑的方法论")).toBeTruthy());
+  expect(screen.queryByDisplayValue("服务端较新的方法论")).toBeNull();
 });

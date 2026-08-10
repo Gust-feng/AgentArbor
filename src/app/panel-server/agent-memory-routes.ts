@@ -42,8 +42,7 @@ const pathDependencySaveSchema = z.object({
   methodology: z.string().trim().min(1).max(50_000),
   tags: z.array(z.string().trim().min(1).max(80)).max(24).optional(),
   verification: z.object({
-    status: z.enum(["not_recorded", "observed", "user_confirmed"]),
-    evidenceRefs: z.array(id).max(64),
+    status: z.enum(["not_recorded", "observed"]),
   }).strict().optional(),
   evidenceRefs: z.array(id).max(64).optional(),
 }).strict();
@@ -304,6 +303,8 @@ function projectDependency(dependency: PathDependency, facts: readonly OrdinaryM
     updatedAt: dependency.updatedAt,
     createdBy: dependency.createdBy,
     tags: dependency.tags,
+    sourceRunCount: dependency.sourceRunRefs.length,
+    evidenceCount: dependency.evidenceRefs.length,
     readCount: dependencyFacts.filter((fact) => fact.kind === "read").length,
     useCount: dependencyFacts.filter((fact) => fact.kind === "applied").length,
     references: dependencyFacts.map((fact) => ({

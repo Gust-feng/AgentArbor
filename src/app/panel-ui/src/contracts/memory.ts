@@ -23,7 +23,7 @@ export type MemoryNote = {
   readonly updatedAt?: string;
 };
 
-export type MemoryVerificationStatus = "not_recorded" | "observed" | "user_confirmed";
+export type MemoryVerificationStatus = "not_recorded" | "observed";
 
 /** The API currently returns an object; the string form keeps the client
  * compatible with the small provisional contract used by the first panel. */
@@ -31,7 +31,6 @@ export type MemoryVerification =
   | MemoryVerificationStatus
   | {
       readonly status: MemoryVerificationStatus;
-      readonly evidenceRefs?: readonly string[];
     };
 
 export type MemorySourceRef =
@@ -64,6 +63,8 @@ export type PathDependency = {
   readonly tags?: readonly string[];
   readonly sourceRunRefs?: readonly MemorySourceRef[];
   readonly evidenceRefs?: readonly string[];
+  readonly sourceRunCount?: number;
+  readonly evidenceCount?: number;
   readonly readCount?: number;
   readonly useCount?: number;
   readonly references?: readonly MemoryReferenceFact[];

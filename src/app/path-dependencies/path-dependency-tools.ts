@@ -261,7 +261,7 @@ function pathDependencySaveTool(options: PathDependencyToolOptions): ToolExecuto
           title: { type: "string", description: "Short recognizable task-method title." },
           methodology: { type: "string", description: "Reusable method with applicability, validation, and failure boundaries." },
           tags: { type: "array", items: { type: "string" }, description: "Optional retrieval tags." },
-          verification: { type: "string", enum: ["not_recorded", "observed", "user_confirmed"] },
+          verification: { type: "string", enum: ["not_recorded", "observed"] },
           evidenceRefs: { type: "array", items: { type: "string" }, description: "Optional durable evidence references; do not paste evidence bodies." },
         },
         required: ["scope", "title", "methodology"],
@@ -307,10 +307,6 @@ function pathDependencySaveTool(options: PathDependencyToolOptions): ToolExecuto
           ...(verification === undefined ? {} : {
             verification: {
               status: verification,
-              // When verification is updated without evidenceRefs, the feature
-              // preserves the current verification evidence. An explicit list
-              // (including []) remains a deliberate replacement/clear.
-              ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
             },
           }),
           sourceRunRefs: [sourceRunRef],
@@ -440,8 +436,8 @@ function boundedStringArrayOrUndefined(value: unknown, maxItems: number, maxItem
   return value;
 }
 
-function isVerificationStatus(value: unknown): value is "not_recorded" | "observed" | "user_confirmed" {
-  return value === "not_recorded" || value === "observed" || value === "user_confirmed";
+function isVerificationStatus(value: unknown): value is "not_recorded" | "observed" {
+  return value === "not_recorded" || value === "observed";
 }
 
 function hostSourceRunRef(run: PathDependencyToolOptions["run"]): PathDependencySourceRef | undefined {

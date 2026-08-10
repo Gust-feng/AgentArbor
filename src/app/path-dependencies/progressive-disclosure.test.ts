@@ -39,7 +39,7 @@ test("search fitting preserves complete candidate facts and stops before its tok
       title: `搜索方法 ${index}`,
       methodology: "method ".repeat(120),
       sourceRunRefs: [],
-      verification: { status: "observed", evidenceRefs: [] },
+      verification: { status: "observed" },
       evidenceRefs: [],
       revision: 1,
       contentVersion: `sha256:${"b".repeat(64)}`,

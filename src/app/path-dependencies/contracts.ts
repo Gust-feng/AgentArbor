@@ -48,19 +48,18 @@ export function assertPathDependencyMemoryId(value: unknown): asserts value is s
 }
 
 export type PathDependencyVerification = {
-  readonly status: "not_recorded" | "observed" | "user_confirmed";
-  readonly evidenceRefs: readonly string[];
+  /** Model-side observation only; user governance is deletion in Memory Center. */
+  readonly status: "not_recorded" | "observed";
 };
 
 /**
- * Partial verification supplied by a save command.  Omitting evidenceRefs
- * means "keep the current verification evidence" on update; an explicit
- * empty array is the deliberate clear operation.  Persisted records always
- * use the complete PathDependencyVerification shape above.
+ * Partial verification supplied by a save command. Evidence references live
+ * on the PathDependency record as the single provenance fact source.
+ * Persisted records always use the complete PathDependencyVerification shape
+ * above.
  */
 export type PathDependencyVerificationInput = {
   readonly status: PathDependencyVerification["status"];
-  readonly evidenceRefs?: readonly string[];
 };
 
 /** Minimal provenance; it never embeds transcript, tool output or absolute paths. */

@@ -44,7 +44,7 @@ test("Memory Center validates an explicitly selected registered owner before man
         title: "下载短视频的稳定方法",
         methodology: "确认来源，使用可验证入口，完成后检查文件可播放。",
         tags: ["video", "download"],
-        verification: { status: "observed", evidenceRefs: [] },
+        verification: { status: "observed" },
       },
     });
     assert.equal(created.status, 201);

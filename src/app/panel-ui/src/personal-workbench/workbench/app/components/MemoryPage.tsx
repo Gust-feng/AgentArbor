@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
-  CheckCircle2,
   ChevronRight,
   Plus,
   RefreshCw,
@@ -70,6 +69,15 @@ export function MemoryPage(): React.ReactElement {
   const [noteDeleteArmed, setNoteDeleteArmed] = useState<NoteScope | null>(null);
   const [noteDeleting, setNoteDeleting] = useState<NoteScope | null>(null);
   const [noteError, setNoteError] = useState<string | undefined>(undefined);
+  const detailRequestRef = useRef<{ readonly id: number; readonly controller: AbortController } | undefined>(undefined);
+  const detailRequestSequenceRef = useRef(0);
+  const detailDraftDirtyRef = useRef(false);
+
+  const cancelDetailRequest = useCallback((): void => {
+    detailRequestRef.current?.controller.abort();
+    detailRequestRef.current = undefined;
+    detailRequestSequenceRef.current += 1;
+  }, []);
 
   const reload = useCallback(async (signal?: AbortSignal): Promise<void> => {
     setLoadState("loading");
@@ -106,9 +114,13 @@ export function MemoryPage(): React.ReactElement {
     setNoteError(undefined);
     setDependencyConflict(false);
     setDeleteArmed(false);
+    detailDraftDirtyRef.current = false;
     void reload(controller.signal);
-    return () => controller.abort();
-  }, [reload]);
+    return () => {
+      controller.abort();
+      cancelDetailRequest();
+    };
+  }, [cancelDetailRequest, reload]);
 
   const ownerOptions = useMemo(
     () => uniqueOwners([GLOBAL_OWNER, ...(snapshot?.owners ?? []), ...(snapshot?.owner === undefined ? [] : [snapshot.owner])]),
@@ -120,6 +132,12 @@ export function MemoryPage(): React.ReactElement {
   const history = snapshot?.history ?? [];
 
   const openDependency = useCallback((dependency: PathDependency): void => {
+    cancelDetailRequest();
+    const requestId = detailRequestSequenceRef.current + 1;
+    const controller = new AbortController();
+    detailRequestRef.current = { id: requestId, controller };
+    detailRequestSequenceRef.current = requestId;
+    detailDraftDirtyRef.current = false;
     setSelectedDependencyId(dependency.id);
     setDetail(dependency);
     setDetailOpen(true);
@@ -129,20 +147,26 @@ export function MemoryPage(): React.ReactElement {
     setDetailError(undefined);
     setDeleteArmed(false);
     setDetailLoading(true);
-    void fetchPathDependency(dependency.id, { owner: ownerSelection })
+    void fetchPathDependency(dependency.id, { owner: ownerSelection, signal: controller.signal })
       .then((fresh) => {
+        if (detailRequestRef.current?.id !== requestId) return;
         setDetail((current) => current?.id === fresh.id ? fresh : current);
-        setDraft((current) => current === undefined || current.title !== dependency.title
-          ? current
-          : draftFromDependency(fresh));
+        if (!detailDraftDirtyRef.current) setDraft(draftFromDependency(fresh));
       })
       .catch((error: unknown) => {
+        if (detailRequestRef.current?.id !== requestId || controller.signal.aborted) return;
         setDetailError(messageOf(error));
       })
-      .finally(() => setDetailLoading(false));
-  }, [ownerSelection]);
+      .finally(() => {
+        if (detailRequestRef.current?.id !== requestId) return;
+        detailRequestRef.current = undefined;
+        setDetailLoading(false);
+      });
+  }, [cancelDetailRequest, ownerSelection]);
 
   const openCreate = useCallback((): void => {
+    cancelDetailRequest();
+    detailDraftDirtyRef.current = false;
     setSelectedDependencyId(null);
     setDetail(undefined);
     setCreating(true);
@@ -158,10 +182,12 @@ export function MemoryPage(): React.ReactElement {
     setDetailError(undefined);
     setDependencyConflict(false);
     setDeleteArmed(false);
-  }, [scopedOwner]);
+  }, [cancelDetailRequest, scopedOwner]);
 
   const closeDetail = useCallback((force = false): void => {
     if (!force && (savingDependency || deleting)) return;
+    cancelDetailRequest();
+    detailDraftDirtyRef.current = false;
     setDetailOpen(false);
     setDetail(undefined);
     setDraft(undefined);
@@ -169,7 +195,7 @@ export function MemoryPage(): React.ReactElement {
     setDependencyConflict(false);
     setDeleteArmed(false);
     setDetailError(undefined);
-  }, [deleting, savingDependency]);
+  }, [cancelDetailRequest, deleting, savingDependency]);
 
   const updateSnapshotDependency = useCallback((next: PathDependency, previousId?: string): void => {
     setSnapshot((current) => {
@@ -201,7 +227,6 @@ export function MemoryPage(): React.ReactElement {
         tags: splitList(draft.tags),
         verification: {
           status: draft.verification,
-          evidenceRefs: splitList(draft.evidenceRefs),
         },
         evidenceRefs: splitList(draft.evidenceRefs),
       });
@@ -209,6 +234,7 @@ export function MemoryPage(): React.ReactElement {
       setSelectedDependencyId(next.id);
       setDetail(next);
       setDraft(draftFromDependency(next));
+      detailDraftDirtyRef.current = false;
       setCreating(false);
       setDeleteArmed(false);
     } catch (error) {
@@ -481,7 +507,10 @@ export function MemoryPage(): React.ReactElement {
           saving={savingDependency}
           deleting={deleting}
           onClose={closeDetail}
-          onDraftChange={setDraft}
+          onDraftChange={(next) => {
+            detailDraftDirtyRef.current = true;
+            setDraft(next);
+          }}
           onSave={() => void saveDependencyDraft()}
           onArmDelete={() => setDeleteArmed(true)}
           onCancelDelete={() => setDeleteArmed(false)}
@@ -692,7 +721,6 @@ function DependencyDialog(props: {
               <select className="memory-center__select" value={draft.verification} onChange={(event) => set("verification", event.target.value as MemoryVerificationStatus)} disabled={props.saving || props.deleting}>
                 <option value="not_recorded">未记录</option>
                 <option value="observed">已观察</option>
-                <option value="user_confirmed">用户确认</option>
               </select>
             </label>
             <label className="memory-center__field memory-center__field--wide">
@@ -749,6 +777,7 @@ function DependencyDialog(props: {
 
 function DependencyProvenance({ dependency }: { readonly dependency: PathDependency }): React.ReactElement {
   const refs = dependency.sourceRunRefs ?? [];
+  const evidenceRefs = dependency.evidenceRefs ?? [];
   const references = dependency.references ?? [];
   return (
     <div style={{ marginTop: 18 }}>
@@ -764,6 +793,12 @@ function DependencyProvenance({ dependency }: { readonly dependency: PathDepende
           {refs.map((ref, index) => <li key={`${sourceRefLabel(ref)}-${index}`}>{sourceRefLabel(ref)}</li>)}
         </ul>
       )}
+      <p style={{ margin: "12px 0 5px", color: "var(--aa-text-2)", fontSize: 11 }}>验证证据</p>
+      {evidenceRefs.length === 0 ? <p style={{ margin: 0, color: "var(--aa-text-3)", fontSize: 11 }}>暂无证据引用</p> : (
+        <ul style={{ margin: 0, paddingLeft: 18, color: "var(--aa-text-2)", fontSize: 11, lineHeight: 1.7 }}>
+          {evidenceRefs.map((ref) => <li key={ref}>{ref}</li>)}
+        </ul>
+      )}
       {references.length > 0 && (
         <p style={{ margin: "12px 0 0", color: "var(--aa-text-3)", fontSize: 10 }}>
           已记录 {references.filter((reference) => reference.kind === "read").length} 次读取，{references.filter((reference) => reference.kind === "applied").length} 次采用。
@@ -776,12 +811,14 @@ function DependencyProvenance({ dependency }: { readonly dependency: PathDepende
 function verificationBadge(value: MemoryVerification | undefined): React.ReactElement | null {
   const status = verificationStatus(value);
   if (status === undefined) return null;
-  const label = status === "user_confirmed" ? "用户确认" : status === "observed" ? "已观察" : "未记录";
-  return <span className="memory-center__verification" data-status={status}>{status === "user_confirmed" && <CheckCircle2 size={11} aria-hidden="true" style={{ marginRight: 4 }} />}{label}</span>;
+  const label = status === "observed" ? "模型已观察" : "未记录";
+  return <span className="memory-center__verification" data-status={status}>{label}</span>;
 }
 
 function dependencyStats(dependency: PathDependency): React.ReactNode[] {
   const stats: React.ReactNode[] = [];
+  if (typeof dependency.sourceRunCount === "number") stats.push(<span key="sources">来源 {dependency.sourceRunCount}</span>);
+  if (typeof dependency.evidenceCount === "number") stats.push(<span key="evidence">证据 {dependency.evidenceCount}</span>);
   if (typeof dependency.readCount === "number") stats.push(<span key="read">读取 {dependency.readCount}</span>);
   if (typeof dependency.useCount === "number") stats.push(<span key="use">采用 {dependency.useCount}</span>);
   return stats;
@@ -794,9 +831,7 @@ function verificationStatus(value: MemoryVerification | undefined): MemoryVerifi
 
 function draftFromDependency(dependency: PathDependency): DependencyDraft {
   const verification = verificationStatus(dependency.verification) ?? "not_recorded";
-  const evidenceRefs = dependency.evidenceRefs
-    ?? (typeof dependency.verification === "object" ? dependency.verification.evidenceRefs : undefined)
-    ?? [];
+  const evidenceRefs = dependency.evidenceRefs ?? [];
   return {
     scope: dependency.owner.kind === "global" ? "global" : "owner",
     title: dependency.title,

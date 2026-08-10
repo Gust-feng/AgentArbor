@@ -31,7 +31,18 @@ function snapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
-test("在没有对话上下文时只显示全局记忆，不伪造 owner 或统计", async () => {
+test("空范围只显示一个统一入口，不把记忆写入责任推给用户", async () => {
+  fetchMock.mockResolvedValueOnce(json(snapshot({ globalNote: { scope: { kind: "global" }, content: "", version: "sha256:empty" } })));
+
+  render(<MemoryPage />);
+
+  expect(await screen.findByRole("heading", { name: "当前范围还没有记忆" })).toBeTruthy();
+  expect(screen.queryByText("声明性记忆")).toBeNull();
+  expect(screen.queryByText("程序性记忆")).toBeNull();
+  expect(screen.queryByRole("button", { name: /开始记录|新建路径依赖/u })).toBeNull();
+});
+
+test("有内容时首屏只展示正文、摘要和需要判断的状态", async () => {
   fetchMock.mockResolvedValueOnce(json(snapshot({
     pathDependencies: [{
       id: "memory-global-1",
@@ -39,44 +50,25 @@ test("在没有对话上下文时只显示全局记忆，不伪造 owner 或统�
       title: "先验证再扩展",
       excerpt: "先跑最小验证，再决定是否扩大改动。",
       revision: 2,
-      sourceRunRefs: [],
-    }],
-  })));
-
-  render(<MemoryPage />);
-
-  expect(await screen.findByRole("heading", { name: "记忆" })).toBeTruthy();
-  expect(screen.getByText("全局记忆")).toBeTruthy();
-  expect(screen.queryByText("当前空间")).toBeNull();
-  expect(screen.getByText("暂无来源记录")).toBeTruthy();
-  expect(screen.queryByText(/读取 0/u)).toBeNull();
-  expect(screen.queryByText(/采用 0/u)).toBeNull();
-});
-
-test("删除路径依赖后仍显示不可用的历史读取与采用事实", async () => {
-  fetchMock.mockResolvedValueOnce(json(snapshot({
-    history: [{
-      id: "memory-deleted",
-      kind: "path_dependency",
-      owner: { kind: "global" },
-      title: "已删除的方法",
-      revision: 2,
-      available: false,
-      readCount: 3,
+      verification: { status: "observed" },
+      sourceRunRefs: [{ runId: "run-1", title: "修复构建" }],
+      evidenceRefs: ["run-1"],
+      readCount: 2,
       useCount: 1,
-      references: [],
     }],
   })));
 
   render(<MemoryPage />);
 
-  expect(await screen.findByText("已删除的方法")).toBeTruthy();
-  expect(screen.getByText("正文不可用")).toBeTruthy();
-  expect(screen.getByText("读取 3")).toBeTruthy();
-  expect(screen.getByText("采用 1")).toBeTruthy();
+  expect(await screen.findByRole("button", { name: /先验证再扩展/u })).toBeTruthy();
+  expect(screen.getByText("偏好简洁、保留真实错误信息。")).toBeTruthy();
+  expect(screen.getByText("先验证再扩展")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "编辑笔记" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "新建路径依赖" })).toBeNull();
+  expect(screen.queryByText("读取 2")).toBeNull();
 });
 
-test("owner 选择器只使用后端登记范围，并把所选 owner 带入查询和写入", async () => {
+test("owner 选择器只使用后端登记范围，并把所选 owner 带入查询", async () => {
   fetchMock
     .mockResolvedValueOnce(json(snapshot({
       owners: [
@@ -97,15 +89,7 @@ test("owner 选择器只使用后端登记范围，并把所选 owner 带入查�
         { kind: "space", id: "space-1", title: "开发空间" },
         { kind: "workspace", id: "workspace-1", title: "AgentArbor" },
       ],
-    })))
-    .mockResolvedValueOnce(json({
-      ok: true,
-      notebook: {
-        scope: { kind: "space", id: "space-1" },
-        content: "更新后的开发约定",
-        version: "sha256:owner-version-2",
-      },
-    }));
+    })));
 
   render(<MemoryPage />);
   const selector = await screen.findByRole("combobox", { name: "记忆范围" });
@@ -115,43 +99,10 @@ test("owner 选择器只使用后端登记范围，并把所选 owner 带入查�
 
   await waitFor(() => expect(screen.getByText("开发空间约定")).toBeTruthy());
   expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/memory?ownerKind=space&ownerId=space-1");
-
-  const ownerNote = screen.getByText("开发空间约定").closest("article");
-  expect(ownerNote).not.toBeNull();
-  fireEvent.click(within(ownerNote!).getByRole("button", { name: "编辑笔记" }));
-  fireEvent.change(within(ownerNote!).getByRole("textbox", { name: "开发空间正文" }), { target: { value: "更新后的开发约定" } });
-  fireEvent.click(within(ownerNote!).getByRole("button", { name: "保存笔记" }));
-  await waitFor(() => expect(screen.getByText("更新后的开发约定")).toBeTruthy());
-  expect(fetchMock.mock.calls[2]?.[1]).toEqual(expect.objectContaining({
-    body: JSON.stringify({
-      ownerKind: "space",
-      ownerId: "space-1",
-      content: "更新后的开发约定",
-      expectedVersion: "sha256:owner-version",
-    }),
-  }));
+  expect(screen.queryByRole("button", { name: "编辑笔记" })).toBeNull();
 });
 
-test("笔记保存携带版本，CAS 冲突会保留编辑并提示合并", async () => {
-  fetchMock
-    .mockResolvedValueOnce(json(snapshot()))
-    .mockResolvedValueOnce(json({ code: "memory_note_revision_conflict", message: "冲突" }, 409));
-
-  render(<MemoryPage />);
-  await screen.findByRole("heading", { name: "记忆" });
-  fireEvent.click(screen.getByRole("button", { name: "编辑笔记" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "全局记忆正文" }), { target: { value: "新正文" } });
-  fireEvent.click(screen.getByRole("button", { name: "保存笔记" }));
-
-  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("已被其他操作更新"));
-  expect(fetchMock).toHaveBeenLastCalledWith("/api/memory/notes/global", expect.objectContaining({
-    method: "PUT",
-    body: JSON.stringify({ content: "新正文", expectedVersion: "sha256:global-version" }),
-  }));
-  expect(screen.getByDisplayValue("新正文")).toBeTruthy();
-});
-
-test("笔记删除经过明确确认并以当前版本直接删除正文", async () => {
+test("笔记只能在面板删除，并携带当前版本", async () => {
   fetchMock
     .mockResolvedValueOnce(json(snapshot()))
     .mockResolvedValueOnce(json({
@@ -165,19 +116,21 @@ test("笔记删除经过明确确认并以当前版本直接删除正文", async
     }));
 
   render(<MemoryPage />);
-  await screen.findByRole("heading", { name: "记忆" });
-  fireEvent.click(screen.getByRole("button", { name: "删除" }));
-  expect(screen.getByRole("button", { name: "确认永久删除" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+  await screen.findByText("偏好简洁、保留真实错误信息。");
+  const note = screen.getByText("偏好简洁、保留真实错误信息。").closest("article");
+  expect(note).not.toBeNull();
+  fireEvent.click(within(note!).getByRole("button", { name: "删除" }));
+  expect(within(note!).getByRole("button", { name: "确认删除" })).toBeTruthy();
+  fireEvent.click(within(note!).getByRole("button", { name: "确认删除" }));
 
-  await waitFor(() => expect(screen.getByText("尚未记录")).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole("heading", { name: "当前范围还没有记忆" })).toBeTruthy());
   expect(fetchMock).toHaveBeenLastCalledWith("/api/memory/notes/global", expect.objectContaining({
     method: "DELETE",
     body: JSON.stringify({ expectedVersion: "sha256:global-version" }),
   }));
 });
 
-test("路径依赖详情允许修订并在冲突时保留草稿，删除先展示不可逆警告", async () => {
+test("路径依赖详情是阅读视图，来源、证据和使用事实进入详情，删除直接移除正文", async () => {
   const dependency = {
     id: "memory-1",
     owner: { kind: "global" },
@@ -188,60 +141,52 @@ test("路径依赖详情允许修订并在冲突时保留草稿，删除先展�
     verification: { status: "observed" },
     evidenceRefs: ["run-1"],
     sourceRunRefs: [{ runId: "run-1", title: "修复构建" }],
-    tags: ["typescript"],
+    sourceRunCount: 1,
+    evidenceCount: 1,
     readCount: 2,
     useCount: 1,
+    tags: ["typescript"],
   };
   fetchMock
     .mockResolvedValueOnce(json(snapshot({ pathDependencies: [dependency] })))
     .mockResolvedValueOnce(json({ ok: true, dependency }))
-    .mockResolvedValueOnce(json({ code: "path_dependency_revision_conflict", message: "冲突" }, 409));
+    .mockResolvedValueOnce(json({ ok: true }));
 
   render(<MemoryPage />);
-  await screen.findByRole("button", { name: /类型检查顺序/u });
-  fireEvent.click(screen.getByRole("button", { name: /类型检查顺序/u }));
-  await screen.findByRole("dialog");
-  expect(screen.getByText("来源 Run")).toBeTruthy();
-  expect(screen.getAllByText("修订 3").length).toBeGreaterThan(0);
-  expect(screen.getByText("读取 2")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: /类型检查顺序/u }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("先跑类型检查，再跑窄范围测试。")).toBeTruthy();
+  expect(within(dialog).getByText("来源 Run")).toBeTruthy();
+  expect(within(dialog).getByText("读取").nextElementSibling?.textContent).toBe("2");
+  expect(within(dialog).queryByRole("textbox")).toBeNull();
 
-  fireEvent.change(screen.getByRole("textbox", { name: "方法论" }), { target: { value: "改过的方法论" } });
-  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "保存" }));
-  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("已被其他操作更新"));
-  expect(screen.getByDisplayValue("改过的方法论")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
+  expect(within(dialog).getByText(/删除后不可恢复/u)).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
 
-  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "删除" }));
-  expect(screen.getByText(/删除后不可撤销/u)).toBeTruthy();
-  expect(screen.getByRole("button", { name: "确认永久删除" })).toBeTruthy();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(fetchMock).toHaveBeenLastCalledWith("/api/memory/path-dependencies/memory-1", expect.objectContaining({
+    method: "DELETE",
+    body: JSON.stringify({ expectedRevision: 3 }),
+  }));
 });
 
-test("路径依赖详情刷新返回较晚时不覆盖用户正在编辑的草稿", async () => {
-  const dependency = {
-    id: "memory-race",
-    owner: { kind: "global" },
-    title: "延迟详情",
-    methodology: "初始方法论",
-    excerpt: "初始方法论",
-    revision: 1,
-    verification: { status: "observed" },
-    evidenceRefs: [],
-    sourceRunRefs: [],
-    tags: [],
-  };
-  let resolveDetail: ((response: Response) => void) | undefined;
+test("详情请求返回较晚时不能覆盖用户刚打开的另一条记忆", async () => {
+  const first = { id: "memory-first", owner: { kind: "global" }, title: "第一条", excerpt: "第一条方法", revision: 1 };
+  const second = { id: "memory-second", owner: { kind: "global" }, title: "第二条", excerpt: "第二条方法", revision: 1 };
+  let resolveFirst: ((response: Response) => void) | undefined;
+  let resolveSecond: ((response: Response) => void) | undefined;
   fetchMock
-    .mockResolvedValueOnce(json(snapshot({ pathDependencies: [dependency] })))
-    .mockImplementationOnce(() => new Promise<Response>((resolve) => {
-      resolveDetail = resolve;
-    }));
+    .mockResolvedValueOnce(json(snapshot({ pathDependencies: [first, second] })))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveFirst = resolve; }))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveSecond = resolve; }));
 
   render(<MemoryPage />);
-  fireEvent.click(await screen.findByRole("button", { name: /延迟详情/u }));
-  const methodology = await screen.findByRole("textbox", { name: "方法论" });
-  fireEvent.change(methodology, { target: { value: "用户正在编辑的方法论" } });
+  fireEvent.click(await screen.findByRole("button", { name: /第一条/u }));
+  fireEvent.click(screen.getByRole("button", { name: /第二条/u }));
+  resolveFirst?.(json({ ok: true, dependency: { ...first, methodology: "第一条完整正文" } }));
+  resolveSecond?.(json({ ok: true, dependency: { ...second, methodology: "第二条完整正文" } }));
 
-  resolveDetail?.(json({ ok: true, dependency: { ...dependency, methodology: "服务端较新的方法论" } }));
-
-  await waitFor(() => expect(screen.getByDisplayValue("用户正在编辑的方法论")).toBeTruthy());
-  expect(screen.queryByDisplayValue("服务端较新的方法论")).toBeNull();
+  await waitFor(() => expect(screen.getByRole("heading", { name: "第二条" })).toBeTruthy());
+  expect(screen.queryByText("第一条完整正文")).toBeNull();
 });

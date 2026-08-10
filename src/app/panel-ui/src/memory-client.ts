@@ -1,14 +1,11 @@
 import { requestJson } from "./api";
 import type {
   MemoryNote,
-  MemoryNoteDeleteInput,
-  MemoryNoteWriteInput,
   MemoryOwner,
   MemoryOwnerSelection,
   MemorySnapshot,
   PathDependencyDeleteInput,
   PathDependency,
-  PathDependencyWriteInput,
 } from "./contracts/memory";
 
 type MemorySnapshotResponse = Omit<MemorySnapshot, "owner"> & {
@@ -51,23 +48,9 @@ export async function fetchPathDependency(
   return response.dependency;
 }
 
-export async function saveMemoryNote(
-  scope: "global" | "owner",
-  input: MemoryNoteWriteInput,
-): Promise<MemoryNote> {
-  const response = await requestJson<{ readonly notebook: MemoryNote }>(
-    `/api/memory/notes/${scope}`,
-    {
-      method: "PUT",
-      body: JSON.stringify(input),
-    },
-  );
-  return response.notebook;
-}
-
 export async function deleteMemoryNote(
   scope: "global" | "owner",
-  input: MemoryNoteDeleteInput,
+  input: { readonly ownerKind?: "space" | "workspace"; readonly ownerId?: string; readonly expectedVersion: string },
 ): Promise<MemoryNote> {
   const response = await requestJson<{ readonly notebook: MemoryNote }>(
     `/api/memory/notes/${scope}`,
@@ -77,19 +60,6 @@ export async function deleteMemoryNote(
     },
   );
   return response.notebook;
-}
-
-export async function savePathDependency(input: PathDependencyWriteInput): Promise<PathDependency> {
-  const response = await requestJson<{
-    readonly result: { readonly dependency: PathDependency };
-  }>(
-    "/api/memory/path-dependencies",
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
-  return response.result.dependency;
 }
 
 export async function deletePathDependency(

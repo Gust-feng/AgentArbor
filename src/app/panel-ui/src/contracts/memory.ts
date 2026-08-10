@@ -101,30 +101,6 @@ export type MemorySnapshot = {
   readonly history?: readonly DeletedMemoryHistory[];
 };
 
-export type MemoryNoteWriteInput = {
-  readonly conversationId?: string;
-  readonly ownerKind?: "space" | "workspace";
-  readonly ownerId?: string;
-  readonly content: string;
-  readonly expectedVersion: string;
-};
-
-export type MemoryNoteDeleteInput = Omit<MemoryNoteWriteInput, "content">;
-
-export type PathDependencyWriteInput = {
-  readonly conversationId?: string;
-  readonly ownerKind?: "space" | "workspace";
-  readonly ownerId?: string;
-  readonly scope: "global" | "owner";
-  readonly memoryId?: string;
-  readonly expectedRevision?: number;
-  readonly title: string;
-  readonly methodology: string;
-  readonly tags?: readonly string[];
-  readonly verification?: MemoryVerification;
-  readonly evidenceRefs?: readonly string[];
-};
-
 export type PathDependencyDeleteInput = {
   readonly conversationId?: string;
   readonly ownerKind?: "space" | "workspace";

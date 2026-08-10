@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
-  BookOpen,
   ChevronRight,
   RefreshCw,
   Trash2,
@@ -241,7 +240,7 @@ export function MemoryPage(): React.ReactElement {
         </nav>
           {noteError !== undefined && <div className="memory-center__conflict" role="alert">{noteError}</div>}
 
-          <section className="memory-center__list-panel" aria-label={`${kindLabel}列表`}>
+          <section className={`memory-center__list-panel${visibleCount === 0 ? " is-empty" : ""}`} aria-label={`${kindLabel}列表`}>
             {visibleCount === 0 ? (
               <MemoryListEmpty kind={memoryKind} />
             ) : (
@@ -344,19 +343,16 @@ function MemoryKindButton(props: {
 }
 
 function MemoryListEmpty({ kind }: { readonly kind: MemoryKind }): React.ReactElement {
-  const title = kind === "notes" ? "还没有长期记忆" : kind === "paths" ? "还没有路径依赖" : "当前范围还没有记忆";
+  const title = kind === "notes" ? "长期记忆暂无内容" : kind === "paths" ? "路径依赖暂无内容" : "当前范围暂无记忆";
   const copy = kind === "paths"
-    ? "模型完成值得复用的任务后，会把方法保存在这里。"
+    ? "完成值得复用的任务后，模型会在这里留下方法。"
     : kind === "notes"
-      ? "模型发现稳定的约定或事实时，会自动记录到这里。"
+      ? "发现稳定的约定或事实后，模型会自动记录。"
       : "模型会在需要时保存稳定信息和可复用方法。";
   return (
     <div className="memory-center__list-empty" role="status">
-      <div className="memory-center__list-empty-icon" aria-hidden="true"><BookOpen size={18} /></div>
-      <div>
-        <h2>{title}</h2>
-        <p>{copy}</p>
-      </div>
+      <strong>{title}</strong>
+      <span>{copy}</span>
     </div>
   );
 }

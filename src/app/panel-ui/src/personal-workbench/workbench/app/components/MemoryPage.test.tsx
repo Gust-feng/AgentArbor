@@ -36,7 +36,7 @@ test("空范围只显示一个统一入口，不把记忆写入责任推给用�
 
   render(<MemoryPage />);
 
-  expect(await screen.findByRole("heading", { name: "当前范围还没有记忆" })).toBeTruthy();
+  expect(await screen.findByText("当前范围暂无记忆")).toBeTruthy();
   expect(screen.queryByText("声明性记忆")).toBeNull();
   expect(screen.queryByText("程序性记忆")).toBeNull();
   expect(screen.queryByRole("button", { name: /开始记录|新建路径依赖/u })).toBeNull();
@@ -123,7 +123,7 @@ test("笔记只能在面板删除，并携带当前版本", async () => {
   expect(within(note!).getByRole("button", { name: "确认删除" })).toBeTruthy();
   fireEvent.click(within(note!).getByRole("button", { name: "确认删除" }));
 
-  await waitFor(() => expect(screen.getByRole("heading", { name: "当前范围还没有记忆" })).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("当前范围暂无记忆")).toBeTruthy());
   expect(fetchMock).toHaveBeenLastCalledWith("/api/memory/notes/global", expect.objectContaining({
     method: "DELETE",
     body: JSON.stringify({ expectedVersion: "sha256:global-version" }),

@@ -1,3 +1,10 @@
+/**
+ * Historical PathMemory implementation retained as a buildable orphan for
+ * schema/repository regression coverage. The production Panel composition
+ * root, routes, settings and new path-dependencies feature must not import or
+ * construct it; existing runtime records are intentionally neither migrated
+ * nor used as new path-dependency input.
+ */
 export {
   PATH_MEMORY_DELETION_SCHEMA_VERSION,
   PATH_MEMORY_SCHEMA_VERSION,

@@ -18,7 +18,6 @@ import {
   Monitor,
   Palette,
   RefreshCw,
-  Route,
   Server,
   SlidersHorizontal,
   X,
@@ -43,7 +42,6 @@ import { SkillSettings } from "./skill-settings";
 import { SubAgentSettings } from "./sub-agent-settings";
 import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
 import { ResponsivenessDiagnostics } from "./responsiveness-diagnostics";
-import { PathMemorySettings } from "./path-memory-settings";
 import { RuntimeSettings } from "./runtime-settings";
 import { ReleaseNotes } from "./release-notes";
 
@@ -265,7 +263,6 @@ export function SettingsDialog(props: {
             )}
             {visibleActiveGroup === "appearance" && <AppearanceSettings />}
             {visibleActiveGroup === "statistics" && <UsageStatisticsSettings />}
-            {visibleActiveGroup === "pathMemory" && <PathMemorySettings />}
             {visibleActiveGroup === "developer" && (
               <>
                 <div className="basic-capabilities-settings developer-prompt-settings">
@@ -310,12 +307,11 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "workspace", label: "运行环境", icon: <Database size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
-  { id: "pathMemory", label: "路径记忆", icon: <Route size={15} /> },
   { id: "developer", label: "开发者选项", icon: <Code2 size={15} /> },
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 
-const DEVELOPER_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["pathMemory", "developer"]);
+const DEVELOPER_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["developer"]);
 // The migrated PersonalWorkbench does not consume the legacy theme layer yet.
 // Keep the implementation available for the later adaptation, but do not expose
 // a setting that currently cannot affect the production surface.

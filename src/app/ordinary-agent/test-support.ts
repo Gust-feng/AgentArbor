@@ -87,6 +87,7 @@ export function ordinaryRunBirth(): OrdinaryRunBirth {
       securitySummary: "command confirmation enabled",
       warnings: [],
     },
+    memoryOwner: { kind: "workspace", id: "workspace-test" },
     workspaceSelection: "explicit",
     informationAccess: {
       sourcePreference: ["codebase"],

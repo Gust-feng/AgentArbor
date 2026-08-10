@@ -65,15 +65,84 @@ test("Space deletion stops owned processes before deleting conversations and Spa
         async cleanupSpace({ spaceId }) { operations.push(`cleanup-knowledge:${spaceId}`); },
       },
     },
+    memory: {
+      async deleteByOwner(owner) { operations.push(`delete-path-dependencies:${owner.kind}:${owner.id}`); return 0; },
+    },
+    agentNotes: {
+      async deleteByOwner(owner) { operations.push(`delete-agent-notes:${owner.kind}:${owner.id}`); },
+    },
   });
   await coordinator.deleteSpace("space-1");
 
   assert.deepEqual(operations, [
     "cleanup:space-1",
     "delete-conversation:conversation-1",
+    "delete-path-dependencies:space:space-1",
+    "delete-agent-notes:space:space-1",
     "cleanup-knowledge:space-1",
     "delete-space:space-1",
   ]);
+});
+
+test("Space admission drains before deletion snapshots conversations and rejects late owners", async () => {
+  let treeExists = true;
+  let releaseAdmission!: () => void;
+  let markAdmissionStarted!: () => void;
+  const admissionStarted = new Promise<void>((resolve) => { markAdmissionStarted = resolve; });
+  const holdAdmission = new Promise<void>((resolve) => { releaseAdmission = resolve; });
+  let listedAfterAdmission = false;
+  const coordinator = createSpaceConversationDeletionCoordinator({
+    journal: memoryJournal(),
+    processTerminator: { killTree: () => ({ status: "killed" as const }) },
+    processes: {
+      async cleanupBySpace(spaceId: string) {
+        return cleanupResult("space", "space_deleted", { spaceId });
+      },
+    },
+    spaces: {
+      queries: {
+        async getTree() {
+          return treeExists
+            ? { space: { id: "space-race", title: "Race", createdAt: "now", updatedAt: "now" }, entries: [] }
+            : undefined;
+        },
+      },
+      commands: {
+        async deleteSpace() { treeExists = false; },
+      },
+    },
+    ordinary: {
+      commands: { async deleteConversation() {} },
+      queries: {
+        async listConversationsByOwner() {
+          listedAfterAdmission = true;
+          return [];
+        },
+      },
+    },
+    personalKnowledge: { commands: { async cleanupSpace() {} } },
+    agentNotes: { async deleteByOwner() {} },
+  });
+
+  const admitted = coordinator.admit("space-race", async () => {
+    markAdmissionStarted();
+    await holdAdmission;
+    return "admitted";
+  });
+  await admissionStarted;
+  const deleting = coordinator.deleteSpace("space-race");
+  await assert.rejects(
+    () => coordinator.admit("space-race", async () => "late"),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "space_deletion_in_progress",
+  );
+  releaseAdmission();
+  assert.equal(await admitted, "admitted");
+  await deleting;
+  assert.equal(listedAfterAdmission, true);
+  await assert.rejects(
+    () => coordinator.admit("space-race", async () => "after"),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "space_not_found",
+  );
 });
 
 test("unresolved process cleanup blocks Space and Conversation deletion", async () => {
@@ -116,6 +185,7 @@ test("unresolved process cleanup blocks Space and Conversation deletion", async 
       personalKnowledge: {
         commands: { async cleanupSpace() { operations.push("cleanup-knowledge"); } },
       },
+      agentNotes: { async deleteByOwner() { throw new Error("not used"); } },
     });
   await assert.rejects(
     coordinator.deleteSpace("space-1"),
@@ -216,6 +286,7 @@ test("startup recovery resumes after Conversation tombstones without repeating c
         async cleanupSpace() { /* no-op */ },
       },
     },
+    agentNotes: { async deleteByOwner() { /* no-op */ } },
   };
   const first = createSpaceConversationDeletionCoordinator(ports);
 
@@ -241,6 +312,7 @@ test("startup recovery resumes after Conversation tombstones without repeating c
 test("birth recovery clears an incomplete submission without replaying the failed Ordinary turn", async () => {
   const journal = memoryLinkJournal();
   let submissionAttempts = 0;
+  let spaceAdmissionCalls = 0;
   const ports = {
     journal,
     processTerminator: { killTree: () => ({ status: "killed" as const }) },
@@ -255,6 +327,11 @@ test("birth recovery clears an incomplete submission without replaying the faile
         async linkConversationOwner() { throw new Error("new space births never create a tree link"); },
         async unlinkConversationReferenceItem() { throw new Error("not used"); },
       },
+    },
+    spaceAdmission: async <T>(spaceId: string, operation: () => Promise<T>): Promise<T> => {
+      spaceAdmissionCalls += 1;
+      assert.equal(spaceId, "space-1");
+      return operation();
     },
     ordinary: {
       queries: {
@@ -283,6 +360,7 @@ test("birth recovery clears an incomplete submission without replaying the faile
     /Ordinary repository unavailable/,
   );
   assert.equal(submissionAttempts, 1);
+  assert.equal(spaceAdmissionCalls, 1, "Space submissions must pass the deletion admission gate");
   assert.deepEqual(await journal.list(), []);
 });
 
@@ -355,6 +433,7 @@ test("single Conversation deletion resumes after its Ordinary tombstone without 
 test("workspace owner submission creates a canonical owner conversation without a Space tree link", async () => {
   const journal = memoryLinkJournal();
   const operations: string[] = [];
+  let workspaceAdmissionCalls = 0;
   const ports = {
     journal,
     processTerminator: { killTree: () => ({ status: "killed" as const }) },
@@ -381,6 +460,11 @@ test("workspace owner submission creates a canonical owner conversation without 
         },
       },
     },
+    workspaceAdmission: async <T>(workspaceId: string, operation: () => Promise<T>): Promise<T> => {
+      workspaceAdmissionCalls += 1;
+      assert.equal(workspaceId, "workspace-1");
+      return operation();
+    },
     ordinary: {
       queries: {
         async getConversation() { return undefined; },
@@ -404,6 +488,7 @@ test("workspace owner submission creates a canonical owner conversation without 
     birth: {} as never,
   });
   assert.deepEqual(operations, ["submit:conversation:submission-workspace:workspace:workspace-1"]);
+  assert.equal(workspaceAdmissionCalls, 1, "Workspace submissions must pass the deletion admission gate");
   assert.deepEqual(await journal.list(), []);
 });
 

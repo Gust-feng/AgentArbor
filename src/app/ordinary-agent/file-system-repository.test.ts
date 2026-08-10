@@ -118,37 +118,69 @@ test("recovery inventory reports incompatible snapshots without hiding healthy r
   assert.equal(inventory.issues[0]?.error instanceof OrdinaryRunSnapshotIncompatibleError, true);
 });
 
-test("file repository round-trips frozen Agent Note versions and accepts older runs without them", async (t) => {
+test("file repository round-trips frozen owner-scoped Agent Note versions and rejects ownerless v7 runs", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-note-versions-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const initial = state("note-version-run", "2026-01-01T00:00:00.000Z");
+  const owner = { kind: "workspace", id: "workspace-note-version" } as const;
   const withVersions = {
     ...initial,
     birth: {
       ...initial.birth,
       agentNoteVersions: {
         global: `sha256:${"a".repeat(64)}` as const,
-        workspace: `sha256:${"b".repeat(64)}` as const,
+        owner: {
+          scope: owner,
+          version: `sha256:${"b".repeat(64)}` as const,
+        },
       },
+      memoryOwner: owner,
     },
   };
 
   await repository.save(withVersions, 0);
   assert.deepEqual((await repository.get("note-version-run"))?.state.birth.agentNoteVersions, {
     global: `sha256:${"a".repeat(64)}`,
-    workspace: `sha256:${"b".repeat(64)}`,
+    owner: {
+      scope: owner,
+      version: `sha256:${"b".repeat(64)}`,
+    },
   });
+  assert.deepEqual((await repository.get("note-version-run"))?.state.birth.memoryOwner, owner);
 
   const snapshotPath = path.join(root, "runs", "note-version-run", "snapshot.json");
   const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
-    state: { birth: { agentNoteVersions?: unknown } };
+    state: { birth: { agentNoteVersions?: unknown; memoryOwner?: unknown } };
   };
   delete snapshot.state.birth.agentNoteVersions;
+  delete snapshot.state.birth.memoryOwner;
   await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
-  assert.equal((await createFileSystemOrdinaryRunRepository(root).get("note-version-run"))?.state.birth.agentNoteVersions, undefined);
+  await assert.rejects(
+    () => createFileSystemOrdinaryRunRepository(root).get("note-version-run"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError,
+  );
 
-  snapshot.state.birth.agentNoteVersions = { global: "invalid", workspace: `sha256:${"b".repeat(64)}` };
+  // Path-keyed v6 versions cannot be mapped to a stable owner without guessing.
+  snapshot.state.birth.agentNoteVersions = {
+    global: `sha256:${"a".repeat(64)}`,
+    workspace: `sha256:${"b".repeat(64)}`,
+  };
+  snapshot.state.birth.memoryOwner = owner;
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+  await assert.rejects(
+    () => createFileSystemOrdinaryRunRepository(root).get("note-version-run"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError,
+  );
+
+  snapshot.state.birth.agentNoteVersions = {
+    global: `sha256:${"a".repeat(64)}`,
+    owner: {
+      scope: owner,
+      version: `sha256:${"b".repeat(64)}`,
+    },
+  };
+  snapshot.state.birth.memoryOwner = { kind: "space", id: "different-owner" };
   await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
   await assert.rejects(
     () => createFileSystemOrdinaryRunRepository(root).get("note-version-run"),
@@ -321,7 +353,7 @@ test("file repository automatically migrates v5 snapshots and retains the origin
   const restarted = createFileSystemOrdinaryRunRepository(root);
   assert.deepEqual((await restarted.list()).map((summary) => summary.runId), ["migrated-run"]);
   const migrated = await restarted.get("migrated-run");
-  assert.equal(migrated?.schemaVersion, "ordinary-run/v6");
+  assert.equal(migrated?.schemaVersion, "ordinary-run/v7");
   assert.equal(migrated?.revision, saved.revision, "schema migration is not a business revision");
   assert.deepEqual(migrated?.state.status, { kind: "completed" });
   const outputEvent = migrated?.state.timeline.find((event) => event.type === "model.output.completed");
@@ -349,8 +381,32 @@ test("file repository migrates a nonterminal v5 snapshot without inventing outpu
   await fs.writeFile(snapshotPath, JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v5" }), "utf8");
 
   const migrated = await createFileSystemOrdinaryRunRepository(root).get("migrated-running");
-  assert.equal(migrated?.schemaVersion, "ordinary-run/v6");
+  assert.equal(migrated?.schemaVersion, "ordinary-run/v7");
   assert.equal(migrated?.state.timeline.some((event) => event.type === "model.output.completed"), false);
+});
+
+test("file repository rejects historical v5 snapshots without an explicit stable memory owner", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-v5-ownerless-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const saved = await repository.save(state("ownerless-v5", "2026-01-01T00:00:00.000Z"), 0);
+  const snapshotPath = path.join(root, "runs", "ownerless-v5", "snapshot.json");
+  const legacy = JSON.parse(JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v5" })) as {
+    state: { birth: { memoryOwner?: unknown; agentNoteVersions?: unknown } };
+  };
+  delete legacy.state.birth.memoryOwner;
+  legacy.state.birth.agentNoteVersions = {
+    global: `sha256:${"a".repeat(64)}`,
+    workspace: `sha256:${"b".repeat(64)}`,
+  };
+  await fs.writeFile(snapshotPath, JSON.stringify(legacy), "utf8");
+
+  await assert.rejects(
+    () => repository.get("ownerless-v5"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
+      error.message.includes("lacks an explicit stable memoryOwner"),
+  );
+  assert.equal(await fs.readFile(snapshotPath, "utf8"), JSON.stringify(legacy));
 });
 
 test("v5 migration never overwrites a different retained snapshot", async (t) => {
@@ -385,22 +441,20 @@ test("file repository rejects old or malformed snapshots instead of compatibilit
     error instanceof OrdinaryRunSnapshotIncompatibleError && error.code === "ordinary_run_snapshot_incompatible");
 });
 
-test("file repository explicitly rejects ordinary-run/v3 without migration", async (t) => {
+test("file repository explicitly rejects ordinary-run/v3 and v6 without migration", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-v2-incompatible-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemOrdinaryRunRepository(root);
   const saved = await repository.save(state("v2-run", "2026-01-01T00:00:00.000Z"), 0);
-  await fs.writeFile(
-    path.join(root, "runs", "v2-run", "snapshot.json"),
-    JSON.stringify({ ...saved, schemaVersion: "ordinary-run/v3" }),
-    "utf8",
-  );
-
-  await assert.rejects(
-    repository.get("v2-run"),
-    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
-      error.message.includes("ordinary-run/v6"),
-  );
+  const snapshotPath = path.join(root, "runs", "v2-run", "snapshot.json");
+  for (const schemaVersion of ["ordinary-run/v3", "ordinary-run/v6"] as const) {
+    await fs.writeFile(snapshotPath, JSON.stringify({ ...saved, schemaVersion }), "utf8");
+    await assert.rejects(
+      repository.get("v2-run"),
+      (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError &&
+        error.message.includes("ordinary-run/v7"),
+    );
+  }
 });
 
 test("file repository rejects a tool catalog missing the frozen schema or hash", async (t) => {

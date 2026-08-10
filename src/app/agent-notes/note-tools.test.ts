@@ -5,12 +5,13 @@ import { createAgentNotesFeature } from "./agent-notes-feature.js";
 import { createNoteWriteTool } from "./note-tools.js";
 import type { AgentNoteRepository } from "./contracts.js";
 import { agentNoteContentVersion } from "./note-version.js";
+import { agentNoteScopeIdentity } from "./scope-identity.js";
 
 function feature() {
   const notes = new Map<string, string>();
   const repository: AgentNoteRepository = {
     async read(scope) {
-      const key = scope.kind === "global" ? "global" : `workspace:${scope.workspaceRoot}`;
+      const key = agentNoteScopeIdentity(scope);
       const content = notes.get(key) ?? "";
       return {
         scope,
@@ -21,7 +22,7 @@ function feature() {
     },
     async write(input) {
       const { scope, content, expectedVersion, updatedAt } = input;
-      const key = scope.kind === "global" ? "global" : `workspace:${scope.workspaceRoot}`;
+      const key = agentNoteScopeIdentity(scope);
       const currentContent = notes.get(key) ?? "";
       if (agentNoteContentVersion(currentContent) !== expectedVersion) {
         return {
@@ -40,6 +41,25 @@ function feature() {
         notebook: { scope, content, version: agentNoteContentVersion(content), updatedAt },
       };
     },
+    async delete(input) {
+      const key = agentNoteScopeIdentity(input.scope);
+      const currentContent = notes.get(key) ?? "";
+      const current = {
+        scope: input.scope,
+        content: currentContent,
+        version: agentNoteContentVersion(currentContent),
+        updatedAt: notes.has(key) ? "2026-07-26T00:00:00.000Z" : undefined,
+      };
+      if (current.version !== input.expectedVersion) return { status: "conflict", current };
+      notes.delete(key);
+      return {
+        status: "deleted",
+        notebook: { scope: input.scope, content: "", version: agentNoteContentVersion(""), updatedAt: undefined },
+      };
+    },
+    async deleteByOwner(owner) {
+      notes.delete(agentNoteScopeIdentity(owner));
+    },
   };
   return createAgentNotesFeature({ repository, now: () => "2026-07-26T00:00:00.000Z" });
 }
@@ -49,8 +69,11 @@ const context = { callerAgentId: "agent", traceId: "trace", goalId: "goal" };
 test("NoteWrite exposes an explicit full-note replacement contract", () => {
   const tool = createNoteWriteTool({
     notes: feature(),
-    workspaceRoot: "/project",
-    initialVersions: { global: agentNoteContentVersion(""), workspace: agentNoteContentVersion("") },
+    owner: { kind: "workspace", id: "workspace-project" },
+    initialVersions: {
+      global: agentNoteContentVersion(""),
+      owner: { scope: { kind: "workspace", id: "workspace-project" }, version: agentNoteContentVersion("") },
+    },
   });
   assert.equal(tool.definition.name, "NoteWrite");
   assert.equal(tool.definition.metadata?.operationType, "read-write");
@@ -68,31 +91,35 @@ test("NoteWrite lets the model save workspace and global notes without engineeri
   const notes = feature();
   const tool = createNoteWriteTool({
     notes,
-    workspaceRoot: "/project",
-    initialVersions: { global: agentNoteContentVersion(""), workspace: agentNoteContentVersion("") },
+    owner: { kind: "workspace", id: "workspace-project" },
+    initialVersions: {
+      global: agentNoteContentVersion(""),
+      owner: { scope: { kind: "workspace", id: "workspace-project" }, version: agentNoteContentVersion("") },
+    },
   });
 
   assert.deepEqual(
-    await tool.execute({ scope: "workspace", content: "- Build: pnpm build." }, context),
+    await tool.execute({ scope: "owner", content: "- Build: pnpm build." }, context),
     {
       status: "saved",
-      scope: "workspace",
+      scope: "owner",
       characters: 20,
       version: agentNoteContentVersion("- Build: pnpm build."),
       updatedAt: "2026-07-26T00:00:00.000Z",
     },
   );
-  assert.equal((await tool.execute({ scope: "workspace", content: "- Build: pnpm build:node." }, context) as { status: string }).status, "saved");
+  assert.equal((await tool.execute({ scope: "owner", content: "- Build: pnpm build:node." }, context) as { status: string }).status, "saved");
   await tool.execute({ scope: "global", content: "- Use Chinese." }, context);
 
-  assert.equal((await notes.queries.get({ kind: "workspace", workspaceRoot: "/project" })).content, "- Build: pnpm build:node.");
+  assert.equal((await notes.queries.get({ kind: "workspace", id: "workspace-project" })).content, "- Build: pnpm build:node.");
   assert.equal((await notes.queries.get({ kind: "global" })).content, "- Use Chinese.");
 });
 
 test("NoteWrite requires an explicit merge baseline after conflict and then advances the run-local version", async () => {
   const notes = feature();
-  const startup = await notes.queries.startupSnapshot("/project");
-  const tool = createNoteWriteTool({ notes, workspaceRoot: "/project", initialVersions: startup.versions });
+  const owner = { kind: "workspace", id: "workspace-project" } as const;
+  const startup = await notes.queries.startupSnapshot(owner);
+  const tool = createNoteWriteTool({ notes, owner, initialVersions: startup.versions });
   const external = await notes.commands.write({
     scope: { kind: "global" },
     content: "- New user preference.",
@@ -125,20 +152,48 @@ test("NoteWrite requires an explicit merge baseline after conflict and then adva
 });
 
 test("NoteWrite refuses an old run without frozen note versions", async () => {
-  const tool = createNoteWriteTool({ notes: feature(), workspaceRoot: "/project" });
-  assert.deepEqual(await tool.execute({ scope: "workspace", content: "- Unsafe overwrite." }, context), {
+  const tool = createNoteWriteTool({ notes: feature(), owner: { kind: "space", id: "space-project" } });
+  assert.deepEqual(await tool.execute({ scope: "owner", content: "- Unsafe overwrite." }, context), {
     status: "note_baseline_unavailable",
-    scope: "workspace",
+    scope: "owner",
     message: "This run has no frozen note versions, so NoteWrite cannot replace a note safely. Do not retry in this run.",
   });
 });
 
-test("NoteWrite reports malformed inputs as tool output instead of throwing", async () => {
-  const tool = createNoteWriteTool({ notes: feature(), workspaceRoot: "/project" });
-  assert.deepEqual(await tool.execute({ scope: "unknown", content: "x" }, context), {
-    status: "invalid_input", message: 'scope must be "workspace" or "global".',
+test("catalog-only NoteWrite never guesses an owner scope", async () => {
+  const tool = createNoteWriteTool({ notes: feature() });
+  assert.deepEqual(await tool.execute({ scope: "owner", content: "- Unsafe owner guess." }, context), {
+    status: "memory_scope_unavailable",
+    scope: "owner",
+    message: "This tool has no frozen conversation owner and cannot write owner-scoped notes.",
   });
-  assert.deepEqual(await tool.execute({ scope: "workspace" }, context), {
+});
+
+test("NoteWrite reports malformed inputs as tool output instead of throwing", async () => {
+  const tool = createNoteWriteTool({ notes: feature(), owner: { kind: "space", id: "space-project" } });
+  assert.deepEqual(await tool.execute({ scope: "unknown", content: "x" }, context), {
+    status: "invalid_input", message: 'scope must be "owner" or "global".',
+  });
+  assert.deepEqual(await tool.execute({ scope: "owner" }, context), {
     status: "invalid_input", message: "content must be a string containing the complete note.",
   });
+});
+
+test("NoteWrite reports an owner deletion without recreating the notebook", async () => {
+  const notes = feature();
+  const owner = { kind: "workspace", id: "workspace-deleted" } as const;
+  const startup = await notes.queries.startupSnapshot(owner);
+  const tool = createNoteWriteTool({ notes, owner, initialVersions: startup.versions });
+
+  await notes.commands.deleteByOwner(owner);
+  const result = await tool.execute({ scope: "owner", content: "- late write" }, context);
+  assert.deepEqual(result, {
+    status: "memory_owner_deleted",
+    scope: "owner",
+    message: "The workspace owner workspace-deleted is being deleted or has already been deleted; owner notes cannot be recreated.",
+  });
+
+  const globalResult = await tool.execute({ scope: "global", content: "- global still works" }, context);
+  assert.equal((globalResult as { readonly status: string }).status, "saved");
+  assert.equal((await notes.queries.get(owner)).content, "");
 });

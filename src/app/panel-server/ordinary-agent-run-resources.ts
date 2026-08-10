@@ -87,6 +87,11 @@ export type CreateOrdinaryAgentRunResourceAcquirerInput = {
   readonly resolveAgentDefinition: OrdinaryAgentDefinitionResolver;
   readonly resolveSkillContexts?: OrdinaryAgentSkillContextResolver;
   readonly resolveFeatureToolContributions?: HostFeatureAgentToolContributionResolver;
+  /** Binds feature-tool reads and explicit adoption to this exact Ordinary run. */
+  readonly resolveMemoryFactSink?: (input: {
+    readonly runId: string;
+    readonly conversationId: string;
+  }) => NonNullable<Parameters<HostFeatureAgentToolContributionResolver>[0]["memoryFacts"]>;
   readonly resolveSubAgentRoots: (workspaceRoot: string) => readonly SubAgentRootInput[];
   readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
   readonly resolveWorkspacePathAuthorization?: (input: {
@@ -208,7 +213,14 @@ export function createOrdinaryAgentRunResourceAcquirer(
               featureContributions: options.resolveFeatureToolContributions?.({
                 workspaceRoot: resources.workspaceRoot,
                 taskSoil,
+                memoryOwner: input.birth.memoryOwner,
                 agentNoteVersions: input.birth.agentNoteVersions,
+                run: { runId: input.runId, conversationId: input.conversationId },
+                memoryFacts: options.resolveMemoryFactSink?.({
+                  runId: input.runId,
+                  conversationId: input.conversationId,
+                }),
+                countMemoryTokens: tokenCounter.countText,
               }),
             }),
             createSkillToolRegistryContribution(skillContexts),

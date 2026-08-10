@@ -9,23 +9,39 @@ import {
   createPersonalKnowledgeToolRegistryContribution,
   type PersonalKnowledgeFeature,
 } from "../personal-knowledge/index.js";
+import {
+  createPathDependencyToolRegistryContribution,
+  type OrdinaryMemoryFactSink,
+  type PathDependencyTokenCounter,
+  type PathDependencyFeature,
+} from "../path-dependencies/index.js";
 import type {
   AgentToolProviderFetch,
   AgentToolRegistryContribution,
   AgentToolRuntimeContext,
 } from "../tool-center/factory.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import type { AgentHostRunResources } from "./agent-run-resources.js";
 
 export type HostFeatureAgentToolContributionResolver = (input: {
   readonly workspaceRoot: string;
   readonly taskSoil?: TaskSoil;
+  /** Undefined while CapabilityCenter is building a catalog outside a concrete run. */
+  readonly memoryOwner?: ConversationOwner;
   readonly agentNoteVersions?: AgentNoteVersions;
+  /** Present only for a concrete Ordinary run; never supplied by the model. */
+  readonly run?: { readonly runId: string; readonly conversationId: string };
+  /** Ordinary-owned durable sink for read/adoption facts. */
+  readonly memoryFacts?: OrdinaryMemoryFactSink;
+  /** Token counter frozen with the concrete run's model. */
+  readonly countMemoryTokens?: PathDependencyTokenCounter;
 }) => readonly AgentToolRegistryContribution[];
 
 /** Selects feature-owned tool contributions once at the Host composition boundary. */
 export function createHostFeatureAgentToolContributionResolver(input: {
   readonly agentNotes?: Pick<AgentNotesFeature, "commands" | "queries">;
+  readonly pathDependencies?: Pick<PathDependencyFeature, "commands" | "queries">;
   readonly spaces?: Pick<SpaceFeature, "commands" | "queries" | "events">;
   readonly personalKnowledge?: Pick<PersonalKnowledgeFeature, "commands" | "queries">;
   readonly revocationOverlay?: SpaceRevocationOverlay;
@@ -38,13 +54,22 @@ export function createHostFeatureAgentToolContributionResolver(input: {
   const revocationOverlay = input.revocationOverlay ?? (input.spaces === undefined
     ? undefined
     : createSpaceRevocationOverlay(input.spaces.events));
-  return ({ workspaceRoot, taskSoil, agentNoteVersions }) => [
+  return ({ workspaceRoot, taskSoil, memoryOwner, agentNoteVersions, run, memoryFacts, countMemoryTokens }) => [
     ...(input.agentNotes === undefined
       ? []
       : [createAgentNotesToolRegistryContribution({
           notes: input.agentNotes,
-          workspaceRoot,
+          owner: memoryOwner,
           initialVersions: agentNoteVersions,
+        })]),
+    ...(input.pathDependencies === undefined
+      ? []
+      : [createPathDependencyToolRegistryContribution({
+          dependencies: input.pathDependencies,
+          owner: memoryOwner,
+          run,
+          memoryFacts,
+          countMemoryTokens,
         })]),
     ...(input.spaces === undefined
       ? []

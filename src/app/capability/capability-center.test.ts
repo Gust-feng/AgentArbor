@@ -61,6 +61,7 @@ test("CapabilityCenter freezes Host-injected feature contributions for the effec
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-contributions-"));
   const workspace = path.join(directory, "workspace");
   const resolvedWorkspaces: string[] = [];
+  const resolvedOwners: unknown[] = [];
   try {
     const configCenter = new ConfigCenter({
       settingsStore: new FileSystemNormalSettingsStore(directory),
@@ -87,13 +88,15 @@ test("CapabilityCenter freezes Host-injected feature contributions for the effec
     const snapshot = await new CapabilityCenter({
       configCenter,
       skillRoots: [],
-      resolveToolContributions: ({ workspaceRoot }) => {
+      resolveToolContributions: ({ workspaceRoot, memoryOwner }) => {
         resolvedWorkspaces.push(workspaceRoot);
+        resolvedOwners.push(memoryOwner);
         return [contribution];
       },
-    }).snapshot({ executionRoot: workspace });
+    }).snapshot({ executionRoot: workspace, memoryOwner: { kind: "space", id: "space-1" } });
 
     assert.deepEqual(resolvedWorkspaces, [path.resolve(workspace)]);
+    assert.deepEqual(resolvedOwners, [{ kind: "space", id: "space-1" }]);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("FeatureOwnedTool"), true);
   } finally {
     await removeTestDirectory(directory);

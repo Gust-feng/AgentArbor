@@ -27,16 +27,12 @@ import {
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
 import { handlePanelAppUpdateRoute } from "./app-update-routes.js";
 import { OrdinaryFeatureError } from "../ordinary-agent/contracts.js";
-import { PathMemoryFeatureError } from "../path-memory/contracts.js";
 import { OrdinaryPanelCursorError } from "./ordinary-agent-panel-projection.js";
 import { handlePanelOrdinaryRoute } from "./ordinary-routes.js";
-import { handlePanelPathMemoryRoute, pathMemoryFeatureHttpError } from "./path-memory-routes.js";
-import { ExperienceCandidateFeatureError } from "../experience-candidate/contracts.js";
+import { agentMemoryHttpError, handlePanelAgentMemoryRoute } from "./agent-memory-routes.js";
+import { AgentNotesError } from "../agent-notes/index.js";
+import { PathDependencyFeatureError } from "../path-dependencies/index.js";
 import { SpaceFeatureError } from "../spaces/index.js";
-import {
-  experienceCandidateFeatureHttpError,
-  handlePanelExperienceCandidateRoute,
-} from "./experience-candidate-routes.js";
 import { handlePanelSpaceRoute, spaceFeatureHttpError } from "./space-routes.js";
 import { WorkspaceFeatureError } from "../workspaces/index.js";
 import { handlePanelWorkspaceRoute, workspaceFeatureHttpError } from "./workspace-routes.js";
@@ -84,6 +80,7 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
     await createdRuntime.spaceFeature.ready();
     await createdRuntime.spaceConversationLink.ready();
     await createdRuntime.spaceConversationDeletion.ready();
+    await createdRuntime.workspaceDeletion.ready();
     const server = createServer(createPanelRequestHandler(createdRuntime));
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 9090;
@@ -156,12 +153,8 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         writePanelError(response, ordinaryFeatureHttpError(error));
         return;
       }
-      if (error instanceof PathMemoryFeatureError) {
-        writePanelError(response, pathMemoryFeatureHttpError(error));
-        return;
-      }
-      if (error instanceof ExperienceCandidateFeatureError) {
-        writePanelError(response, experienceCandidateFeatureHttpError(error));
+      if (error instanceof AgentNotesError || error instanceof PathDependencyFeatureError) {
+        writePanelError(response, agentMemoryHttpError(error));
         return;
       }
       if (error instanceof SpaceFeatureError) {
@@ -275,11 +268,7 @@ async function handlePanelRequest(
     return;
   }
 
-  if (await handlePanelPathMemoryRoute(runtime, request, response, url)) {
-    return;
-  }
-
-  if (await handlePanelExperienceCandidateRoute(runtime, request, response, url)) {
+  if (await handlePanelAgentMemoryRoute(runtime, request, response, url)) {
     return;
   }
 
@@ -443,10 +432,7 @@ export async function releasePanelRuntimeResources(
   runtime.isQuiescing = true;
   const errors: unknown[] = [];
   await captureCleanupError(errors, () => ordinaryDisposal);
-  // Keep the connector subscribed until Ordinary has produced its final stable facts.
-  await captureCleanupError(errors, () => runtime.ordinaryPathMemoryConnector.release());
-  await captureCleanupError(errors, () => runtime.pathMemoryFeature.release());
-  await captureCleanupError(errors, () => runtime.experienceCandidateFeature.release());
+  await captureCleanupError(errors, () => runtime.pathDependencyFeature.release());
   await captureCleanupError(errors, async () => runtime.releaseWorkbenchProjectionChanges());
   await captureCleanupError(errors, () => releaseWorkbenchStorage(runtime));
   await captureCleanupError(errors, () => runtime.releaseAgentSessionStorage());
@@ -490,6 +476,7 @@ function ordinaryFeatureHttpError(error: OrdinaryFeatureError): PanelHttpError {
     case "ordinary_submission_conflict":
     case "ordinary_conversation_cleanup_pending":
     case "ordinary_managed_attachment_unavailable":
+    case "ordinary_memory_scope_unavailable":
     case "ordinary_completion_commit_failed":
       return new PanelHttpError(409, error.code, error.message);
   }

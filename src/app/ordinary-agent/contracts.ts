@@ -1,5 +1,6 @@
 import type { ConfirmationDecision, ConfirmationRequest } from "../../domain/confirmation/index.js";
 import type { ConversationOwner } from "../../domain/execution-scope/index.js";
+import type { MemoryContentKind, MemoryOwner } from "../../domain/memory/index.js";
 import type {
   BasicAgentCapabilitySnapshot,
   ModelRunReasoningEffort,
@@ -30,7 +31,7 @@ import type {
   OrdinaryManagedAttachmentRecord,
 } from "./managed-attachment-repository.js";
 
-export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v6" as const;
+export const ORDINARY_RUN_SCHEMA_VERSION = "ordinary-run/v7" as const;
 export const ORDINARY_CONVERSATION_SCHEMA_VERSION = "ordinary-conversation/v3" as const;
 
 export type OrdinaryFeatureErrorCode =
@@ -49,6 +50,7 @@ export type OrdinaryFeatureErrorCode =
   | "ordinary_submission_conflict"
   | "ordinary_conversation_cleanup_pending"
   | "ordinary_managed_attachment_unavailable"
+  | "ordinary_memory_scope_unavailable"
   | "ordinary_completion_commit_failed";
 
 /** Expected command/query failures that protocol adapters may map without parsing messages. */
@@ -107,7 +109,7 @@ export type OrdinaryFeatureDiagnostic =
       /** Durable deletion remains authoritative while startup or background cleanup retries this resource. */
       readonly kind: "conversation_cleanup_failed";
       readonly conversationId: string;
-      readonly phase: "run_enumeration" | "tool_evidence" | "run_snapshot" | "session" | "terminal_settlement" | "conversation_control";
+    readonly phase: "run_enumeration" | "tool_evidence" | "memory_facts" | "run_snapshot" | "session" | "terminal_settlement" | "conversation_control";
       readonly runId?: string;
       readonly error: unknown;
     }
@@ -147,6 +149,8 @@ export type OrdinaryRunBirth = {
   readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
   /** Versions of the Agent Notes text frozen into this run's instructions. */
   readonly agentNoteVersions?: AgentNoteVersions;
+  /** Stable non-global memory owner frozen with this run; never derived from cwd. */
+  readonly memoryOwner: ConversationOwner;
   /** Frozen provenance prevents the configured fallback becoming a user selection after restore. */
   readonly workspaceSelection?: "default" | "explicit";
   /** 模型可见的 owner 区块文本（ADR-0035 §6.2），随 birth 冻结；无 owner 时为 undefined。 */
@@ -337,6 +341,31 @@ export type OrdinaryRunSummary = {
   readonly createdAt: string;
   readonly updatedAt: string;
 };
+
+/**
+ * Ordinary owns these facts because only it can truthfully bind a memory read
+ * or explicit adoption to a specific run. The memory feature never increments
+ * usage counters by itself.
+ */
+export type OrdinaryMemoryFact = {
+  readonly factId: string;
+  readonly runId: string;
+  readonly conversationId: string;
+  readonly kind: "read" | "applied";
+  readonly memoryId: string;
+  readonly memoryKind: MemoryContentKind;
+  readonly owner: MemoryOwner;
+  readonly revision: number;
+  readonly title: string;
+  readonly recordedAt: string;
+  readonly note?: string;
+};
+
+export interface OrdinaryMemoryFactRepository {
+  append(fact: OrdinaryMemoryFact): Promise<"recorded" | "already_recorded">;
+  list(query?: { readonly runId?: string; readonly memoryId?: string }): Promise<readonly OrdinaryMemoryFact[]>;
+  deleteByRunIds(runIds: readonly string[]): Promise<void>;
+}
 
 export type OrdinaryRunRecoveryInventory = {
   readonly summaries: readonly OrdinaryRunSummary[];
@@ -547,7 +576,8 @@ export type SubmitOrdinaryTurnResult = {
  * Narrow public projection of one run whose terminal facts are stable: the
  * terminal snapshot and every accepted tool result are durably persisted and
  * the live execution has settled. This is an Ordinary-owned source contract
- * for read-only consumers such as PathMemory capture or audits.
+ * for read-only consumers such as audits and diagnostic projections. Historical
+ * PathMemory capture is intentionally not part of the production owner graph.
  */
 export type OrdinaryStableTerminalRunFacts = {
   readonly runId: string;
@@ -597,6 +627,8 @@ export interface OrdinaryAgentFeature {
     discardManagedAttachmentDraft(attachmentId: string): Promise<void>;
     cancel(runId: string, reason?: string): Promise<OrdinaryRunState>;
     decideApproval(input: DecideOrdinaryApprovalInput): Promise<OrdinaryRunState>;
+    recordMemoryRead(input: Omit<OrdinaryMemoryFact, "kind" | "memoryKind" | "recordedAt" | "conversationId">): Promise<void>;
+    recordMemoryReference(input: Omit<OrdinaryMemoryFact, "kind" | "memoryKind" | "recordedAt" | "conversationId">): Promise<"recorded" | "already_recorded" | "not_read">;
   };
   readonly queries: {
     getRun(runId: string): Promise<OrdinaryRunState | undefined>;
@@ -608,6 +640,7 @@ export interface OrdinaryAgentFeature {
     /** Owner 视角的对话列表（ADR-0035 §8.1），供删除协调与资源页 read-model 使用。 */
     listConversationsByOwner(owner: ConversationOwner): Promise<readonly OrdinaryConversationReadModel[]>;
     getManagedAttachment(attachmentId: string): Promise<OrdinaryManagedAttachmentRecord | undefined>;
+    listMemoryFacts(query?: { readonly runId?: string; readonly memoryId?: string }): Promise<readonly OrdinaryMemoryFact[]>;
     /** Returns undefined until the run's terminal facts are durably settled. */
     getStableTerminalRunFacts(runId: string): Promise<OrdinaryStableTerminalRunFacts | undefined>;
   };

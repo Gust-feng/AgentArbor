@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import type {
   BasicAgentCapabilitySnapshot,
   CapabilitySkillCatalogItem,
@@ -62,6 +63,8 @@ export type CapabilitySubAgentRootsInput = {
 
 export type CapabilityToolContributionsInput = {
   readonly workspaceRoot: string;
+  /** Present only when a concrete Conversation owner freezes a run catalog. */
+  readonly memoryOwner?: ConversationOwner;
 };
 
 export type CapabilityCenterOptions = {
@@ -83,6 +86,8 @@ export type CapabilityCenterOptions = {
 
 export type CapabilityCenterSnapshotInput = {
   readonly executionRoot?: string;
+  /** Owner-scoped feature tools must never derive identity from executionRoot. */
+  readonly memoryOwner?: ConversationOwner;
 };
 
 type CapabilityCenterSnapshotResult = {
@@ -163,7 +168,7 @@ export class CapabilityCenter {
   private async snapshotResult(
     input: CapabilityCenterSnapshotInput,
   ): Promise<CapabilityCenterSnapshotResult> {
-    if (input.executionRoot !== undefined) {
+    if (input.executionRoot !== undefined || input.memoryOwner !== undefined) {
       return this.buildSnapshot(input);
     }
     if (this.snapshotPromise === undefined) {
@@ -230,6 +235,7 @@ export class CapabilityCenter {
       }),
       ...(this.options.resolveToolContributions?.({
         workspaceRoot: executionRoot,
+        memoryOwner: input.memoryOwner,
       }) ?? []),
     ];
     applyAgentToolRegistryContributions(registry, { toolStates }, hostContributions);

@@ -4,6 +4,7 @@ import {
   Home,
   Layers,
   Library,
+  BookOpen,
   Pencil,
   Trash2,
   Plus,
@@ -28,7 +29,7 @@ import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
 import type { PersonalWorkspaceProjection } from '../../../workspace'
 
-export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'brain'
+export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'brain' | 'memory'
 
 interface SidebarProps {
   view: View
@@ -371,6 +372,14 @@ export function Sidebar({
             collapsed={collapsed}
             icon={<Library size={14}/>}
             label="知识库"
+          />
+          <SidebarNavRow
+            active={view === 'memory'}
+            onClick={() => onNavigate('memory')}
+            labelsVisible={labelsVisible}
+            collapsed={collapsed}
+            icon={<BookOpen size={14}/>}
+            label="记忆"
           />
         </div>
       </nav>

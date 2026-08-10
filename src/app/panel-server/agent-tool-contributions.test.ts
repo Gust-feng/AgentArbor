@@ -8,6 +8,7 @@ import {
   agentNoteContentVersion,
   type AgentNotesFeature,
 } from "../agent-notes/index.js";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import { createSpaceFeature, type SpaceFeature, type SpaceRepository, type SpaceTreeSnapshot } from "../spaces/index.js";
 import type { PersonalKnowledgeFeature } from "../personal-knowledge/index.js";
 import {
@@ -31,24 +32,46 @@ test("Host keeps the NoteWrite catalog contract static and injects run-born note
           },
         };
       },
+      async delete(command) {
+        return {
+          status: "deleted",
+          notebook: {
+            scope: command.scope,
+            content: "",
+            version: agentNoteContentVersion(""),
+            updatedAt: undefined,
+          },
+        };
+      },
+      async deleteByOwner() {
+        // This test exercises catalog and run-born NoteWrite wiring; owner
+        // deletion is covered by the deletion coordinators.
+      },
     },
     queries: {
       async get(scope) {
         return { scope, content: "", version: agentNoteContentVersion(""), updatedAt: undefined };
       },
-      async startupSnapshot() {
+      async startupSnapshot(owner: ConversationOwner) {
         return {
           injection: undefined,
-          versions: { global: agentNoteContentVersion(""), workspace: agentNoteContentVersion("") },
+          versions: {
+            global: agentNoteContentVersion(""),
+            owner: { scope: owner, version: agentNoteContentVersion("") },
+          },
         };
       },
     },
   };
   const registrations: Array<{ readonly name: string; readonly scopes: readonly string[]; readonly enabledByDefault: boolean }> = [];
   const resolveFeatureContributions = createHostFeatureAgentToolContributionResolver({ agentNotes: notes });
-  const versions = { global: agentNoteContentVersion("global"), workspace: agentNoteContentVersion("workspace") };
+  const owner = { kind: "workspace", id: "workspace-1" } as const;
+  const versions = {
+    global: agentNoteContentVersion("global"),
+    owner: { scope: owner, version: agentNoteContentVersion("owner") },
+  };
   const catalogContributions = resolveFeatureContributions({ workspaceRoot: "/workspace" });
-  const runContributions = resolveFeatureContributions({ workspaceRoot: "/workspace", agentNoteVersions: versions });
+  const runContributions = resolveFeatureContributions({ workspaceRoot: "/workspace", memoryOwner: owner, agentNoteVersions: versions });
   let catalogNoteWrite: ToolExecutor | undefined;
   let runNoteWrite: ToolExecutor | undefined;
   for (const contribution of catalogContributions) {
@@ -80,10 +103,10 @@ test("Host keeps the NoteWrite catalog contract static and injects run-born note
   });
   assert.deepEqual(runNoteWrite?.definition, catalogNoteWrite?.definition);
   assert.equal((await runNoteWrite?.execute(
-    { scope: "workspace", content: "next" },
+    { scope: "owner", content: "next" },
     { callerAgentId: "agent", traceId: "trace", goalId: "goal" },
   ) as { status: string }).status, "saved");
-  assert.equal(observedExpectedVersion, versions.workspace);
+  assert.equal(observedExpectedVersion, versions.owner.version);
 });
 
 test("Host selects feature-owned Space and Personal Knowledge contributions", () => {

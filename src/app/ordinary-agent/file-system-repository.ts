@@ -212,6 +212,18 @@ const capabilitySnapshotSchema = z.preprocess((value: unknown) => {
   mcpCatalog: z.array(z.object({ serverId: z.string().min(1), enabled: z.boolean(), availability: z.string() }).passthrough()),
   executionRoot: z.string().min(1), securitySummary: z.string(), warnings: z.array(z.string()),
 }).passthrough());
+const memoryOwnerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("space"), id: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("workspace"), id: z.string().min(1) }).strict(),
+]);
+const agentNoteVersionSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
+const agentNoteVersionsSchema = z.object({
+  global: agentNoteVersionSchema,
+  owner: z.object({
+    scope: memoryOwnerSchema,
+    version: agentNoteVersionSchema,
+  }).strict(),
+}).strict();
 const birthSchema = z.object({
   instructions: z.string(), aiMode: z.enum(["none", "fake", "openai-compatible", "openai-responses"]), config: configSchema,
   reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
@@ -220,10 +232,8 @@ const birthSchema = z.object({
     outputContractId: z.string().min(1), toolVisibilityProfileId: z.string().min(1), definitionHash: z.string().optional(),
   }).strict(),
   capabilitySnapshot: capabilitySnapshotSchema,
-  agentNoteVersions: z.object({
-    global: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
-    workspace: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
-  }).strict().optional(),
+  agentNoteVersions: agentNoteVersionsSchema.optional(),
+  memoryOwner: memoryOwnerSchema,
   workspaceSelection: z.enum(["default", "explicit"]).optional(),
   ownerContext: z.string().max(16_000).optional(),
   informationAccess: z.object({
@@ -236,7 +246,17 @@ const birthSchema = z.object({
     }).strict(),
   }).passthrough(),
   toolConfirmationPolicy: z.enum(["prompt", "full_access"]),
-}).strict();
+}).strict().superRefine((birth, context) => {
+  if (birth.agentNoteVersions === undefined) return;
+  if (birth.agentNoteVersions.owner.scope.kind !== birth.memoryOwner.kind ||
+      birth.agentNoteVersions.owner.scope.id !== birth.memoryOwner.id) {
+    context.addIssue({
+      code: "custom",
+      message: "memoryOwner must match the owner captured in agentNoteVersions",
+      path: ["agentNoteVersions", "owner", "scope"],
+    });
+  }
+});
 const statusSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("queued") }).strict(),
   z.object({ kind: z.literal("running") }).strict(),
@@ -716,6 +736,13 @@ async function migrateV5Snapshot(
     );
   }
 
+  // ordinary-run/v5 predates the owner-scoped memory contract.  A historical
+  // snapshot is migratable only when an explicit stable owner was already
+  // recorded by a prior host-side migration.  Never infer one from cwd,
+  // executionRoot, workspaceSelection, or the run/conversation id: doing so
+  // would silently move Notes and path dependencies across memory scopes.
+  assertV5StableMemoryOwner(envelope.data.state, runId);
+
   const migratedState = toPersistedJsonShape(envelope.data.state) as Record<string, unknown>;
   if (isCompletedV5Status(envelope.data.state.status, runId)) {
     const session = v5CompletedSessionSchema.safeParse(envelope.data.state.session);
@@ -759,6 +786,35 @@ async function migrateV5Snapshot(
   await preserveV5Snapshot(rootDir, runId, originalContent);
   await writeJsonAtomically(snapshotPath(rootDir, runId), validation.data);
   return validation.data;
+}
+
+function assertV5StableMemoryOwner(state: unknown, runId: string): void {
+  if (typeof state !== "object" || state === null || Array.isArray(state)) {
+    throw new OrdinaryRunSnapshotIncompatibleError(runId, "v5 migration has no stable memory owner");
+  }
+  const birth = (state as Record<string, unknown>).birth;
+  if (typeof birth !== "object" || birth === null || Array.isArray(birth)) {
+    throw new OrdinaryRunSnapshotIncompatibleError(runId, "v5 migration has no birth record containing a stable memory owner");
+  }
+  const birthRecord = birth as Record<string, unknown>;
+  const owner = memoryOwnerSchema.safeParse(birthRecord.memoryOwner);
+  if (!owner.success) {
+    throw new OrdinaryRunSnapshotIncompatibleError(
+      runId,
+      "v5 snapshot lacks an explicit stable memoryOwner; migration refuses to guess from cwd or path",
+    );
+  }
+  const versions = birthRecord.agentNoteVersions;
+  if (versions === undefined) return;
+  const parsedVersions = agentNoteVersionsSchema.safeParse(versions);
+  if (!parsedVersions.success ||
+      parsedVersions.data.owner.scope.kind !== owner.data.kind ||
+      parsedVersions.data.owner.scope.id !== owner.data.id) {
+    throw new OrdinaryRunSnapshotIncompatibleError(
+      runId,
+      "v5 snapshot Agent Notes versions do not contain the same stable owner; migration refuses to guess",
+    );
+  }
 }
 
 const v5CompletedStatusSchema = z.object({ kind: z.literal("completed"), answer: z.string() }).strict();

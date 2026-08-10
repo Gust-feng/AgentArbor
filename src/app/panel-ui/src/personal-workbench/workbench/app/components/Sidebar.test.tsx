@@ -2,6 +2,30 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import { Sidebar } from './Sidebar'
 
+test('exposes memory as an independent sidebar destination', () => {
+  const onNavigate = vi.fn()
+  render(
+    <Sidebar
+      view="home"
+      onNavigate={onNavigate}
+      onOpenSettings={vi.fn()}
+      collapsed={false}
+      conversations={[]}
+      spaces={[]}
+      activeSpaceId={null}
+      onOpenConversation={() => true}
+      pendingConversationIds={new Set()}
+      onRenameConversation={vi.fn()}
+      onToggleConversationPinned={vi.fn()}
+      onDeleteConversation={vi.fn()}
+      onActiveSpaceChange={vi.fn()}
+    />,
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: '记忆' }))
+  expect(onNavigate).toHaveBeenCalledWith('memory')
+})
+
 test('offers settings without presenting a fabricated account identity', () => {
   const onOpenSettings = vi.fn()
   render(

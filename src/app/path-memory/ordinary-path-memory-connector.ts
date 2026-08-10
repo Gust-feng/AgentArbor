@@ -8,6 +8,12 @@ import type {
   PathMemoryOutcome,
 } from "./contracts.js";
 
+/**
+ * Historical bridge retained only with the PathMemory orphan. The production
+ * runtime deliberately does not construct it, and future path-dependencies
+ * code must not reconnect this automatic run capture or migrate its records.
+ */
+
 export type OrdinaryPathMemoryConnector = {
   /** Resolves when startup reconciliation has drained. Ordinary routes never depend on it. */
   ready(): Promise<void>;

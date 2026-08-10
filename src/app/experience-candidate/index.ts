@@ -1,3 +1,9 @@
+/**
+ * Historical ExperienceCandidate implementation retained as a buildable
+ * orphan for contract and repository regression coverage. It has no
+ * production composition, route or settings owner and must not be reattached
+ * as a source or migration input for the new path-dependencies feature.
+ */
 export {
   EXPERIENCE_CANDIDATE_SCHEMA_VERSION,
   ExperienceCandidateFeatureError,

@@ -32,8 +32,6 @@ import type { AgentArborRunMode as PanelRunMode } from "../run-runtime-core/run-
 import { DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS } from "../config-center/desktop-agent-settings.js";
 import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
-import type { PathMemoryListFilter, PathMemorySearchInput } from "../path-memory/contracts.js";
-import { PATH_MEMORY_SEARCH_MAX_LIMIT } from "../path-memory/search.js";
 import { z } from "zod";
 import { PanelHttpError } from "./http-utils.js";
 
@@ -121,7 +119,6 @@ const webSearchProviderSchema = z.enum(["tavily", "exa", "zai", "metaso", "googl
 const runModeSchema = z.enum(["agent", "deep"]);
 const toolConfirmationPolicySchema = z.enum(["prompt", "full_access"]);
 const skillTriggerModeSchema = z.enum(["keyword", "model"]);
-const pathMemoryTerminalStatusSchema = z.enum(["completed", "failed", "cancelled", "blocked"]);
 const aiModeSchema = z.enum(["none", "fake", "openai-compatible", "openai-responses"]);
 const configuredAiModeSchema = z.enum(["none", "openai-compatible", "openai-responses"]);
 
@@ -539,83 +536,6 @@ export function parseSkillStateRequest(raw: unknown): { readonly enabled: boolea
 
 export function parseConversationRollbackInput(raw: unknown): ConversationRollbackInput {
   return conversationRollbackRequestSchema.parse(raw);
-}
-
-const pathMemoryListQuerySchema = z.preprocess(normalizeRequestObject, z.object({
-  conversationId: optionalTrimmedStringSchema,
-  workspaceRoot: optionalTrimmedStringSchema,
-  terminalStatus: z.unknown().optional(),
-  limit: z.unknown().optional(),
-}));
-
-export function parsePathMemoryListQuery(raw: unknown): PathMemoryListFilter {
-  const request = pathMemoryListQuerySchema.parse(raw);
-  return {
-    conversationId: request.conversationId,
-    workspaceRoot: request.workspaceRoot,
-    terminalStatus: parseOptionalEnum(
-      pathMemoryTerminalStatusSchema,
-      request.terminalStatus,
-      "invalid_path_memory_terminal_status",
-      "路径记忆终态过滤只能是 completed、failed、cancelled 或 blocked。",
-    ),
-    limit: parsePathMemoryLimit(request.limit),
-  };
-}
-
-const pathMemorySearchQuerySchema = z.preprocess(normalizeRequestObject, z.object({
-  q: z.unknown().optional(),
-  conversationId: optionalTrimmedStringSchema,
-  workspaceRoot: optionalTrimmedStringSchema,
-  terminalStatus: z.unknown().optional(),
-  limit: z.unknown().optional(),
-}));
-
-export function parsePathMemorySearchQuery(raw: unknown): PathMemorySearchInput {
-  const request = pathMemorySearchQuerySchema.parse(raw);
-  const text = typeof request.q === "string" ? request.q.trim() : "";
-  if (text.length === 0) {
-    throw new PanelHttpError(400, "invalid_path_memory_search_query", "路径记忆检索需要非空 q。");
-  }
-  return {
-    text,
-    conversationId: request.conversationId,
-    workspaceRoot: request.workspaceRoot,
-    terminalStatus: parseOptionalEnum(
-      pathMemoryTerminalStatusSchema,
-      request.terminalStatus,
-      "invalid_path_memory_terminal_status",
-      "路径记忆终态过滤只能是 completed、failed、cancelled 或 blocked。",
-    ),
-    limit: parsePathMemorySearchLimit(request.limit),
-  };
-}
-
-function parsePathMemorySearchLimit(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
-  const parsed = typeof value === "string" ? Number(value) : value;
-  if (
-    typeof parsed !== "number" ||
-    !Number.isSafeInteger(parsed) ||
-    parsed < 1 ||
-    parsed > PATH_MEMORY_SEARCH_MAX_LIMIT
-  ) {
-    throw new PanelHttpError(
-      400,
-      "invalid_path_memory_limit",
-      `路径记忆检索 limit 必须是 1 到 ${PATH_MEMORY_SEARCH_MAX_LIMIT} 的整数。`,
-    );
-  }
-  return parsed;
-}
-
-function parsePathMemoryLimit(value: unknown): number {
-  if (value === undefined || value === null || value === "") return 100;
-  const parsed = typeof value === "string" ? Number(value) : value;
-  if (typeof parsed !== "number" || !Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new PanelHttpError(400, "invalid_path_memory_limit", "路径记忆 limit 必须是正整数。");
-  }
-  return parsed;
 }
 
 export function parseContextAttachmentPreviewRequest(raw: unknown): ContextAttachmentPreviewRequestInput {

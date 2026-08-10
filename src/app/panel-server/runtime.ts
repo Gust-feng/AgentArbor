@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { ConversationOwner } from "../../domain/execution-scope/index.js";
+import { memoryOwnersForConversation } from "../../domain/memory/index.js";
 import {
   FileSystemAgentSessionRepository,
 } from "../../adapters/intelligence/index.js";
@@ -16,6 +17,7 @@ import {
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
 import { createMinimalReadonlySoilStore } from "../../domain/soil/index.js";
+import { createOpenAITokenCounter } from "../context-maintenance/index.js";
 import { createRuntimeAgentDefinitionCatalog } from "../agent-definitions/agent-definition-catalog.js";
 import { agentDefinitionRefMatchesDefinition, runAgentDefinitionRefCacheKey } from "../agent-definitions/agent-definition-ref.js";
 import type { AgentDefinitionRegistry } from "../agent-definitions/agent-definition-registry.js";
@@ -47,30 +49,25 @@ import {
 } from "../ordinary-agent/agent-loop-execution.js";
 import {
   createOrdinaryAgentFeature,
+  createFileSystemOrdinaryMemoryFactRepository,
   createFileSystemOrdinaryManagedAttachmentRepository,
   OrdinaryManagedAttachmentRepositoryError,
   type OrdinaryAgentFeature,
   type OrdinaryRunBirth,
 } from "../ordinary-agent/index.js";
 import {
-  createFileSystemPathMemoryRepository,
-  createPathMemoryFeature,
-  type PathMemoryFeature,
-} from "../path-memory/index.js";
-import {
-  createOrdinaryPathMemoryConnector,
-  type OrdinaryPathMemoryConnector,
-} from "../path-memory/ordinary-path-memory-connector.js";
-import {
-  createExperienceCandidateFeature,
-  createFileSystemExperienceCandidateRepository,
-  type ExperienceCandidateFeature,
-} from "../experience-candidate/index.js";
-import {
   createAgentNotesFeature,
   createFileSystemAgentNoteRepository,
   type AgentNotesFeature,
 } from "../agent-notes/index.js";
+import {
+  createFileSystemPathDependencyRepository,
+  createPathDependencyFeature,
+  PATH_DEPENDENCY_DIRECTORY_MAX_ENTRIES,
+  renderPathDependencyDirectory,
+  type PathDependencyDirectoryEntry,
+  type PathDependencyFeature,
+} from "../path-dependencies/index.js";
 import {
   canonicalSpacePathIdentity,
   createSpaceRunPathAuthorization,
@@ -178,6 +175,7 @@ export type PanelRuntime = {
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
   readonly resolveManagedAttachmentPath: (attachmentId: string) => Promise<string | undefined>;
   readonly agentNotesFeature: AgentNotesFeature;
+  readonly pathDependencyFeature: PathDependencyFeature;
   readonly spaceFeature: SpaceFeature;
   readonly workspaceFeature: WorkspaceFeature;
   readonly spaceConversationLink: SpaceConversationLinkCoordinator;
@@ -185,9 +183,6 @@ export type PanelRuntime = {
   readonly workspaceDeletion: WorkspaceDeletionCoordinator;
   readonly personalKnowledgeFeature: PersonalKnowledgeFeature<import("../panel-api-contracts.js").DocumentPreview>;
   readonly workbenchDataMaintenance: WorkbenchDataMaintenance;
-  readonly pathMemoryFeature: PathMemoryFeature;
-  readonly experienceCandidateFeature: ExperienceCandidateFeature;
-  readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput, conversationId?: string) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
   readonly workbenchDatabase: SqliteRuntimeDatabase;
@@ -431,6 +426,16 @@ function assemblePanelRuntime(input: {
   const agentNotesFeature = createAgentNotesFeature({
     repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
   });
+  // Path dependencies are durable methodology memories. They deliberately
+  // live beside, rather than inside, Ordinary run snapshots: Ordinary owns
+  // the run-bound read/adoption facts, while this feature owns the reusable
+  // content and its revision history.
+  const pathDependencyFeature = createPathDependencyFeature({
+    repository: createFileSystemPathDependencyRepository(path.join(runtimeHome, "path-dependencies")),
+  });
+  const ordinaryMemoryFactRepository = createFileSystemOrdinaryMemoryFactRepository(
+    ordinaryRuntimeRoot,
+  );
   const spaceFeature = createSpaceFeature({
     repository: spaceRepository,
     workspaceMountIdentity: canonicalWorkspaceMountIdentity,
@@ -567,6 +572,7 @@ function assemblePanelRuntime(input: {
   });
   const resolveFeatureToolContributions = createHostFeatureAgentToolContributionResolver({
     agentNotes: agentNotesFeature,
+    pathDependencies: pathDependencyFeature,
     spaces: spaceFeature,
     personalKnowledge: personalKnowledgeFeature,
     revocationOverlay: spaceRevocationOverlay,
@@ -624,6 +630,13 @@ function assemblePanelRuntime(input: {
         : { routingMode: "keyword", abortSignal: context.abortSignal },
     ),
     resolveFeatureToolContributions,
+    resolveMemoryFactSink: ({ runId }) => ({
+      recordRead: async (fact) => {
+        await ordinaryAgentFeature.commands.recordMemoryRead({ runId, ...fact });
+      },
+      recordReference: async (fact) =>
+        await ordinaryAgentFeature.commands.recordMemoryReference({ runId, ...fact }),
+    }),
     contextAttachmentReadAuthorization,
     resolveWorkspacePathAuthorization: ({ taskSoil, workspaceRoot }) =>
       createSpaceRunPathAuthorization({
@@ -642,6 +655,7 @@ function assemblePanelRuntime(input: {
     releaseToolEvidenceOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
     managedAttachmentRepository,
     managedAttachmentInstanceId,
+    memoryFactRepository: ordinaryMemoryFactRepository,
     onDiagnostic: (diagnostic) => {
       if (diagnostic.kind === "session_finalization_failed") {
         console.error(`[panel-server] Ordinary run ${diagnostic.runId} Session finalization failed; the conversation queue stays paused until a retry succeeds`, diagnostic.error);
@@ -677,31 +691,38 @@ function assemblePanelRuntime(input: {
     spaces: spaceFeature,
     ordinary: ordinaryAgentFeature,
     personalKnowledge: personalKnowledgeFeature,
+    agentNotes: agentNotesFeature.commands,
+    memory: pathDependencyFeature.commands,
     processes: processRegistry,
     processTerminator,
     journal: spaceConversationDeletionJournal,
+    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
+  });
+  const workspaceDeletion = createWorkspaceDeletionCoordinator({
+    workspaces: {
+      commands: { deleteWorkspace: workspaceFeature.commands.deleteWorkspace, unlinkWorkspaceFromSpace: workspaceFeature.commands.unlinkWorkspaceFromSpace },
+      queries: { get: workspaceFeature.queries.get, list: workspaceFeature.queries.list },
+    },
+    ordinary: {
+      commands: { deleteConversation: ordinaryAgentFeature.commands.deleteConversation },
+      queries: { listConversationsByOwner: ordinaryAgentFeature.queries.listConversationsByOwner },
+    },
+    agentNotes: agentNotesFeature.commands,
+    memory: pathDependencyFeature.commands,
+    processes: processRegistry,
+    processTerminator,
     runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
   });
   const spaceConversationLink = createSpaceConversationLinkCoordinator({
     spaces: spaceFeature,
     ordinary: ordinaryAgentFeature,
     workspaces: { queries: workspaceFeature.queries },
+    workspaceAdmission: (workspaceId, operation) => workspaceDeletion.admit(workspaceId, operation),
+    spaceAdmission: (spaceId, operation) => spaceConversationDeletion.admit(spaceId, operation),
     processes: processRegistry,
     processTerminator,
     journal: spaceConversationLinkJournal,
     runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
-  });
-  const workspaceDeletion = createWorkspaceDeletionCoordinator({
-    workspaces: {
-      commands: { deleteWorkspace: workspaceFeature.commands.deleteWorkspace, unlinkWorkspaceFromSpace: workspaceFeature.commands.unlinkWorkspaceFromSpace },
-      queries: { get: workspaceFeature.queries.get },
-    },
-    ordinary: {
-      commands: { deleteConversation: ordinaryAgentFeature.commands.deleteConversation },
-      queries: { listConversationsByOwner: ordinaryAgentFeature.queries.listConversationsByOwner },
-    },
-    processes: processRegistry,
-    processTerminator,
   });
   const projectionChangeUnsubscribers = [
     spaceFeature.events.subscribe((event) => {
@@ -726,26 +747,6 @@ function assemblePanelRuntime(input: {
       workbenchProjectionChanges.publish({ owners: ["mounted_files"] });
     }),
   ];
-  const pathMemoryFeature = createPathMemoryFeature({
-    repository: createFileSystemPathMemoryRepository(resolvePathMemoryRoot(input)),
-  });
-  const experienceCandidateFeature = createExperienceCandidateFeature({
-    repository: createFileSystemExperienceCandidateRepository(resolveExperienceCandidateRoot(input)),
-    // Narrow cross-feature port: candidates only reference PathMemory records
-    // that exist at proposal time; no feature object crosses the boundary.
-    pathMemoryLookup: async (memoryId) => await pathMemoryFeature.queries.get(memoryId) !== undefined,
-  });
-  // Wiring adapter only: memory capture failures are diagnostics and never
-  // block or rewrite the user's Ordinary runs.
-  const ordinaryPathMemoryConnector = createOrdinaryPathMemoryConnector({
-    ordinary: ordinaryAgentFeature,
-    pathMemory: pathMemoryFeature,
-    onDiagnostic: (diagnostic) => console.error(
-      `[panel-server] PathMemory ${diagnostic.source} capture failed`,
-      diagnostic.runId,
-      diagnostic.error,
-    ),
-  });
   const runtime: PanelRuntime = {
     isQuiescing: false,
     configCenter: input.configCenter,
@@ -772,6 +773,7 @@ function assemblePanelRuntime(input: {
     ordinaryAgentFeature,
     resolveManagedAttachmentPath,
     agentNotesFeature,
+    pathDependencyFeature,
     spaceFeature,
     workspaceFeature,
     spaceConversationLink,
@@ -779,9 +781,6 @@ function assemblePanelRuntime(input: {
     workspaceDeletion,
     personalKnowledgeFeature,
     workbenchDataMaintenance,
-    pathMemoryFeature,
-    experienceCandidateFeature,
-    ordinaryPathMemoryConnector,
     prepareOrdinaryRunBirth: (runInput, conversationId) => prepareOrdinaryRunBirth(runtime, runInput, conversationId),
     toolOutputStore,
     workbenchDatabase,
@@ -810,6 +809,7 @@ function assemblePanelRuntime(input: {
   beforeWorkbenchRestoreStage = () => restorePreparation ??= (async () => {
     runtime.isQuiescing = true;
     await ordinaryAgentFeature.release();
+    await pathDependencyFeature.release();
     await initialWorkbenchData.ensure();
     await personalKnowledgeFeature.release();
     await spaceFeature.release();
@@ -949,18 +949,6 @@ function resolveOrdinaryRuntimeRoot(input: {
   return path.join(runtimeHome, "ordinary-agent");
 }
 
-function resolvePathMemoryRoot(input: {
-  readonly runtimePaths?: AgentArborRuntimePaths;
-  readonly configDirectory?: string;
-}): string {
-  const runtimeHome = input.runtimePaths?.runtimeHome ??
-    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
-  if (runtimeHome === undefined) {
-    throw new Error("PathMemory requires a runtime directory.");
-  }
-  return path.join(runtimeHome, "path-memory");
-}
-
 function resolveAgentNotesRoot(input: {
   readonly runtimePaths?: AgentArborRuntimePaths;
   readonly configDirectory?: string;
@@ -971,18 +959,6 @@ function resolveAgentNotesRoot(input: {
     throw new Error("Agent notes require a runtime directory.");
   }
   return path.join(runtimeHome, "agent-notes");
-}
-
-function resolveExperienceCandidateRoot(input: {
-  readonly runtimePaths?: AgentArborRuntimePaths;
-  readonly configDirectory?: string;
-}): string {
-  const runtimeHome = input.runtimePaths?.runtimeHome ??
-    (input.configDirectory === undefined ? undefined : path.join(input.configDirectory, "runtime"));
-  if (runtimeHome === undefined) {
-    throw new Error("ExperienceCandidate requires a runtime directory.");
-  }
-  return path.join(runtimeHome, "experience-candidates");
 }
 
 function resolveToolEvidenceRoot(input: {
@@ -1025,7 +1001,7 @@ async function prepareOrdinaryRunBirth(
   const [informationAccess, toolConfirmation, baseCapabilitySnapshot, desktopAgentConfig] = await Promise.all([
     runtime.configCenter.getInformationAccessConfig(),
     runtime.configCenter.getToolConfirmationConfig(),
-    capabilitySnapshotForRun(runtime, input.modelOverride, scope.cwd),
+    capabilitySnapshotForRun(runtime, input.modelOverride, scope.cwd, scope.owner),
     runtime.configCenter.getDesktopAgentConfig(),
   ]);
   const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
@@ -1033,12 +1009,24 @@ async function prepareOrdinaryRunBirth(
     input.reasoningEffort,
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
-  const ownerContext = await formatOwnerContext(runtime, scope);
-  const noteSnapshot = await runtime.agentNotesFeature.queries.startupSnapshot(capabilitySnapshot.executionRoot);
-  // The injected note is frozen with this run's definition. This preserves the
-  // existing definition/hash invariant: a restarted run uses exactly the notes
-  // it saw at birth, while the next run sees any later model-written revision.
-  const definition = definitionWithAgentNotes(configuredDefinition, noteSnapshot.injection);
+  const [ownerContext, noteSnapshot, pathDependencyDirectory] = await Promise.all([
+    formatOwnerContext(runtime, scope),
+    runtime.agentNotesFeature.queries.startupSnapshot(scope.owner),
+    runtime.pathDependencyFeature.queries.directory({
+      owners: memoryOwnersForConversation(scope.owner),
+      limit: PATH_DEPENDENCY_DIRECTORY_MAX_ENTRIES,
+      excerptChars: 240,
+    }),
+  ]);
+  // Both memory injections are frozen with this run's definition. A restarted
+  // run therefore sees the exact directory and declarative notes available at
+  // birth; the following run sees any later revision deliberately.
+  const definition = definitionWithMemoryContext(
+    configuredDefinition,
+    noteSnapshot.injection,
+    pathDependencyDirectory,
+    createOpenAITokenCounter(capabilitySnapshot.activeModel.model ?? "gpt-4o").countText,
+  );
   const agentDefinitionRef = runAgentDefinitionRef(definition);
   runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), definition);
   return {
@@ -1049,6 +1037,7 @@ async function prepareOrdinaryRunBirth(
     agentDefinitionRef,
     capabilitySnapshot,
     agentNoteVersions: noteSnapshot.versions,
+    memoryOwner: scope.owner,
     workspaceSelection: "explicit",
     ownerContext,
     informationAccess,
@@ -1096,19 +1085,40 @@ async function resolveConversationExecutionScope(
   conversationId: string | undefined,
 ): Promise<{ readonly owner: ConversationOwner; readonly cwd: string; readonly managedRoot?: string }> {
   const requestedOwner = input.owner ?? (input.spaceId === undefined ? undefined : { kind: "space" as const, id: input.spaceId });
-  const owner = requestedOwner ?? (conversationId === undefined
+  const canonicalOwner = conversationId === undefined
     ? undefined
-    : await runtime.ordinaryAgentFeature.queries.getConversationOwner(conversationId));
+    : await runtime.ordinaryAgentFeature.queries.getConversationOwner(conversationId);
+  if (requestedOwner !== undefined && canonicalOwner !== undefined &&
+    (requestedOwner.kind !== canonicalOwner.kind || requestedOwner.id !== canonicalOwner.id)) {
+    throw new Error(`Conversation ${conversationId} owner cannot be changed after creation.`);
+  }
+  const owner = canonicalOwner ?? requestedOwner;
   if (owner === undefined) {
     throw new Error("Conversation owner is required before run birth.");
   }
   if (owner.kind === "workspace") {
+    // Run birth is also a host boundary (not only an HTTP route). Check both
+    // the in-process deletion gate and the durable status so a restart cannot
+    // birth a run for a Workspace whose cascade is still pending.
+    runtime.workspaceDeletion.assertAvailable(owner.id);
     const workspace = await runtime.workspaceFeature.queries.get(owner.id);
+    if (workspace?.status !== "available") {
+      if (workspace === undefined) {
+        throw new PanelHttpError(404, "workspace_not_found", `工作区 ${owner.id} 不存在。`);
+      }
+      throw new PanelHttpError(409, "workspace_not_available", `工作区 ${owner.id} 当前不可用。`);
+    }
     const mount = workspace?.mounts.find((entry) => entry.status === "active");
     if (mount === undefined) {
       throw new Error(`Workspace ${owner.id} has no active mount and cannot host a run.`);
     }
     return { owner, cwd: mount.rootPath };
+  }
+  // Run birth is a host boundary as well as an HTTP route. Reject a Space
+  // whose deletion journal is active before creating a frozen birth snapshot.
+  runtime.spaceConversationDeletion.assertAvailable(owner.id);
+  if (await runtime.spaceFeature.queries.getTree(owner.id) === undefined) {
+    throw new PanelHttpError(404, "space_not_found", `Space ${owner.id} was not found.`);
   }
   const managedRoot = path.join(resolveRuntimeHome(runtime), "spaces", owner.id, "files");
   await ensureSpaceManagedRoot(managedRoot);
@@ -1119,22 +1129,43 @@ async function ensureSpaceManagedRoot(managedRoot: string): Promise<void> {
   await fs.mkdir(managedRoot, { recursive: true });
 }
 
-function definitionWithAgentNotes(
+function definitionWithMemoryContext(
   definition: AgentDefinition,
   noteInjection: string | undefined,
+  pathDependencyDirectory: readonly PathDependencyDirectoryEntry[],
+  countMemoryTokens: (text: string) => number,
 ): AgentDefinition {
-  if (noteInjection === undefined) return definition;
-  const systemPrompt = `${definition.prompt.systemPrompt}\n\n<agent_notes>\n${noteInjection}\n</agent_notes>`;
+  const directoryInjection = pathDependencyDirectoryInjection(pathDependencyDirectory, countMemoryTokens);
+  if (noteInjection === undefined && directoryInjection === undefined) return definition;
+  const systemPrompt = [
+    definition.prompt.systemPrompt,
+    ...(noteInjection === undefined ? [] : ["<agent_notes>", noteInjection, "</agent_notes>"]),
+    ...(directoryInjection === undefined ? [] : ["<path_dependency_directory>", directoryInjection, "</path_dependency_directory>"]),
+  ].join("\n\n");
   const fingerprint = createHash("sha256").update(systemPrompt, "utf8").digest("hex").slice(0, 12);
+  const promptSuffix = noteInjection === undefined ? "path-dependencies" : "agent-notes";
+  const versionSuffix = noteInjection === undefined ? "path-dependencies" : "notes";
   return {
     ...definition,
     prompt: {
       ...definition.prompt,
-      promptRef: `${definition.prompt.promptRef}:agent-notes`,
-      version: `${definition.prompt.version}:notes-${fingerprint}`,
+      promptRef: `${definition.prompt.promptRef}:${promptSuffix}`,
+      version: `${definition.prompt.version}:${versionSuffix}-${fingerprint}`,
       systemPrompt,
     },
   };
+}
+
+/**
+ * The prompt contains only a small directory, never a full methodology. The
+ * model must choose whether a candidate warrants MemoryRead, then separately
+ * record deliberate adoption with MemoryReference.
+ */
+function pathDependencyDirectoryInjection(
+  entries: readonly PathDependencyDirectoryEntry[],
+  countMemoryTokens: (text: string) => number,
+): string | undefined {
+  return renderPathDependencyDirectory(entries, countMemoryTokens);
 }
 
 function resolveAppUpdateService(options: PanelServerOptions): AppUpdateServiceLike {
@@ -1182,8 +1213,9 @@ async function capabilitySnapshotForRun(
   runtime: PanelRuntime,
   override: PanelRunInput["modelOverride"],
   executionRoot: string,
+  memoryOwner: ConversationOwner,
 ): Promise<import("../../domain/config/index.js").BasicAgentCapabilitySnapshot> {
-  const snapshot = await runtime.capabilityCenter.snapshot({ executionRoot });
+  const snapshot = await runtime.capabilityCenter.snapshot({ executionRoot, memoryOwner });
   if (override === undefined) {
     return snapshot;
   }

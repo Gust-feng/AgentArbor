@@ -30,15 +30,8 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     ordinaryAgentFeature: {
       async release() { disposalOrder.push("ordinary"); },
     },
-    ordinaryPathMemoryConnector: {
-      async ready() { /* reconciliation already drained in this fixture */ },
-      async release() { disposalOrder.push("path-memory-connector"); },
-    },
-    pathMemoryFeature: {
-      async release() { disposalOrder.push("path-memory"); },
-    },
-    experienceCandidateFeature: {
-      async release() { disposalOrder.push("experience-candidate"); },
+    pathDependencyFeature: {
+      async release() { disposalOrder.push("path-dependencies"); },
     },
     releaseWorkbenchProjectionChanges() {
       disposalOrder.push("projection-changes");
@@ -74,13 +67,10 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
   await closePanelServer(server, runtime);
 
   assert.equal(runtime.isQuiescing, true);
-  // Memory drains only after Ordinary produced its final stable terminal facts.
   assert.deepEqual(disposalOrder, [
     "ordinary",
     "space-process-cleanup",
-    "path-memory-connector",
-    "path-memory",
-    "experience-candidate",
+    "path-dependencies",
     "projection-changes",
     "space-knowledge-sync",
     "personal-knowledge",

@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { createOpenAITokenCounter } from "../context-maintenance/index.js";
 import { FileSystemAgentSessionRepository } from "../../adapters/intelligence/file-system-agent-session-repository.js";
 import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort } from "../ordinary-agent/contracts.js";
@@ -20,6 +21,7 @@ import {
   type AgentNoteScope,
   agentNoteContentVersion,
 } from "../agent-notes/index.js";
+import { PATH_DEPENDENCY_DIRECTORY_MAX_TOKENS } from "../path-dependencies/index.js";
 
 test("Panel composition closes failed Workbench storage before Space recovery starts", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-startup-failure-"));
@@ -134,6 +136,57 @@ test("Panel capability snapshots freeze NoteWrite so the model can actually use 
   }
 });
 
+test("Panel capability snapshots expose progressive path-dependency tools and birth injects only a compact directory", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-path-dependency-runtime-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    const space = await runtime.spaceFeature.commands.createSpace({ title: "方法空间" });
+    const methodology = `方法开头：先确认来源，再选择可验证的下载入口。${" 保留验证条件和失败边界。".repeat(30)} TAIL_NOT_INJECTED`;
+    const saved = await runtime.pathDependencyFeature.commands.save({
+      owner: { kind: "space", id: space.id },
+      title: "下载视频的稳定方法",
+      methodology,
+      tags: ["video", "download"],
+    });
+    assert.equal(saved.status, "created");
+    if (saved.status !== "created") return;
+    for (let index = 0; index < 15; index += 1) {
+      const extra = await runtime.pathDependencyFeature.commands.save({
+        owner: { kind: "space", id: space.id },
+        title: `备用下载方法 ${index}`,
+        methodology: `候选 ${index}：${"保留适用条件和验证边界。".repeat(60)}`,
+      });
+      assert.equal(extra.status, "created");
+    }
+
+    const snapshot = await runtime.capabilityCenter.snapshot({
+      executionRoot: path.join(directory, "runtime", "spaces", space.id, "files"),
+      memoryOwner: { kind: "space", id: space.id },
+    });
+    for (const name of ["MemorySearch", "MemoryRead", "MemoryReference", "PathDependencySave"]) {
+      assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
+    }
+
+    const birth = await runtime.prepareOrdinaryRunBirth({
+      goal: "下载视频",
+      owner: { kind: "space", id: space.id },
+    });
+    assert.match(birth.instructions, /<path_dependency_directory>/u);
+    assert.match(birth.instructions, /备用下载方法/u);
+    assert.match(birth.instructions, /MemoryRead/u);
+    assert.equal(birth.instructions.includes("TAIL_NOT_INJECTED"), false);
+    const directoryBlock = /<path_dependency_directory>\n([\s\S]*?)\n<\/path_dependency_directory>/u.exec(birth.instructions)?.[1];
+    assert.ok(directoryBlock);
+    assert.equal(
+      createOpenAITokenCounter(birth.config.model ?? "gpt-4o").countText(directoryBlock) <= PATH_DEPENDENCY_DIRECTORY_MAX_TOKENS,
+      true,
+    );
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
 test("Panel capability snapshots freeze Space tools so an Ordinary Agent can organize references", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-catalog-"));
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
@@ -215,8 +268,8 @@ test("Panel capability snapshots freeze Personal Knowledge tools for Ordinary ru
   }
 });
 
-test("Panel composition wires Ordinary terminal runs into durable PathMemory records", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-path-memory-wiring-"));
+test("Panel composition does not assemble or capture legacy PathMemory archives", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-legacy-memory-unload-"));
   const sessionEnvironment = new NodeExecutionEnv({ cwd: directory });
   let runtime: ReturnType<typeof createPanelRuntime> | undefined;
   try {
@@ -230,6 +283,8 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
       testOnlySkipInitialWorkbenchData: true,
       ordinaryAgentExecution: completedExecution("memory answer", sessionRepository),
     });
+    assert.equal(Object.hasOwn(runtime, "pathMemoryFeature"), false);
+    assert.equal(Object.hasOwn(runtime, "experienceCandidateFeature"), false);
     await runtime.ordinaryAgentFeature.commands.start({
       runId: "wired-run",
       sessionRef,
@@ -242,22 +297,9 @@ test("Panel composition wires Ordinary terminal runs into durable PathMemory rec
         Date.now() < deadline) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await runtime.ordinaryPathMemoryConnector.ready();
-    // The realtime capture may still settle after ready when the terminal
-    // notification arrives late; poll the durable record instead of sleeping.
-    let memory = await runtime.pathMemoryFeature.queries.findBySource({ feature: "ordinary", runId: "wired-run" });
-    const memoryDeadline = Date.now() + 5_000;
-    while (memory === undefined && Date.now() < memoryDeadline) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      memory = await runtime.pathMemoryFeature.queries.findBySource({ feature: "ordinary", runId: "wired-run" });
-    }
-    assert.notEqual(memory, undefined);
-    assert.equal(memory?.goal.userRequest, "记录这次运行");
-    assert.equal(memory?.outcome.terminalStatus, "completed");
-    assert.equal(memory?.verification.status, "not_recorded");
-
-    const files = await fs.readdir(path.join(directory, "runtime", "path-memory", "records"));
-    assert.equal(files.filter((name) => name.endsWith(".json")).length, 1);
+    assert.equal((await runtime.ordinaryAgentFeature.queries.getRun("wired-run"))?.status.kind, "completed");
+    await assert.rejects(fs.access(path.join(directory, "runtime", "path-memory")), { code: "ENOENT" });
+    await assert.rejects(fs.access(path.join(directory, "runtime", "experience-candidates")), { code: "ENOENT" });
   } finally {
     if (runtime !== undefined) await releasePanelRuntimeResources(runtime);
     await sessionEnvironment.cleanup();
@@ -333,7 +375,7 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
     await replaceAgentNote(runtime, { kind: "global" }, "- Reply in Chinese.");
     await replaceAgentNote(
       runtime,
-      { kind: "workspace", workspaceRoot: workspace },
+      { kind: "workspace", id: ownerWorkspace.id },
       "- Build this project with pnpm build.",
     );
 
@@ -348,14 +390,81 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
     assert.match(birth.agentDefinitionRef.promptRef, /agent-notes/u);
     assert.match(birth.agentDefinitionRef.promptVersion, /notes-/u);
     assert.equal(birth.workspaceSelection, "explicit");
+    assert.deepEqual(birth.memoryOwner, { kind: "workspace", id: ownerWorkspace.id });
     assert.equal(birth.capabilitySnapshot.executionRoot.toLowerCase(), path.resolve(workspace).toLowerCase());
     assert.deepEqual(birth.agentNoteVersions, {
       global: agentNoteContentVersion("- Reply in Chinese."),
-      workspace: agentNoteContentVersion("- Build this project with pnpm build."),
+      owner: {
+        scope: { kind: "workspace", id: ownerWorkspace.id },
+        version: agentNoteContentVersion("- Build this project with pnpm build."),
+      },
     });
 
   } finally {
     await cleanupRuntime(runtime, directory);
+  }
+});
+
+test("Panel deletion coordinators purge only the deleted owner note", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-owner-note-deletion-runtime-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    const workspaceRoot = path.join(directory, "project");
+    await fs.mkdir(workspaceRoot, { recursive: true });
+    const { workspace } = await runtime.workspaceFeature.commands.registerWorkspace({
+      rootPath: workspaceRoot,
+      sourceIdentity: "dev:owner-note-deletion",
+    });
+
+    await replaceAgentNote(runtime, { kind: "global" }, "- Keep this global preference.");
+    await replaceAgentNote(runtime, { kind: "workspace", id: workspace.id }, "- Delete this workspace note.");
+    const ownerPathDependency = await runtime.pathDependencyFeature.commands.save({
+      owner: { kind: "workspace", id: workspace.id },
+      title: "Owner deletion test",
+      methodology: "Delete with the owner.",
+    });
+    assert.equal(ownerPathDependency.status, "created");
+
+    await runtime.workspaceDeletion.deleteWorkspace(workspace.id);
+
+    assert.equal((await runtime.agentNotesFeature.queries.get({ kind: "workspace", id: workspace.id })).content, "");
+    assert.equal((await runtime.agentNotesFeature.queries.get({ kind: "global" })).content, "- Keep this global preference.");
+    assert.equal((await runtime.pathDependencyFeature.queries.list({ owners: [{ kind: "workspace", id: workspace.id }] })).length, 0);
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
+test("Panel composition restores the durable Workspace deleting gate", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-deleting-restart-"));
+  let first: ReturnType<typeof createPanelRuntime> | undefined;
+  let restarted: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    first = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    const workspaceRoot = path.join(directory, "project");
+    await fs.mkdir(workspaceRoot, { recursive: true });
+    const { workspace } = await first.workspaceFeature.commands.registerWorkspace({
+      rootPath: workspaceRoot,
+      sourceIdentity: "dev:workspace-deleting-restart",
+    });
+    // Persist the owner marker without completing a host cascade, which is
+    // exactly the state a process restart must keep denied.
+    await first.workspaceFeature.commands.deleteWorkspace(workspace.id);
+    await releasePanelRuntimeResources(first);
+    first = undefined;
+
+    restarted = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    await restarted.workspaceDeletion.ready();
+
+    assert.equal(restarted.workspaceDeletion.isDeleting(workspace.id), true);
+    assert.throws(
+      () => restarted?.workspaceDeletion.assertAvailable(workspace.id),
+      (error: unknown) => error instanceof Error && "code" in error && error.code === "workspace_deletion_in_progress",
+    );
+  } finally {
+    await cleanupRuntime(first, directory);
+    await cleanupRuntime(restarted, directory);
   }
 });
 
@@ -373,6 +482,7 @@ test("Space owner run birth uses the Space managedRoot as cwd", async () => {
 
     const expectedRoot = path.join(directory, "runtime", "spaces", space.id, "files");
     assert.equal(birth.capabilitySnapshot.executionRoot, path.resolve(expectedRoot));
+    assert.deepEqual(birth.memoryOwner, { kind: "space", id: space.id });
     assert.equal(birth.workspaceSelection, "explicit");
     assert.equal((await fs.stat(expectedRoot)).isDirectory(), true);
     assert.match(birth.ownerContext ?? "", /kind=space/u);
@@ -429,10 +539,39 @@ test("Workspace owner run birth uses the current mount root as cwd", async () =>
     });
 
     assert.equal(birth.capabilitySnapshot.executionRoot.toLowerCase(), path.resolve(project).toLowerCase());
+    assert.deepEqual(birth.memoryOwner, { kind: "workspace", id: workspace.id });
     assert.equal(birth.workspaceSelection, "explicit");
     assert.match(birth.ownerContext ?? "", /kind=workspace/u);
     assert.match(birth.ownerContext ?? "", /name=project/u);
     assert.match(birth.ownerContext ?? "", /path=/u);
+  } finally {
+    await cleanupRuntime(runtime, directory);
+  }
+});
+
+test("Workspace run birth rejects a durable deleting Workspace", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-deleting-birth-"));
+  let runtime: ReturnType<typeof createPanelRuntime> | undefined;
+  try {
+    runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
+    const project = path.join(directory, "project");
+    await fs.mkdir(project, { recursive: true });
+    const { workspace } = await runtime.workspaceFeature.commands.registerWorkspace({
+      rootPath: project,
+      sourceIdentity: "dev:deleting-birth",
+    });
+
+    // Simulate a persisted deletion marker (for example after a restart). The
+    // active mount remains present, so checking only mount availability would
+    // incorrectly allow a new run.
+    await runtime.workspaceFeature.commands.deleteWorkspace(workspace.id);
+    await assert.rejects(
+      () => runtime!.prepareOrdinaryRunBirth({
+        goal: "不应在删除中的工作区启动",
+        owner: { kind: "workspace", id: workspace.id },
+      }),
+      (error: unknown) => error instanceof Error && "code" in error && error.code === "workspace_not_available",
+    );
   } finally {
     await cleanupRuntime(runtime, directory);
   }

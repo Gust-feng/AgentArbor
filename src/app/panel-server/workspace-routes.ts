@@ -54,19 +54,22 @@ export async function handlePanelWorkspaceRoute(
     if (request.method === "POST") {
       const workspaceId = decode(linkMatch[1]);
       const input = parse(linkSchema, await readJsonBody(request), "链接参数无效。");
-      const link = await feature.commands.linkWorkspaceToSpace({ spaceId: input.spaceId, workspaceId });
+      const link = await runtime.workspaceDeletion.admit(workspaceId, () =>
+        feature.commands.linkWorkspaceToSpace({ spaceId: input.spaceId, workspaceId }));
       writeJson(response, 201, { ok: true, link });
       return true;
     }
     if (request.method === "DELETE") {
       const workspaceId = decode(linkMatch[1]);
       const input = parse(linkSchema, await readJsonBody(request), "链接参数无效。");
-      const links = await feature.queries.listLinksBySpace(input.spaceId);
-      const target = links.find((link) => link.workspaceId === workspaceId && link.status === "active");
-      if (target === undefined) {
-        throw new PanelHttpError(404, "workspace_link_not_found", "未找到该工作区引用。");
-      }
-      await feature.commands.unlinkWorkspaceFromSpace(target.linkId);
+      await runtime.workspaceDeletion.admit(workspaceId, async () => {
+        const links = await feature.queries.listLinksBySpace(input.spaceId);
+        const target = links.find((link) => link.workspaceId === workspaceId && link.status === "active");
+        if (target === undefined) {
+          throw new PanelHttpError(404, "workspace_link_not_found", "未找到该工作区引用。");
+        }
+        await feature.commands.unlinkWorkspaceFromSpace(target.linkId);
+      });
       writeJson(response, 200, { ok: true });
       return true;
     }
@@ -76,7 +79,10 @@ export async function handlePanelWorkspaceRoute(
   const deleteMatch = /^\/api\/workspaces\/([^/]+)$/u.exec(url.pathname);
   if (deleteMatch !== null && request.method === "DELETE") {
     const workspaceId = decode(deleteMatch[1]);
-    runtime.workspaceDeletion.assertAvailable(workspaceId);
+    // deleteWorkspace is idempotent and is also the explicit retry path for a
+    // cascade that persisted `deleting` before a later cleanup step failed.
+    // Calling assertAvailable here would make that durable retry impossible in
+    // the same process.
     await runtime.workspaceDeletion.deleteWorkspace(workspaceId);
     writeJson(response, 200, { ok: true });
     return true;

@@ -12,6 +12,7 @@ import type {
 import type { ModelMessage, ModelRequest } from "../../domain/intelligence/index.js";
 import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../../domain/soil/index.js";
 import { toolPresentationForDefinition, type ToolDefinition, type ToolExecutor } from "../../domain/tools/index.js";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { runAgentDefinitionRef } from "../agent-definitions/agent-definition-ref.js";
 import { InMemorySessionRepo } from "@earendil-works/pi-agent-core";
@@ -90,6 +91,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   let loopReleases = 0;
   let loopConfig: AgentSessionLoopOptions | undefined;
   let resolvedAgentNoteVersions: OrdinaryRunBirth["agentNoteVersions"];
+  let resolvedMemoryOwner: ConversationOwner | undefined;
   const countedToolContracts: string[] = [];
   const checkedAttachmentIds: string[] = [];
   const routingProvider = fauxProvider();
@@ -132,6 +134,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     },
     resolveFeatureToolContributions(input) {
       resolvedAgentNoteVersions = input.agentNoteVersions;
+      resolvedMemoryOwner = input.memoryOwner;
       return [];
     },
     resolveSubAgentRoots: () => [subAgentRoot],
@@ -166,9 +169,13 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     ...baseExecution,
     birth: {
       ...baseExecution.birth,
+      memoryOwner: { kind: "workspace", id: "workspace-1" },
       agentNoteVersions: {
         global: `sha256:${"a".repeat(64)}`,
-        workspace: `sha256:${"b".repeat(64)}`,
+        owner: {
+          scope: { kind: "workspace", id: "workspace-1" },
+          version: `sha256:${"b".repeat(64)}`,
+        },
       },
     },
   };
@@ -197,6 +204,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   ]);
   assert.equal(acquired.capabilityResolution?.runMode, "agent");
   assert.deepEqual(resolvedAgentNoteVersions, execution.birth.agentNoteVersions);
+  assert.deepEqual(resolvedMemoryOwner, execution.birth.memoryOwner);
   assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
   assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["Agent", "AgentSpawn"]);
   assert.equal(loopConfig?.toolDefinitionTokenCounter?.("visible definition"), "visible definition".length);

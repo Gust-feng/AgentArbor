@@ -16,6 +16,7 @@ import { ConversationPage } from "./app/components/ConversationPage";
 import { BrainPage } from "./app/components/BrainPage";
 import { DeferredSurfaceBoundary } from "./app/components/DeferredSurfaceBoundary";
 import { HomePage } from "./app/components/HomePage";
+import { MemoryPage } from "./app/components/MemoryPage";
 import { ConversationTranscript } from "./app/components/ConversationTranscript";
 import { SearchPage } from "./app/components/SearchPage";
 import { type View, Sidebar } from "./app/components/Sidebar";
@@ -400,6 +401,7 @@ function viewLabel(view: View): string {
     case "home": return "个人首页";
     case "space": return "空间";
     case "brain": return "知识库";
+    case "memory": return "记忆";
     case "search": return "搜索";
     case "conv-active":
     case "conv-done": return "对话工作台";
@@ -468,6 +470,9 @@ function renderView(input: {
       selectedId={input.brainSelectedId}
       onSelect={input.onBrainSelect}
     />;
+  }
+  if (input.view === "memory") {
+    return <MemoryPage />;
   }
   if (input.view === "search") {
     return <SearchPage

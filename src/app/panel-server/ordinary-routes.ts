@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import type { OrdinaryRunActivity, OrdinaryRunActivityCursor, OrdinaryRunState } from "../ordinary-agent/contracts.js";
 import { durableOrdinaryRunReplayFromState } from "../ordinary-agent/ordinary-agent-feature.js";
 import { nowIso } from "../../kernel/id.js";
@@ -165,10 +166,31 @@ async function submitTurn(
     throw new PanelHttpError(400, "conversation_run_mode_not_supported", "对话入口只支持普通 Agent。");
   }
   const explicitOwner = runInput.owner ?? (runInput.spaceId === undefined ? undefined : { kind: "space" as const, id: runInput.spaceId });
-  const owner = explicitOwner;
+  const canonicalOwner = conversationId === undefined
+    ? undefined
+    : await runtime.ordinaryAgentFeature.queries.getConversationOwner(conversationId);
+  if (conversationId !== undefined && canonicalOwner === undefined) {
+    throw new PanelHttpError(409, "conversation_owner_required", "Conversation 缺少稳定 owner，不能继续提交。");
+  }
+  if (explicitOwner !== undefined && canonicalOwner !== undefined && !sameConversationOwner(explicitOwner, canonicalOwner)) {
+    throw new PanelHttpError(
+      409,
+      "conversation_owner_conflict",
+      `Conversation ${conversationId} already belongs to ${canonicalOwner.kind} ${canonicalOwner.id}.`,
+    );
+  }
+  // Existing conversations always use their canonical owner. The request may
+  // omit it, but it can never select a different Space/Workspace just for this
+  // turn (and therefore cannot change the memory/tool scope before admission).
+  const owner = canonicalOwner ?? explicitOwner;
   const selectedSpaceId = owner?.kind === "space" ? owner.id : undefined;
   if (conversationId === undefined && owner === undefined) {
     throw new PanelHttpError(400, "conversation_owner_required", "开始新对话前请选择空间或工作区。");
+  }
+  if (owner?.kind === "workspace") {
+    // Fast in-process rejection; the admission wrapper below also checks the
+    // durable Workspace status to cover restart/retry state.
+    runtime.workspaceDeletion.assertAvailable(owner.id);
   }
   const submissionId = conversationId === undefined
     ? runInput.submissionId ?? crypto.randomUUID()
@@ -200,13 +222,29 @@ async function submitTurn(
         runInput: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
         birth,
       })
-    : await runtime.ordinaryAgentFeature.commands.submitTurn({
-        conversationId,
-        owner,
-        submissionId: effectiveRunInput.submissionId,
-        input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
-        birth,
-      });
+    : owner?.kind === "workspace"
+      ? await runtime.workspaceDeletion.admit(owner.id, () => runtime.ordinaryAgentFeature.commands.submitTurn({
+          conversationId,
+          owner,
+          submissionId: effectiveRunInput.submissionId,
+          input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
+          birth,
+        }))
+      : owner?.kind === "space"
+        ? await runtime.spaceConversationDeletion.admit(owner.id, () => runtime.ordinaryAgentFeature.commands.submitTurn({
+            conversationId,
+            owner,
+            submissionId: effectiveRunInput.submissionId,
+            input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
+            birth,
+          }))
+      : await runtime.ordinaryAgentFeature.commands.submitTurn({
+          conversationId,
+          owner,
+          submissionId: effectiveRunInput.submissionId,
+          input: { userMessage: effectiveRunInput.goal, taskSoil: effectiveRunInput.taskSoilInput },
+          birth,
+        });
   const run = await projectCommandRun(runtime, submitted.run);
   writeJson(response, 202, {
     ok: true,
@@ -221,6 +259,10 @@ async function submitTurn(
   });
 }
 
+function sameConversationOwner(left: ConversationOwner, right: ConversationOwner): boolean {
+  return left.kind === right.kind && left.id === right.id;
+}
+
 async function assertConversationMutationAvailable(runtime: PanelRuntime, conversationId: string): Promise<void> {
   runtime.spaceConversationLink.assertConversationAvailable(conversationId);
   const owner = await conversationOwnerForList(runtime, conversationId);
@@ -229,6 +271,8 @@ async function assertConversationMutationAvailable(runtime: PanelRuntime, conver
   }
   if (owner.kind === "space") {
     runtime.spaceConversationDeletion.assertAvailable(owner.id);
+  } else {
+    runtime.workspaceDeletion.assertAvailable(owner.id);
   }
 }
 

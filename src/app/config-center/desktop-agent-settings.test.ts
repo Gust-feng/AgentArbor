@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DESKTOP_ROOT_AGENT_PROMPT,
+  DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V6,
   DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V5,
 } from "../agent-prompts/desktop-root-agent-prompt.js";
 import {
@@ -12,9 +13,9 @@ import {
 
 const NOW = "2026-08-03T00:00:00.000Z";
 
-test("legacy built-in prompts migrate to the current built-in prompt", () => {
+test("the preceding built-in prompt migrates to the current built-in prompt", () => {
   const parsed = parseDesktopAgentSettings({
-    systemPrompt: DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V5.systemPrompt,
+    systemPrompt: DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V6.systemPrompt,
     updatedAt: "2026-07-01T00:00:00.000Z",
   }, NOW);
 

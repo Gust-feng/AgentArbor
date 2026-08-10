@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConfirmationDecision } from "../../domain/confirmation/index.js";
+import { memoryOwnerKey, memoryOwnersForConversation } from "../../domain/memory/index.js";
 import {
   toolCallFactId,
   type ToolCallProgress,
@@ -28,6 +29,8 @@ import type {
   OrdinaryRunSnapshotDocument,
   OrdinaryRunState,
   OrdinaryRunInput,
+  OrdinaryMemoryFact,
+  OrdinaryMemoryFactRepository,
   StartOrdinaryRunInput,
   SubmitOrdinaryTurnInput,
   SubmitOrdinaryTurnResult,
@@ -61,6 +64,7 @@ import {
   managedUploadAttachmentId,
   managedUploadAttachmentRef,
 } from "../task-soil/context-attachments.js";
+import { createInMemoryOrdinaryMemoryFactRepository } from "./memory-fact-repository.js";
 
 export function createOrdinaryAgentFeature(input: {
   readonly repository: OrdinaryRunRepository;
@@ -72,6 +76,8 @@ export function createOrdinaryAgentFeature(input: {
   readonly releaseToolEvidenceOwner?: (ownerId: string) => void | Promise<void>;
   readonly managedAttachmentRepository?: OrdinaryManagedAttachmentRepository;
   readonly managedAttachmentInstanceId?: string;
+  /** Durable Ordinary-owned read/reference facts for memory tools. */
+  readonly memoryFactRepository?: OrdinaryMemoryFactRepository;
   /**
    * Observability hook for failures that never rewrite committed run facts but
    * would otherwise be invisible: Session finalization failures that keep the
@@ -85,6 +91,7 @@ export function createOrdinaryAgentFeature(input: {
   const visibleAssistantCheckpointIntervalMs = 250;
   const now = input.now ?? nowIso;
   const idFactory = input.idFactory ?? createId;
+  const memoryFactRepository = input.memoryFactRepository ?? createInMemoryOrdinaryMemoryFactRepository();
   if ((input.managedAttachmentRepository === undefined) !== (input.managedAttachmentInstanceId === undefined)) {
     throw new Error("Ordinary managed attachment repository and instance identity must be configured together.");
   }
@@ -2382,6 +2389,13 @@ export function createOrdinaryAgentFeature(input: {
           }
         }
         try {
+          await memoryFactRepository.deleteByRunIds([runId]);
+        } catch (error) {
+          retryNeeded = true;
+          emitDiagnostic({ kind: "conversation_cleanup_failed", conversationId, phase: "memory_facts", runId, error });
+          continue;
+        }
+        try {
           await input.repository.delete(runId);
         } catch (error) {
           retryNeeded = true;
@@ -2818,6 +2832,65 @@ export function createOrdinaryAgentFeature(input: {
     return input.managedAttachmentRepository;
   }
 
+  async function recordMemoryRead(
+    factInput: Omit<OrdinaryMemoryFact, "kind" | "memoryKind" | "recordedAt" | "conversationId">,
+  ): Promise<void> {
+    await readyPromise;
+    await enqueue(factInput.runId, async () => {
+      const document = await load(factInput.runId);
+      if (document === undefined || isHiddenRun(document.state)) {
+        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${factInput.runId} was not found.`);
+      }
+      assertMemoryFactOwnerAllowed(document.state, factInput.owner);
+      await memoryFactRepository.append({
+        ...factInput,
+        conversationId: document.state.turn.conversationId,
+        kind: "read",
+        memoryKind: "path_dependency",
+        recordedAt: now(),
+      });
+    });
+  }
+
+  async function recordMemoryReference(
+    factInput: Omit<OrdinaryMemoryFact, "kind" | "memoryKind" | "recordedAt" | "conversationId">,
+  ): Promise<"recorded" | "already_recorded" | "not_read"> {
+    await readyPromise;
+    return enqueue(factInput.runId, async () => {
+      const document = await load(factInput.runId);
+      if (document === undefined || isHiddenRun(document.state)) {
+        throw new OrdinaryFeatureError("ordinary_run_not_found", `Ordinary run ${factInput.runId} was not found.`);
+      }
+      assertMemoryFactOwnerAllowed(document.state, factInput.owner);
+      const facts = await memoryFactRepository.list({ runId: factInput.runId, memoryId: factInput.memoryId });
+      const read = facts.some((fact) =>
+        fact.kind === "read" &&
+        fact.memoryKind === "path_dependency" &&
+        fact.revision === factInput.revision &&
+        fact.title === factInput.title &&
+        memoryOwnerKey(fact.owner) === memoryOwnerKey(factInput.owner));
+      if (!read) return "not_read";
+      return memoryFactRepository.append({
+        ...factInput,
+        conversationId: document.state.turn.conversationId,
+        kind: "applied",
+        memoryKind: "path_dependency",
+        recordedAt: now(),
+      });
+    });
+  }
+
+  function assertMemoryFactOwnerAllowed(run: OrdinaryRunState, owner: OrdinaryMemoryFact["owner"]): void {
+    const runOwner = run.birth.memoryOwner;
+    if (!memoryOwnersForConversation(runOwner)
+      .some((candidate) => memoryOwnerKey(candidate) === memoryOwnerKey(owner))) {
+      throw new OrdinaryFeatureError(
+        "ordinary_memory_scope_unavailable",
+        `Memory owner ${memoryOwnerKey(owner)} is outside the frozen scope of Ordinary run ${run.runId}.`,
+      );
+    }
+  }
+
   return {
     commands: {
       start,
@@ -2830,6 +2903,8 @@ export function createOrdinaryAgentFeature(input: {
       discardManagedAttachmentDraft,
       cancel,
       decideApproval,
+      recordMemoryRead,
+      recordMemoryReference,
     },
     queries: {
       async getRun(runId) {
@@ -2881,6 +2956,10 @@ export function createOrdinaryAgentFeature(input: {
           if (isManagedAttachmentNotFound(error)) return undefined;
           throw error;
         }
+      },
+      async listMemoryFacts(query) {
+        await readyPromise;
+        return structuredClone(await memoryFactRepository.list(query));
       },
       async getStableTerminalRunFacts(runId) {
         // Startup reconciliation must finish first so recovered runs already

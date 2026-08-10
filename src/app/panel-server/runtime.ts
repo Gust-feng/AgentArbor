@@ -139,6 +139,7 @@ import { createSqliteWorkbenchAssetRepository, type WorkbenchAssetRepository } f
 import {
   createWorkbenchProjectionChangeFeed,
   type WorkbenchProjectionChangeFeed,
+  type WorkbenchProjectionChangeInput,
 } from "./workbench-projection-change-feed.js";
 import {
   createSpaceConversationDeletionCoordinator,
@@ -851,7 +852,7 @@ function assertSpaceDeletionJournalIdle(runtimeHome: string): void {
   if (status !== "idle") throw new Error("Space deletion recovery is still pending.");
 }
 
-function projectionChangeFromSpace(event: SpaceEvent) {
+function projectionChangeFromSpace(event: SpaceEvent): WorkbenchProjectionChangeInput {
   switch (event.type) {
     case "space.created":
       return { owners: ["spaces"] as const, spaceIds: [event.space.id] };
@@ -862,6 +863,12 @@ function projectionChangeFromSpace(event: SpaceEvent) {
         referenceIds: event.removedReferenceIds,
       };
     case "space.reference_added":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.item.spaceId],
+        referenceIds: [event.item.id],
+      };
+    case "space.reference_annotation_updated":
       return {
         owners: ["spaces"] as const,
         spaceIds: [event.item.spaceId],

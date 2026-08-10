@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ToolDefinition, ToolExecutionContext, ToolExecutor, ToolJsonSchema } from "../../domain/tools/index.js";
+import type { ToolDefinition, ToolExecutionContext, ToolExecutor, ToolJsonSchema, ToolJsonSchemaValue } from "../../domain/tools/index.js";
 import { asOptionalRecord, asRecord, stringOrUndefined } from "../../kernel/values/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { AgentToolRegistryContribution } from "../tool-center/factory.js";
@@ -10,7 +10,7 @@ import {
 import {
   spaceReferenceIdFromAttachmentId,
 } from "./space-file-access.js";
-import { SpaceFeatureError, type SpaceAddableReference, type SpaceFeature, type SpaceReference, type SpaceTarget } from "./contracts.js";
+import { SpaceFeatureError, type SpaceAddableReference, type SpaceFeature, type SpaceReference, type SpaceReferenceAnnotationInput, type SpaceReferenceAnnotationPatch, type SpaceTarget } from "./contracts.js";
 
 export type SpaceToolOptions = {
   readonly spaces: Pick<SpaceFeature, "commands" | "queries">;
@@ -35,6 +35,8 @@ export function createSpaceTools(options: SpaceToolOptions): readonly ToolExecut
     createConversationDeleteTool(options),
     createSpaceMoveTool(options),
     createSpaceAddReferenceTool(options),
+    createSpaceReadReferenceTool(options),
+    createSpaceUpdateReferenceAnnotationTool(options),
     createSpaceUnlinkReferenceTool(options),
     createSpaceRemoveReferenceTool(options),
     createSpaceRenameTool(options),
@@ -146,10 +148,10 @@ export function createSpaceMoveTool(options: SpaceToolOptions): ToolExecutor {
 export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExecutor {
   return tool({
     name: "SpaceAddReference",
-    description: "Add an external file/folder reference or Space material from the current Task Soil attachment. Select local files and folders by attachmentId from AttachmentList; raw local paths are not accepted. Conversation owners are created only by the conversation workflow.",
+    description: "Add an external file/folder reference or Space material from the current Task Soil attachment. Select local files and folders by attachmentId from AttachmentList; raw local paths are not accepted. Conversation owners are created only by the conversation workflow. annotation is the Agent-maintained understanding of the source, never the source body: when the source needs understanding, read it first with the existing reading tools, then submit your own summary, key points and tags; do not fabricate content without reading the source. This tool never fetches web pages or files implicitly.",
     metadata: writeMetadata,
     inputSchema: requiredSchema({
-      spaceId: { type: "string" }, title: { type: "string" }, reference: referenceSchema,
+      spaceId: { type: "string" }, title: { type: "string" }, reference: referenceSchema, annotation: annotationSchema,
     }, ["spaceId", "title", "reference"]),
     execute: async (input) => {
       const record = asRecord(input);
@@ -159,7 +161,57 @@ export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExec
       options.assertSpaceAvailable?.(spaceId);
       const resolution = await resolveAgentSpaceReference(record.reference, options);
       if ("error" in resolution) return resolution.error;
-      return resultFor(() => options.spaces.commands.addReference({ spaceId, title, reference: resolution.reference }), (item) => ({ status: "added", item }));
+      const annotation = parseAgentAnnotation(record.annotation);
+      if (annotation === "invalid") return invalid("annotation must be an object with a markdown string.");
+      return resultFor(
+        () => options.spaces.commands.addReference({ spaceId, title, reference: resolution.reference, ...(annotation === undefined ? {} : { annotation }), actor: "agent" }),
+        (item) => ({ status: "added", item, annotationStatus: item.annotation === undefined ? "missing" : "written" }),
+      );
+    },
+  });
+}
+
+export function createSpaceReadReferenceTool(options: SpaceToolOptions): ToolExecutor {
+  return tool({
+    name: "SpaceReadReference",
+    description: "Read one Space reference: its source fact and the current Agent-maintained annotation (markdown, key points, tags, revision). This tool only reads what the Space saved; it never connects to the web, refreshes a source, or reads external file content. Source content stays on WebFetch, AttachmentRead, AttachmentReadImage and file tools.",
+    metadata: readMetadata,
+    inputSchema: requiredSchema({ itemId: { type: "string" } }, ["itemId"]),
+    execute: async (input) => {
+      const itemId = stringOrUndefined(asRecord(input).itemId);
+      if (itemId === undefined) return invalid("itemId must be a string.");
+      const item = await options.spaces.queries.getReference(itemId);
+      return item === undefined ? { status: "space_reference_not_found", itemId } : { status: "found", item };
+    },
+  });
+}
+
+export function createSpaceUpdateReferenceAnnotationTool(options: SpaceToolOptions): ToolExecutor {
+  return tool({
+    name: "SpaceUpdateReferenceAnnotation",
+    description: "Update the Agent-maintained annotation of one Space reference with an expectedRevision read from SpaceReadReference. Provided content fields replace their current values; absent fields are kept unchanged. It never refetches the source: reading the source again is a separate Agent decision using WebFetch or file tools. Returns the complete current annotation after a successful update.",
+    metadata: writeMetadata,
+    inputSchema: requiredSchema({
+      itemId: { type: "string" },
+      expectedRevision: { type: "number", description: "Current revision read from SpaceReadReference." },
+      ...annotationContentProperties,
+    }, ["itemId", "expectedRevision"]),
+    execute: async (input) => {
+      const record = asRecord(input);
+      const itemId = stringOrUndefined(record.itemId);
+      const expectedRevision = typeof record.expectedRevision === "number" ? record.expectedRevision : undefined;
+      if (itemId === undefined || expectedRevision === undefined || !Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        return invalid("itemId and a non-negative integer expectedRevision are required.");
+      }
+      const item = await options.spaces.queries.getReference(itemId);
+      if (item === undefined) return { status: "space_reference_not_found", itemId };
+      options.assertSpaceAvailable?.(item.spaceId);
+      const patch = annotationPatchFromRecord(record);
+      if (patch === undefined) return invalid("At least one content field (markdown, keyPoints or tags) is required.");
+      return resultFor(
+        () => options.spaces.commands.updateReferenceAnnotation({ itemId, expectedRevision, patch, actor: "agent" }),
+        (updated) => ({ status: "updated", item: updated }),
+      );
     },
   });
 }
@@ -287,6 +339,54 @@ const referenceSchema: ToolJsonSchema = {
     { type: "object", properties: { kind: { const: "generated_artifact" }, artifactRef: { type: "string" } }, required: ["kind", "artifactRef"], additionalProperties: false },
   ],
 };
+
+const annotationContentProperties: Record<string, ToolJsonSchemaValue> = {
+  markdown: { type: "string", minLength: 1, maxLength: 512 * 1024, description: "Agent 对来源的整理内容 Markdown，不是来源正文。" },
+  keyPoints: { type: "array", items: { type: "string", minLength: 1, maxLength: 512 }, maxItems: 32, description: "关键要点列表。" },
+  tags: { type: "array", items: { type: "string", minLength: 1, maxLength: 64 }, maxItems: 32, description: "标签列表。" },
+};
+
+const annotationSchema: ToolJsonSchema = {
+  type: "object",
+  properties: annotationContentProperties,
+  required: ["markdown"],
+  additionalProperties: false,
+};
+
+/**
+ * 解析 Agent 提交的 annotation 输入。返回 undefined 表示未提供
+ * （允许保存来源引用但不生成注释），返回 "invalid" 表示提供了但结构非法。
+ */
+function parseAgentAnnotation(value: unknown): SpaceReferenceAnnotationInput | "invalid" | undefined {
+  const record = asOptionalRecord(value);
+  if (record === undefined) return undefined;
+  const markdown = stringOrUndefined(record.markdown);
+  if (markdown === undefined || markdown.length === 0) return "invalid";
+  const keyPoints = optionalStringArray(record.keyPoints);
+  const tags = optionalStringArray(record.tags);
+  if (keyPoints === "invalid" || tags === "invalid") return "invalid";
+  return { markdown, ...(keyPoints === undefined || keyPoints.length === 0 ? {} : { keyPoints }), ...(tags === undefined || tags.length === 0 ? {} : { tags }) };
+}
+
+/** 从更新输入组装 patch；只包含真正出现的字段，未提供字段保持原值。 */
+function annotationPatchFromRecord(record: Readonly<Record<string, unknown>>): SpaceReferenceAnnotationPatch | undefined {
+  const markdown = stringOrUndefined(record.markdown);
+  const keyPoints = optionalStringArray(record.keyPoints);
+  const tags = optionalStringArray(record.tags);
+  if (keyPoints === "invalid" || tags === "invalid") return undefined;
+  if (markdown === undefined && keyPoints === undefined && tags === undefined) return undefined;
+  return {
+    ...(markdown === undefined ? {} : { markdown }),
+    ...(keyPoints === undefined ? {} : { keyPoints }),
+    ...(tags === undefined ? {} : { tags }),
+  };
+}
+
+function optionalStringArray(value: unknown): readonly string[] | "invalid" | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || entry.length === 0)) return "invalid";
+  return value as string[];
+}
 
 function invalid(message: string) { return { status: "invalid_input", message }; }
 
@@ -432,5 +532,8 @@ function isExpectedSpaceOperationError(code: SpaceFeatureError["code"]): boolean
     || code === "space_id_collision"
     || code === "space_workspace_mount_conflict"
     || code === "space_asset_ownership_conflict"
-    || code === "space_conversation_ownership_conflict";
+    || code === "space_conversation_ownership_conflict"
+    || code === "space_reference_annotation_invalid"
+    || code === "space_reference_annotation_revision_conflict"
+    || code === "space_reference_annotation_too_large";
 }

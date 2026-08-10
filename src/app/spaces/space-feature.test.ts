@@ -629,6 +629,180 @@ test("Space accepts only internal asset folders as metadata parents", async () =
   }), { code: "space_invalid_input" });
 });
 
+test("Space reference annotation persists on add, reads back, and advances revision on update", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    now: () => "2026-08-11T00:00:00.000Z",
+  });
+  const events: unknown[] = [];
+  feature.events.subscribe((event) => events.push(event));
+  const space = await feature.commands.createSpace({ title: "机器学习" });
+  const withAnnotation = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation: { markdown: "通过优化输入观察神经元激活。", keyPoints: ["优化输入"], tags: ["深度学习"] },
+    actor: "agent",
+  });
+  assert.deepEqual(withAnnotation.annotation, {
+    markdown: "通过优化输入观察神经元激活。",
+    keyPoints: ["优化输入"],
+    tags: ["深度学习"],
+    revision: 1,
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    updatedBy: "agent",
+  });
+  assert.deepEqual((await feature.queries.getReference(withAnnotation.id))?.annotation, withAnnotation.annotation);
+
+  const updated = await feature.commands.updateReferenceAnnotation({
+    itemId: withAnnotation.id,
+    expectedRevision: 1,
+    patch: { markdown: "更新后的理解", tags: ["深度学习", "Transformer"] },
+    actor: "user",
+  });
+  assert.equal(updated.annotation?.revision, 2);
+  assert.equal(updated.annotation?.updatedBy, "user");
+  assert.equal(updated.annotation?.markdown, "更新后的理解");
+  assert.deepEqual(updated.annotation?.keyPoints, ["优化输入"]);
+  assert.deepEqual(updated.annotation?.tags, ["深度学习", "Transformer"]);
+  assert.deepEqual(events.at(-1), { type: "space.reference_annotation_updated", item: updated });
+  assert.equal((await feature.queries.list()).find((entry) => entry.id === space.id)?.updatedAt, "2026-08-11T00:00:00.000Z");
+  await feature.release();
+});
+
+test("Space reference without annotation stays annotation-free and update creates revision one", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    now: () => "2026-08-11T00:00:00.000Z",
+  });
+  const space = await feature.commands.createSpace({ title: "阅读" });
+  const bare = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "无法读取的网页",
+    reference: { kind: "web_page", url: "https://example.com/private" },
+  });
+  assert.equal(bare.annotation, undefined);
+  assert.equal((await feature.queries.getReference(bare.id))?.annotation, undefined);
+
+  const first = await feature.commands.updateReferenceAnnotation({
+    itemId: bare.id,
+    expectedRevision: 0,
+    patch: { markdown: "后续补上的理解" },
+    actor: "agent",
+  });
+  assert.equal(first.annotation?.revision, 1);
+  assert.equal(first.annotation?.markdown, "后续补上的理解");
+  assert.equal(first.annotation?.updatedBy, "agent");
+  await feature.release();
+});
+
+test("Space reference annotation update rejects stale revisions, missing items, empty patches and oversized content", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+  });
+  const space = await feature.commands.createSpace({ title: "机器学习" });
+  const item = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation: { markdown: "v1" },
+    actor: "agent",
+  });
+  await assert.rejects(
+    feature.commands.updateReferenceAnnotation({ itemId: item.id, expectedRevision: 2, patch: { markdown: "stale" } }),
+    { code: "space_reference_annotation_revision_conflict" },
+  );
+  await assert.rejects(
+    feature.commands.updateReferenceAnnotation({ itemId: "missing", expectedRevision: 0, patch: { markdown: "x" } }),
+    { code: "space_reference_not_found" },
+  );
+  await assert.rejects(
+    feature.commands.updateReferenceAnnotation({ itemId: item.id, expectedRevision: 1, patch: {} }),
+    { code: "space_reference_annotation_invalid" },
+  );
+  await assert.rejects(
+    feature.commands.addReference({
+      spaceId: space.id,
+      title: "超长",
+      reference: { kind: "web_page", url: "https://example.com" },
+      annotation: { markdown: "x".repeat(512 * 1024 + 1) },
+    }),
+    { code: "space_reference_annotation_too_large" },
+  );
+  await assert.rejects(
+    feature.commands.addReference({
+      spaceId: space.id,
+      title: "超多标签",
+      reference: { kind: "web_page", url: "https://example.com" },
+      annotation: { markdown: "ok", tags: Array.from({ length: 33 }, (_, index) => `tag-${index}`) },
+    }),
+    { code: "space_reference_annotation_too_large" },
+  );
+  assert.equal((await feature.queries.getReference(item.id))?.annotation?.revision, 1);
+  await feature.release();
+});
+
+test("Space deletion removes reference annotations with their references", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+  });
+  const space = await feature.commands.createSpace({ title: "机器学习" });
+  const item = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation: { markdown: "v1" },
+    actor: "agent",
+  });
+  assert.notEqual(item.annotation, undefined);
+  await feature.commands.deleteSpace(space.id);
+  assert.equal(await feature.queries.getReference(item.id), undefined);
+  assert.equal(snapshot.referenceItems.some((entry) => entry.annotation !== undefined), false);
+  await feature.release();
+});
+
+test("owned reference deletion journals an annotated removed reference", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  const lifecycle: string[] = [];
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    referenceDeletion: referenceDeletionFixture(lifecycle),
+  });
+  const space = await feature.commands.createSpace({ title: "机器学习" });
+  const material = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "内部资料",
+    reference: { kind: "managed_folder", path: "C:/managed" },
+    annotation: { markdown: "整理内容", tags: ["资料"] },
+    actor: "agent",
+  });
+  await feature.commands.removeReference(material.id);
+  assert.deepEqual(lifecycle, [
+    "journal:prepared",
+    "stage:" + material.id,
+    "journal:files_staged",
+    "journal:metadata_committed",
+    "remove-staged:" + material.id,
+    "journal:deleted",
+  ]);
+  assert.equal(await feature.queries.getReference(material.id), undefined);
+  await feature.release();
+});
+
 function referenceDeletionFixture(lifecycle: string[]) {
   const records = new Map<string, SpaceReferenceDeletionJournalRecord>();
   const journal: SpaceReferenceDeletionJournalStore = {

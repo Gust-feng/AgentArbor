@@ -6,7 +6,7 @@ import { z } from "zod";
 import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
 import { isNodeError, toPersistedJsonShape } from "../../kernel/values/index.js";
 import { SpaceFeatureError, type SpaceReferenceItem } from "./contracts.js";
-import { spaceReferenceSchema } from "./space-validation.js";
+import { spaceReferenceAnnotationSchema, spaceReferenceSchema } from "./space-validation.js";
 
 const SPACE_REFERENCE_DELETION_SCHEMA_VERSION = "space-reference-deletion/v1" as const;
 const SAFE_DELETION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
@@ -69,6 +69,7 @@ const referenceItemSchema: z.ZodType<SpaceReferenceItem> = z.object({
   parentId: z.string().min(1).optional(),
   reference: spaceReferenceSchema,
   sourceIdentity: z.string().min(1).optional(),
+  annotation: spaceReferenceAnnotationSchema.optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 }).strict();

@@ -24,12 +24,31 @@ import { documentPresentation } from "./document-preview-presentation.js";
 
 export type PanelDocumentPreview = DocumentPreview;
 
+/**
+ * Space 引用预览：来源事实与 Agent 整理内容分离投影。
+ * annotation 是额外展示字段，永远不映射进 `content`（来源正文）。
+ */
 export async function createPanelDocumentPreview(
   item: SpaceReferenceItem,
   relativePath = "",
   contentBaseUrl?: string,
   contentTypeHintPath?: string,
 ): Promise<PanelDocumentPreview> {
+  const preview = await buildPanelDocumentPreview(item, relativePath, contentBaseUrl, contentTypeHintPath);
+  return attachSpaceAnnotation(preview, item);
+}
+
+/** 把 Space 自己的 annotation 作为额外投影附加，不改变来源预览的 content。 */
+export function attachSpaceAnnotation(preview: PanelDocumentPreview, item: SpaceReferenceItem): PanelDocumentPreview {
+  return item.annotation === undefined ? preview : { ...preview, annotation: item.annotation };
+}
+
+async function buildPanelDocumentPreview(
+  item: SpaceReferenceItem,
+  relativePath: string,
+  contentBaseUrl?: string,
+  contentTypeHintPath?: string,
+): Promise<DocumentPreview> {
   if (item.reference.kind === "web_page") {
     const content = { kind: "web" as const, url: item.reference.url };
     return {

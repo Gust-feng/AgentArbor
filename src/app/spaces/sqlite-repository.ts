@@ -54,6 +54,11 @@ const MIGRATIONS = [{
      WHERE source_identity IS NULL
        AND json_extract(reference_json, '$.kind') IN ('local_file', 'workspace_folder');
   `,
+}, {
+  version: 7,
+  sql: `
+    ALTER TABLE space_references ADD COLUMN annotation_json TEXT;
+  `,
 }] as const;
 
 export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): SpaceRepository {
@@ -66,7 +71,7 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
         ).all();
         const referenceItems = database.connection.prepare(`
           SELECT id, space_id AS spaceId, title, parent_id AS parentId, reference_json AS referenceJson,
-                 source_identity AS sourceIdentity,
+                 source_identity AS sourceIdentity, annotation_json AS annotationJson,
                  created_at AS createdAt, updated_at AS updatedAt
            FROM space_references ORDER BY rowid
         `).all().map((row) => {
@@ -78,6 +83,7 @@ export function createSqliteSpaceRepository(database: SqliteRuntimeDatabase): Sp
             ...(item.parentId === null ? {} : { parentId: item.parentId }),
             reference: JSON.parse(String(item.referenceJson)) as unknown,
             ...(item.sourceIdentity === null ? {} : { sourceIdentity: item.sourceIdentity }),
+            ...(item.annotationJson === null ? {} : { annotation: JSON.parse(String(item.annotationJson)) as unknown }),
             createdAt: item.createdAt,
             updatedAt: item.updatedAt,
           };
@@ -107,8 +113,8 @@ function writeSnapshot(database: SqliteRuntimeDatabase, value: SpaceTreeSnapshot
     );
     for (const space of value.spaces) insertSpace.run(space.id, space.title, space.createdAt, space.updatedAt);
     const insertReference = database.connection.prepare(`
-      INSERT INTO space_references(id, space_id, title, parent_id, reference_json, source_identity, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO space_references(id, space_id, title, parent_id, reference_json, source_identity, annotation_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const item of value.referenceItems) {
       insertReference.run(
@@ -118,6 +124,7 @@ function writeSnapshot(database: SqliteRuntimeDatabase, value: SpaceTreeSnapshot
         item.parentId ?? null,
         JSON.stringify(item.reference),
         item.sourceIdentity ?? null,
+        item.annotation === undefined ? null : JSON.stringify(item.annotation),
         item.createdAt,
         item.updatedAt,
       );

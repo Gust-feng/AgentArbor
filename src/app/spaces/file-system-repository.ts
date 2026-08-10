@@ -5,7 +5,7 @@ import { z } from "zod";
 import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
 import { isNodeError, toPersistedJsonShape } from "../../kernel/values/index.js";
 import { SPACE_TREE_SCHEMA_VERSION, SpaceFeatureError, type SpaceRepository, type SpaceTreeSnapshot } from "./contracts.js";
-import { spaceReferenceSchema } from "./space-validation.js";
+import { spaceReferenceAnnotationSchema, spaceReferenceSchema } from "./space-validation.js";
 
 const spaceSchema = z.object({
   id: z.string().min(1),
@@ -21,6 +21,7 @@ const referenceItemSchema = z.object({
   parentId: z.string().min(1).optional(),
   reference: spaceReferenceSchema,
   sourceIdentity: z.string().min(1).optional(),
+  annotation: spaceReferenceAnnotationSchema.optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 }).strict();

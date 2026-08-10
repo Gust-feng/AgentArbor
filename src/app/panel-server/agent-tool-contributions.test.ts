@@ -137,6 +137,8 @@ test("Host selects feature-owned Space and Personal Knowledge contributions", ()
     "ConversationDelete",
     "SpaceMove",
     "SpaceAddReference",
+    "SpaceReadReference",
+    "SpaceUpdateReferenceAnnotation",
     "SpaceUnlinkReference",
     "SpaceRemoveReference",
     "SpaceRename",
@@ -182,7 +184,7 @@ test("Host forwards Space deletion admission and lifecycle callbacks into the co
 });
 
 test("Host freezes Task Soil and workspace root into the Space contribution", async () => {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] };
   const repository: SpaceRepository = {
     async read() { return structuredClone(snapshot); },
     async write(next) { snapshot = structuredClone(next); },

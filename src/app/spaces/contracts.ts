@@ -1,5 +1,5 @@
 /** Durable metadata for the roots visible in one Space. File descendants stay in their owning filesystem. */
-export const SPACE_TREE_SCHEMA_VERSION = "space-tree/v4" as const;
+export const SPACE_TREE_SCHEMA_VERSION = "space-tree/v5" as const;
 
 export type SpaceReference =
   | { readonly kind: "local_file"; readonly path: string }
@@ -34,9 +34,44 @@ export type SpaceReferenceItem = {
   readonly reference: SpaceReference;
   /** Stable platform identity for an external source; never used as a model-facing path. */
   readonly sourceIdentity?: string;
+  /** Agent/user-maintained understanding of the source. It is never the source body itself. */
+  readonly annotation?: SpaceReferenceAnnotation;
   readonly createdAt: string;
   readonly updatedAt: string;
 };
+
+/**
+ * Agent 或用户对引用来源的整理内容（产品内容）。
+ *
+ * 与 `reference`（来源事实）严格分离：`annotation` 表达“对这个来源的理解”，
+ * 不保存抓取正文、网页快照或文件内容。revision 由 SpaceFeature 管理，
+ * 输入侧（工具/HTTP）不提交 revision、时间或 actor。
+ */
+export type SpaceReferenceAnnotation = {
+  /** Agent 或用户维护的 Markdown，不是来源网页原文或文件正文。 */
+  readonly markdown: string;
+  readonly keyPoints?: readonly string[];
+  readonly tags?: readonly string[];
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly updatedBy: SpaceReferenceActor;
+};
+
+/** 工具/用户提交的 annotation 内容字段；revision、时间与 actor 由 SpaceFeature 生成。 */
+export type SpaceReferenceAnnotationInput = {
+  readonly markdown: string;
+  readonly keyPoints?: readonly string[];
+  readonly tags?: readonly string[];
+};
+
+/** 更新 annotation 时的部分内容；未提供的字段保持原值，不能无意清空。 */
+export type SpaceReferenceAnnotationPatch = {
+  readonly markdown?: string;
+  readonly keyPoints?: readonly string[];
+  readonly tags?: readonly string[];
+};
+
+export type SpaceReferenceActor = "agent" | "user";
 
 export type SpaceTreeSnapshot = {
   readonly schemaVersion: typeof SPACE_TREE_SCHEMA_VERSION;
@@ -85,7 +120,10 @@ export type SpaceFeatureErrorCode =
   | "space_snapshot_incompatible"
   | "space_deletion_journal_failure"
   | "space_deletion_recovery_failed"
-  | "space_repository_failure";
+  | "space_repository_failure"
+  | "space_reference_annotation_invalid"
+  | "space_reference_annotation_revision_conflict"
+  | "space_reference_annotation_too_large";
 
 export class SpaceFeatureError extends Error {
   readonly name = "SpaceFeatureError";
@@ -98,6 +136,7 @@ export type SpaceEvent =
   | { readonly type: "space.created"; readonly space: Space }
   | { readonly type: "space.deleted"; readonly spaceId: string; readonly removedReferenceIds: readonly string[] }
   | { readonly type: "space.reference_added"; readonly item: SpaceReferenceItem }
+  | { readonly type: "space.reference_annotation_updated"; readonly item: SpaceReferenceItem }
   | { readonly type: "space.renamed"; readonly target: SpaceTarget; readonly spaceId: string }
   | { readonly type: "space.moved"; readonly target: SpaceMovableTarget; readonly sourceSpaceId: string; readonly destinationSpaceId: string }
   | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string };
@@ -109,7 +148,9 @@ export type SpaceFeature = {
     createSpace(input: { readonly id?: string; readonly title: string }): Promise<Space>;
     /** Deletes the Space container and Space-owned assets; external sources remain untouched. */
     deleteSpace(spaceId: string): Promise<void>;
-    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceAddableReference }): Promise<SpaceReferenceItem>;
+    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceAddableReference; readonly annotation?: SpaceReferenceAnnotationInput; readonly actor?: SpaceReferenceActor }): Promise<SpaceReferenceItem>;
+    /** Updates the annotation content of one reference with optimistic concurrency; revision advances on success. */
+    updateReferenceAnnotation(input: { readonly itemId: string; readonly expectedRevision: number; readonly patch: SpaceReferenceAnnotationPatch; readonly actor?: SpaceReferenceActor }): Promise<SpaceReferenceItem>;
     /** Creates the sole owning link for a Conversation. This is reserved for the Conversation coordinator. */
     linkConversationOwner(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly conversationId: string; readonly conversationTitle?: string }): Promise<SpaceReferenceItem>;
     rename(input: { readonly target: SpaceTarget; readonly title: string }): Promise<SpaceTarget>;

@@ -14,7 +14,7 @@ test("conversation Space access freezes only the owning Space local references",
   const firstFilePath = path.join(directory, "space-one", "note.md");
   await fs.mkdir(path.dirname(firstFilePath), { recursive: true });
   await fs.writeFile(firstFilePath, "one", "utf8");
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] };
   const repository: SpaceRepository = {
     async read() { return structuredClone(snapshot); },
     async write(value) { snapshot = structuredClone(value); },
@@ -67,7 +67,7 @@ test("Run access freezes stored paths without scanning or mutating missing refer
   const missingPath = path.join(directory, "gone.md");
   const presentPath = path.join(directory, "here.md");
   await fs.writeFile(presentPath, "present", "utf8");
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] };
   let id = 0;
   const spaces = createSpaceFeature({
     repository: {
@@ -109,7 +109,7 @@ test("Run access freezes stored paths without scanning or mutating missing refer
   assert.notEqual(await spaces.queries.getReference(missing.id), undefined);
 });
 test("Space ownership remains frozen even when the Space has no local references", async () => {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] };
   const spaces = createSpaceFeature({
     repository: {
       async read() { return structuredClone(snapshot); },
@@ -126,7 +126,7 @@ test("Space ownership remains frozen even when the Space has no local references
 });
 
 test("canonical conversation owner wins over the legacy Space tree link", async () => {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] };
   const spaces = createSpaceFeature({
     repository: {
       async read() { return structuredClone(snapshot); },
@@ -152,7 +152,7 @@ test("canonical conversation owner wins over the legacy Space tree link", async 
 test("unassigned conversations keep their submitted Task Soil unchanged", async () => {
   const spaces = createSpaceFeature({
     repository: {
-      async read() { return { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] }; },
+      async read() { return { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] }; },
       async write() { return undefined; },
     },
   });

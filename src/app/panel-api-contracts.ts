@@ -50,6 +50,8 @@ export type WorkbenchProjectionChange = {
 
 /* ─── Document Preview ───────────────────────────────────────────── */
 
+import type { SpaceReferenceAnnotation } from "./spaces/contracts.js";
+
 export type DocumentPresentation = {
   readonly kind: "directory" | "markdown" | "code" | "text" | "image" | "pdf" | "docx" | "xlsx" | "video" | "audio" | "web" | "unavailable";
   readonly editable: boolean;
@@ -83,6 +85,8 @@ export type DocumentPreview = {
   readonly fingerprint?: string;
   readonly byteLength?: number;
   readonly modifiedAt?: number;
+  /** Space 引用的 Agent/用户整理内容（额外展示字段）。它属于 Space，不是来源正文，不能覆盖 content 中的源事实。 */
+  readonly annotation?: SpaceReferenceAnnotation;
   readonly content:
     | { readonly kind: "text"; readonly text: string; readonly truncated: boolean; readonly editable: boolean; readonly language?: string; readonly encoding?: string }
     | { readonly kind: "directory"; readonly relativePath: string; readonly entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: "file" | "directory" | "other" }[]; readonly truncated: boolean }

@@ -7,13 +7,17 @@ import {
   type SpaceAddableReference,
   type SpaceMovableTarget,
   type SpaceReference,
+  type SpaceReferenceActor,
+  type SpaceReferenceAnnotation,
+  type SpaceReferenceAnnotationInput,
+  type SpaceReferenceAnnotationPatch,
   type SpaceReferenceItem,
   type SpaceRepository,
   type SpaceOwnedAssetDeletionPort,
   type SpaceTarget,
   type SpaceTreeSnapshot,
 } from "./contracts.js";
-import { validateSpaceReference } from "./space-validation.js";
+import { validateSpaceReference, validateSpaceReferenceAnnotation } from "./space-validation.js";
 import {
   createSpaceReferenceDeletionLifecycle,
   type SpaceReferenceDeletionDiagnostic,
@@ -342,7 +346,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           publish({ type: "space.deleted", spaceId, removedReferenceIds });
         });
       },
-      addReference({ id, spaceId, title, parentId, reference }) {
+      addReference({ id, spaceId, title, parentId, reference, annotation, actor }) {
         assertUsable("add a reference");
         return serialize(async () => {
           const snapshot = await input.repository.read();
@@ -361,6 +365,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
             ...(parentId === undefined ? {} : { parentId }),
             reference: validatedReference,
             ...(sourceIdentity === undefined ? {} : { sourceIdentity }),
+            ...(annotation === undefined ? {} : { annotation: initialAnnotation(annotation, at, actor ?? "agent") }),
             createdAt: at,
             updatedAt: at,
           };
@@ -370,6 +375,30 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
             spaces: touchSpaces(snapshot.spaces, [spaceId], at),
           });
           publish({ type: "space.reference_added", item });
+          return item;
+        });
+      },
+      updateReferenceAnnotation({ itemId, expectedRevision, patch, actor }) {
+        assertUsable("update a reference annotation");
+        return serialize(async () => {
+          const snapshot = await input.repository.read();
+          const current = requireReference(snapshot, itemId);
+          const revision = current.annotation?.revision ?? 0;
+          if (revision !== expectedRevision) {
+            throw new SpaceFeatureError(
+              "space_reference_annotation_revision_conflict",
+              `Space reference ${itemId} annotation revision is ${revision}, expected ${expectedRevision}`,
+            );
+          }
+          const at = now();
+          const annotation = updatedAnnotation(current.annotation, patch, at, actor ?? "agent");
+          const item: SpaceReferenceItem = { ...current, annotation, updatedAt: at };
+          await input.repository.write({
+            ...snapshot,
+            referenceItems: snapshot.referenceItems.map((entry) => entry.id === itemId ? item : entry),
+            spaces: touchSpaces(snapshot.spaces, [current.spaceId], at),
+          });
+          publish({ type: "space.reference_annotation_updated", item });
           return item;
         });
       },
@@ -686,4 +715,49 @@ async function captureExternalSourceIdentity(
 
 export function emptySpaceTreeSnapshot(): SpaceTreeSnapshot {
   return { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+}
+
+/** 首次写入 annotation：revision 固定为 1，revision/时间/actor 由 SpaceFeature 生成。 */
+function initialAnnotation(
+  input: SpaceReferenceAnnotationInput,
+  at: string,
+  actor: SpaceReferenceActor,
+): SpaceReferenceAnnotation {
+  return validateSpaceReferenceAnnotation({ ...input, revision: 1, updatedAt: at, updatedBy: actor });
+}
+
+/**
+ * 基于当前事实应用内容 patch：
+ * - 至少提供一个真正要更新的内容字段；
+ * - 未提供的字段保持原值，不能无意清空；
+ * - 更新成功后 revision 加一。
+ */
+function updatedAnnotation(
+  current: SpaceReferenceAnnotation | undefined,
+  patch: SpaceReferenceAnnotationPatch,
+  at: string,
+  actor: SpaceReferenceActor,
+): SpaceReferenceAnnotation {
+  const hasMarkdown = patch.markdown !== undefined;
+  const hasKeyPoints = patch.keyPoints !== undefined;
+  const hasTags = patch.tags !== undefined;
+  if (!hasMarkdown && !hasKeyPoints && !hasTags) {
+    throw new SpaceFeatureError(
+      "space_reference_annotation_invalid",
+      "Space reference annotation update requires at least one content field.",
+    );
+  }
+  const next: SpaceReferenceAnnotation = {
+    markdown: hasMarkdown ? patch.markdown! : current?.markdown ?? "",
+    ...(hasKeyPoints
+      ? { keyPoints: patch.keyPoints! }
+      : current?.keyPoints === undefined ? {} : { keyPoints: current.keyPoints }),
+    ...(hasTags
+      ? { tags: patch.tags! }
+      : current?.tags === undefined ? {} : { tags: current.tags }),
+    revision: (current?.revision ?? 0) + 1,
+    updatedAt: at,
+    updatedBy: actor,
+  };
+  return validateSpaceReferenceAnnotation(next);
 }

@@ -17,7 +17,7 @@ test("SpaceTree persists its current SQLite snapshot without inferring demo data
     await rm(directory, { recursive: true, force: true });
   });
   const snapshot: SpaceTreeSnapshot = {
-    schemaVersion: "space-tree/v4" as const,
+    schemaVersion: "space-tree/v5" as const,
     spaces: [{ id: "space-one", title: "学习空间", createdAt: "2026-01-01", updatedAt: "2026-01-01" }],
     referenceItems: [{
       id: "reference-top",
@@ -101,4 +101,46 @@ test("SpaceTree migration removes legacy unavailable references", async (t) => {
   const migrated = createSqliteSpaceRepository(database);
 
   assert.deepEqual((await migrated.read()).referenceItems, []);
+});
+
+test("SpaceTree SQLite repository round-trips annotations after migration v7", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-spaces-sqlite-annotation-"));
+  const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
+  t.after(async () => {
+    database.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const repository = createSqliteSpaceRepository(database);
+  const annotation = {
+    markdown: "# Agent 整理",
+    keyPoints: ["要点"],
+    tags: ["深度学习"],
+    revision: 2,
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    updatedBy: "agent" as const,
+  };
+  const snapshot: SpaceTreeSnapshot = {
+    schemaVersion: "space-tree/v5" as const,
+    spaces: [{ id: "space-one", title: "学习空间", createdAt: "2026-01-01", updatedAt: "2026-01-01" }],
+    referenceItems: [{
+      id: "reference-annotated",
+      spaceId: "space-one",
+      title: "特征可视化",
+      reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+      annotation,
+      createdAt: "2026-01-02",
+      updatedAt: "2026-01-02",
+    }, {
+      id: "reference-bare",
+      spaceId: "space-one",
+      title: "无注释引用",
+      reference: { kind: "web_page", url: "https://example.com" },
+      createdAt: "2026-01-03",
+      updatedAt: "2026-01-03",
+    }],
+  };
+  await repository.write(snapshot);
+  const read = await repository.read();
+  assert.deepEqual(read.referenceItems[0].annotation, annotation);
+  assert.equal(read.referenceItems[1].annotation, undefined);
 });

@@ -8,7 +8,7 @@ import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
 import { spaceReferenceMutationKey } from "./space-reference-deletion.js";
-import { createPanelDocumentPreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { attachSpaceAnnotation, createPanelDocumentPreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
 import { getWorkbenchAssetPreview, updateWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 import { createPanelSpaceReferenceEntry, deletePanelSpaceReferenceEntry, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
 
@@ -258,7 +258,7 @@ export async function handlePanelSpaceRoute(
     runtime.spaceConversationDeletion.assertAvailable(item.spaceId);
     await assertExternalReferenceCurrent(runtime, item);
     const preview = item.reference.kind === "workbench_asset"
-      ? await getWorkbenchAssetPreview(runtime.workbenchAssets, item.reference.assetId, item.id)
+      ? attachSpaceAnnotation(await getWorkbenchAssetPreview(runtime.workbenchAssets, item.reference.assetId, item.id), item)
       : await createPanelDocumentPreview(item, url.searchParams.get("path") ?? "");
     if (preview.status === "missing" && await unlinkInvalidExternalReference(runtime, item)) {
       throw new PanelHttpError(410, "space_reference_source_missing", "来源路径已不存在，当前 Space 引用已移除，请重新添加。");

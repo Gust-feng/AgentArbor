@@ -13,7 +13,7 @@ import { createSpaceRevocationOverlay, createSpaceToolRegistryContribution, crea
 import type { SpaceReference, SpaceRepository, SpaceTreeSnapshot } from "./contracts.js";
 
 function toolsFixture() {
-  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v4", spaces: [], referenceItems: [] };
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] };
   const repository: SpaceRepository = {
     async read() { return structuredClone(snapshot); },
     async write(next) { snapshot = structuredClone(next); },
@@ -31,7 +31,7 @@ async function execute(tool: ToolExecutor, input: unknown): Promise<unknown> { r
 
 test("Space tools expose the complete factual operation set and object-root schemas", () => {
   const { tools } = toolsFixture();
-  assert.deepEqual([...tools.keys()], ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
+  assert.deepEqual([...tools.keys()], ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceReadReference", "SpaceUpdateReferenceAnnotation", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
   for (const tool of tools.values()) {
     assert.equal(tool.definition.inputSchema.type, "object");
     assert.equal(tool.definition.metadata?.requiresConfirmation, ["SpaceDelete", "ConversationDelete", "SpaceRemoveReference"].includes(tool.definition.name));
@@ -44,7 +44,7 @@ test("Space contribution contributes all executors without owning ToolCenter ass
   const { spaces } = toolsFixture();
   const names: string[] = [];
   createSpaceToolRegistryContribution({ spaces, workspaceRoot: path.resolve(".") })((entry) => names.push(entry.executor.definition.name));
-  assert.deepEqual(names, ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
+  assert.deepEqual(names, ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceReadReference", "SpaceUpdateReferenceAnnotation", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
 });
 
 test("Space and Conversation deletion tools require confirmation and use Host callbacks", async () => {
@@ -260,5 +260,185 @@ test("SpaceAddReference persists only authorized current Task Soil attachments",
   }) as { readonly status: string; readonly item: { readonly reference: SpaceReference } };
   assert.equal(added.status, "added");
   assert.deepEqual(added.item.reference, { kind: "local_file", path: allowedFile });
+  await spaces.release();
+});
+
+test("SpaceAddReference saves an Agent annotation on first write and reports annotationStatus", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "机器学习" }) as { space: { id: string } };
+  const annotation = {
+    markdown: "# 特征可视化\n\n通过优化输入观察神经元激活。",
+    keyPoints: ["通过优化输入观察神经元激活", "深层网络表示更抽象的概念"],
+    tags: ["深度学习", "可视化"],
+  };
+  const result = await execute(tools.get("SpaceAddReference")!, {
+    spaceId: created.space.id,
+    title: "Distill：特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation,
+  }) as { readonly status: string; readonly annotationStatus: string; readonly item: { readonly annotation: unknown } };
+  assert.equal(result.status, "added");
+  assert.equal(result.annotationStatus, "written");
+  assert.deepEqual(result.item.annotation, {
+    ...annotation,
+    revision: 1,
+    updatedAt: "2026-07-28T00:00:00.000Z",
+    updatedBy: "agent",
+  });
+  await spaces.release();
+});
+
+test("SpaceAddReference without annotation reports annotationStatus missing and stores no body", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "阅读" }) as { space: { id: string } };
+  const result = await execute(tools.get("SpaceAddReference")!, {
+    spaceId: created.space.id,
+    title: "无法读取的网页",
+    reference: { kind: "web_page", url: "https://example.com/private" },
+  }) as { readonly status: string; readonly annotationStatus: string; readonly item: { readonly annotation?: unknown; readonly reference: SpaceReference } };
+  assert.equal(result.status, "added");
+  assert.equal(result.annotationStatus, "missing");
+  assert.equal(result.item.annotation, undefined);
+  assert.deepEqual(result.item.reference, { kind: "web_page", url: "https://example.com/private" });
+  await spaces.release();
+});
+
+test("SpaceAddReference rejects structurally invalid annotation without writing", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "工作" }) as { space: { id: string } };
+  const addReference = tools.get("SpaceAddReference")!;
+  assert.deepEqual(await execute(addReference, {
+    spaceId: created.space.id,
+    title: "坏注释",
+    reference: { kind: "web_page", url: "https://example.com" },
+    annotation: { keyPoints: ["缺少 markdown"] },
+  }), { status: "invalid_input", message: "annotation must be an object with a markdown string." });
+  assert.deepEqual(await execute(addReference, {
+    spaceId: created.space.id,
+    title: "坏要点",
+    reference: { kind: "web_page", url: "https://example.com" },
+    annotation: { markdown: "ok", keyPoints: [42] },
+  }), { status: "invalid_input", message: "annotation must be an object with a markdown string." });
+  assert.equal((await spaces.queries.getTree(created.space.id))?.entries.length, 0);
+  await spaces.release();
+});
+
+test("SpaceAddReference executor never performs an implicit web fetch", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "工作" }) as { space: { id: string } };
+  const executor = tools.get("SpaceAddReference")!;
+  assert.match(executor.definition.description, /never fetches web pages or files implicitly/iu);
+  assert.doesNotMatch(JSON.stringify(executor.definition.inputSchema), /webfetch|browser/iu);
+  await execute(executor, {
+    spaceId: created.space.id,
+    title: "网页",
+    reference: { kind: "web_page", url: "https://example.com/unreachable" },
+  });
+  const tree = await spaces.queries.getTree(created.space.id);
+  assert.equal(tree?.entries.length, 1);
+  await spaces.release();
+});
+
+test("SpaceReadReference returns the source and current annotation without touching the web", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "机器学习" }) as { space: { id: string } };
+  const added = await spaces.commands.addReference({
+    spaceId: created.space.id,
+    title: "特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation: { markdown: "通过优化输入观察神经元激活。", tags: ["深度学习"] },
+    actor: "agent",
+  });
+  const result = await execute(tools.get("SpaceReadReference")!, { itemId: added.id }) as {
+    readonly status: string;
+    readonly item: { readonly reference: SpaceReference; readonly annotation: { readonly revision: number; readonly markdown: string; readonly tags: readonly string[] } };
+  };
+  assert.equal(result.status, "found");
+  assert.deepEqual(result.item.reference, { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" });
+  assert.equal(result.item.annotation.revision, 1);
+  assert.equal(result.item.annotation.markdown, "通过优化输入观察神经元激活。");
+  assert.deepEqual(result.item.annotation.tags, ["深度学习"]);
+  assert.deepEqual(await execute(tools.get("SpaceReadReference")!, { itemId: "missing-reference" }), {
+    status: "space_reference_not_found",
+    itemId: "missing-reference",
+  });
+  await spaces.release();
+});
+
+test("SpaceUpdateReferenceAnnotation updates content with expectedRevision and keeps absent fields", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "机器学习" }) as { space: { id: string } };
+  const added = await spaces.commands.addReference({
+    spaceId: created.space.id,
+    title: "特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation: { markdown: "旧理解", keyPoints: ["旧要点"], tags: ["深度学习"] },
+    actor: "agent",
+  });
+  const result = await execute(tools.get("SpaceUpdateReferenceAnnotation")!, {
+    itemId: added.id,
+    expectedRevision: 1,
+    markdown: "新理解：补充与 Transformer 的关系。",
+    tags: ["深度学习", "Transformer"],
+  }) as { readonly status: string; readonly item: { readonly annotation: { readonly revision: number; readonly markdown: string; readonly keyPoints: readonly string[]; readonly tags: readonly string[]; readonly updatedBy: string } } };
+  assert.equal(result.status, "updated");
+  assert.equal(result.item.annotation.revision, 2);
+  assert.equal(result.item.annotation.markdown, "新理解：补充与 Transformer 的关系。");
+  assert.deepEqual(result.item.annotation.keyPoints, ["旧要点"]);
+  assert.deepEqual(result.item.annotation.tags, ["深度学习", "Transformer"]);
+  assert.equal(result.item.annotation.updatedBy, "agent");
+  await spaces.release();
+});
+
+test("SpaceUpdateReferenceAnnotation rejects stale revisions and empty patches as structured results", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "机器学习" }) as { space: { id: string } };
+  const added = await spaces.commands.addReference({
+    spaceId: created.space.id,
+    title: "特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation: { markdown: "v1 内容" },
+    actor: "agent",
+  });
+  const update = tools.get("SpaceUpdateReferenceAnnotation")!;
+  assert.deepEqual(await execute(update, { itemId: added.id, expectedRevision: 2, markdown: "基于过期版本" }), {
+    status: "space_reference_annotation_revision_conflict",
+    message: "Space reference " + added.id + " annotation revision is 1, expected 2",
+  });
+  assert.deepEqual(await execute(update, { itemId: added.id, expectedRevision: 1 }), {
+    status: "invalid_input",
+    message: "At least one content field (markdown, keyPoints or tags) is required.",
+  });
+  assert.deepEqual(await execute(update, { itemId: "missing", expectedRevision: 1, markdown: "x" }), {
+    status: "space_reference_not_found",
+    itemId: "missing",
+  });
+  const current = await spaces.queries.getReference(added.id);
+  assert.equal(current?.annotation?.markdown, "v1 内容");
+  assert.equal(current?.annotation?.revision, 1);
+  await spaces.release();
+});
+
+test("SpaceUpdateReferenceAnnotation rejects invalid keyPoints and tags without writing", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "机器学习" }) as { space: { id: string } };
+  const added = await spaces.commands.addReference({
+    spaceId: created.space.id,
+    title: "特征可视化",
+    reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
+    annotation: { markdown: "v1 内容" },
+    actor: "agent",
+  });
+  const update = tools.get("SpaceUpdateReferenceAnnotation")!;
+  assert.deepEqual(await execute(update, { itemId: added.id, expectedRevision: 1, markdown: "x", keyPoints: [1] }), {
+    status: "invalid_input",
+    message: "At least one content field (markdown, keyPoints or tags) is required.",
+  });
+  assert.deepEqual(await execute(update, { itemId: added.id, expectedRevision: 1, keyPoints: "not-an-array" }), {
+    status: "invalid_input",
+    message: "At least one content field (markdown, keyPoints or tags) is required.",
+  });
+  const current = await spaces.queries.getReference(added.id);
+  assert.equal(current?.annotation?.revision, 1);
   await spaces.release();
 });

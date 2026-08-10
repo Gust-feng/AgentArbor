@@ -213,6 +213,57 @@ test('keeps image, video, audio, and web content inside application-owned surfac
   expect(rendered.container.querySelector('.aa-reference-preview__web-source')).not.toBeNull()
 })
 
+test('shows the Agent annotation as the primary content for an annotated web reference', async () => {
+  const previews: Record<string, DocumentPreview> = {
+    'web-annotated': {
+      ...previewWithPresentation('web-annotated', 'web', { kind: 'web', url: 'https://distill.pub/2017/feature-visualization', site: 'distill.pub' }),
+      title: '特征可视化',
+      sourceKind: 'web_page',
+      annotation: {
+        markdown: '# Agent 整理\n\n通过优化输入观察神经元激活。',
+        keyPoints: ['通过优化输入观察神经元激活', '深层网络倾向于表示更抽象的概念'],
+        tags: ['深度学习', '可视化'],
+        revision: 2,
+        updatedAt: '2026-08-11T00:00:00.000Z',
+        updatedBy: 'agent',
+      },
+    },
+    'web-bare': {
+      ...previewWithPresentation('web-bare', 'web', { kind: 'web', url: 'https://example.test/private', site: 'example.test' }),
+      title: '未整理网页',
+      sourceKind: 'web_page',
+    },
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const id = String(input).includes('web-annotated') ? 'web-annotated' : 'web-bare'
+    return new Response(JSON.stringify({ preview: previews[id] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  const rendered = render(<ReferencePreview itemId="web-annotated" fallbackTitle="特征可视化" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByRole('heading', { name: 'Agent 整理' })).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation')).not.toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation-markdown')?.textContent).toContain('通过优化输入观察神经元激活')
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation-points')?.textContent).toContain('深层网络倾向于表示更抽象的概念')
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation-tags')?.textContent).toContain('可视化')
+  expect(rendered.container.querySelector('.aa-reference-preview__web-source a')?.getAttribute('href')).toBe('https://distill.pub/2017/feature-visualization')
+  expect(rendered.container.querySelector('.aa-reference-preview__web--annotated')).not.toBeNull()
+  expect(screen.queryByText('Agent 尚未整理此引用')).toBeNull()
+})
+
+test('shows an explicit unannotated state and the source entry for a bare web reference', async () => {
+  const preview = {
+    ...previewWithPresentation('web-bare', 'web', { kind: 'web', url: 'https://example.test/private', site: 'example.test' }),
+    title: '未整理网页',
+    sourceKind: 'web_page',
+  }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ preview }), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+  const rendered = render(<ReferencePreview itemId="web-bare" fallbackTitle="未整理网页" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByText('Agent 尚未整理此引用')).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation')).toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-preview__web a')?.getAttribute('href')).toBe('https://example.test/private')
+})
+
 test('keeps an edited reference stable until the user loads the external version', async () => {
   const user = userEvent.setup()
   const original = textPreview('1:4', '原始内容')

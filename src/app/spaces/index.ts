@@ -19,6 +19,10 @@ export {
   type SpaceOwnedAssetDeletionPort,
   type SpaceMovableTarget,
   type SpaceReference,
+  type SpaceReferenceActor,
+  type SpaceReferenceAnnotation,
+  type SpaceReferenceAnnotationInput,
+  type SpaceReferenceAnnotationPatch,
   type SpaceReferenceItem,
   type SpaceRepository,
   type SpaceSummary,
@@ -47,7 +51,7 @@ export {
   type SpaceReferenceDeletionLifecycle,
   type SpaceReferenceDeletionTargetState,
 } from "./space-reference-deletion.js";
-export { validateSpaceReference } from "./space-validation.js";
+export { validateSpaceReference, validateSpaceReferenceAnnotation, spaceReferenceAnnotationSchema } from "./space-validation.js";
 export {
   createSpaceAddReferenceTool,
   createSpaceCreateTool,
@@ -55,11 +59,14 @@ export {
   createConversationDeleteTool,
   createSpaceListTool,
   createSpaceMoveTool,
+  createSpaceReadReferenceTool,
   createSpaceRemoveReferenceTool,
   createSpaceRenameTool,
   createSpaceRevocationOverlay,
   createSpaceToolRegistryContribution,
   createSpaceTools,
+  createSpaceUnlinkReferenceTool,
+  createSpaceUpdateReferenceAnnotationTool,
   type SpaceRevocationOverlay,
   type SpaceToolOptions,
 } from "./space-tools.js";

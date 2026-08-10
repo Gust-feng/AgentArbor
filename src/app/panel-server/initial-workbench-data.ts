@@ -113,8 +113,22 @@ export async function initializeInitialWorkbenchData(input: {
   const existingTree = await input.spaceFeature.queries.getTree(DEMO_SPACE_ID);
   const existingItemIds = new Set(existingTree?.entries.map((entry) => entry.item.id) ?? []);
   for (const item of INITIAL_SPACE_ITEMS) {
-    if (existingItemIds.has(item.id)) continue;
     const parentId = "parentId" in item ? item.parentId : undefined;
+    if (existingItemIds.has(item.id)) {
+      // 旧演示数据缺失 annotation 时，对同一演示引用做一次性补齐；
+      // 已有 Agent/用户 annotation 的引用绝不覆盖。
+      const existing = existingTree?.entries.find((entry) => entry.item.id === item.id)?.item;
+      const initialAnnotation = "annotation" in item ? item.annotation : undefined;
+      if (existing?.annotation === undefined && initialAnnotation !== undefined) {
+        await input.spaceFeature.commands.updateReferenceAnnotation({
+          itemId: item.id,
+          expectedRevision: 0,
+          patch: { markdown: initialAnnotation.markdown, ...(initialAnnotation.keyPoints === undefined ? {} : { keyPoints: initialAnnotation.keyPoints }), ...(initialAnnotation.tags === undefined ? {} : { tags: initialAnnotation.tags }) },
+          actor: "agent",
+        });
+      }
+      continue;
+    }
     if (item.reference.kind === "conversation") {
       await input.spaceFeature.commands.linkConversationOwner({
         id: item.id,
@@ -124,12 +138,14 @@ export async function initializeInitialWorkbenchData(input: {
         conversationTitle: item.reference.conversationTitle,
       });
     } else {
+      const initialAnnotation = "annotation" in item ? item.annotation : undefined;
       await input.spaceFeature.commands.addReference({
         id: item.id,
         spaceId: DEMO_SPACE_ID,
         title: item.title,
         ...(parentId === undefined ? {} : { parentId }),
         reference: item.reference,
+        ...(initialAnnotation === undefined ? {} : { annotation: initialAnnotation, actor: "agent" }),
       });
     }
   }
@@ -185,10 +201,70 @@ const INITIAL_SPACE_ITEMS = [
   { id: "f4", title: "学习框架制定对话", reference: { kind: "conversation" as const, conversationId: "conv-learning-plan", conversationTitle: "学习框架制定对话" } },
   { id: "f2", title: "阅读笔记", reference: { kind: "asset_folder" as const } },
   { id: "f2-3", parentId: "f2", title: "认知偏见与阅读整理", reference: { kind: "conversation" as const, conversationId: "conv-bias", conversationTitle: "认知偏见与阅读整理" } },
-  { id: "f2-2", parentId: "f2", title: "卡片笔记法完整介绍", reference: { kind: "workbench_asset" as const, assetId: "f2-2" } },
+  {
+    id: "f2-2", parentId: "f2", title: "卡片笔记法完整介绍", reference: { kind: "workbench_asset" as const, assetId: "f2-2" },
+    annotation: {
+      markdown: `# 卡片笔记法（Zettelkasten）
+
+卡片笔记法的核心不是"记录"而是"连接"：每张卡片承载一个原子化的想法，通过链接与其他卡片相连，逐渐长成一张思想网络。
+
+## 三类笔记
+
+- 闪念笔记：随手记下的临时想法，当天处理
+- 文献笔记：读到的内容，用自己的话重写
+- 永久笔记：提炼后的原子想法，进入卡片盒并建立链接
+
+关键在写永久笔记时强迫自己"用自己的话"——这一步就是主动回忆，也是理解真正发生的地方。`,
+      keyPoints: ["核心是连接而不是记录", "文献笔记必须用自己的话重写", "永久笔记是理解真正发生的地方"],
+      tags: ["读书方法", "笔记法", "知识管理"],
+    },
+  },
   { id: "f1", title: "2026年学习资料", reference: { kind: "asset_folder" as const } },
-  { id: "f1-5", parentId: "f1", title: "神经网络结构图.png", reference: { kind: "workbench_asset" as const, assetId: "f1-5" } },
+  {
+    id: "f1-5", parentId: "f1", title: "神经网络结构图.png", reference: { kind: "workbench_asset" as const, assetId: "f1-5" },
+    annotation: {
+      markdown: `# 手绘网络结构与推导草稿
+
+一张手绘的学习笔记草图，梳理了网络结构示意与推导过程，属于课程学习中的直观理解素材，可配合 CS231n 与 PyTorch 笔记一起使用。`,
+      keyPoints: ["网络结构示意图", "包含推导草稿", "课程学习辅助素材"],
+      tags: ["深度学习", "手写笔记"],
+    },
+  },
   { id: "f1-3", parentId: "f1", title: "关于梯度下降的讨论", reference: { kind: "conversation" as const, conversationId: "conv-grad", conversationTitle: "关于梯度下降的讨论" } },
-  { id: "f1-2", parentId: "f1", title: "CS231n 课程主页", reference: { kind: "workbench_asset" as const, assetId: "f1-2" } },
-  { id: "f1-1", parentId: "f1", title: "PyTorch 入门笔记.pdf", reference: { kind: "workbench_asset" as const, assetId: "f1-1" } },
+  {
+    id: "f1-2", parentId: "f1", title: "CS231n 课程主页", reference: { kind: "workbench_asset" as const, assetId: "f1-2" },
+    annotation: {
+      markdown: `# CS231n：面向视觉识别的卷积神经网络
+
+这门课深入讲解深度学习在计算机视觉中的应用，尤其是图像分类。课程从最近邻、线性分类器讲起，逐步过渡到神经网络与卷积神经网络。
+
+## 核心主题
+
+- 反向传播与计算图：理解梯度如何在网络中流动
+- 卷积网络架构：卷积层、池化层、批归一化
+- 训练技巧：初始化、优化器选择、正则化与 dropout
+- 迁移学习：如何复用预训练模型
+
+作业围绕从零实现这些组件展开——先手写，再用框架，理解会深得多。`,
+      keyPoints: ["从最近邻到卷积网络的完整路径", "反向传播与计算图是理解主线", "作业要求先手写再框架实现"],
+      tags: ["CS231n", "计算机视觉", "卷积网络"],
+    },
+  },
+  {
+    id: "f1-1", parentId: "f1", title: "PyTorch 入门笔记.pdf", reference: { kind: "workbench_asset" as const, assetId: "f1-1" },
+    annotation: {
+      markdown: `# PyTorch 入门笔记
+
+一份入门级 PyTorch 笔记，覆盖三个部分：张量与基础运算、自动求导（Autograd）、最小训练循环骨架。
+
+## 要点
+
+- 张量类似 NumPy ndarray，可在 GPU 上运算并支持自动求导
+- \`requires_grad=True\` 会构建动态计算图，\`.backward()\` 反向传播梯度
+- 梯度是累加的，训练循环每步前要调用 \`optimizer.zero_grad()\` 清零
+- 训练循环五步：前向、算损失、清梯度、反向、更新`,
+      keyPoints: ["张量是 GPU 上的 ndarray 并支持自动求导", "backward 沿动态计算图传播梯度", "zero_grad 必须在每步前清零", "训练循环五步骨架"],
+      tags: ["PyTorch", "深度学习", "入门"],
+    },
+  },
 ] as const;

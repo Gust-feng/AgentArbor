@@ -2,6 +2,7 @@ import { Fragment, forwardRef, useEffect, useImperativeHandle, useLayoutEffect, 
 import { diffLines, type Change } from 'diff'
 import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Folder, RefreshCw } from 'lucide-react'
 import { fetchDocumentPreview, getCachedReferencePreview, refreshDocumentPreview, saveDocumentText, subscribeReferencePreviewCache, type DocumentPreview } from './referencePreviewClient'
+import type { SpaceReferenceAnnotation } from '../../../../../../spaces/contracts'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
 import { PdfDocumentSurface } from './PdfDocumentSurface'
@@ -333,8 +334,35 @@ function ReferenceDocumentSessionView({
       {error !== undefined && <div className="aa-reference-preview__error" role="alert">{error}</div>}
       {changes !== undefined ? <TextDiff changes={changes} /> : sourceModeActive && markdownDocument ? (
         <textarea className="aa-reference-preview__editor" data-document-scroll="source" value={draft} onChange={(event) => scheduleSave(event.target.value)} spellCheck={false} />
-      ) : <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />}
+      ) : <>
+        {preview.annotation !== undefined && <ReferenceAnnotation annotation={preview.annotation} sourceVersion={`${targetKey}:annotation:${preview.annotation.revision}`} />}
+        <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />
+      </>}
     </div>
+  )
+}
+
+function ReferenceAnnotation({ annotation, sourceVersion }: { annotation: SpaceReferenceAnnotation; sourceVersion: string }) {
+  return (
+    <section className="aa-reference-preview__annotation" aria-label="Agent 整理">
+      <div className="aa-reference-preview__annotation-label">
+        <span>Agent 整理</span>
+        <span className="aa-reference-preview__annotation-actor" data-actor={annotation.updatedBy}>{annotation.updatedBy === 'user' ? '用户维护' : 'Agent 维护'}</span>
+      </div>
+      <div className="aa-reference-preview__annotation-markdown reading-prose">
+        <MarkdownDocumentSurface markdown={annotation.markdown} sourceVersion={sourceVersion} />
+      </div>
+      {annotation.keyPoints !== undefined && annotation.keyPoints.length > 0 && (
+        <ul className="aa-reference-preview__annotation-points">
+          {annotation.keyPoints.map((point, index) => <li key={index}>{point}</li>)}
+        </ul>
+      )}
+      {annotation.tags !== undefined && annotation.tags.length > 0 && (
+        <div className="aa-reference-preview__annotation-tags">
+          {annotation.tags.map((tag, index) => <span key={index}>{tag}</span>)}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -444,7 +472,20 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
     }
     case 'web':
       if (content.kind !== 'web') return <InvalidPresentationState preview={preview} onReload={onReload} />
+      if (preview.annotation !== undefined) {
+        // Space 引用：Agent 整理内容由 ReferenceAnnotation 区块展示，
+        // 这里只保留来源事实，绝不把资产里的 body 当作 Agent 整理内容。
+        return (
+          <div className="aa-reference-preview__web aa-reference-preview__web--annotated" data-document-scroll="content">
+            <div className="aa-reference-preview__web-source">
+              <span>{content.site ?? preview.title}</span>
+              <a href={content.url} target="_blank" rel="noreferrer">访问原网页<ExternalLink size={12} /></a>
+            </div>
+          </div>
+        )
+      }
       if (content.body !== undefined) {
+        // Personal Knowledge 旧素材预览兼容路径：正文是素材自身内容，不是 Space annotation。
         return (
           <div className="aa-reference-preview__reader" data-document-scroll="content">
             <article className="aa-reference-preview__markdown reading-prose">
@@ -461,6 +502,7 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
         <div className="aa-reference-preview__web" data-document-scroll="content">
           <FileText size={28} />
           <strong>{preview.title}</strong>
+          <span className="aa-reference-preview__annotation-empty">Agent 尚未整理此引用</span>
           <a href={content.url} target="_blank" rel="noreferrer">{content.url}<ExternalLink size={12} /></a>
         </div>
       )

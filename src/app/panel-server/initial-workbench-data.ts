@@ -1,11 +1,22 @@
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 import type { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import type { PersonalKnowledgeFeature } from "../personal-knowledge/index.js";
 import type { SpaceFeature } from "../spaces/index.js";
 import type { WorkbenchAssetRepository } from "../workbench-assets/index.js";
 import { getInitialWorkbenchAssets } from "../workbench-assets/index.js";
 
-export const INITIAL_WORKBENCH_DATA_KEY = "workbench-initial-assets/v5";
-export const INITIAL_SPACE_ID = "space-learning";
+/**
+ * The production first-install contract is intentionally small: create one
+ * ordinary Space and let the user/model populate everything else.
+ *
+ * The version is separate from the retired demo seed so upgrading a machine
+ * never re-imports example assets or treats old demo data as product state.
+ */
+export const INITIAL_WORKBENCH_DATA_KEY = "workbench-initial-space/v1";
+export const INITIAL_SPACE_ID = "space-default";
+export const INITIAL_DEMO_DATA_KEY = "workbench-initial-demo/v1";
+const DEMO_SPACE_ID = "space-learning";
 
 export type InitialWorkbenchDataInitializer = {
   ensure(): Promise<void>;
@@ -75,17 +86,31 @@ export async function initializeInitialWorkbenchData(input: {
   readonly spaceFeature: SpaceFeature;
   readonly personalKnowledgeFeature: PersonalKnowledgeFeature;
   readonly workbenchAssets: WorkbenchAssetRepository;
+  /** Host-owned root used to materialize each Space managedRoot. */
+  readonly managedSpaceRoot?: string;
+  /** Development/test seam only. Production must leave the demo seed off. */
+  readonly seedDemo?: boolean;
 }): Promise<void> {
-  if (input.database.hasInitialization(INITIAL_WORKBENCH_DATA_KEY)) return;
+  if (!input.database.hasInitialization(INITIAL_WORKBENCH_DATA_KEY)) {
+    const existingSpaces = await input.spaceFeature.queries.list();
+    if (existingSpaces.length === 0) {
+      await input.spaceFeature.commands.createSpace({ id: INITIAL_SPACE_ID, title: "我的空间" });
+    }
+    await ensureSpaceManagedRoot(input.managedSpaceRoot, INITIAL_SPACE_ID);
+    input.database.recordInitialization(INITIAL_WORKBENCH_DATA_KEY);
+  }
+
+  if (input.seedDemo !== true || input.database.hasInitialization(INITIAL_DEMO_DATA_KEY)) return;
 
   await input.workbenchAssets.upsertMany(getInitialWorkbenchAssets());
 
-  const existingSpace = (await input.spaceFeature.queries.list()).find((space) => space.id === INITIAL_SPACE_ID);
+  const existingSpace = (await input.spaceFeature.queries.list()).find((space) => space.id === DEMO_SPACE_ID);
   if (existingSpace === undefined) {
-    await input.spaceFeature.commands.createSpace({ id: INITIAL_SPACE_ID, title: "学习空间" });
+    await input.spaceFeature.commands.createSpace({ id: DEMO_SPACE_ID, title: "学习空间" });
   }
+  await ensureSpaceManagedRoot(input.managedSpaceRoot, DEMO_SPACE_ID);
 
-  const existingTree = await input.spaceFeature.queries.getTree(INITIAL_SPACE_ID);
+  const existingTree = await input.spaceFeature.queries.getTree(DEMO_SPACE_ID);
   const existingItemIds = new Set(existingTree?.entries.map((entry) => entry.item.id) ?? []);
   for (const item of INITIAL_SPACE_ITEMS) {
     if (existingItemIds.has(item.id)) continue;
@@ -93,7 +118,7 @@ export async function initializeInitialWorkbenchData(input: {
     if (item.reference.kind === "conversation") {
       await input.spaceFeature.commands.linkConversationOwner({
         id: item.id,
-        spaceId: INITIAL_SPACE_ID,
+        spaceId: DEMO_SPACE_ID,
         title: item.title,
         conversationId: item.reference.conversationId,
         conversationTitle: item.reference.conversationTitle,
@@ -101,7 +126,7 @@ export async function initializeInitialWorkbenchData(input: {
     } else {
       await input.spaceFeature.commands.addReference({
         id: item.id,
-        spaceId: INITIAL_SPACE_ID,
+        spaceId: DEMO_SPACE_ID,
         title: item.title,
         ...(parentId === undefined ? {} : { parentId }),
         reference: item.reference,
@@ -148,7 +173,12 @@ export async function initializeInitialWorkbenchData(input: {
     existingLinks.add(key);
   }
 
-  input.database.recordInitialization(INITIAL_WORKBENCH_DATA_KEY);
+  input.database.recordInitialization(INITIAL_DEMO_DATA_KEY);
+}
+
+async function ensureSpaceManagedRoot(root: string | undefined, spaceId: string): Promise<void> {
+  if (root === undefined) return;
+  await mkdir(path.join(root, spaceId, "files"), { recursive: true });
 }
 
 const INITIAL_SPACE_ITEMS = [

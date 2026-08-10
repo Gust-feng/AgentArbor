@@ -7,69 +7,35 @@ import test from "node:test";
 import { releasePanelRuntimeResources } from "./request-handler.js";
 import {
   createInitialWorkbenchDataInitializer,
+  INITIAL_DEMO_DATA_KEY,
   INITIAL_SPACE_ID,
   INITIAL_WORKBENCH_DATA_KEY,
 } from "./initial-workbench-data.js";
 import { createPanelRuntime } from "./runtime.js";
 
-const INITIAL_MATERIAL_IDS = [
-  "f1-1",
-  "f2-2",
-  "m-attn-pdf",
-  "m-transformer-md",
-  "m-loss-img",
-  "m-train-code",
-  "m-distill-web",
-  "m-inspo-img",
-].sort();
-const INITIAL_ASSET_IDS = ["f1-2", "f1-5", ...INITIAL_MATERIAL_IDS].sort();
-
-test("Panel initializes the built-in Workbench dataset exactly once", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-initial-workbench-assets-"));
+test("Panel 首次启动只创建一个普通的我的空间", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-initial-space-"));
   try {
     const firstRuntime = createPanelRuntime({ configDirectory: directory });
     try {
       await firstRuntime.ensureInitialWorkbenchData();
       assert.equal(firstRuntime.workbenchDatabase.hasInitialization(INITIAL_WORKBENCH_DATA_KEY), true);
+      assert.equal(firstRuntime.workbenchDatabase.hasInitialization(INITIAL_DEMO_DATA_KEY), false);
 
       const space = await firstRuntime.spaceFeature.queries.getTree(INITIAL_SPACE_ID);
-      assert.equal(space?.space.title, "学习空间");
-      assert.equal(space?.entries.length, 9);
-      assert.equal(space?.entries.find((entry) => entry.item.id === "f1-1")?.item.parentId, "f1");
-      assert.deepEqual(space?.entries.find((entry) => entry.item.id === "f1-1")?.item.reference, { kind: "workbench_asset", assetId: "f1-1" });
-      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === undefined).map((entry) => entry.item.id), ["f1-3", "f1", "f2-3", "f2", "f4"]);
-      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === "f1").map((entry) => entry.item.id), ["f1-1", "f1-2", "f1-5"]);
-      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === "f2").map((entry) => entry.item.id), ["f2-2"]);
-
-      const assets = await firstRuntime.workbenchAssets.list();
-      assert.deepEqual(assets.map((asset) => asset.id).sort(), INITIAL_ASSET_IDS);
-      assert.match(assets.find((asset) => asset.id === "m-train-code")?.code?.source ?? "", /import torch/u);
-
+      assert.equal(space?.space.title, "我的空间");
+      assert.deepEqual(space?.entries, []);
+      assert.deepEqual((await firstRuntime.spaceFeature.queries.list()).map(({ id, title }) => ({ id, title })), [
+        { id: INITIAL_SPACE_ID, title: "我的空间" },
+      ]);
+      await fs.access(path.join(directory, "runtime", "spaces", INITIAL_SPACE_ID, "files"));
+      assert.deepEqual(await firstRuntime.workbenchAssets.list(), []);
       const knowledge = await firstRuntime.personalKnowledgeFeature.queries.snapshot();
-      assert.deepEqual(knowledge.pages.map((page) => page.refId).sort(), INITIAL_MATERIAL_IDS);
-      assert.deepEqual(knowledge.pages.map((page) => page.kind), Array(INITIAL_MATERIAL_IDS.length).fill("material"));
+      assert.deepEqual(knowledge.pages, []);
       assert.deepEqual(knowledge.notes, []);
-      assert.deepEqual(knowledge.themes.map(({ id, name, origin }) => ({ id, name, origin })), [
-        { id: "t-inspo", name: "灵感与杂谈", origin: "agent" },
-        { id: "t-method", name: "读书与方法", origin: "agent" },
-        { id: "t-training", name: "训练与实践", origin: "agent" },
-        { id: "t-transformer", name: "Transformer", origin: "agent" },
-      ]);
-      assert.equal(knowledge.assignments.length, 10);
-      assert.deepEqual(
-        INITIAL_MATERIAL_IDS.filter((refId) => !knowledge.assignments.some((assignment) => assignment.refId === refId)),
-        [],
-      );
-      assert.equal(knowledge.assignments.every((assignment) => assignment.by === "agent" && !assignment.locked), true);
-      assert.deepEqual(knowledge.links.map(({ from, to }) => ({ from, to })), [
-        { from: "m-loss-img", to: "f1-1" },
-        { from: "m-train-code", to: "m-attn-pdf" },
-        { from: "m-transformer-md", to: "f2-2" },
-        { from: "m-transformer-md", to: "m-attn-pdf" },
-      ]);
-
-      await assert.rejects(fs.access(path.join(directory, "runtime", "space-folders", INITIAL_SPACE_ID, "README.md")));
-      await assert.rejects(fs.access(path.join(directory, "runtime", "space-folders", INITIAL_SPACE_ID, "学习路线.md")));
+      assert.deepEqual(knowledge.themes, []);
+      assert.deepEqual(knowledge.assignments, []);
+      assert.deepEqual(knowledge.links, []);
     } finally {
       await releasePanelRuntimeResources(firstRuntime);
     }
@@ -77,16 +43,32 @@ test("Panel initializes the built-in Workbench dataset exactly once", async () =
     const restartedRuntime = createPanelRuntime({ configDirectory: directory });
     try {
       await restartedRuntime.ensureInitialWorkbenchData();
-      const knowledge = await restartedRuntime.personalKnowledgeFeature.queries.snapshot();
-      assert.deepEqual(knowledge.pages.map((page) => page.refId).sort(), INITIAL_MATERIAL_IDS);
-      assert.equal(knowledge.themes.length, 4);
-      assert.equal(knowledge.assignments.length, 10);
-      assert.equal(knowledge.links.length, 4);
-      assert.equal((await restartedRuntime.spaceFeature.queries.list()).filter((space) => space.id === INITIAL_SPACE_ID).length, 1);
-      assert.equal((await restartedRuntime.spaceFeature.queries.getTree(INITIAL_SPACE_ID))?.entries.length, 9);
-      assert.equal((await restartedRuntime.workbenchAssets.list()).length, 10);
+      assert.equal((await restartedRuntime.spaceFeature.queries.list()).length, 1);
+      assert.deepEqual((await restartedRuntime.spaceFeature.queries.getTree(INITIAL_SPACE_ID))?.entries, []);
+      assert.deepEqual(await restartedRuntime.workbenchAssets.list(), []);
     } finally {
       await releasePanelRuntimeResources(restartedRuntime);
+    }
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("示例数据只有显式测试开关才会导入", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-initial-demo-"));
+  try {
+    const runtime = createPanelRuntime({
+      configDirectory: directory,
+      testOnlySeedInitialWorkbenchDemoData: true,
+    });
+    try {
+      await runtime.ensureInitialWorkbenchData();
+      assert.equal(runtime.workbenchDatabase.hasInitialization(INITIAL_DEMO_DATA_KEY), true);
+      assert.equal((await runtime.spaceFeature.queries.getTree("space-learning"))?.entries.length, 9);
+      assert.equal((await runtime.workbenchAssets.list()).length, 10);
+      assert.equal((await runtime.personalKnowledgeFeature.queries.snapshot()).pages.length, 8);
+    } finally {
+      await releasePanelRuntimeResources(runtime);
     }
   } finally {
     await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });

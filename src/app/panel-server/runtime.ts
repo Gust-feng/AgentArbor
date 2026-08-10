@@ -237,6 +237,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       ordinaryAgentExecution: options.ordinaryAgentExecution,
       testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
       testOnlySkipInitialWorkbenchData: options.testOnlySkipInitialWorkbenchData,
+      testOnlySeedInitialWorkbenchDemoData: options.testOnlySeedInitialWorkbenchDemoData,
       runtimePaths,
     });
   }
@@ -263,6 +264,7 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     ordinaryAgentExecution: options.ordinaryAgentExecution,
     testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
     testOnlySkipInitialWorkbenchData: options.testOnlySkipInitialWorkbenchData,
+    testOnlySeedInitialWorkbenchDemoData: options.testOnlySeedInitialWorkbenchDemoData,
     runtimePaths,
   });
 }
@@ -354,6 +356,7 @@ function assemblePanelRuntime(input: {
   readonly ordinaryAgentExecution?: import("../ordinary-agent/contracts.js").OrdinaryExecutionPort;
   readonly testOnlyAllowFakeModel?: boolean;
   readonly testOnlySkipInitialWorkbenchData?: boolean;
+  readonly testOnlySeedInitialWorkbenchDemoData?: boolean;
 }): PanelRuntime {
   const activeRequestJobs = new Set<Promise<void>>();
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
@@ -514,7 +517,9 @@ function assemblePanelRuntime(input: {
           spaceFeature,
           personalKnowledgeFeature,
           workbenchAssets,
-      }),
+          managedSpaceRoot,
+          seedDemo: input.testOnlySeedInitialWorkbenchDemoData,
+        }),
   );
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
     await fileMutationCoordinator.runExclusive(knowledgeAssetRoot, async () => await reconcileKnowledgeAssets(
@@ -731,7 +736,7 @@ function assemblePanelRuntime(input: {
         // Each Space owns a managedRoot（ADR-0035 §2.3）。Directory creation is a
         // Host mechanical step: missing roots are recreated lazily by the scope
         // resolver, and failures are diagnostics that never block the Space command.
-        void ensureSpaceManagedRoot(path.join(managedSpaceRoot, event.space.id))
+        void ensureSpaceManagedRoot(path.join(managedSpaceRoot, event.space.id, "files"))
           .catch((error) => console.error(`[panel-server] Could not create managedRoot for Space ${event.space.id}`, error));
       }
     }),

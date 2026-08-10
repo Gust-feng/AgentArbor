@@ -147,6 +147,28 @@ test("Space API read-model merges legacy tree-linked conversations", async () =>
   }
 });
 
+test("Space API ignores an unavailable legacy conversation instead of failing the Space projection", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-stale-legacy-"));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "干净空间" } });
+    const spaceId = created.body.space.id as string;
+    await runtime.spaceFeature.commands.linkConversationOwner({
+      spaceId,
+      title: "不可用旧对话",
+      conversationId: "conversation:missing-legacy-run",
+      conversationTitle: "不可用旧对话",
+    });
+
+    const tree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    assert.equal(tree.status, 200);
+    assert.deepEqual(tree.body.conversations, []);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Space API deletes a Space and its links without deleting referenced sources", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-delete-api-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);

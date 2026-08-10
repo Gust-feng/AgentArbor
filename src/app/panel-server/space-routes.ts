@@ -82,10 +82,17 @@ export async function handlePanelSpaceRoute(
     const canonicalIds = new Set(canonicalConversations.map((conversation) => conversation.conversationId));
     const legacyConversations = await Promise.all(
       [...legacyIds].filter((conversationId) => !canonicalIds.has(conversationId)).map(async (conversationId) => {
-        const conversation = await runtime.ordinaryAgentFeature.queries.getConversation(conversationId);
-        return conversation === undefined
-          ? undefined
-          : { conversationId, title: conversation.title, updatedAt: conversation.updatedAt };
+        try {
+          const conversation = await runtime.ordinaryAgentFeature.queries.getConversation(conversationId);
+          return conversation === undefined
+            ? undefined
+            : { conversationId, title: conversation.title, updatedAt: conversation.updatedAt };
+        } catch {
+          // A stale tree link must not make the entire Space unreadable. The
+          // conversation remains on disk for recovery diagnostics, while the
+          // Space projection simply omits the unavailable legacy entry.
+          return undefined;
+        }
       }),
     );
     writeJson(response, 200, {

@@ -1,6 +1,6 @@
 # 开发指南
 
-本目录是 AgentArbor 开发前的正式指南。产品只有一个 Workbench，Ordinary Agent 是当前唯一生产主线，Sub-Agent 是 Ordinary Agent 的工具能力；Multi-Agent 源码仅作为延期材料保留，不属于当前首页入口、生产 Composition Root 或当前对话方案。Ordinary、Sub-Agent 和中性模型/工具/确认/上下文能力按功能边界协作，执行事实归 owning feature。
+本目录是 AgentArbor 开发前的正式指南。产品只有一个 Workbench，Ordinary Agent 是当前唯一生产主线，Sub-Agent 是 Ordinary Agent 的工具能力；Multi-Agent 源码仅作为延期材料保留，不属于当前首页入口、生产 Composition Root 或当前对话方案。`PathDependencyFeature` 已作为 owner-scoped 程序性记忆 feature 进入生产组合根，Memory Center 通过 facade 管理它与 Agent Notes。Ordinary、Sub-Agent 和中性模型/工具/确认/上下文能力按功能边界协作，执行事实归 owning feature。
 
 开发指南不是过程归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
 
@@ -20,10 +20,10 @@
 10. [普通 Agent 主干开发指南](06-工程实现/09-普通Agent主干开发指南/README.md)
 11. [子 Agent 工具能力开发书](06-工程实现/09-普通Agent主干开发指南/11-子Agent工具能力开发书.md)
 12. [功能模块边界与组合根](06-工程实现/11-功能模块边界与组合根.md)
-13. [路径记忆第一阶段开发方案](06-工程实现/15-路径记忆第一阶段开发方案.md)
-14. [共享工具层收敛与重复实现治理](06-工程实现/16-共享工具层收敛与重复实现治理.md)
-15. [Multi-Agent 源码归档边界](06-工程实现/17-Multi-Agent源码归档边界.md)
-16. [Space、Workspace、Conversation 与资源权限开发指南](06-工程实现/18-Space工作区对话与资源权限开发指南.md)
+13. [共享工具层收敛与重复实现治理](06-工程实现/16-共享工具层收敛与重复实现治理.md)
+14. [Multi-Agent 源码归档边界](06-工程实现/17-Multi-Agent源码归档边界.md)
+15. [Space、Workspace、Conversation 与资源权限开发指南](06-工程实现/18-Space工作区对话与资源权限开发指南.md)
+16. [路径依赖（程序性记忆）开发指南](06-工程实现/19-路径依赖方法论记忆开发指南.md)
 
 ## 一句话定位
 
@@ -34,7 +34,7 @@ AgentArbor 是一个桌面通用 Agent Workbench。当前用户直接使用 Ordi
 - 用户只面对一个 Workbench；当前生产 surface 是 Ordinary。首页是新 Conversation 的唯一入口，Conversation 创建后固定属于一个 Space，不能在对话中切换 Space 或 Workspace。
 - Desktop Shell 包含 Task Inbox、Workspace Context、Main Canvas、Artifact Area 和 Observation Panel。
 - Task Soil 保存当前任务目标、文件引用、项目上下文、网页材料、临时约束、权限边界和本轮运行材料。
-- Global Soil 保存长期偏好、Capability Asset、Path Bias、历史约束、失败模式和治理后的长期事实。
+- Agent Notes 与 PathDependencyFeature 分别保存声明性记忆和模型主动提炼的方法论；Global Soil、Capability Asset、Path Bias 与治理后的长期事实仍是未来按需能力，不是当前记忆回流链。
 - 当前默认普通 Agent 负责直接回答、模型工具循环、命令确认、工具结果回传和结果展示；当前阶段能力优先，不以脱敏或安全投影限制普通回答。
 - 普通 Agent 不自动升级到 Underground，不派生 child/rootlet，不把普通文件编辑、helper、adapter 或一次工具循环包装成 Plan / Handoff / deep flow。
 - 子 Agent 是普通 Agent 的工具能力，不是独立编排流程；模型在普通会话中通过 Pi AgentTool 适配的 `agent_call` / `agent_spawn` 自主调用，子 Agent 不能递归派生，完整输出作为工具结果交回父层模型（见 [ADR-0026](../架构设计/产品架构/ADR-0026-子Agent工具能力架构.md)）。
@@ -49,8 +49,7 @@ AgentArbor 是一个桌面通用 Agent Workbench。当前用户直接使用 Ordi
 - `agent`、`atomic`、`Plan`、`Handoff` 等命名必须匹配真实职责；`atomic` 只用于真正有全成功/全失败、回滚或一致性边界的场景。
 - `AgentTurnRuntime` 仅服务 Deep child，不是 Ordinary 主链；默认稳定测试应使用 fake/stub model loop 验证 AI 路径。
 - reasoningTrace 只保存决策摘要、输入引用、模型/工具引用、不确定性和证据 refs，不保存 raw chain-of-thought。
-- Fruits 不是 Global Soil；PathMemory、Experience Candidate 和候选能力必须经过 Governance Pipeline 才能入土。
-- Path Bias 只能影响偏好和方案排序，不能覆盖 hard constraint。
+- 历史 PathMemory、Experience Candidate 和候选能力不参与当前运行或迁移；未来若治理链出生，Path Bias 只能影响偏好和方案排序，不能覆盖 hard constraint。
 - Codex、OpenCode、Agent Skills 等平台格式是适配层，不是 AgentArbor 产品语义的事实源。
 
 ## 使用规则

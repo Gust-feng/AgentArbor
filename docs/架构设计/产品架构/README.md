@@ -32,15 +32,13 @@ Workbench
 - [ADR-0026-子Agent工具能力架构](ADR-0026-子Agent工具能力架构.md)：Sub-Agent 是 Ordinary Agent 工具能力。
 - [ADR-0027-工具执行事实与单向消费架构](ADR-0027-工具执行事实与单向消费架构.md)：工具执行事实链与单向投影。
 - [ADR-0031-工具定义保真与渐进曝光边界](ADR-0031-工具定义保真与渐进曝光边界.md)：定义保真、曝光/执行授权/确认分离、MCP 成本门控与 Pi active set 边界。
-- [ADR-0032-路径记忆与长期记忆回流架构](ADR-0032-路径记忆与长期记忆回流架构.md)：定义 PathMemory 自动采集、记忆分层、写入触发、治理后召回与第一阶段边界。
-- [ADR-0033-模型自主笔记记忆架构](ADR-0033-模型自主笔记记忆架构.md)：修正记忆主线为模型主动撰写、启动时注入的透明 Markdown 笔记；PathMemory 降级为运行档案。
+- [ADR-0032-路径记忆与长期记忆回流架构](ADR-0032-路径记忆与长期记忆回流架构.md)：已被取代，保留 PathMemory / ExperienceCandidate 历史实验的背景和边界。
+- [ADR-0033-模型自主笔记记忆架构](ADR-0033-模型自主笔记记忆架构.md)：定义声明性 Agent Notes；模型主动写入，用户可见、可编辑、可删除。
 - [ADR-0034-Space工作区引用与对话资源生命周期](ADR-0034-Space工作区引用与对话资源生命周期.md)：Space 外部引用、路径权限、Shell 确认、知识副本和后台进程生命周期；Conversation owner 语义部分已由 ADR-0035 取代。
 - [ADR-0035-Conversation双资源owner与统一运行作用域](ADR-0035-Conversation双资源owner与统一运行作用域.md)：`Accepted`。Conversation 单一 owner（Space 或 Workspace）、Space managedRoot、统一 Run 作用域、WorkspaceFeature 三层身份与整体迁移方案。owner 语义与 Run scope 以本文为准；实施仍在迁移中，未完成前运行行为以 `CURRENT_RUNTIME_MODE.md` 为准。
   - [实施补充：模型智能与 UI 增强](ADR-0035-实施补充-模型智能与UI增强.md)：模型上下文注入、智能路径映射、UI 交互设计的具体要求和实施检查清单。
-
-## 待接受的目标方案
-
-当前无待接受目标方案。
+- [ADR-0036-路径依赖（程序性记忆）系统](ADR-0036-路径依赖方法论记忆系统.md)：已接受并已落地 `PathDependencyFeature`、owner-scoped 渐进披露、MemorySearch/Read/Reference/PathDependencySave 与 Memory Center；旧 PathMemory / ExperienceCandidate 仅保留历史孤儿，Dream、向量、Path Bias 与 Governance 仍未实现。
+  - [路径依赖（程序性记忆）开发指南](../../开发指南/06-工程实现/19-路径依赖方法论记忆开发指南.md)：实现边界、迁移顺序和验收门。
 
 ## 历史或部分取代决策
 

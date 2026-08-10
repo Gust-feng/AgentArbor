@@ -1,17 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   createFileSystemPathDependencyRepository,
   createPathDependencyFeature,
   PathDependencyFeatureError,
 } from "./index.js";
+import { makeTestDirectory, removeTestDirectory } from "../testing/fs-test-directories.js";
 
 test("filesystem repository survives a restart and rejects malformed snapshots", async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-path-dependency-"));
-  t.after(async () => fs.rm(root, { recursive: true, force: true }));
+  const root = await makeTestDirectory("agentarbor-path-dependency-");
+  t.after(() => removeTestDirectory(root));
   const feature = createPathDependencyFeature({
     repository: createFileSystemPathDependencyRepository(root),
     idFactory: () => "path-dependency:restart",

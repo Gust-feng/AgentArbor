@@ -1,4 +1,4 @@
-import type { ConversationOwner } from "../execution-scope/index.js";
+import type { ConversationOwner } from "../execution-scope/contracts.js";
 
 /** Stable identity for long-lived memory; never a cwd or path hash. */
 export type MemoryOwner =

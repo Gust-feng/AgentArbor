@@ -33,6 +33,7 @@ import { CapabilityCenter } from "../capability/capability-center.js";
 import {
   captureKnowledgeAsset,
   managedKnowledgeDocumentTarget,
+  readManagedKnowledgeAsset,
   reconcileKnowledgeAssets,
   removeKnowledgeAsset,
   stageKnowledgeAssetRemoval,
@@ -512,6 +513,8 @@ function assemblePanelRuntime(input: {
           throw managedKnowledgeAssetWriteError(error);
         }));
     },
+    readManagedKnowledgeAsset: async (input) =>
+      await readManagedKnowledgeAsset(knowledgeAssetRoot, input.page, input),
   });
   const initialWorkbenchData = createInitialWorkbenchDataInitializer(
     input.testOnlySkipInitialWorkbenchData

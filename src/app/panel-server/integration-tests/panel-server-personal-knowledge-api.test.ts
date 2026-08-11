@@ -108,6 +108,14 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       owners: ["personal_knowledge"],
       referenceIds: [knowledgeRefId],
     }]);
+    const changeRecords = await requestJson(server.baseUrl, "/api/personal-knowledge/change-records");
+    assert.equal(changeRecords.status, 200);
+    const assetRecord = changeRecords.body.records.find((record: any) => record.type === "knowledge.asset_updated");
+    assert.ok(assetRecord);
+    assert.equal(assetRecord.refId, knowledgeRefId);
+    assert.deepEqual(assetRecord.actor, { kind: "user" });
+    assert.equal(typeof assetRecord.beforeFingerprint, "string");
+    assert.equal(assetRecord.afterFingerprint, editedManaged.body.preview.fingerprint);
 
     const rejectedUpdateCursor = server.runtime.workbenchProjectionChanges.replay().cursor;
     const rejectedUpdate = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/content`, {
@@ -199,6 +207,12 @@ test("Personal Knowledge and Space references persist, open and clean up consist
       body: { type: "knowledge.uncollect", refId: "plain-material" },
     });
     assert.equal(uncollectedMaterial.status, 200);
+    const uncollectRecords = await requestJson(server.baseUrl, "/api/personal-knowledge/change-records", {
+      method: "GET",
+    });
+    const uncollectRecord = uncollectRecords.body.records.find((record: any) => record.type === "knowledge.uncollected" && record.refId === knowledgeRefId);
+    assert.ok(uncollectRecord);
+    assert.deepEqual(uncollectRecord.actor, { kind: "user" });
     const removedAsset = await requestJson(server.baseUrl, `/api/personal-knowledge/assets/${encodeURIComponent(knowledgeRefId)}/preview`);
     assert.equal(removedAsset.status, 404);
 

@@ -138,6 +138,7 @@ export async function handlePanelPersonalKnowledgeRoute(
       relativePath,
       expectedFingerprint: input.expectedFingerprint,
       text: input.text,
+      actor: USER_ACTOR,
     });
     writeJson(response, 200, {
       ok: true,
@@ -186,9 +187,28 @@ export async function handlePanelPersonalKnowledgeRoute(
   }
   if (url.pathname === "/api/personal-knowledge/commands" && request.method === "POST") {
     const command = parse(commandSchema, await readJsonBody(request));
-    if (command.type === "knowledge.uncollect") await feature.commands.uncollect(command.refId);
+    if (command.type === "knowledge.uncollect") await feature.commands.uncollect(command.refId, USER_ACTOR);
     else await feature.commands.execute(command);
     writeJson(response, 200, { ok: true });
+    return true;
+  }
+  if (url.pathname === "/api/personal-knowledge/change-records" && request.method === "GET") {
+    await runtime.ensureInitialWorkbenchData();
+    const refId = url.searchParams.get("refId")?.trim() || undefined;
+    const themeId = url.searchParams.get("themeId")?.trim() || undefined;
+    const limitValue = url.searchParams.get("limit");
+    const limit = limitValue === null ? undefined : Number(limitValue);
+    const cursor = url.searchParams.get("cursor")?.trim() || undefined;
+    if ((limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200))) {
+      throw invalidInput();
+    }
+    const result = await feature.queries.recentChanges({
+      ...(refId === undefined ? {} : { refId }),
+      ...(themeId === undefined ? {} : { themeId }),
+      ...(limit === undefined ? {} : { limit }),
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    writeJson(response, 200, { ok: true, ...result });
     return true;
   }
   return false;

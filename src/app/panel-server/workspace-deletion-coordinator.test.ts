@@ -3,15 +3,17 @@ import test from "node:test";
 
 import { createWorkspaceDeletionCoordinator } from "./workspace-deletion-coordinator.js";
 
-test("Workspace deletion stops processes, deletes owner conversations, revokes links and marks deleting", async () => {
+test("Workspace deletion stops processes, deletes owner conversations, revokes links, marks deleting and purges the registration", async () => {
   const operations: string[] = [];
   const coordinator = createWorkspaceDeletionCoordinator({
     workspaces: {
       commands: {
         async deleteWorkspace(workspaceId) { operations.push(`delete-workspace:${workspaceId}`); },
+        async purgeWorkspace(workspaceId) { operations.push(`purge-workspace:${workspaceId}`); },
         async unlinkWorkspaceFromSpace(linkId) { operations.push(`unlink:${linkId}`); },
       },
       queries: {
+        async list() { return []; },
         async get(workspaceId) {
           return {
             id: workspaceId,
@@ -84,8 +86,43 @@ test("Workspace deletion stops processes, deletes owner conversations, revokes l
     "delete-path-dependencies:workspace:workspace-1",
     "delete-agent-notes:workspace:workspace-1",
     "unlink:link-1",
+    "purge-workspace:workspace-1",
   ]);
   assert.equal(coordinator.isDeleting("workspace-1"), false);
+});
+
+test("Workspace deletion ready() restores the deleting gate after restart", async () => {
+  const operations: string[] = [];
+  const coordinator = createWorkspaceDeletionCoordinator({
+    workspaces: {
+      commands: {
+        async deleteWorkspace() { throw new Error("not used"); },
+        async purgeWorkspace(workspaceId) { operations.push(`purge-workspace:${workspaceId}`); },
+        async unlinkWorkspaceFromSpace() { throw new Error("not used"); },
+      },
+      queries: {
+        async list() {
+          return [
+            { id: "workspace-1", title: "AgentArbor", status: "deleting" as const, createdAt: "now", updatedAt: "now", linkCount: 0 },
+            { id: "workspace-2", title: "Active", status: "available" as const, createdAt: "now", updatedAt: "now", currentMount: { workspaceId: "workspace-2", mountVersion: "m-1", rootPath: "C:/active", sourceIdentity: "identity-2", status: "active" as const, connectedAt: "now" }, linkCount: 1 },
+          ];
+        },
+        async get() { throw new Error("not used"); },
+      },
+    },
+    ordinary: {
+      commands: { async deleteConversation() { throw new Error("not used"); } },
+      queries: { async listConversationsByOwner() { throw new Error("not used"); } },
+    },
+    agentNotes: { async deleteByOwner() { throw new Error("not used"); } },
+    processes: { async cleanupByConversation() { throw new Error("not used"); } },
+    processTerminator: { killTree: () => ({ status: "killed" }) },
+  });
+
+  await coordinator.ready();
+
+  assert.deepEqual(operations, []);
+  assert.equal(coordinator.isDeleting("workspace-1"), true);
 });
 
 test("Workspace deletion rejects a missing Workspace and blocks while deleting", async () => {
@@ -93,9 +130,13 @@ test("Workspace deletion rejects a missing Workspace and blocks while deleting",
     workspaces: {
       commands: {
         async deleteWorkspace() {},
+        async purgeWorkspace() { throw new Error("not used"); },
         async unlinkWorkspaceFromSpace() { throw new Error("not used"); },
       },
-      queries: { async get() { return undefined; } },
+      queries: {
+        async list() { return []; },
+        async get() { return undefined; },
+      },
     },
     ordinary: {
       commands: { async deleteConversation() { throw new Error("not used"); } },
@@ -137,9 +178,11 @@ test("Workspace deletion blocks on unresolved process stops", async () => {
     workspaces: {
       commands: {
         async deleteWorkspace() {},
+        async purgeWorkspace() { throw new Error("not used"); },
         async unlinkWorkspaceFromSpace() { throw new Error("not used"); },
       },
       queries: {
+        async list() { return []; },
         async get(workspaceId) {
           return {
             id: workspaceId,
@@ -222,6 +265,7 @@ test("Workspace admission is serialized with deletion and honors the durable del
     workspaces: {
       commands: {
         async deleteWorkspace() { status = "deleting"; },
+        async purgeWorkspace() {},
         async unlinkWorkspaceFromSpace() {},
       },
       queries: { async get(workspaceId) { return detail(workspaceId); } },
@@ -287,6 +331,7 @@ test("a failed owner cascade keeps Workspace denied and an explicit retry can fi
     workspaces: {
       commands: {
         async deleteWorkspace() { status = "deleting"; },
+        async purgeWorkspace() {},
         async unlinkWorkspaceFromSpace() {},
       },
       queries: { async get(workspaceId) { return detail(workspaceId); } },
@@ -346,7 +391,7 @@ test("a failed owner cascade keeps Workspace denied and an explicit retry can fi
 test("Workspace coordinator restores a durable deleting gate before request admission", async () => {
   const coordinator = createWorkspaceDeletionCoordinator({
     workspaces: {
-      commands: { async deleteWorkspace() {}, async unlinkWorkspaceFromSpace() {} },
+      commands: { async deleteWorkspace() {}, async purgeWorkspace() {}, async unlinkWorkspaceFromSpace() {} },
       queries: {
         async get() {
           return {

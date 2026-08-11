@@ -278,6 +278,27 @@ export function createWorkspaceFeature(input: CreateWorkspaceFeatureInput): Work
           publish({ type: "workspace.deleted", workspaceId });
         });
       },
+      async purgeWorkspace(workspaceId: string) {
+        assertUsable("purge a Workspace");
+        return serialize(async () => {
+          const snapshot = await input.repository.read();
+          const workspace = requireWorkspace(snapshot, workspaceId);
+          if (workspace.status !== "deleting") {
+            throw new WorkspaceFeatureError(
+              "workspace_not_deleting",
+              `Workspace must enter deleting before purge: ${workspaceId}`,
+            );
+          }
+          // 删除流程的收尾：级联（停止进程、删除 Conversation、撤销 links）完成后，
+          // 物理移除软件侧登记（元数据、mount 与残留 link），外部文件夹与知识副本不受影响。
+          await input.repository.write({
+            schemaVersion: WORKSPACE_SCHEMA_VERSION,
+            workspaces: snapshot.workspaces.filter((entry) => entry.id !== workspaceId),
+            mounts: snapshot.mounts.filter((mount) => mount.workspaceId !== workspaceId),
+            links: snapshot.links.filter((link) => link.workspaceId !== workspaceId),
+          });
+        });
+      },
     },
     queries: {
       async list() {

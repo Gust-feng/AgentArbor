@@ -94,6 +94,7 @@ export type WorkspaceFeatureErrorCode =
   | "workspace_mount_conflict"
   | "workspace_mount_invalid"
   | "workspace_not_available"
+  | "workspace_not_deleting"
   | "workspace_link_not_found"
   | "workspace_link_conflict"
   | "workspace_invalid_input"
@@ -128,6 +129,11 @@ export type WorkspaceFeature = {
     unlinkWorkspaceFromSpace(linkId: string): Promise<void>;
     /** 进入 deleting 并发布事件；跨 feature 级联由 Host coordinator 协调。 */
     deleteWorkspace(workspaceId: string): Promise<void>;
+    /**
+     * 物理移除 deleting Workspace 的软件侧登记（元数据、mount 与残留 link）。
+     * 只能在 deleteWorkspace 之后执行；跨 feature 级联完成后由 Host coordinator 调用。
+     */
+    purgeWorkspace(workspaceId: string): Promise<void>;
   };
   readonly queries: {
     list(): Promise<readonly WorkspaceSummary[]>;

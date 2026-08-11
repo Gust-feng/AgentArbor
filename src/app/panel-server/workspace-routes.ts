@@ -123,6 +123,8 @@ export function workspaceFeatureHttpError(error: WorkspaceFeatureError): PanelHt
       return new PanelHttpError(409, error.code, error.message);
     case "workspace_mount_invalid":
       return new PanelHttpError(400, error.code, error.message);
+    case "workspace_not_deleting":
+      return new PanelHttpError(409, error.code, error.message);
     case "workspace_invalid_input":
       return new PanelHttpError(400, error.code, error.message);
     case "workspace_snapshot_incompatible":

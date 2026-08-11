@@ -171,6 +171,23 @@ test("删除：进入 deleting 并发布事件，重复删除幂等", async () =
   assert.equal(events.filter((event) => event.type === "workspace.deleted").length, 1);
 });
 
+test("purge：仅允许在 deleting 后物理移除元数据与 mount，活跃 Workspace 拒绝", async () => {
+  const { feature, current } = createFeature();
+  const { workspace } = await feature.commands.registerWorkspace({ rootPath: root, sourceIdentity: rootIdentity });
+  await assert.rejects(
+    feature.commands.purgeWorkspace(workspace.id),
+    (error: unknown) => error instanceof WorkspaceFeatureError && error.code === "workspace_not_deleting",
+  );
+  await feature.commands.deleteWorkspace(workspace.id);
+  await feature.commands.purgeWorkspace(workspace.id);
+  assert.deepEqual(current().workspaces, []);
+  assert.deepEqual(current().mounts, []);
+  assert.equal(await feature.queries.get(workspace.id), undefined);
+  assert.deepEqual(await feature.queries.list(), []);
+  const reRegistered = await feature.commands.registerWorkspace({ rootPath: root, sourceIdentity: rootIdentity });
+  assert.equal(reRegistered.workspace.status, "available");
+});
+
 test("查询：list 带 currentMount/linkCount，get 返回详情，findByRootPath 按规范化路径匹配", async () => {
   const { feature } = createFeature();
   const { workspace } = await feature.commands.registerWorkspace({ rootPath: root, sourceIdentity: rootIdentity });

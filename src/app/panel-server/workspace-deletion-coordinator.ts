@@ -30,13 +30,16 @@ export type WorkspaceDeletionCoordinator = {
 /**
  * Host-owned coordination for Workspace deletion（ADR-0035 §7.2）。
  *
- * 跨 Workspace/Ordinary 的级联顺序：进入 deleting 并拒绝新 Run -> 停止直属对话
- * 进程 -> 删除 Workspace owner 的 Conversation/Run -> 移除所有 Space links。
- * 外部真实文件夹与知识库副本始终保留。
+ * The deleting marker is written before the cascade so new runs are denied.
+ * The Workspace registration is purged only after conversations, owner memory,
+ * and Space links have been cleaned successfully. A failed or interrupted
+ * cascade keeps the durable deleting marker; startup restores that deny gate
+ * and an explicit DELETE retries the idempotent cleanup. External folders and
+ * Personal Knowledge copies are never deletion targets.
  */
 export function createWorkspaceDeletionCoordinator(input: {
   readonly workspaces: {
-    readonly commands: Pick<WorkspaceFeature["commands"], "deleteWorkspace" | "unlinkWorkspaceFromSpace">;
+    readonly commands: Pick<WorkspaceFeature["commands"], "deleteWorkspace" | "purgeWorkspace" | "unlinkWorkspaceFromSpace">;
     readonly queries: Pick<WorkspaceFeature["queries"], "get"> &
       Partial<Pick<WorkspaceFeature["queries"], "list">>;
   };
@@ -55,14 +58,13 @@ export function createWorkspaceDeletionCoordinator(input: {
   readonly now?: () => string;
 }): WorkspaceDeletionCoordinator {
   const deletingWorkspaceIds = new Set<string>();
-  // WorkspaceFeature keeps a durable `status: deleting` tombstone rather than
-  // removing the record. Keep a separate in-process terminal set so a
-  // successful cascade cannot look available merely because the active
-  // deletion gate was released; owner-scoped memory tombstones are terminal too.
+  // A successful cascade leaves a durable deleting tombstone in the feature,
+  // but the in-process terminal set gives callers a stable 409 after purge.
   const deletedWorkspaceIds = new Set<string>();
   const admissionTails = new Map<string, Promise<void>>();
   const runExclusive = input.runExclusive ?? (async <T>(operation: () => Promise<T>) => await operation());
   let tail = Promise.resolve();
+
   const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = tail.then(operation, operation);
     tail = result.then(() => undefined, () => undefined);
@@ -83,11 +85,10 @@ export function createWorkspaceDeletionCoordinator(input: {
   return {
     ready() {
       return serialize(async () => {
-        // Rehydrate the cheap deny gate before the server accepts requests.
-        // There is deliberately no phase replay here yet; a persisted
-        // `deleting` owner remains denied and an explicit DELETE retries the
-        // idempotent cleanup. The optional list port keeps small unit fakes
-        // compatible while the production WorkspaceFeature always provides it.
+        // Rehydrate the deny gate before the server accepts requests. There is
+        // deliberately no phase replay: without a durable cascade journal,
+        // purging a deleting row on startup could orphan its conversations or
+        // owner memory. Explicit DELETE remains the recovery operation.
         const workspaces = await input.workspaces.queries.list?.() ?? [];
         for (const workspace of workspaces) {
           if (workspace.status === "deleting") deletingWorkspaceIds.add(workspace.id);
@@ -136,45 +137,42 @@ export function createWorkspaceDeletionCoordinator(input: {
       // Re-enter the active state while preserving the durable deleting marker.
       deletedWorkspaceIds.delete(workspaceId);
       deletingWorkspaceIds.add(workspaceId);
-      return serialize(async () => {
-        return serializeAdmission(workspaceId, async () => await runExclusive(async () => {
-          let workspaceMissing = false;
-          let completed = false;
-          try {
-            const workspace = await input.workspaces.queries.get(workspaceId);
-            if (workspace === undefined) {
-              workspaceMissing = true;
-              throw new PanelHttpError(404, "workspace_not_found", "工作区不存在。");
-            }
-            // Persist the deleting marker before any owner list is captured.
-            // The command is idempotent, so a retry can resume a partial
-            // cascade while run admission observes the durable status.
-            await input.workspaces.commands.deleteWorkspace(workspaceId);
-            const conversations = await input.ordinary.queries.listConversationsByOwner({ kind: "workspace", id: workspaceId });
-            for (const conversation of conversations) {
-              assertProcessCleanupComplete(
-                await input.processes.cleanupByConversation(conversation.conversationId, input.processTerminator),
-                `Workspace ${workspaceId}`,
-              );
-              await input.ordinary.commands.deleteConversation(conversation.conversationId);
-            }
-            await input.memory?.deleteByOwner({ kind: "workspace", id: workspaceId });
-            await input.agentNotes.deleteByOwner({ kind: "workspace", id: workspaceId });
-            const activeLinks = workspace.links.filter((link) => link.status === "active");
-            for (const link of activeLinks) {
-              await input.workspaces.commands.unlinkWorkspaceFromSpace(link.linkId);
-            }
-            completed = true;
-          } finally {
-            // A failed cascade remains denied in this process so a retry can
-            // finish the partial cleanup without admitting new owner data.
-            // A missing id is the only failure that is safe to forget.
-            if (completed || workspaceMissing) deletingWorkspaceIds.delete(workspaceId);
-            if (completed) deletedWorkspaceIds.add(workspaceId);
-            if (workspaceMissing) deletedWorkspaceIds.delete(workspaceId);
+      return serialize(async () => await serializeAdmission(workspaceId, async () => await runExclusive(async () => {
+        let workspaceMissing = false;
+        let completed = false;
+        try {
+          const workspace = await input.workspaces.queries.get(workspaceId);
+          if (workspace === undefined) {
+            workspaceMissing = true;
+            throw new PanelHttpError(404, "workspace_not_found", "工作区不存在。");
           }
-        }));
-      });
+          // Persist the deny marker before capturing owner resources. The
+          // command is idempotent, so retries can resume a partial cascade.
+          await input.workspaces.commands.deleteWorkspace(workspaceId);
+          const conversations = await input.ordinary.queries.listConversationsByOwner({ kind: "workspace", id: workspaceId });
+          for (const conversation of conversations) {
+            assertProcessCleanupComplete(
+              await input.processes.cleanupByConversation(conversation.conversationId, input.processTerminator),
+              `Workspace ${workspaceId}`,
+            );
+            await input.ordinary.commands.deleteConversation(conversation.conversationId);
+          }
+          await input.memory?.deleteByOwner({ kind: "workspace", id: workspaceId });
+          await input.agentNotes.deleteByOwner({ kind: "workspace", id: workspaceId });
+          const activeLinks = workspace.links.filter((link) => link.status === "active");
+          for (const link of activeLinks) {
+            await input.workspaces.commands.unlinkWorkspaceFromSpace(link.linkId);
+          }
+          await input.workspaces.commands.purgeWorkspace(workspaceId);
+          completed = true;
+        } finally {
+          // A failed cascade remains denied in this process so a retry can
+          // finish the partial cleanup without admitting new owner data.
+          if (completed || workspaceMissing) deletingWorkspaceIds.delete(workspaceId);
+          if (completed) deletedWorkspaceIds.add(workspaceId);
+          if (workspaceMissing) deletedWorkspaceIds.delete(workspaceId);
+        }
+      })));
     },
   };
 }

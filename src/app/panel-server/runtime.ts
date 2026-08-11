@@ -714,7 +714,11 @@ function assemblePanelRuntime(input: {
   });
   const workspaceDeletion = createWorkspaceDeletionCoordinator({
     workspaces: {
-      commands: { deleteWorkspace: workspaceFeature.commands.deleteWorkspace, unlinkWorkspaceFromSpace: workspaceFeature.commands.unlinkWorkspaceFromSpace },
+      commands: {
+        deleteWorkspace: workspaceFeature.commands.deleteWorkspace,
+        purgeWorkspace: workspaceFeature.commands.purgeWorkspace,
+        unlinkWorkspaceFromSpace: workspaceFeature.commands.unlinkWorkspaceFromSpace,
+      },
       queries: { get: workspaceFeature.queries.get, list: workspaceFeature.queries.list },
     },
     ordinary: {

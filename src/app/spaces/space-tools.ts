@@ -58,14 +58,21 @@ export function createSpaceToolRegistryContribution(options: SpaceToolOptions): 
 export function createSpaceListTool(options: SpaceToolOptions): ToolExecutor {
   return tool({
     name: "SpaceList",
-    description: "List the user's Spaces and their folder/reference counts, or read one SpaceTree when spaceId is provided. External files and conversations are returned only as stored references.",
+    description: "List the user's Spaces and their folder/reference counts, or read one SpaceTree when spaceId is provided. Tree entries are model projections: source identities and audit fields are never returned. External files and conversations are returned only as stored references.",
     metadata: readMetadata,
     inputSchema: { type: "object", properties: { spaceId: { type: "string", description: "Optional Space id to read as a tree." } } },
     execute: async (input) => {
       const spaceId = stringOrUndefined(asRecord(input).spaceId);
       if (spaceId === undefined) return { status: "listed", spaces: await options.spaces.queries.list() };
       const tree = await options.spaces.queries.getTree(spaceId);
-      return tree === undefined ? { status: "space_not_found", spaceId } : { status: "found", tree };
+      if (tree === undefined) return { status: "space_not_found", spaceId };
+      return {
+        status: "found",
+        tree: {
+          space: tree.space,
+          entries: tree.entries.map((entry) => ({ kind: "reference" as const, item: spaceReferenceModelView(entry.item) })),
+        },
+      };
     },
   });
 }
@@ -548,9 +555,19 @@ export type SpaceReferenceModelView = {
   readonly spaceId: string;
   readonly title: string;
   readonly reference: SpaceReference;
-  readonly annotation?: SpaceReferenceAnnotation;
+  readonly annotation?: SpaceReferenceAnnotationModelView;
   readonly createdAt: string;
   readonly updatedAt: string;
+};
+
+/** 模型可读的 annotation 投影：内容与版本事实，不包含 actor 审计字段。 */
+export type SpaceReferenceAnnotationModelView = {
+  readonly markdown: string;
+  readonly keyPoints?: readonly string[];
+  readonly tags?: readonly string[];
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly updatedBy: SpaceReferenceAnnotation["updatedBy"];
 };
 
 export function spaceReferenceModelView(item: SpaceReferenceItem): SpaceReferenceModelView {
@@ -559,9 +576,23 @@ export function spaceReferenceModelView(item: SpaceReferenceItem): SpaceReferenc
     spaceId: item.spaceId,
     title: item.title,
     reference: item.reference,
-    ...(item.annotation === undefined ? {} : { annotation: item.annotation }),
+    ...(item.annotation === undefined ? {} : { annotation: spaceReferenceAnnotationModelView(item.annotation) }),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+  };
+}
+
+/** 审计字段（actor/traceId/goalId/toolCallId）只留在持久化与后台查询，不进入模型可见输出。 */
+export function spaceReferenceAnnotationModelView(
+  annotation: SpaceReferenceAnnotation,
+): SpaceReferenceAnnotationModelView {
+  return {
+    markdown: annotation.markdown,
+    ...(annotation.keyPoints === undefined ? {} : { keyPoints: annotation.keyPoints }),
+    ...(annotation.tags === undefined ? {} : { tags: annotation.tags }),
+    revision: annotation.revision,
+    updatedAt: annotation.updatedAt,
+    updatedBy: annotation.updatedBy,
   };
 }
 

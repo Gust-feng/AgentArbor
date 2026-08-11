@@ -284,8 +284,8 @@ test("SpaceAddReference saves an Agent annotation on first write and reports ann
     revision: 1,
     updatedAt: "2026-07-28T00:00:00.000Z",
     updatedBy: "agent",
-    actor: { kind: "agent", actorId: "agent", traceId: "trace", goalId: "goal" },
   });
+  assert.equal("actor" in (result.item.annotation as object), false, "model projection must not expose audit actor fields");
   await spaces.release();
 });
 
@@ -441,5 +441,41 @@ test("SpaceUpdateReferenceAnnotation rejects invalid keyPoints and tags without 
   });
   const current = await spaces.queries.getReference(added.id);
   assert.equal(current?.annotation?.revision, 1);
+  await spaces.release();
+});
+
+test("SpaceList tree and reference tools never expose source identities or audit fields", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: "space-tree/v5", spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    externalSourceInspector: async () => ({ kind: "file" as const, identity: "device:file-id-42" }),
+  });
+  const spaces = feature;
+  const tools = new Map(createSpaceTools({ spaces, workspaceRoot: path.resolve(".") }).map((entry) => [entry.definition.name, entry]));
+  const created = await execute(tools.get("SpaceCreate")!, { title: "机器学习" }) as { space: { id: string } };
+  await spaces.commands.addReference({
+    spaceId: created.space.id,
+    title: "本地文件",
+    reference: { kind: "local_file", path: "C:/workspace/note.md" },
+    annotation: { markdown: "整理内容", tags: ["资料"] },
+    actor: { kind: "agent", actorId: "agent", traceId: "trace", goalId: "goal", toolCallId: "call-1" },
+  });
+
+  const listed = await execute(tools.get("SpaceList")!, { spaceId: created.space.id }) as {
+    readonly tree: { readonly entries: readonly { readonly item: Record<string, unknown> & { readonly annotation: Record<string, unknown> } }[] };
+  };
+  assert.equal(listed.tree.entries.length, 1);
+  assert.equal("sourceIdentity" in listed.tree.entries[0]!.item, false);
+  assert.equal("actor" in listed.tree.entries[0]!.item.annotation, false);
+  assert.equal(listed.tree.entries[0]!.item.annotation.revision, 1);
+
+  const read = await execute(tools.get("SpaceReadReference")!, { itemId: "id-2" }) as {
+    readonly item: Record<string, unknown> & { readonly annotation: Record<string, unknown> };
+  };
+  assert.equal(read.item.itemId, "id-2");
+  assert.equal("sourceIdentity" in read.item, false);
+  assert.equal("actor" in read.item.annotation, false);
   await spaces.release();
 });

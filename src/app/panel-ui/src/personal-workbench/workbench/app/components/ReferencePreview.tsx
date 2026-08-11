@@ -230,16 +230,24 @@ function ReferenceDocumentSessionView({
       try {
         const next = await fetchDocumentPreview(itemId, relativePath, undefined, apiBase)
         if (disposed) return
-        if (annotationRevisionChanged(preview, next)) {
-          // annotation 是 Space 自己的维护内容：Agent/用户更新后应当即生效，
-          // 不进入“来源已更新，等待用户决定”的流程。来源正文未变化时
-          // preview.content 相同，用户当前草稿（draft）不受影响。
+        const annotationChanged = annotationRevisionChanged(preview, next)
+        const sourceChanged = hasSourceChanged(preview, next)
+        if (annotationChanged && sourceChanged) {
+          // annotation 与来源同时变化：立即应用新整理内容（Space 自己的内容），
+          // 同时保留来源冲突提示，不能吞掉用户对正文变化的知情权。
+          setPreview({ ...preview, annotation: next.annotation })
+          setIncoming(next)
+          return
+        }
+        if (annotationChanged) {
+          // 仅 annotation 变化：来源正文未变化时 preview.content 相同，
+          // 用户当前草稿（draft）不受影响。
           setPreview(next)
           setIncoming(undefined)
           setShowDiff(false)
           return
         }
-        if (hasSourceChanged(preview, next)) setIncoming(next)
+        if (sourceChanged) setIncoming(next)
       } catch {
         // Keep the visible projection stable. Explicit reload still reports failures.
       }

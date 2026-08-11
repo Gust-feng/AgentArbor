@@ -335,6 +335,40 @@ test('keeps the user text draft when only the annotation changes on refresh', as
   expect(screen.getByRole('textbox')).toBeTruthy()
 })
 
+test('applies a refreshed annotation but keeps the source-change notice when both changed', async () => {
+  const base = textPreview('1:4', '正文内容')
+  let current: DocumentPreview = {
+    ...base,
+    annotation: {
+      markdown: '# 整理 v1',
+      revision: 1,
+      updatedAt: '2026-08-11T00:00:00.000Z',
+      updatedBy: 'agent',
+    },
+  }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ preview: current }), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+  render(<ReferencePreview itemId="reference-one" fallbackTitle="note.txt" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByDisplayValue('正文内容')).toBeTruthy()
+  expect(await screen.findByRole('heading', { name: '整理 v1' })).toBeTruthy()
+
+  current = {
+    ...textPreview('2:6', '外部新版正文'),
+    annotation: {
+      markdown: '# 整理 v2',
+      revision: 2,
+      updatedAt: '2026-08-11T02:00:00.000Z',
+      updatedBy: 'agent',
+    },
+  }
+  invalidateDocumentPreviews(['reference-one'])
+
+  expect(await screen.findByRole('heading', { name: '整理 v2' })).toBeTruthy()
+  expect(screen.getByText('来源已更新，当前内容仍保持不变。')).toBeTruthy()
+  expect(screen.getByDisplayValue('正文内容')).toBeTruthy()
+  expect(screen.getByRole('button', { name: '加载新版' })).toBeTruthy()
+})
+
 test('hides the legacy image caption when the Space reference has an annotation', async () => {
   const annotated = {
     ...previewWithPresentation('image-annotated', 'image', { kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image.png', alt: '图像', caption: '手绘的网络结构与推导草稿' }),

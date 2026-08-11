@@ -12,6 +12,7 @@ import {
   FilePlus,
   Globe,
   MessageSquare,
+  Maximize2,
   Plus,
   Search,
   NotebookPen,
@@ -293,6 +294,8 @@ interface SpacePageProps {
   onOpenConversation?: (conversationId: string) => boolean | Promise<boolean>
   /** 当前正式对话的右侧工作台内容，由 Workbench 组合根提供。 */
   conversationContent?: ReactNode
+  /** 从空间右侧对话进入已有的全屏专注模式。 */
+  onEnterFocus?: () => void
   activeConversationId?: string
   onRenameConversation?: (conversationId: string, title: string) => void | Promise<void>
   onToggleConversationPinned?: (conversationId: string, pinned: boolean) => void | Promise<void>
@@ -322,6 +325,7 @@ export function SpacePage({
   onOpenItem,
   onOpenConversation,
   conversationContent,
+  onEnterFocus,
   activeConversationId,
   onRenameConversation,
   onToggleConversationPinned,
@@ -403,12 +407,44 @@ export function SpacePage({
     onError: setActionError,
   })
   const { tree, projectedTree, expandedIds } = mountedTree
+  const rememberedSelectedId = rememberedView?.selectedId !== null
+    && rememberedView?.selectedId !== undefined
+    && (notes.some((note) => note.id === rememberedView.selectedId)
+      || getItem(projectedTree, rememberedView.selectedId) !== undefined)
+    ? rememberedView.selectedId
+    : undefined
   // 书写为中心:默认打开最近一篇笔记(有 targetId / 记忆选择则优先)，再回退到首个空间对象。
   const [selectedId, setSelectedId] = useState<string | null>(() => (
-    targetId ?? rememberedView?.selectedId ?? notes[0]?.id ?? tree[0]?.id ?? null
+    targetId ?? rememberedSelectedId ?? notes[0]?.id ?? projectedTree[0]?.id ?? null
   ))
   const selectedStillExists = selectedId !== null
     && (notes.some((note) => note.id === selectedId) || getItem(tree, selectedId) !== undefined)
+  const previousMemoryKeyRef = useRef(memoryKey)
+
+  // SpacePage stays mounted while the selected Space changes. Reset only the
+  // space-bound transient UI before paint so the workbench does not flash an
+  // empty page or rebuild the whole surface between two already-known Spaces.
+  useLayoutEffect(() => {
+    if (previousMemoryKeyRef.current === memoryKey) return
+    previousMemoryKeyRef.current = memoryKey
+    dragOrderRef.current = null
+    conversationSwitchRequestRef.current += 1
+    referenceCreationRequestRef.current += 1
+    setDragOrder(null)
+    setCreatingNoteId(null)
+    setActionError(null)
+    setRenamingConversationId(null)
+    setPendingConversationId(null)
+    setOpenConversationId(
+      activeConversationId !== undefined && space?.conversations?.some((conversation) => conversation.conversationId === activeConversationId)
+        ? activeConversationId
+        : null,
+    )
+    setCreatingFolder(false)
+    setCreatingReferenceFile(null)
+    setPendingSpaceConfirmation(null)
+    setSelectedId(targetId ?? rememberedSelectedId ?? notes[0]?.id ?? projectedTree[0]?.id ?? null)
+  }, [activeConversationId, memoryKey, notes, projectedTree, rememberedSelectedId, space?.conversations, targetId])
 
   function selectItem(id: string) {
     setActionError(null)
@@ -816,7 +852,7 @@ export function SpacePage({
           {notes.length === 0 && (
             <button
               onClick={handleCreateNote}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm text-left transition-colors hover:bg-black/5"
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm text-left transition-colors hover:bg-[var(--aa-hover-tint)]"
               style={{ color: 'var(--aa-text-3, #aba39b)' }}
             >
               <span style={{ width: 12 }} />
@@ -1229,6 +1265,7 @@ function InlineName({
     <input
       ref={ref}
       aria-label={label}
+      spellCheck={false}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onMouseDown={(e) => e.stopPropagation()}
@@ -1390,7 +1427,7 @@ function CollectButton({
         if (collected) brain.uncollect(refId)
         else brain.collect(refId, kind)
       }}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-[var(--aa-hover-tint)]"
       style={{ color: collected ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}
     >
       <Brain size={12} />

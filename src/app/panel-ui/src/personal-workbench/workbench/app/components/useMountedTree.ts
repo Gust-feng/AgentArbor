@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type {
   PersonalSpaceItemProjection,
   PersonalSpaceProjection,
@@ -452,12 +452,18 @@ export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeRe
     return map
   }, [directories, spaceId])
 
-  useEffect(() => {
+  // Space identity is part of the rendered tree contract. Clear the previous
+  // space's mounted directories before the browser paints; using a passive
+  // effect here leaves one frame where the old tree can still be visible.
+  useLayoutEffect(() => {
     const nextDirectories = new Map<string, DirectoryState>()
     directoriesRef.current = nextDirectories
     inFlightRef.current.clear()
     setDirectories(nextDirectories)
     setExpandedIds(new Set(initialExpandedIds ?? collectDefaultExpanded(projectedTree)))
+    // The reset is intentionally keyed only by identity. Projection updates
+    // within one Space must retain mounted directory entries and expansion.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spaceId])
 
   const tree = useMemo(

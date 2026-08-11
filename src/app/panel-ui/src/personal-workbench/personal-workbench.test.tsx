@@ -1337,6 +1337,34 @@ test("opens a Space conversation as the formal workbench in the right pane", asy
   expect(screen.queryByRole("button", { name: "打开完整对话" })).toBeNull();
 });
 
+test("enters and exits the shared focus mode from a Space conversation", async () => {
+  const user = userEvent.setup();
+  renderWorkbench({
+    conversation: {
+      conversationId: "conversation-focus",
+      title: "专注会话",
+      owner: { kind: "space", id: "space-study" },
+      turns: [{ turnId: "turn-focus", role: "assistant", title: "专注会话", content: "继续阅读这里", status: "completed" }],
+    },
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [{ conversationId: "conversation-focus", title: "专注会话" }],
+    }],
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click(await screen.findByRole("button", { name: "专注会话" }));
+  await user.click(await screen.findByRole("button", { name: "专注阅读" }));
+
+  expect(await screen.findByRole("region", { name: "专注阅读" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "退出专注" }));
+
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+  expect(screen.getByText("继续阅读这里")).toBeTruthy();
+});
+
 test("keeps the current Space conversation surface mounted while switching", async () => {
   const user = userEvent.setup();
   let finishOpen!: (opened: boolean) => void;

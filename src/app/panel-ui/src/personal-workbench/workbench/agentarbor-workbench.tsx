@@ -324,7 +324,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
           className="aa-workbench-main flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <div
-            className="view-enter flex min-h-0 flex-1 flex-col overflow-hidden"
+            className={`${view === "space" ? "" : "view-enter "}flex min-h-0 flex-1 flex-col overflow-hidden`}
             key={isConversationView(view) ? "conversation" : view}
           >
             {showLoadingFallback ? <WorkbenchBootstrapLoading /> : (
@@ -348,6 +348,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
                     conversationMode,
                     onBrainSelect: setBrainSelectedId,
                     navigate,
+                    onEnterFocus: () => setConversationMode("focus"),
                     onExitFocus: () => setConversationMode("normal"),
                     onOpenInSpace: (spaceId, id) => {
                       setActiveSpaceId(spaceId);
@@ -427,6 +428,7 @@ function renderView(input: {
   readonly conversationMode: ConversationMode;
   readonly onBrainSelect: (id: string | null) => void;
   readonly navigate: (view: View) => void;
+  readonly onEnterFocus: () => void;
   readonly onExitFocus: () => void;
   readonly onOpenInSpace: (spaceId: string, id: string) => void;
 }) {
@@ -443,7 +445,6 @@ function renderView(input: {
   if (input.view === "space") {
     const activeSpace = input.props.spaces?.find((space) => space.spaceId === input.activeSpaceId);
     return <SpacePage
-      key={activeSpace?.spaceId ?? "space-empty"}
       onNavigate={input.navigate}
       targetId={input.spaceTargetId}
       space={activeSpace}
@@ -458,8 +459,11 @@ function renderView(input: {
           projection={input.conversationProjection}
           state={input.conversationState}
           input={input.conversationInput}
+          focus={input.conversationMode === "focus"}
+          onExitFocus={input.onExitFocus}
         />
       }
+      onEnterFocus={input.conversationMode === "normal" ? input.onEnterFocus : undefined}
       onRenameConversation={input.props.onRenameConversation}
       onToggleConversationPinned={input.props.onToggleConversationPinned}
       onDeleteConversation={input.props.onDeleteConversation}
@@ -611,7 +615,7 @@ function WorkbenchStatusNotice(props: {
           type="button"
           aria-label="重新加载工作台数据"
           onClick={props.onRetry}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-black/5 disabled:opacity-40"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-[var(--aa-hover-tint)] disabled:opacity-40"
           style={{ color: "var(--aa-text-3)" }}
           disabled={props.retrying}
         >

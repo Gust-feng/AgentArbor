@@ -5,17 +5,9 @@ import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelInputAttachment, ModelMessage } from "../../domain/intelligence/index.js";
 import type { TaskSoil, TaskSoilContextRef } from "../../domain/soil/index.js";
 import { managedUploadAttachmentId } from "./context-attachments.js";
+import { isConversationOwnerContextRef } from "./context-ref-origin.js";
 
 const MAX_IMAGE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-
-/**
- * Attachment ids injected by the Space owner resolver (space-agent-access)
- * for every run of a Space-owned conversation. Such references are standing
- * authorization context, not attachments the user selected for this turn, so
- * they must never become automatic model vision attachments; otherwise every
- * new message would silently carry an old image.
- */
-const SPACE_INJECTED_ATTACHMENT_PREFIX = "space-reference:";
 
 const IMAGE_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".gif": "image/gif",
@@ -105,10 +97,6 @@ async function resolveImageAttachments(input: {
   const failures: string[] = [];
   for (const ref of input.taskSoil.contextRefs) {
     if (!isImageContextRef(ref)) continue;
-    // Space-injected references are standing authorization context, not
-    // attachments the user selected for this turn. They stay readable file
-    // references but never become automatic model vision input.
-    if (isSpaceInjectedReference(ref)) continue;
     if (ref.attachmentId !== undefined) {
       try {
         await input.readAuthorization?.assertReadAllowed(ref.attachmentId);
@@ -163,14 +151,17 @@ async function resolveImageAttachments(input: {
   return { items: attachments, failures };
 }
 
+/**
+ * Only explicitly user-attached image refs are auto-attached to the model
+ * message. Space-authorized references（automaticSpaceReference）stay visible
+ * in the reference list and can be read on demand through attachment tools,
+ * but must not silently ride along every turn of a new conversation.
+ */
 function isImageContextRef(ref: TaskSoilContextRef): boolean {
   if (ref.kind !== "file") return false;
+  if (isConversationOwnerContextRef(ref)) return false;
   if (ref.metadata?.mimeType?.startsWith("image/") === true) return true;
   return IMAGE_MIME_BY_EXTENSION[path.extname(ref.ref).toLowerCase()] !== undefined;
-}
-
-function isSpaceInjectedReference(ref: TaskSoilContextRef): boolean {
-  return ref.attachmentId?.startsWith(SPACE_INJECTED_ATTACHMENT_PREFIX) === true;
 }
 
 function imageMimeTypeFor(ref: TaskSoilContextRef, absolutePath: string): string | undefined {

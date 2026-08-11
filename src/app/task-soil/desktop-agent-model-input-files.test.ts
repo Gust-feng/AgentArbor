@@ -146,73 +146,6 @@ test("Desktop Agent reports unreadable image refs as a text notice for non-visio
   }
 });
 
-test("Desktop Agent does not turn Space-injected image references into automatic model attachments", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-space-"));
-  const imagePath = path.join(root, "standing.png");
-  await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  try {
-    const taskSoil = createTaskSoil({
-      rawGoal: "continue",
-      goalId: "goal-space-injected",
-      traceId: "trace-space-injected",
-      contextRefs: [{
-        attachmentId: "space-reference:reference-1",
-        ref: `local-file:${imagePath}`,
-        kind: "file",
-        title: "standing.png",
-        summary: "当前对话所属空间授权的本地资源。",
-      }],
-      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
-    });
-    const messages: readonly ModelMessage[] = [{ role: "user", content: "Continue." }];
-
-    const resolved = await attachDesktopFileInputsToModelMessages({
-      messages,
-      taskSoil,
-      modelCapabilities: VISION_CAPABILITIES,
-      workspaceRoot: root,
-    });
-
-    // Standing Space context must not resurface as this turn's image input.
-    assert.equal(resolved, messages);
-    assert.equal(resolved[0]?.attachments, undefined);
-  } finally {
-    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
-});
-
-test("Desktop Agent ignores Space-injected image references for non-vision models without a notice", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-space-no-vision-"));
-  const imagePath = path.join(root, "standing.png");
-  await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-  try {
-    const taskSoil = createTaskSoil({
-      rawGoal: "continue",
-      goalId: "goal-space-injected-no-vision",
-      traceId: "trace-space-injected-no-vision",
-      contextRefs: [{
-        attachmentId: "space-reference:reference-1",
-        ref: `local-file:${imagePath}`,
-        kind: "file",
-        title: "standing.png",
-      }],
-      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
-    });
-
-    const resolved = await attachDesktopFileInputsToModelMessages({
-      messages: [{ role: "user", content: "Continue." }],
-      taskSoil,
-      modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
-      workspaceRoot: root,
-    });
-
-    assert.equal(resolved[0]?.attachments, undefined);
-    assert.equal(resolved[0]?.content, "Continue.");
-  } finally {
-    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
-});
-
 test("Desktop Agent rejects an image ref that becomes unreadable before model preparation", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-missing-"));
   const imagePath = path.join(root, "missing.png");
@@ -274,6 +207,118 @@ test("Desktop Agent rechecks live attachment authorization before reading a user
         error.message.includes("no longer points to its original source"),
     );
     assert.deepEqual(checked, ["ctx:user-selected-image"]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent does not auto-attach Space-authorized image references to a new conversation turn", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-space-reference-image-"));
+  const imagePath = path.join(root, "space-photo.png");
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await fs.writeFile(imagePath, bytes);
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "start a new conversation",
+      goalId: "goal-space-ref",
+      traceId: "trace-space-ref",
+      contextRefs: [{
+        attachmentId: "space-reference:photo-1",
+        ref: `local-file:${imagePath}`,
+        kind: "file",
+        pathGranted: true,
+        automaticSpaceReference: true,
+        title: "space-photo.png",
+        summary: "当前对话所属空间授权的本地资源。",
+      }, {
+        attachmentId: "space-reference:legacy-photo",
+        ref: `local-file:${imagePath}`,
+        kind: "file",
+        pathGranted: true,
+        title: "legacy-space-photo.png",
+      }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+    const messages: readonly ModelMessage[] = [{ role: "user", content: "你好" }];
+
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages,
+      taskSoil,
+      modelCapabilities: VISION_CAPABILITIES,
+      workspaceRoot: root,
+    });
+
+    // The reference stays in the list, but no image bytes ride along this turn.
+    assert.equal(taskSoil.contextRefs.length, 2);
+    assert.equal(resolved[0]?.attachments, undefined);
+    assert.equal(resolved[0]?.content, "你好");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent does not emit an undeliverable notice for Space-authorized image references on text-only models", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-space-reference-image-no-vision-"));
+  const imagePath = path.join(root, "space-photo.png");
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await fs.writeFile(imagePath, bytes);
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "continue",
+      goalId: "goal-space-ref-no-vision",
+      traceId: "trace-space-ref-no-vision",
+      contextRefs: [{
+        attachmentId: "space-reference:photo-1",
+        ref: `local-file:${imagePath}`,
+        kind: "file",
+        pathGranted: true,
+        automaticSpaceReference: true,
+        title: "space-photo.png",
+        summary: "当前对话所属空间授权的本地资源。",
+      }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+    const messages: readonly ModelMessage[] = [{ role: "user", content: "Continue." }];
+
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages,
+      taskSoil,
+      modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
+      workspaceRoot: root,
+    });
+
+    assert.equal(resolved, messages);
+    assert.equal(resolved[0]?.attachments, undefined);
+    assert.equal(resolved[0]?.content, "Continue.");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent keeps auto-attaching explicitly selected image refs without preview metadata", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-explicit-image-no-metadata-"));
+  const imagePath = path.join(root, "explicit.png");
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await fs.writeFile(imagePath, bytes);
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the image",
+      goalId: "goal-explicit",
+      traceId: "trace-explicit",
+      contextRefs: [{ ref: `local-file:${imagePath}`, kind: "file", title: "explicit.png" }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages: [{ role: "user", content: "Describe it." }],
+      taskSoil,
+      modelCapabilities: VISION_CAPABILITIES,
+      workspaceRoot: root,
+    });
+
+    assert.equal(resolved[0]?.attachments?.length, 1);
+    assert.equal(resolved[0]?.attachments?.[0]?.kind, "image");
+    assert.equal(resolved[0]?.attachments?.[0]?.inputRef, `local-file:${imagePath}`);
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

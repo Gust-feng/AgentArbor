@@ -554,6 +554,7 @@ export type SpaceReferenceModelView = {
   readonly itemId: string;
   readonly spaceId: string;
   readonly title: string;
+  readonly parentId?: string;
   readonly reference: SpaceReference;
   readonly annotation?: SpaceReferenceAnnotationModelView;
   readonly createdAt: string;
@@ -575,6 +576,7 @@ export function spaceReferenceModelView(item: SpaceReferenceItem): SpaceReferenc
     itemId: item.id,
     spaceId: item.spaceId,
     title: item.title,
+    ...(item.parentId === undefined ? {} : { parentId: item.parentId }),
     reference: item.reference,
     ...(item.annotation === undefined ? {} : { annotation: spaceReferenceAnnotationModelView(item.annotation) }),
     createdAt: item.createdAt,

@@ -21,6 +21,7 @@ import type {
   OrdinaryRunState,
 } from "../ordinary-agent/contracts.js";
 import { toolStreamDetail, toolSummary } from "../panel-read-model/run/panel-stream-tool-projection.js";
+import { isConversationOwnerContextRef } from "../task-soil/context-ref-origin.js";
 import { workspaceFolderSummaryFromPath } from "../task-soil/workspace-folder-summary.js";
 import type {
   OrdinaryPanelBasicRun,
@@ -777,27 +778,29 @@ function projectConversationTurn(turn: OrdinaryConversationTurnReadModel): Ordin
 function projectConversationAttachments(
   turn: Extract<OrdinaryConversationTurnReadModel, { readonly role: "user" }>,
 ): readonly OrdinaryPanelConversationTurnAttachment[] | undefined {
-  const attachments = (turn.input.taskSoil?.contextRefs ?? []).map((ref): OrdinaryPanelConversationTurnAttachment => ({
-    attachmentId: ref.attachmentId ?? ref.ref,
-    kind: ref.kind,
-    title: ref.title ?? attachmentTitle(ref.kind, ref.ref),
-    summary: ref.summary,
-    readonlyPreviewMeta: {
-      available: ref.metadata?.available,
-      title: ref.title ?? ref.readonlyPreview?.title,
-      byteLength: ref.metadata?.byteLength,
-      mimeType: ref.metadata?.mimeType,
-      truncated: ref.metadata?.truncated,
-    },
-    mediaPreview: ref.attachmentId !== undefined && ref.metadata?.mimeType?.startsWith("image/")
-      ? {
-          kind: "image",
-          url: `/api/context/attachments/media/${encodeURIComponent(ref.attachmentId)}`,
-          mimeType: ref.metadata.mimeType,
-          byteLength: ref.metadata.byteLength,
-        }
-      : undefined,
-  }));
+  const attachments = (turn.input.taskSoil?.contextRefs ?? [])
+    .filter((ref) => !isConversationOwnerContextRef(ref))
+    .map((ref): OrdinaryPanelConversationTurnAttachment => ({
+      attachmentId: ref.attachmentId ?? ref.ref,
+      kind: ref.kind,
+      title: ref.title ?? attachmentTitle(ref.kind, ref.ref),
+      summary: ref.summary,
+      readonlyPreviewMeta: {
+        available: ref.metadata?.available,
+        title: ref.title ?? ref.readonlyPreview?.title,
+        byteLength: ref.metadata?.byteLength,
+        mimeType: ref.metadata?.mimeType,
+        truncated: ref.metadata?.truncated,
+      },
+      mediaPreview: ref.attachmentId !== undefined && ref.metadata?.mimeType?.startsWith("image/")
+        ? {
+            kind: "image",
+            url: `/api/context/attachments/media/${encodeURIComponent(ref.attachmentId)}`,
+            mimeType: ref.metadata.mimeType,
+            byteLength: ref.metadata.byteLength,
+          }
+        : undefined,
+    }));
   return attachments.length === 0 ? undefined : attachments;
 }
 

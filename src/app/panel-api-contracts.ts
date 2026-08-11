@@ -76,6 +76,7 @@ export type DocumentTextUpdateInput = {
 };
 
 export type DocumentCaptionUpdateInput = {
+  readonly relativePath?: string;
   readonly expectedFingerprint: string;
   readonly caption: string;
 };
@@ -95,7 +96,7 @@ export type DocumentPreview = {
   readonly content:
     | { readonly kind: "text"; readonly text: string; readonly truncated: boolean; readonly editable: boolean; readonly language?: string; readonly encoding?: string }
     | { readonly kind: "directory"; readonly relativePath: string; readonly entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: "file" | "directory" | "other" }[]; readonly truncated: boolean }
-    | { readonly kind: "media"; readonly mediaKind: "image" | "pdf" | "video" | "audio"; readonly mimeType: string; readonly url: string; readonly alt?: string; readonly caption?: string; readonly captionEditable?: boolean; readonly poster?: string; readonly duration?: string; readonly transcript?: string }
+    | { readonly kind: "media"; readonly mediaKind: "image" | "pdf" | "video" | "audio"; readonly mimeType: string; readonly url: string; readonly alt?: string; readonly caption?: string; readonly captionEditable?: boolean; readonly captionFingerprint?: string; readonly poster?: string; readonly duration?: string; readonly transcript?: string }
     | { readonly kind: "office"; readonly officeKind: "docx" | "xlsx"; readonly mimeType: string; readonly url: string }
     | { readonly kind: "pages"; readonly pages: readonly string[] }
     | { readonly kind: "web"; readonly url: string; readonly site?: string; readonly body?: string }

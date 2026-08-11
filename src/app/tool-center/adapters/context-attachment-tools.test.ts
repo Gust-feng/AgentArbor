@@ -105,6 +105,39 @@ test("attachment list shows only server-authorized local paths", async () => {
   assert.equal(attachments[2]?.ref, undefined);
 });
 
+test("attachment list identifies standing owner references separately from user input", async () => {
+  const taskSoil = taskSoilWithContext({
+    contextRefs: [{
+      attachmentId: "space-reference:owner-image",
+      ref: "local-file:C:/work/owner.png",
+      pathGranted: true,
+      automaticSpaceReference: true,
+      kind: "file",
+      title: "owner.png",
+    }, {
+      attachmentId: "ctx-user-file",
+      ref: "local-file:C:/work/user.txt",
+      kind: "file",
+      title: "user.txt",
+    }],
+    permissionBoundaryRefs: [
+      "read:local-file:C:/work/owner.png",
+      "read:local-file:C:/work/user.txt",
+    ],
+  });
+  const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: "C:/work" });
+
+  const result = await center.execute(
+    { callId: "call:list-origins", toolName: "AttachmentList", input: {} },
+    TOOL_CONTEXT,
+    { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["AttachmentList"] },
+  );
+  const attachments = asRecord(result.output).attachments as readonly Record<string, unknown>[];
+
+  assert.equal(attachments[0]?.origin, "conversation_owner");
+  assert.equal(attachments[1]?.origin, "user_input");
+});
+
 test("context attachment reads honor live authorization after the run grant was frozen", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-live-authorization-"));
   t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));

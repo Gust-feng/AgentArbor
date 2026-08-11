@@ -11,6 +11,14 @@ export type TaskSoilContextRef = {
   readonly ref: string;
   /** Set when the run authorizes this path, letting the model see it and call file tools on it. */
   readonly pathGranted?: boolean;
+  /**
+   * Server-side only. Marks a reference injected automatically from the
+   * conversation owner（Space 授权引用列表），not explicitly attached by the
+   * user this turn. Request parsing never reads this flag, so a client cannot
+   * forge it; it keeps auto-attached media（例如图片）off the model message
+   * while the reference list and attachment tools stay available.
+   */
+  readonly automaticSpaceReference?: boolean;
   /** Run-frozen backend identity used to reject a different filesystem object at the same path. */
   readonly sourceIdentity?: string;
   readonly kind: "user_goal" | "workspace" | "file" | "project" | "web" | "runtime";

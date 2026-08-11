@@ -3,6 +3,7 @@ import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import { normalizeModelFacingText } from "../text-projection/visible-text-safety.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import { isConversationOwnerContextRef } from "../task-soil/context-ref-origin.js";
 import type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 
 export type DesktopAgentModelInput = {
@@ -53,17 +54,27 @@ function currentUserMessageContent(input: BuildDesktopAgentModelInputOptions): s
   const skills = (input.skillContexts ?? [])
     .filter((context) => (context.loadStatus ?? "loaded") === "loaded")
     .map(skillBlock);
+  const ownerReferences = input.taskSoil.contextRefs
+    .map((ref, index) => isConversationOwnerContextRef(ref)
+      ? contextRefBlock(ref, input.taskSoil, index, "conversation_owner")
+      : undefined)
+    .filter(isString);
   const attachments = input.taskSoil.contextRefs
-    .map((ref, index) => attachmentBlock(ref, input.taskSoil, index))
+    .map((ref, index) => isConversationOwnerContextRef(ref)
+      ? undefined
+      : contextRefBlock(ref, input.taskSoil, index, "user_input"))
     .filter(isString);
   const goal = normalizeModelFacingText(input.goal);
   const owner = input.ownerContext === undefined ? undefined : normalizeModelFacingText(input.ownerContext);
-  if (skills.length === 0 && attachments.length === 0 && owner === undefined) {
+  if (skills.length === 0 && ownerReferences.length === 0 && attachments.length === 0 && owner === undefined) {
     return goal;
   }
   return [
     owner === undefined ? undefined : owner,
     skills.length === 0 ? undefined : `[Selected skill instructions]\n${skills.join("\n\n")}`,
+    ownerReferences.length === 0
+      ? undefined
+      : `[Conversation owner resources]\n${ownerReferences.join("\n")}`,
     attachments.length === 0 ? undefined : `[User-provided context]\n${attachments.join("\n")}`,
     `[Current user request]\n${goal}`,
   ].filter(isString).join("\n\n");
@@ -133,17 +144,18 @@ function safeRelativeResourcePath(value: string | undefined): string | undefined
   return normalized;
 }
 
-function attachmentBlock(
+function contextRefBlock(
   ref: TaskSoil["contextRefs"][number],
   taskSoil: TaskSoil,
   index: number,
+  origin: "conversation_owner" | "user_input",
 ): string | undefined {
   if (!isModelVisibleContextRef(ref, taskSoil)) {
     return undefined;
   }
   const safeRef = modelSafeContextRef(ref.ref, ref.pathGranted === true);
   return [
-    "User-provided attachment:",
+    origin === "conversation_owner" ? "Owner-authorized reference:" : "User-provided attachment:",
     `attachment_id=${normalizeModelFacingText(ref.attachmentId ?? safeRef ?? `attachment-${index}`)}`,
     `kind=${ref.kind}`,
     safeRef === undefined ? undefined : `ref=${normalizeModelFacingText(safeRef)}`,
@@ -152,7 +164,9 @@ function attachmentBlock(
     ref.metadata?.mimeType === undefined ? undefined : `mime=${ref.metadata.mimeType}`,
     ref.metadata?.byteLength === undefined ? undefined : `bytes=${ref.metadata.byteLength}`,
     ref.metadata?.truncated === true ? "preview_truncated=true" : undefined,
-    "Inspect it with available attachment tools, or directly if file/image input is attached to this request. Do not assume unread content.",
+    origin === "conversation_owner"
+      ? "This is standing context from the conversation owner, not an attachment selected for this turn. Inspect it with available attachment tools only when relevant. Do not assume unread content."
+      : "Inspect it with available attachment tools, or directly if file/image input is attached to this request. Do not assume unread content.",
   ].filter(isString).join(" ");
 }
 

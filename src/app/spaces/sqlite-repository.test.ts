@@ -103,7 +103,7 @@ test("SpaceTree migration removes legacy unavailable references", async (t) => {
   assert.deepEqual((await migrated.read()).referenceItems, []);
 });
 
-test("SpaceTree SQLite repository round-trips annotations after migration v7", async (t) => {
+test("SpaceTree SQLite repository round-trips annotations and image captions after migration v8", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-spaces-sqlite-annotation-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   t.after(async () => {
@@ -119,6 +119,14 @@ test("SpaceTree SQLite repository round-trips annotations after migration v7", a
     updatedAt: "2026-08-11T00:00:00.000Z",
     updatedBy: "agent" as const,
   };
+  const imageCaptions = {
+    "": {
+      text: "结构图说明",
+      revision: 2,
+      updatedAt: "2026-08-11T01:00:00.000Z",
+      updatedBy: "user" as const,
+    },
+  };
   const snapshot: SpaceTreeSnapshot = {
     schemaVersion: "space-tree/v5" as const,
     spaces: [{ id: "space-one", title: "学习空间", createdAt: "2026-01-01", updatedAt: "2026-01-01" }],
@@ -131,16 +139,27 @@ test("SpaceTree SQLite repository round-trips annotations after migration v7", a
       createdAt: "2026-01-02",
       updatedAt: "2026-01-02",
     }, {
+      id: "reference-image",
+      spaceId: "space-one",
+      title: "结构图.png",
+      reference: { kind: "local_file", path: "C:/work/diagram.png" },
+      sourceIdentity: "device:image-id",
+      imageCaptions,
+      createdAt: "2026-01-03",
+      updatedAt: "2026-01-03",
+    }, {
       id: "reference-bare",
       spaceId: "space-one",
       title: "无注释引用",
       reference: { kind: "web_page", url: "https://example.com" },
-      createdAt: "2026-01-03",
-      updatedAt: "2026-01-03",
+      createdAt: "2026-01-04",
+      updatedAt: "2026-01-04",
     }],
   };
   await repository.write(snapshot);
   const read = await repository.read();
   assert.deepEqual(read.referenceItems[0].annotation, annotation);
-  assert.equal(read.referenceItems[1].annotation, undefined);
+  assert.deepEqual(read.referenceItems[1].imageCaptions, imageCaptions);
+  assert.equal(read.referenceItems[2].annotation, undefined);
+  assert.equal(read.referenceItems[2].imageCaptions, undefined);
 });

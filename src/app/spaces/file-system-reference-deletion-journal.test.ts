@@ -103,7 +103,7 @@ function record(
   deletionId: string,
   phase: SpaceReferenceDeletionPhase,
 ): SpaceReferenceDeletionJournalRecord {
-  const sourcePath = path.resolve("owned", `${deletionId}.md`);
+  const sourcePath = path.resolve("owned", `${deletionId}.png`);
   return {
     schemaVersion: "space-reference-deletion/v1",
     deletionId,
@@ -114,6 +114,14 @@ function record(
       spaceId: "space-one",
       title: "Owned file",
       reference: { kind: "local_file", path: sourcePath },
+      imageCaptions: {
+        "": {
+          text: "待删除图片说明",
+          revision: 1,
+          updatedAt: "2026-08-02T00:00:00.000Z",
+          updatedBy: "user",
+        },
+      },
       createdAt: "2026-08-02T00:00:00.000Z",
       updatedAt: "2026-08-02T00:00:00.000Z",
     }],

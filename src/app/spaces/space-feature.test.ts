@@ -703,6 +703,68 @@ test("Space reference without annotation stays annotation-free and update create
   await feature.release();
 });
 
+test("Space reference image captions persist per relative path and enforce revisions", async () => {
+  let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
+  let id = 0;
+  const feature = createSpaceFeature({
+    repository: { async read() { return snapshot; }, async write(value) { snapshot = value; } },
+    idFactory: () => `id-${++id}`,
+    now: () => "2026-08-11T00:00:00.000Z",
+  });
+  const events: unknown[] = [];
+  feature.events.subscribe((event) => events.push(event));
+  const space = await feature.commands.createSpace({ title: "图片" });
+  const item = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "素材",
+    reference: { kind: "workspace_folder", path: "C:/images" },
+  });
+
+  const first = await feature.commands.updateReferenceImageCaption({
+    itemId: item.id,
+    relativePath: "icons/logo.png",
+    expectedRevision: 0,
+    text: "品牌标志",
+    actor: { kind: "user" },
+  });
+  assert.deepEqual(first.imageCaptions?.["icons/logo.png"], {
+    text: "品牌标志",
+    revision: 1,
+    updatedAt: "2026-08-11T00:00:00.000Z",
+    updatedBy: "user",
+    actor: { kind: "user" },
+  });
+  assert.deepEqual(events.at(-1), { type: "space.reference_image_caption_updated", item: first, relativePath: "icons/logo.png" });
+  await assert.rejects(feature.commands.updateReferenceImageCaption({
+    itemId: item.id,
+    relativePath: "icons/logo.png",
+    expectedRevision: 0,
+    text: "过期覆盖",
+  }), { code: "space_reference_image_caption_revision_conflict" });
+
+  const cleared = await feature.commands.updateReferenceImageCaption({
+    itemId: item.id,
+    relativePath: "icons/logo.png",
+    expectedRevision: 1,
+    text: "",
+  });
+  assert.equal(cleared.imageCaptions?.["icons/logo.png"]?.text, "");
+  assert.equal(cleared.imageCaptions?.["icons/logo.png"]?.revision, 2);
+
+  const web = await feature.commands.addReference({
+    spaceId: space.id,
+    title: "网页",
+    reference: { kind: "web_page", url: "https://example.com" },
+  });
+  await assert.rejects(feature.commands.updateReferenceImageCaption({
+    itemId: web.id,
+    relativePath: "",
+    expectedRevision: 0,
+    text: "不应写入",
+  }), { code: "space_reference_image_caption_invalid" });
+  await feature.release();
+});
+
 test("Space reference annotation update rejects stale revisions, missing items, empty patches and oversized content", async () => {
   let snapshot: SpaceTreeSnapshot = { schemaVersion: SPACE_TREE_SCHEMA_VERSION, spaces: [], referenceItems: [] };
   let id = 0;

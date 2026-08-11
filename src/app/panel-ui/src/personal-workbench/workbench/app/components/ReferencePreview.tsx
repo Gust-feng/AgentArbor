@@ -231,6 +231,7 @@ function ReferenceDocumentSessionView({
         const next = await fetchDocumentPreview(itemId, relativePath, undefined, apiBase)
         if (disposed) return
         const annotationChanged = annotationRevisionChanged(preview, next)
+        const captionChanged = imageCaptionRevisionChanged(preview, next)
         const sourceChanged = hasSourceChanged(preview, next)
         if (annotationChanged && sourceChanged) {
           // annotation 与来源同时变化：立即应用新整理内容（Space 自己的内容），
@@ -242,6 +243,12 @@ function ReferenceDocumentSessionView({
         if (annotationChanged) {
           // 仅 annotation 变化：来源正文未变化时 preview.content 相同，
           // 用户当前草稿（draft）不受影响。
+          setPreview(next)
+          setIncoming(undefined)
+          setShowDiff(false)
+          return
+        }
+        if (captionChanged && !sourceChanged) {
           setPreview(next)
           setIncoming(undefined)
           setShowDiff(false)
@@ -314,8 +321,8 @@ function ReferenceDocumentSessionView({
   }
 
   async function saveCaption(caption: string) {
-    if (readOnly || preview?.content.kind !== 'media' || preview.content.mediaKind !== 'image' || preview.content.captionEditable !== true || preview.annotation !== undefined || preview.fingerprint === undefined) return
-    const saved = await saveDocumentCaption(itemId, { expectedFingerprint: preview.fingerprint, caption }, apiBase)
+    if (readOnly || preview?.content.kind !== 'media' || preview.content.mediaKind !== 'image' || preview.content.captionEditable !== true || preview.content.captionFingerprint === undefined) return
+    const saved = await saveDocumentCaption(itemId, { relativePath, expectedFingerprint: preview.content.captionFingerprint, caption }, apiBase)
     setPreview(saved)
     setIncoming(undefined)
     setError(undefined)
@@ -363,7 +370,7 @@ function ReferenceDocumentSessionView({
         {preview.annotation !== undefined && preview.presentation.kind !== 'web' && (
           <ReferenceAnnotation annotation={preview.annotation} sourceVersion={`${targetKey}:annotation:${preview.annotation.revision}`} />
         )}
-        <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} captionEditable={!readOnly && !loading && preview.content.kind === 'media' && preview.content.mediaKind === 'image' && preview.content.captionEditable === true && preview.annotation === undefined} onChange={scheduleSave} onCaptionChange={saveCaption} onReload={() => void reload()} onNavigatePath={onNavigatePath} />
+        <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} captionEditable={!readOnly && !loading && preview.content.kind === 'media' && preview.content.mediaKind === 'image' && preview.content.captionEditable === true} onChange={scheduleSave} onCaptionChange={saveCaption} onReload={() => void reload()} onNavigatePath={onNavigatePath} />
       </>}
     </div>
   )
@@ -565,7 +572,7 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'image':
       return content.kind === 'media' && content.mediaKind === 'image'
-        ? <ImageDocumentSurface url={content.url} sourceVersion={preview.fingerprint} alt={content.alt ?? preview.title} caption={preview.annotation === undefined ? content.caption : undefined} editable={captionEditable} onCaptionChange={onCaptionChange} />
+        ? <ImageDocumentSurface url={content.url} sourceVersion={preview.fingerprint} alt={content.alt ?? preview.title} caption={content.caption} editable={captionEditable} onCaptionChange={onCaptionChange} />
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'video':
       return content.kind === 'media' && content.mediaKind === 'video'
@@ -647,4 +654,14 @@ function hasSourceChanged(current: DocumentPreview, next: DocumentPreview): bool
 
 function annotationRevisionChanged(current: DocumentPreview, next: DocumentPreview): boolean {
   return current.annotation?.revision !== next.annotation?.revision
+}
+
+function imageCaptionRevisionChanged(current: DocumentPreview, next: DocumentPreview): boolean {
+  const currentFingerprint = current.content.kind === 'media' && current.content.mediaKind === 'image'
+    ? current.content.captionFingerprint
+    : undefined
+  const nextFingerprint = next.content.kind === 'media' && next.content.mediaKind === 'image'
+    ? next.content.captionFingerprint
+    : undefined
+  return currentFingerprint !== nextFingerprint
 }

@@ -10,6 +10,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { TaskSoil, TaskSoilContextRef } from "../../../domain/soil/index.js";
 import { managedUploadAttachmentId } from "../../task-soil/context-attachments.js";
+import { isConversationOwnerContextRef } from "../../task-soil/context-ref-origin.js";
 
 export type ContextAttachmentToolOptions = {
   readonly taskSoil?: TaskSoil;
@@ -74,6 +75,7 @@ export function attachmentSummary(entry: AttachmentEntry): Readonly<Record<strin
   const format = attachmentFormat(entry.ref);
   return {
     attachmentId: entry.attachmentId,
+    origin: isConversationOwnerContextRef(entry.ref) ? "conversation_owner" : "user_input",
     kind: entry.ref.kind,
     format,
     title: entry.ref.title,

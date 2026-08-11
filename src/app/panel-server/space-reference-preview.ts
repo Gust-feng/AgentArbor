@@ -34,13 +34,35 @@ export async function createPanelDocumentPreview(
   contentBaseUrl?: string,
   contentTypeHintPath?: string,
 ): Promise<PanelDocumentPreview> {
-  const preview = await buildPanelDocumentPreview(item, relativePath, contentBaseUrl, contentTypeHintPath);
-  return attachSpaceAnnotation(preview, item);
+  const normalizedRelativePath = item.reference.kind === "local_file"
+    || item.reference.kind === "workspace_folder"
+    || item.reference.kind === "managed_folder"
+    ? safeNormalizeRelativePath(relativePath)
+    : relativePath;
+  const preview = await buildPanelDocumentPreview(item, normalizedRelativePath, contentBaseUrl, contentTypeHintPath);
+  return attachSpaceReferenceMetadata(preview, item, normalizedRelativePath);
 }
 
-/** 把 Space 自己的 annotation 作为额外投影附加，不改变来源预览的 content。 */
-export function attachSpaceAnnotation(preview: PanelDocumentPreview, item: SpaceReferenceItem): PanelDocumentPreview {
-  return item.annotation === undefined ? preview : { ...preview, annotation: item.annotation };
+/** 把 Space 自己的 annotation / 图片说明附加到投影，不改变来源文件。 */
+export function attachSpaceReferenceMetadata(
+  preview: PanelDocumentPreview,
+  item: SpaceReferenceItem,
+  relativePath = "",
+): PanelDocumentPreview {
+  const annotated = item.annotation === undefined ? preview : { ...preview, annotation: item.annotation };
+  if (item.reference.kind === "workbench_asset" || annotated.content.kind !== "media" || annotated.content.mediaKind !== "image") {
+    return annotated;
+  }
+  const caption = item.imageCaptions?.[relativePath];
+  return {
+    ...annotated,
+    content: {
+      ...annotated.content,
+      ...(caption?.text ? { caption: caption.text } : {}),
+      captionEditable: true,
+      captionFingerprint: `space-image-caption:${caption?.revision ?? 0}`,
+    },
+  };
 }
 
 async function buildPanelDocumentPreview(
@@ -75,11 +97,10 @@ async function buildPanelDocumentPreview(
   }
 
   const meta: LocalDocumentMeta = { itemId: item.id, title: item.title, sourceKind: item.reference.kind };
-  const normalized = safeNormalizeRelativePath(relativePath);
-  if (item.reference.kind === "local_file" && normalized.length > 0) {
+  if (item.reference.kind === "local_file" && relativePath.length > 0) {
     throw new PanelHttpError(400, "invalid_space_reference_path", "文件引用不接受子路径。");
   }
-  return buildLocalDocumentPreview(item.reference.path, normalized, meta, { contentBaseUrl, contentTypeHintPath });
+  return buildLocalDocumentPreview(item.reference.path, relativePath, meta, { contentBaseUrl, contentTypeHintPath });
 }
 
 export async function writePanelSpaceReferenceContent(

@@ -2,13 +2,14 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { z } from "zod";
 import type { DocumentCaptionUpdateInput, DocumentTextUpdateInput } from "../panel-api-contracts.js";
+import { normalizeRelativePath } from "../local-filesystem/index.js";
 import type { SpaceAddableReference, SpaceFeatureError, SpaceReference, SpaceReferenceItem, SpaceTarget } from "../spaces/index.js";
 import { spaceExternalReferenceStatus } from "../spaces/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
 import { spaceReferenceMutationKey } from "./space-reference-deletion.js";
-import { attachSpaceAnnotation, createPanelDocumentPreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
+import { attachSpaceReferenceMetadata, createPanelDocumentPreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
 import { getWorkbenchAssetPreview, updateWorkbenchAssetCaptionPreview, updateWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 import { createPanelSpaceReferenceEntry, deletePanelSpaceReferenceEntry, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
 
@@ -33,6 +34,7 @@ const updateTextSchema: z.ZodType<DocumentTextUpdateInput> = z.object({
   text: z.string().max(512 * 1024),
 }).strict();
 const updateCaptionSchema: z.ZodType<DocumentCaptionUpdateInput> = z.object({
+  relativePath: z.string().max(4_096).optional(),
   expectedFingerprint: z.string().min(1).max(512),
   caption: z.string().max(16 * 1024),
 }).strict();
@@ -262,7 +264,7 @@ export async function handlePanelSpaceRoute(
     runtime.spaceConversationDeletion.assertAvailable(item.spaceId);
     await assertExternalReferenceCurrent(runtime, item);
     const preview = item.reference.kind === "workbench_asset"
-      ? attachSpaceAnnotation(await getWorkbenchAssetPreview(runtime.workbenchAssets, item.reference.assetId, item.id), item)
+      ? attachSpaceReferenceMetadata(await getWorkbenchAssetPreview(runtime.workbenchAssets, item.reference.assetId, item.id), item)
       : await createPanelDocumentPreview(item, url.searchParams.get("path") ?? "");
     if (preview.status === "missing" && await unlinkInvalidExternalReference(runtime, item)) {
       throw new PanelHttpError(410, "space_reference_source_missing", "来源路径已不存在，当前 Space 引用已移除，请重新添加。");
@@ -313,14 +315,32 @@ export async function handlePanelSpaceRoute(
     if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
     runtime.spaceConversationDeletion.assertAvailable(item.spaceId);
     const input = parse(updateCaptionSchema, await readJsonBody(request), "图片说明编辑请求无效。");
-    if (item.reference.kind !== "workbench_asset") {
-      throw new PanelHttpError(409, "space_reference_caption_unavailable", "只有工作台图片资产可以编辑说明。");
+    if (item.reference.kind === "workbench_asset") {
+      if ((input.relativePath ?? "").length > 0) {
+        throw new PanelHttpError(400, "invalid_workbench_asset_input", "工作台图片说明不接受子路径。");
+      }
+      writeJson(response, 200, { ok: true, preview: await updateWorkbenchAssetCaptionPreview(
+        runtime.workbenchAssets,
+        { assetId: item.reference.assetId, expectedFingerprint: input.expectedFingerprint, caption: input.caption },
+        item.id,
+      ) });
+      return true;
     }
-    writeJson(response, 200, { ok: true, preview: await updateWorkbenchAssetCaptionPreview(
-      runtime.workbenchAssets,
-      { assetId: item.reference.assetId, expectedFingerprint: input.expectedFingerprint, caption: input.caption },
-      item.id,
-    ) });
+    await assertExternalReferenceCurrent(runtime, item);
+    const relativePath = captionRelativePath(input.relativePath ?? "");
+    const currentPreview = await createPanelDocumentPreview(item, relativePath);
+    if (currentPreview.content.kind !== "media" || currentPreview.content.mediaKind !== "image" || currentPreview.content.captionEditable !== true) {
+      throw new PanelHttpError(409, "space_reference_caption_unavailable", "只有图片引用可以编辑说明。");
+    }
+    const expectedRevision = captionRevision(input.expectedFingerprint);
+    const updated = await feature.commands.updateReferenceImageCaption({
+      itemId: item.id,
+      relativePath,
+      expectedRevision,
+      text: input.caption,
+      actor: { kind: "user" },
+    });
+    writeJson(response, 200, { ok: true, preview: await createPanelDocumentPreview(updated, relativePath) });
     return true;
   }
 
@@ -362,6 +382,20 @@ export async function handlePanelSpaceRoute(
 
 function isSpaceReferenceSourceMissing(error: unknown): boolean {
   return error instanceof PanelHttpError && error.code === "space_reference_source_missing";
+}
+
+function captionRelativePath(value: string): string {
+  try {
+    return normalizeRelativePath(value);
+  } catch {
+    throw new PanelHttpError(400, "invalid_space_reference_path", "图片说明路径无效。");
+  }
+}
+
+function captionRevision(fingerprint: string): number {
+  const match = /^space-image-caption:(\d+)$/u.exec(fingerprint);
+  if (match === null) throw new PanelHttpError(409, "space_reference_image_caption_revision_conflict", "图片说明版本已变化，请重新加载。");
+  return Number(match[1]);
 }
 
 async function runReferenceMutation<T>(
@@ -443,8 +477,11 @@ export function spaceFeatureHttpError(error: SpaceFeatureError): PanelHttpError 
     case "space_workspace_mount_conflict":
     case "space_asset_ownership_conflict":
     case "space_conversation_ownership_conflict":
+    case "space_reference_image_caption_revision_conflict":
       return new PanelHttpError(409, error.code, error.message);
     case "space_invalid_input":
+    case "space_reference_image_caption_invalid":
+    case "space_reference_image_caption_too_large":
       return new PanelHttpError(400, error.code, error.message);
     case "space_snapshot_incompatible":
     case "space_deletion_journal_failure":

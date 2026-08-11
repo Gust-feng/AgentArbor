@@ -122,6 +122,46 @@ test("Desktop Agent model input exposes granted paths so the model can call file
   assert.match(result.messages.at(-1)?.content ?? "", /C:\/workspace\/report\.md/);
 });
 
+test("Desktop Agent model input distinguishes owner references from current-turn attachments", () => {
+  const result = buildDesktopAgentModelInput({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    goal: "compare the available files",
+    taskSoil: createTaskSoil({
+      rawGoal: "compare the available files",
+      goalId: "goal-context-origin",
+      traceId: "trace-context-origin",
+      contextRefs: [{
+        attachmentId: "space-reference:legacy-owner-ref",
+        ref: "local-file:C:/workspace/legacy-owner.png",
+        pathGranted: true,
+        kind: "file",
+        title: "legacy-owner.png",
+      }, {
+        attachmentId: "space-reference:marked-owner-ref",
+        ref: "local-file:C:/workspace/marked-owner.png",
+        pathGranted: true,
+        automaticSpaceReference: true,
+        kind: "file",
+        title: "marked-owner.png",
+      }, {
+        attachmentId: "ctx-current-turn",
+        ref: "local-file:C:/workspace/current-turn.txt",
+        kind: "file",
+        title: "current-turn.txt",
+      }],
+      createdAt: "2026-08-11T00:00:00.000Z",
+    }),
+  });
+
+  const content = result.messages.at(-1)?.content ?? "";
+  assert.match(content, /\[Conversation owner resources\]/u);
+  assert.match(content, /Owner-authorized reference: attachment_id=space-reference:legacy-owner-ref/u);
+  assert.match(content, /Owner-authorized reference: attachment_id=space-reference:marked-owner-ref/u);
+  assert.match(content, /\[User-provided context\]/u);
+  assert.match(content, /User-provided attachment: attachment_id=ctx-current-turn/u);
+  assert.equal(content.includes("User-provided attachment: attachment_id=space-reference:"), false);
+});
+
 test("Desktop Agent model input does not silently trim canonical history or the current request", () => {
   const historySentinel = `history:${"h".repeat(20_000)}`;
   const requestSentinel = `request:${"r".repeat(20_000)}`;

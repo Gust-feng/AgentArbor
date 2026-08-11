@@ -373,9 +373,9 @@ test('applies a refreshed annotation but keeps the source-change notice when bot
   expect(screen.getByRole('button', { name: '加载新版' })).toBeTruthy()
 })
 
-test('hides the legacy image caption when the Space reference has an annotation', async () => {
+test('keeps the image caption editable alongside the Space annotation', async () => {
   const annotated = {
-    ...previewWithPresentation('image-annotated', 'image', { kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image.png', alt: '图像', caption: '手绘的网络结构与推导草稿' }),
+    ...previewWithPresentation('image-annotated', 'image', { kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image.png', alt: '图像', caption: '手绘的网络结构与推导草稿', captionEditable: true, captionFingerprint: 'space-image-caption:1' }),
     title: '神经网络结构图.png',
     annotation: {
       markdown: '# Agent 描述\n\n手绘网络结构与推导草稿，属于课程学习辅助素材。',
@@ -395,8 +395,9 @@ test('hides the legacy image caption when the Space reference has an annotation'
 
   const rendered = render(<ReferencePreview itemId="image-annotated" fallbackTitle="神经网络结构图.png" canOpen={false} onOpen={() => undefined} />)
   expect(await screen.findByAltText('图像')).toBeTruthy()
-  expect(rendered.container.querySelector('.aa-reference-preview__media--described')).toBeNull()
-  expect(screen.queryByText('手绘的网络结构与推导草稿')).toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-preview__media--described')).not.toBeNull()
+  expect(screen.getByText('手绘的网络结构与推导草稿')).toBeTruthy()
+  expect(screen.getByRole('textbox', { name: '图片说明' })).toBeTruthy()
   expect(rendered.container.querySelector('.aa-reference-preview__annotation')).not.toBeNull()
 
   rendered.rerender(<ReferencePreview itemId="image-bare" fallbackTitle="神经网络结构图.png" canOpen={false} onOpen={() => undefined} />)
@@ -415,6 +416,7 @@ test('edits an image caption and allows adding one to a captionless image', asyn
       alt: '图像',
       caption: '旧说明',
       captionEditable: true,
+      captionFingerprint: 'caption-v1',
     }),
     fingerprint: 'caption-v1',
   }
@@ -431,7 +433,7 @@ test('edits an image caption and allows adding one to a captionless image', asyn
       current = {
         ...current,
         fingerprint: `caption-${body.caption || 'empty'}`,
-        content: { ...(current.content as Extract<DocumentPreview['content'], { kind: 'media' }>), caption: body.caption || undefined },
+        content: { ...(current.content as Extract<DocumentPreview['content'], { kind: 'media' }>), caption: body.caption || undefined, captionFingerprint: `caption-${body.caption || 'empty'}` },
       }
     }
     return new Response(JSON.stringify({ preview: empty ? emptyPreview : current }), { status: 200, headers: { 'content-type': 'application/json' } })

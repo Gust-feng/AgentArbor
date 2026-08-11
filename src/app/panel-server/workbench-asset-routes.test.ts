@@ -20,7 +20,7 @@ type TestResponseBody = {
     readonly sourceKind?: string;
     readonly fingerprint?: string;
     readonly presentation?: { readonly kind?: string; readonly editable?: boolean; readonly sourceMode?: boolean };
-    readonly content?: { readonly editable?: boolean; readonly text?: string };
+    readonly content?: { readonly editable?: boolean; readonly text?: string; readonly caption?: string; readonly captionEditable?: boolean; readonly captionFingerprint?: string };
   };
   readonly error?: { readonly code?: string };
 };
@@ -95,14 +95,16 @@ test("Workbench asset routes return editable previews and enforce SQLite fingerp
   assert.deepEqual((await repository.get("paper-one"))?.pdf?.pages, ["只读正文"]);
 
   const image = await request(baseUrl, "/api/workbench-assets/image-one/preview");
-  assert.equal(image.body.preview?.fingerprint, workbenchAssetCaptionFingerprint("初始说明"));
+  assert.equal(image.body.preview?.fingerprint, "asset:image-one");
+  assert.equal(image.body.preview?.content?.captionFingerprint, workbenchAssetCaptionFingerprint("初始说明"));
   const caption = await request(baseUrl, "/api/workbench-assets/image-one/caption", {
     method: "PUT",
-    body: { expectedFingerprint: image.body.preview?.fingerprint, caption: "更新说明" },
+    body: { expectedFingerprint: image.body.preview?.content?.captionFingerprint, caption: "更新说明" },
   });
   assert.equal(caption.status, 200);
   assert.equal((await repository.get("image-one"))?.image?.caption, "更新说明");
-  assert.equal(caption.body.preview?.fingerprint, workbenchAssetCaptionFingerprint("更新说明"));
+  assert.equal(caption.body.preview?.fingerprint, "asset:image-one");
+  assert.equal(caption.body.preview?.content?.captionFingerprint, workbenchAssetCaptionFingerprint("更新说明"));
 });
 
 async function startServer(repository: WorkbenchAssetRepository): Promise<Server> {

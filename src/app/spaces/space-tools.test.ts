@@ -455,8 +455,14 @@ test("SpaceList tree and reference tools never expose source identities or audit
   const spaces = feature;
   const tools = new Map(createSpaceTools({ spaces, workspaceRoot: path.resolve(".") }).map((entry) => [entry.definition.name, entry]));
   const created = await execute(tools.get("SpaceCreate")!, { title: "机器学习" }) as { space: { id: string } };
-  await spaces.commands.addReference({
+  const parent = await spaces.commands.addReference({
     spaceId: created.space.id,
+    title: "资料文件夹",
+    reference: { kind: "asset_folder" },
+  });
+  const child = await spaces.commands.addReference({
+    spaceId: created.space.id,
+    parentId: parent.id,
     title: "本地文件",
     reference: { kind: "local_file", path: "C:/workspace/note.md" },
     annotation: { markdown: "整理内容", tags: ["资料"] },
@@ -466,15 +472,20 @@ test("SpaceList tree and reference tools never expose source identities or audit
   const listed = await execute(tools.get("SpaceList")!, { spaceId: created.space.id }) as {
     readonly tree: { readonly entries: readonly { readonly item: Record<string, unknown> & { readonly annotation: Record<string, unknown> } }[] };
   };
-  assert.equal(listed.tree.entries.length, 1);
-  assert.equal("sourceIdentity" in listed.tree.entries[0]!.item, false);
-  assert.equal("actor" in listed.tree.entries[0]!.item.annotation, false);
-  assert.equal(listed.tree.entries[0]!.item.annotation.revision, 1);
+  assert.equal(listed.tree.entries.length, 2);
+  const listedParent = listed.tree.entries.find((entry) => entry.item.itemId === parent.id)!.item;
+  const listedChild = listed.tree.entries.find((entry) => entry.item.itemId === child.id)!.item;
+  assert.equal("parentId" in listedParent, false);
+  assert.equal(listedChild.parentId, parent.id);
+  assert.equal("sourceIdentity" in listedChild, false);
+  assert.equal("actor" in listedChild.annotation, false);
+  assert.equal(listedChild.annotation.revision, 1);
 
-  const read = await execute(tools.get("SpaceReadReference")!, { itemId: "id-2" }) as {
+  const read = await execute(tools.get("SpaceReadReference")!, { itemId: child.id }) as {
     readonly item: Record<string, unknown> & { readonly annotation: Record<string, unknown> };
   };
-  assert.equal(read.item.itemId, "id-2");
+  assert.equal(read.item.itemId, child.id);
+  assert.equal(read.item.parentId, parent.id);
   assert.equal("sourceIdentity" in read.item, false);
   assert.equal("actor" in read.item.annotation, false);
   await spaces.release();

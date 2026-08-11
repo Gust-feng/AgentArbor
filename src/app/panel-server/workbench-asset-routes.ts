@@ -28,6 +28,7 @@ const updateTextSchema = z.object({
 
 const updateCaptionSchema = z.object({
   itemId: z.string().min(1).max(512).optional(),
+  relativePath: z.literal("").optional(),
   expectedFingerprint: z.string().min(1).max(512),
   caption: z.string(),
 }).strict();

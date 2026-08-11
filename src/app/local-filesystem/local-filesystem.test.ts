@@ -55,6 +55,9 @@ test("local filesystem resolves only normalized paths inside an authorized root"
   assert.throws(() => normalizeRelativePath("notes/../outside.md"));
   assert.throws(() => normalizeRelativePath("C:\\outside.md"));
   assert.throws(() => normalizeRelativePath("/outside.md"));
+  assert.equal(normalizeRelativePath("notes/./draft.md"), "notes/draft.md");
+  assert.equal(normalizeRelativePath("notes//draft.md/"), "notes/draft.md");
+  assert.equal(normalizeRelativePath("."), "");
   assert.throws(() => joinRelativePath("notes", "../outside.md"));
   await assert.rejects(() => resolveDestinationWithinRoot(root, "missing/two.md"));
 });

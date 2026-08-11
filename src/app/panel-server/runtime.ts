@@ -884,6 +884,7 @@ function projectionChangeFromSpace(event: SpaceEvent): WorkbenchProjectionChange
         referenceIds: [event.item.id],
       };
     case "space.reference_annotation_updated":
+    case "space.reference_image_caption_updated":
       return {
         owners: ["spaces"] as const,
         spaceIds: [event.item.spaceId],

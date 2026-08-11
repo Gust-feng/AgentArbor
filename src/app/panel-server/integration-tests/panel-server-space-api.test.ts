@@ -115,6 +115,35 @@ test("Space API exposes the canonical Conversation owner created by the conversa
   }
 });
 
+test("Space API creates a conversation with standing owner resources without treating them as message attachments", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-conversation-standing-context-"));
+  const sourcePath = path.join(directory, "standing.png");
+  await fs.writeFile(sourcePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "学习" } });
+    const spaceId = created.body.space.id as string;
+    const reference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "standing.png", reference: { kind: "local_file", path: sourcePath } },
+    });
+    assert.equal(reference.status, 201);
+
+    const submitted = await requestJson(baseUrl, "/api/conversations", {
+      method: "POST",
+      body: { goal: "开始学习", submissionId: "standing-context-conversation", spaceId },
+    });
+
+    assert.equal(submitted.status, 202);
+    assert.equal(submitted.body.conversation.turns[0]?.attachments, undefined);
+    const run = await runtime.ordinaryAgentFeature.queries.getRun(submitted.body.run.runId as string);
+    assert.equal(run?.input.taskSoil?.contextRefs?.[0]?.automaticSpaceReference, true);
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("Space API read-model merges legacy tree-linked conversations", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-api-legacy-"));
   const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
@@ -622,6 +651,86 @@ test("Space API previews referenced files without copying them", async () => {
 
     const tree = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(created.body.space.id as string)}`);
     assert.deepEqual(tree.body.tree.entries[0].item.reference, { kind: "local_file", path: sourcePath });
+  } finally {
+    await closePanelServer(httpServer, runtime);
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("Space API persists editable captions for added image files and folder images", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-image-caption-"));
+  const sourcePath = path.join(directory, "added-image.png");
+  const folderRoot = path.join(directory, "folder-source");
+  await fs.writeFile(sourcePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  await fs.mkdir(path.join(folderRoot, "images"), { recursive: true });
+  await fs.writeFile(path.join(folderRoot, "images", "diagram.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const { baseUrl, runtime, httpServer } = await startSpaceTestServer(directory);
+  try {
+    const created = await requestJson(baseUrl, "/api/spaces", { method: "POST", body: { title: "图片说明" } });
+    const spaceId = created.body.space.id as string;
+    const localReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "added-image.png", reference: { kind: "local_file", path: sourcePath } },
+    });
+    const localItemId = localReference.body.item.id as string;
+
+    const initial = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(localItemId)}/preview`);
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.preview.content.mediaKind, "image");
+    assert.equal(initial.body.preview.content.caption, undefined);
+    assert.equal(initial.body.preview.content.captionEditable, true);
+    assert.equal(initial.body.preview.content.captionFingerprint, "space-image-caption:0");
+    const sourceFingerprint = initial.body.preview.fingerprint;
+
+    const saved = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(localItemId)}/caption`, {
+      method: "PUT",
+      body: {
+        relativePath: "",
+        expectedFingerprint: initial.body.preview.content.captionFingerprint,
+        caption: "用户添加的图片说明",
+      },
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.preview.fingerprint, sourceFingerprint);
+    assert.equal(saved.body.preview.content.caption, "用户添加的图片说明");
+    assert.equal(saved.body.preview.content.captionFingerprint, "space-image-caption:1");
+
+    const reloaded = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(localItemId)}/preview`);
+    assert.equal(reloaded.body.preview.content.caption, "用户添加的图片说明");
+    assert.equal(reloaded.body.preview.content.captionFingerprint, "space-image-caption:1");
+
+    const stale = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(localItemId)}/caption`, {
+      method: "PUT",
+      body: { expectedFingerprint: "space-image-caption:0", caption: "过期覆盖" },
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.error.code, "space_reference_image_caption_revision_conflict");
+
+    const folderReference = await requestJson(baseUrl, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+      method: "POST",
+      body: { title: "folder-source", reference: { kind: "workspace_folder", path: folderRoot } },
+    });
+    const folderItemId = folderReference.body.item.id as string;
+    const childPath = "images/diagram.png";
+    const childPreview = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(folderItemId)}/preview?path=${encodeURIComponent(childPath)}`);
+    assert.equal(childPreview.body.preview.content.captionEditable, true);
+    assert.equal(childPreview.body.preview.content.captionFingerprint, "space-image-caption:0");
+
+    const childSaved = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(folderItemId)}/caption`, {
+      method: "PUT",
+      body: {
+        relativePath: "images/./diagram.png",
+        expectedFingerprint: childPreview.body.preview.content.captionFingerprint,
+        caption: "文件夹内图片说明",
+      },
+    });
+    assert.equal(childSaved.status, 200);
+    assert.equal(childSaved.body.preview.content.caption, "文件夹内图片说明");
+    assert.equal(childSaved.body.preview.content.captionFingerprint, "space-image-caption:1");
+
+    const childReloaded = await requestJson(baseUrl, `/api/spaces/references/${encodeURIComponent(folderItemId)}/preview?path=${encodeURIComponent(childPath)}`);
+    assert.equal(childReloaded.body.preview.content.caption, "文件夹内图片说明");
+    assert.equal(childReloaded.body.preview.content.captionFingerprint, "space-image-caption:1");
   } finally {
     await closePanelServer(httpServer, runtime);
     await removeTemporaryTree(directory);

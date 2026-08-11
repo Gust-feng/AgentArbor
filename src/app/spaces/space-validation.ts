@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { SpaceFeatureError, type SpaceReference, type SpaceReferenceAnnotation } from "./contracts.js";
+import { SpaceFeatureError, type SpaceReference, type SpaceReferenceAnnotation, type SpaceReferenceImageCaption } from "./contracts.js";
 import { toPersistedJsonShape } from "../../kernel/values/index.js";
 
 /**
@@ -13,6 +13,7 @@ export const MAX_SPACE_REFERENCE_ANNOTATION_KEY_POINTS = 32;
 export const MAX_SPACE_REFERENCE_ANNOTATION_KEY_POINT_LENGTH = 512;
 export const MAX_SPACE_REFERENCE_ANNOTATION_TAGS = 32;
 export const MAX_SPACE_REFERENCE_ANNOTATION_TAG_LENGTH = 64;
+export const MAX_SPACE_REFERENCE_IMAGE_CAPTION_LENGTH = 16 * 1024;
 
 export const spaceReferenceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local_file"), path: z.string().min(1) }).strict(),
@@ -48,6 +49,19 @@ export const spaceReferenceAnnotationSchema = z.object({
   actor: spaceReferenceActorRecordSchema.optional(),
 }).strict();
 
+export const spaceReferenceImageCaptionSchema = z.object({
+  text: z.string().max(MAX_SPACE_REFERENCE_IMAGE_CAPTION_LENGTH),
+  revision: z.number().int().min(1),
+  updatedAt: z.string().min(1),
+  updatedBy: z.enum(["agent", "user"]),
+  actor: spaceReferenceActorRecordSchema.optional(),
+}).strict();
+
+export const spaceReferenceImageCaptionsSchema = z.record(
+  z.string().max(4_096),
+  spaceReferenceImageCaptionSchema,
+);
+
 /** Validate the opaque edge, never by reading or resolving its external target. */
 export function validateSpaceReference(reference: SpaceReference): SpaceReference {
   const result = spaceReferenceSchema.safeParse(reference);
@@ -69,6 +83,18 @@ export function validateSpaceReferenceAnnotation(annotation: SpaceReferenceAnnot
     throw new SpaceFeatureError(
       tooLarge ? "space_reference_annotation_too_large" : "space_reference_annotation_invalid",
       `Space reference annotation is ${tooLarge ? "too large" : "invalid"}: ${z.prettifyError(result.error)}`,
+    );
+  }
+  return toPersistedJsonShape(result.data);
+}
+
+export function validateSpaceReferenceImageCaption(caption: SpaceReferenceImageCaption): SpaceReferenceImageCaption {
+  const result = spaceReferenceImageCaptionSchema.safeParse(caption);
+  if (!result.success) {
+    const tooLarge = result.error.issues.some((issue) => issue.code === "too_big");
+    throw new SpaceFeatureError(
+      tooLarge ? "space_reference_image_caption_too_large" : "space_reference_image_caption_invalid",
+      `Space reference image caption is ${tooLarge ? "too large" : "invalid"}: ${z.prettifyError(result.error)}`,
     );
   }
   return toPersistedJsonShape(result.data);

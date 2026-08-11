@@ -24,6 +24,7 @@ export {
   type SpaceReferenceAnnotation,
   type SpaceReferenceAnnotationInput,
   type SpaceReferenceAnnotationPatch,
+  type SpaceReferenceImageCaption,
   type SpaceReferenceItem,
   type SpaceRepository,
   type SpaceSummary,
@@ -52,7 +53,11 @@ export {
   type SpaceReferenceDeletionLifecycle,
   type SpaceReferenceDeletionTargetState,
 } from "./space-reference-deletion.js";
-export { validateSpaceReference, validateSpaceReferenceAnnotation, spaceReferenceAnnotationSchema } from "./space-validation.js";
+export {
+  validateSpaceReference,
+  validateSpaceReferenceAnnotation,
+  spaceReferenceAnnotationSchema,
+} from "./space-validation.js";
 export {
   createSpaceAddReferenceTool,
   createSpaceCreateTool,

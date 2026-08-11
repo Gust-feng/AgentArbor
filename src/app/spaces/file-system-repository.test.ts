@@ -21,7 +21,7 @@ test("filesystem Space repository persists the root-only schema", async (t) => {
   assert.deepEqual(await repository.read(), value);
 });
 
-test("filesystem Space repository round-trips annotations and rejects invalid ones", async (t) => {
+test("filesystem Space repository round-trips reference metadata and rejects invalid values", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-repo-annotation-"));
   t.after(() => removeTestDirectory(root));
   const repository = createFileSystemSpaceRepository(root);
@@ -33,18 +33,49 @@ test("filesystem Space repository round-trips annotations and rejects invalid on
     updatedAt: "2026-08-11T00:00:00.000Z",
     updatedBy: "agent" as const,
   };
+  const imageCaptions = {
+    "": {
+      text: "图片说明",
+      revision: 1,
+      updatedAt: "2026-08-11T01:00:00.000Z",
+      updatedBy: "user" as const,
+    },
+  };
   const value: SpaceTreeSnapshot = {
     schemaVersion: SPACE_TREE_SCHEMA_VERSION,
     spaces: [{ id: "space-1", title: "空间", createdAt: "now", updatedAt: "now" }],
-    referenceItems: [{ id: "ref-1", spaceId: "space-1", title: "网页", reference: { kind: "web_page", url: "https://example.com" }, annotation, createdAt: "now", updatedAt: "now" }],
+    referenceItems: [{ id: "ref-1", spaceId: "space-1", title: "图片", reference: { kind: "local_file", path: "C:/image.png" }, annotation, imageCaptions, createdAt: "now", updatedAt: "now" }],
   };
   await repository.write(value);
   assert.deepEqual((await repository.read()).referenceItems[0].annotation, annotation);
+  assert.deepEqual((await repository.read()).referenceItems[0].imageCaptions, imageCaptions);
 
   await assert.rejects(
     repository.write({
       ...value,
       referenceItems: [{ ...value.referenceItems[0], annotation: { ...annotation, revision: 0 } }],
+    }),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "space_snapshot_incompatible",
+  );
+
+  await assert.rejects(
+    repository.write({
+      ...value,
+      referenceItems: [{
+        ...value.referenceItems[0],
+        imageCaptions: { "": { ...imageCaptions[""], revision: 0 } },
+      }],
+    }),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "space_snapshot_incompatible",
+  );
+
+  await assert.rejects(
+    repository.write({
+      ...value,
+      referenceItems: [{
+        ...value.referenceItems[0],
+        imageCaptions: { "": { ...imageCaptions[""], text: "x".repeat(16 * 1024 + 1) } },
+      }],
     }),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "space_snapshot_incompatible",
   );
@@ -61,4 +92,5 @@ test("filesystem Space repository still accepts references without annotation", 
   };
   await repository.write(value);
   assert.deepEqual((await repository.read()).referenceItems[0].annotation, undefined);
+  assert.deepEqual((await repository.read()).referenceItems[0].imageCaptions, undefined);
 });

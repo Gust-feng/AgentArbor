@@ -17,11 +17,12 @@ export function normalizeRelativePath(value: string): string {
   if (path.posix.isAbsolute(slashed) || path.win32.isAbsolute(slashed)) {
     throw new Error("Expected a relative path.");
   }
-  const normalized = slashed.replace(/^\/+|\/+$/gu, "");
-  if (normalized.split("/").some((part) => part === "..")) {
+  const trimmed = slashed.replace(/^\/+|\/+$/gu, "");
+  if (trimmed.split("/").some((part) => part === "..")) {
     throw new Error("Relative path contains parent directory traversal.");
   }
-  return normalized;
+  const normalized = path.posix.normalize(trimmed);
+  return normalized === "." ? "" : normalized;
 }
 
 /** 拼接父子相对路径，自动规范化。 */

@@ -243,6 +243,39 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
   assert.equal(rawSnapshot.includes("read:file:image.png"), true);
 });
 
+test("file repository round-trips the standing Space reference marker", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-space-reference-origin-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const run = createInitialOrdinaryRunState({
+    runId: "space-reference-origin-run",
+    sessionRef: ordinaryAgentSessionRef(),
+    turn: ordinaryRunTurn("space-reference-origin-run"),
+    runInput: {
+      userMessage: "start conversation",
+      taskSoil: {
+        contextRefs: [{
+          attachmentId: "space-reference:reference-1",
+          ref: "local-file:C:/workspace/standing.png",
+          pathGranted: true,
+          automaticSpaceReference: true,
+          kind: "file",
+          title: "standing.png",
+        }],
+        permissionBoundaryRefs: ["read:local-file:C:/workspace/standing.png"],
+      },
+    },
+    birth: ordinaryRunBirth(),
+    recordedAt: "2026-08-11T00:00:00.000Z",
+    eventId: "event-1",
+  });
+
+  await repository.save(run, 0);
+
+  const restored = await repository.get(run.runId);
+  assert.equal(restored?.state.input.taskSoil?.contextRefs?.[0]?.automaticSpaceReference, true);
+});
+
 test("file repository round-trips JSON-safe model attachment references in tool facts", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-attachment-refs-"));
   t.after(() => removeTestDirectory(root));

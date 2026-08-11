@@ -36,6 +36,8 @@ export type SpaceReferenceItem = {
   readonly sourceIdentity?: string;
   /** Agent/user-maintained understanding of the source. It is never the source body itself. */
   readonly annotation?: SpaceReferenceAnnotation;
+  /** Space-owned image captions keyed by normalized relative path; the empty key addresses a root file. */
+  readonly imageCaptions?: Readonly<Record<string, SpaceReferenceImageCaption>>;
   readonly createdAt: string;
   readonly updatedAt: string;
 };
@@ -74,6 +76,14 @@ export type SpaceReferenceAnnotationPatch = {
 };
 
 export type SpaceReferenceActorKind = "agent" | "user";
+
+export type SpaceReferenceImageCaption = {
+  readonly text: string;
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly updatedBy: SpaceReferenceActorKind;
+  readonly actor?: SpaceReferenceActorRecord;
+};
 
 /** 一次 annotation 写入的完整审计来源；`kind` 是显示语义，其余字段来自执行上下文。 */
 export type SpaceReferenceActorRecord = {
@@ -135,7 +145,10 @@ export type SpaceFeatureErrorCode =
   | "space_repository_failure"
   | "space_reference_annotation_invalid"
   | "space_reference_annotation_revision_conflict"
-  | "space_reference_annotation_too_large";
+  | "space_reference_annotation_too_large"
+  | "space_reference_image_caption_invalid"
+  | "space_reference_image_caption_revision_conflict"
+  | "space_reference_image_caption_too_large";
 
 export class SpaceFeatureError extends Error {
   readonly name = "SpaceFeatureError";
@@ -149,6 +162,7 @@ export type SpaceEvent =
   | { readonly type: "space.deleted"; readonly spaceId: string; readonly removedReferenceIds: readonly string[] }
   | { readonly type: "space.reference_added"; readonly item: SpaceReferenceItem }
   | { readonly type: "space.reference_annotation_updated"; readonly item: SpaceReferenceItem }
+  | { readonly type: "space.reference_image_caption_updated"; readonly item: SpaceReferenceItem; readonly relativePath: string }
   | { readonly type: "space.renamed"; readonly target: SpaceTarget; readonly spaceId: string }
   | { readonly type: "space.moved"; readonly target: SpaceMovableTarget; readonly sourceSpaceId: string; readonly destinationSpaceId: string }
   | { readonly type: "space.reference_removed"; readonly itemId: string; readonly removedItemIds: readonly string[]; readonly spaceId: string };
@@ -163,6 +177,8 @@ export type SpaceFeature = {
     addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceAddableReference; readonly annotation?: SpaceReferenceAnnotationInput; readonly actor?: SpaceReferenceActorRecord }): Promise<SpaceReferenceItem>;
     /** Updates the annotation content of one reference with optimistic concurrency; revision advances on success. */
     updateReferenceAnnotation(input: { readonly itemId: string; readonly expectedRevision: number; readonly patch: SpaceReferenceAnnotationPatch; readonly actor?: SpaceReferenceActorRecord }): Promise<SpaceReferenceItem>;
+    /** Updates one image caption without mutating the referenced image file. */
+    updateReferenceImageCaption(input: { readonly itemId: string; readonly relativePath: string; readonly expectedRevision: number; readonly text: string; readonly actor?: SpaceReferenceActorRecord }): Promise<SpaceReferenceItem>;
     /** Creates the sole owning link for a Conversation. This is reserved for the Conversation coordinator. */
     linkConversationOwner(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly conversationId: string; readonly conversationTitle?: string }): Promise<SpaceReferenceItem>;
     rename(input: { readonly target: SpaceTarget; readonly title: string }): Promise<SpaceTarget>;

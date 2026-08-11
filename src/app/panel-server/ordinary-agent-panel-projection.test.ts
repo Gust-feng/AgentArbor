@@ -707,6 +707,48 @@ test("conversation DTO is a one-way projection with full turns, attachments and 
   assert.equal(ordinary.turns[0]?.content, run.input.userMessage);
 });
 
+test("conversation DTO keeps Space standing references out of user-turn attachments", () => {
+  const base = runState({
+    runId: "conversation-standing-context",
+    status: { kind: "completed" },
+    withAttachment: true,
+  });
+  const explicitAttachment = base.input.taskSoil!.contextRefs![0]!;
+  const run: OrdinaryRunState = {
+    ...base,
+    input: {
+      ...base.input,
+      taskSoil: {
+        ...base.input.taskSoil!,
+        contextRefs: [{
+          attachmentId: "space-reference:legacy-reference",
+          ref: "local-file:Z:/workspace/standing-legacy.png",
+          pathGranted: true,
+          kind: "file",
+          title: "standing-legacy.png",
+        }, {
+          attachmentId: "space-reference:marked-reference",
+          ref: "local-file:Z:/workspace/standing-marked.png",
+          pathGranted: true,
+          automaticSpaceReference: true,
+          kind: "file",
+          title: "standing-marked.png",
+        }, explicitAttachment],
+      },
+    },
+  };
+  const ordinary = conversationFrom(run);
+  const currentRun = projectOrdinaryPanelRunView({ run, fullReplay: replay(run, []) });
+
+  const projected = projectOrdinaryPanelConversation({ conversation: ordinary, currentRun, workspaceRun: run });
+
+  assert.deepEqual(
+    projected.turns[0]?.attachments?.map((attachment) => attachment.attachmentId),
+    [explicitAttachment.attachmentId],
+  );
+  assert.equal(projected.currentRun?.workView?.contextAttachments.length, 3);
+});
+
 test("quiet interruptions restore visible text without cancellation or restart notices", () => {
   const cases: readonly {
     readonly runId: string;

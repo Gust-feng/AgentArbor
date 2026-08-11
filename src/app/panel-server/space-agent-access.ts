@@ -83,6 +83,11 @@ function contextRefFor(
     attachmentId: spaceReferenceAttachmentId(item.id),
     ref: `${file ? "local-file" : "local-project"}:${item.reference.path}`,
     pathGranted: true,
+    // Space 授权引用是自动注入的上下文列表，不是用户本轮显式附件：
+    // 模型保持引用可见并按需用 AttachmentReadImage 读图，但不会自动把
+    // 其中图片附加到每轮模型消息（automaticSpaceReference 标记由
+    // model-input-files 消费）。
+    automaticSpaceReference: true,
     ...(item.sourceIdentity === undefined ? {} : { sourceIdentity: item.sourceIdentity }),
     kind: file ? "file" : "project",
     title: item.title,

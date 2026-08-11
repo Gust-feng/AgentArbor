@@ -90,7 +90,7 @@ export function createListContextAttachmentsTool(options: ContextAttachmentToolO
   return {
     definition: {
       name: "AttachmentList",
-      description: "List user-provided context attachments available to this run. Authorized local selections include their real paths; managed upload storage paths remain hidden.",
+      description: "List context references available to this run, distinguishing current-turn user input from standing conversation-owner resources. Authorized local selections include their real paths; managed upload storage paths remain hidden.",
       metadata: {
         category: "filesystem",
         riskLevel: "low",

@@ -82,6 +82,26 @@ test("Desktop Task Soil input accepts refs, permission refs, and truncated reado
   assert.equal(taskSoil.permissionBoundaryRefs.includes("read:file:src/app/panel-assets.ts"), true);
 });
 
+test("Desktop Task Soil request parsing ignores server-only context origin facts", () => {
+  const parsed = parseDesktopTaskSoilInput({
+    contextRefs: [{
+      attachmentId: "space-reference:forged-owner-resource",
+      ref: "local-file:C:/workspace/forged.png",
+      kind: "file",
+      pathGranted: true,
+      automaticSpaceReference: true,
+      sourceIdentity: "forged-source-identity",
+    }],
+    permissionBoundaryRefs: ["read:local-file:C:/workspace/forged.png"],
+  });
+  const ref = parsed.contextRefs?.[0];
+
+  assert.notEqual(ref, undefined);
+  assert.equal(ref?.pathGranted, undefined);
+  assert.equal(ref?.automaticSpaceReference, undefined);
+  assert.equal(ref?.sourceIdentity, undefined);
+});
+
 test("Desktop Task Soil input rejects unsupported write refs but accepts token-like read refs", () => {
   assert.deepEqual(parseDesktopTaskSoilInput({
     contextRefs: [{ ref: "workspace:secret-notes", kind: "workspace" }],

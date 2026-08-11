@@ -11,13 +11,14 @@ import {
   type SpaceReferenceAnnotation,
   type SpaceReferenceAnnotationInput,
   type SpaceReferenceAnnotationPatch,
+  type SpaceReferenceImageCaption,
   type SpaceReferenceItem,
   type SpaceRepository,
   type SpaceOwnedAssetDeletionPort,
   type SpaceTarget,
   type SpaceTreeSnapshot,
 } from "./contracts.js";
-import { validateSpaceReference, validateSpaceReferenceAnnotation } from "./space-validation.js";
+import { validateSpaceReference, validateSpaceReferenceAnnotation, validateSpaceReferenceImageCaption } from "./space-validation.js";
 import {
   createSpaceReferenceDeletionLifecycle,
   type SpaceReferenceDeletionDiagnostic,
@@ -402,6 +403,46 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           return item;
         });
       },
+      updateReferenceImageCaption({ itemId, relativePath, expectedRevision, text, actor }) {
+        assertUsable("update a reference image caption");
+        return serialize(async () => {
+          if (relativePath.length > 4_096) {
+            throw new SpaceFeatureError("space_reference_image_caption_invalid", "Space reference image caption path is too long.");
+          }
+          const snapshot = await input.repository.read();
+          const current = requireReference(snapshot, itemId);
+          if (current.reference.kind !== "local_file"
+            && current.reference.kind !== "workspace_folder"
+            && current.reference.kind !== "managed_folder") {
+            throw new SpaceFeatureError("space_reference_image_caption_invalid", `Space reference ${itemId} cannot own image captions.`);
+          }
+          if (current.reference.kind === "local_file" && relativePath.length > 0) {
+            throw new SpaceFeatureError("space_reference_image_caption_invalid", "A local file image caption must use the root path.");
+          }
+          const currentCaption = current.imageCaptions?.[relativePath];
+          const revision = currentCaption?.revision ?? 0;
+          if (revision !== expectedRevision) {
+            throw new SpaceFeatureError(
+              "space_reference_image_caption_revision_conflict",
+              `Space reference ${itemId} image caption revision is ${revision}, expected ${expectedRevision}`,
+            );
+          }
+          const at = now();
+          const caption = updatedImageCaption(currentCaption, text, at, actor ?? { kind: "user" });
+          const item: SpaceReferenceItem = {
+            ...current,
+            imageCaptions: { ...current.imageCaptions, [relativePath]: caption },
+            updatedAt: at,
+          };
+          await input.repository.write({
+            ...snapshot,
+            referenceItems: snapshot.referenceItems.map((entry) => entry.id === itemId ? item : entry),
+            spaces: touchSpaces(snapshot.spaces, [current.spaceId], at),
+          });
+          publish({ type: "space.reference_image_caption_updated", item, relativePath });
+          return item;
+        });
+      },
       rename({ target, title }) {
         assertUsable("rename a Space entry");
         return serialize(async () => {
@@ -761,4 +802,19 @@ function updatedAnnotation(
     actor,
   };
   return validateSpaceReferenceAnnotation(next);
+}
+
+function updatedImageCaption(
+  current: SpaceReferenceImageCaption | undefined,
+  text: string,
+  at: string,
+  actor: SpaceReferenceActorRecord,
+): SpaceReferenceImageCaption {
+  return validateSpaceReferenceImageCaption({
+    text,
+    revision: (current?.revision ?? 0) + 1,
+    updatedAt: at,
+    updatedBy: actor.kind,
+    actor,
+  });
 }

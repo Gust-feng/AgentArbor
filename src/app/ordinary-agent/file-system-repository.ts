@@ -397,6 +397,9 @@ const rawStateSchema = z.object({
         attachmentId: z.string().optional(),
         ref: z.string().min(1),
         pathGranted: z.boolean().optional(),
+        // server-side-only，与 pathGranted 同级：Space 授权引用自动注入的标记，
+        // 请求解析不读取，只随 run 快照持久化供投影/恢复使用
+        automaticSpaceReference: z.boolean().optional(),
         sourceIdentity: z.string().min(1).optional(),
         kind: z.enum(["file", "project", "web", "workspace"]),
         title: z.string().optional(),

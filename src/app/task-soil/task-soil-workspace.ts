@@ -18,6 +18,12 @@ export type DesktopTaskSoilContextRefInput = {
    * cannot grant itself path visibility; the host derives it from an explicit read permission.
    */
   readonly pathGranted?: boolean;
+  /**
+   * Server-side only and ignored by request parsing, like pathGranted.
+   * Marks references auto-injected from the Space owner's resource tree:
+   * they stay visible as references but are never auto-attached as media.
+   */
+  readonly automaticSpaceReference?: boolean;
   /** Server-side only and ignored by request parsing, like pathGranted. */
   readonly sourceIdentity?: string;
   readonly kind: "workspace" | "file" | "project" | "web";
@@ -123,6 +129,7 @@ function createDesktopTaskSoilContextRefs(input: {
       pathGranted: hasLocalPathPermission(ref, permissionRefs)
         ? true
         : undefined,
+      ...(ref.automaticSpaceReference === true ? { automaticSpaceReference: true } : {}),
       sourceIdentity: hasLocalPathPermission(ref, permissionRefs)
         ? ref.sourceIdentity
         : undefined,

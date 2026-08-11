@@ -171,7 +171,8 @@ export async function saveDocumentCaption(
   input: DocumentCaptionUpdateInput,
   apiBase = '/api/spaces/references',
 ): Promise<DocumentPreview> {
-  const key = previewCacheKey(apiBase, itemId, '')
+  const relativePath = input.relativePath ?? ''
+  const key = previewCacheKey(apiBase, itemId, relativePath)
   const generation = advanceGeneration(key)
   let request!: Promise<DocumentPreview>
   request = requestJson<{ preview: DocumentPreview }>(

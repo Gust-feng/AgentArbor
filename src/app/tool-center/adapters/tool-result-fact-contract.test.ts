@@ -33,7 +33,7 @@ test("shell returns small stdout and stderr exactly without truncation facts", a
     assert.equal(output.stdoutOmittedChars, 0);
     assert.equal(output.stderrOmittedChars, 0);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -59,7 +59,7 @@ test("shell reports factual truncation and omitted counts only after output caps
     assert.equal(output.stderrOmittedChars, stderrChars - 4_000);
     assert.doesNotMatch(JSON.stringify(output), suggestionPattern);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -101,7 +101,7 @@ test("ToolCenter preserves command logRef in model-visible command facts", async
     assert.equal(continuation.ref, output.logRef);
     assert.equal(asRecord(continuation.nextInput).ref, output.logRef);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -154,7 +154,7 @@ test("ToolCenter read can consume shell command-log refs", async () => {
     assert.match(String(readContent.contentPreview), /readable-log-end/);
     assert.equal(JSON.stringify(readContent.metadata).includes(String(shellFacts.logPath)), false);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -201,7 +201,7 @@ test("ToolCenter UI summaries do not replace model-visible command facts", async
     assert.equal(JSON.stringify(result.output).includes("start-"), true);
     assert.equal(JSON.stringify(result.output).includes("-end"), true);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -235,7 +235,7 @@ test("edit success and failures return exact replacement facts without recovery 
       }
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -261,7 +261,7 @@ test("grep exposes skipped facts only when the search engine can observe them", 
     assert.equal(rgResult.skippedUnreadableFiles, undefined);
     assert.equal(rgResult.skippedSamples, undefined);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -340,7 +340,7 @@ test("ToolCenter exposes executable nextInput for bounded local read, glob, and 
       offset: 2,
     });
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -382,7 +382,7 @@ test("local read, glob, and JS grep report cancellation instead of completed out
       assert.equal(result.status, "cancelled", fixture.tool.definition.name);
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -421,7 +421,7 @@ test("grep forwards AbortSignal to the search runner and preserves cancellation"
     const result = await resultPromise;
     assert.equal(result.status, "cancelled");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

@@ -276,7 +276,7 @@ test("file-system DirectionHandoffPackage store round-trips through a temp direc
     assert.equal(riskRegister.includes("impactScope"), true);
   } finally {
     if (tempRoot.startsWith(tmpdir())) {
-      rmSync(tempRoot, { recursive: true, force: true });
+      rmSync(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   }
 });

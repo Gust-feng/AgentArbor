@@ -48,7 +48,7 @@ test("real read results from 110k through 128k reach the model once and in full"
       assert.equal(message.content.length < 220_000, true);
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -93,7 +93,7 @@ test("escaped read content stays model-visible through repeated character-range 
 
     assert.equal(reconstructed, content);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

@@ -50,7 +50,7 @@ test("Workbench asset routes return editable previews and enforce SQLite fingerp
   t.after(async () => {
     await closeServer(server);
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const initial = await request(baseUrl, "/api/workbench-assets/note-one/preview");

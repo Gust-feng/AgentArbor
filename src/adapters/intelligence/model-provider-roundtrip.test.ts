@@ -259,7 +259,7 @@ async function createRuntime(t: test.TestContext, sessionId: string) {
   const executionEnvironment = new NodeExecutionEnv({ cwd: root });
   t.after(async () => {
     await executionEnvironment.cleanup();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   return {
     executionEnvironment,

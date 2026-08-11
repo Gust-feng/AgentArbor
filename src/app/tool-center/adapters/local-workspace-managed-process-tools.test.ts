@@ -63,7 +63,7 @@ test("managed process tools start, inspect, and stop a workspace-session service
     if (pid !== undefined && registry.listAll().some((record) => record.pid === pid && record.status === "running")) {
       await createPlatformProcessTerminator().killTree(pid, registry.listAll().find((record) => record.pid === pid)!);
     }
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -103,7 +103,7 @@ test("process_inspect lists only managed processes inside its workspace", async 
 
     assert.deepEqual(processes.map((process) => process.processId), ["inside-workspace"]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -129,7 +129,7 @@ test("process_start returns not_started facts when the requested port is already
     assert.equal(registry.listAll().length, 0);
   } finally {
     await closeServer(server);
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

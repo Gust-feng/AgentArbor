@@ -14,7 +14,7 @@ test("Workspace snapshot 在 SQLite 中完整 round-trip", async (t) => {
   const repository = createSqliteWorkspaceRepository(database);
   t.after(async () => {
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const snapshot: WorkspaceSnapshot = {
     schemaVersion: WORKSPACE_SCHEMA_VERSION,

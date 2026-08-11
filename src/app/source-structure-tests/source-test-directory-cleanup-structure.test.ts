@@ -15,7 +15,7 @@ import { collectSourceFiles, relativePath } from "./source-structure-test-utils.
  * 新测试优先使用 `src/app/testing/fs-test-directories.ts` 的
  * `removeTestDirectory`，或至少给 rm 带上 `maxRetries`。
  */
-const BARE_RECURSIVE_RM = /fs\.rm(?:Sync)?\([^)]*recursive:\s*true[^)]*\)/gu;
+const BARE_RECURSIVE_RM = /\b(?:fs\.)?rm(?:Sync)?\([^)]*recursive:\s*true[^)]*\)/gu;
 
 test("test files never remove directories without Windows retry options", async () => {
   const root = process.cwd();

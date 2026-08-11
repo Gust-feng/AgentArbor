@@ -16,7 +16,7 @@ test("Workbench asset repository atomically updates editable text using the expe
   const repository = createSqliteWorkbenchAssetRepository(database);
   t.after(async () => {
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const markdown: WorkbenchAsset = {

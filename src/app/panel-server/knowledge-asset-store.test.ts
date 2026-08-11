@@ -23,7 +23,7 @@ const DIRECTORY_PAGE: KnowledgePage = {
 
 test("readManagedKnowledgeAsset reads text, continues large text and reports fingerprints", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-read-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   await mkdir(contentPath(root, "directory-page"), { recursive: true });
   await writeFile(path.join(contentPath(root, "directory-page"), "note.txt"), "0123456789ABCDEFGHIJ", "utf8");
 
@@ -51,7 +51,7 @@ test("readManagedKnowledgeAsset reads text, continues large text and reports fin
 
 test("readManagedKnowledgeAsset lists directories with replayable continuation", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-list-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const content = contentPath(root, "directory-page");
   await mkdir(path.join(content, "sub"), { recursive: true });
   await writeFile(path.join(content, "a.md"), "a", "utf8");
@@ -77,7 +77,7 @@ test("readManagedKnowledgeAsset lists directories with replayable continuation",
 
 test("readManagedKnowledgeAsset reports media facts and rejects binary content", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-media-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const content = contentPath(root, "directory-page");
   await mkdir(content, { recursive: true });
   await writeFile(path.join(content, "diagram.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>", "utf8");

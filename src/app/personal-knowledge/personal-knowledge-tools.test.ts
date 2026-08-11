@@ -40,7 +40,7 @@ test("Knowledge list, page read, asset text update, uncollect and theme tools op
   t.after(async () => {
     await feature.release();
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const tools = new Map(createPersonalKnowledgeTools({ knowledge: feature }).map((tool) => [tool.definition.name, tool]));
 
@@ -179,7 +179,7 @@ test("Personal Knowledge agent tool schemas reject actor and visual facts", asyn
   t.after(async () => {
     await feature.release();
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   for (const tool of createPersonalKnowledgeTools({ knowledge: feature })) {
     const definition = tool.definition;
@@ -210,7 +210,7 @@ test("Personal Knowledge tools search, read, create, update, delete and collect 
   t.after(async () => {
     await feature.release();
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const tools = new Map(createPersonalKnowledgeTools({ knowledge: feature }).map((tool) => [tool.definition.name, tool]));
   assert.equal(tools.get("KnowledgeDeleteNote")!.definition.metadata?.requiresConfirmation, true);

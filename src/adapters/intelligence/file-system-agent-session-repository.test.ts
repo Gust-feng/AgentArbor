@@ -917,7 +917,7 @@ async function repositoryFixture(t: test.TestContext) {
   const repository = new FileSystemAgentSessionRepository({ fileSystem, sessionsRoot });
   t.after(async () => {
     await fileSystem.cleanup();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   return { fileSystem, repository, sessionsRoot, workspace };
 }

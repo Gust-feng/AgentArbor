@@ -175,7 +175,7 @@ test("FileSystemRunSnapshotStore rebuilds a broken disposable manifest from comm
 
     assert.deepEqual(await store.get("run-manifest"), committed);
     assert.deepEqual(await store.list(), [committed]);
-    await fs.rm(path.join(root, "manifest.json"), { recursive: true, force: true });
+    await fs.rm(path.join(root, "manifest.json"), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     assert.deepEqual(await store.list(), [committed]);
   } finally {
     await removeDirectory(root);

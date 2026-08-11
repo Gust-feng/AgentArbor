@@ -51,7 +51,7 @@ test("JSONL agent session repository restores the active branch after reopening"
   const environment = new NodeExecutionEnv({ cwd: root });
   t.after(async () => {
     await environment.cleanup();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const repository = new JsonlSessionRepo({ fs: environment, sessionsRoot: "sessions" });
   const session = await repository.create({
@@ -99,7 +99,7 @@ test("agent session harness persists one prompt and answer through its session",
   const environment = new NodeExecutionEnv({ cwd: root });
   t.after(async () => {
     await environment.cleanup();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const repository = new InMemorySessionRepo();
   const session = await repository.create({ id: "harness-session" });
@@ -128,7 +128,7 @@ test("agent session harness can pause a tool call for external confirmation and 
   const environment = new NodeExecutionEnv({ cwd: root });
   t.after(async () => {
     await environment.cleanup();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const session = await new InMemorySessionRepo().create({ id: "confirmation-session" });
   const models = createModels();
@@ -182,7 +182,7 @@ test("agent session harness returns one denied tool call to the model and contin
   const environment = new NodeExecutionEnv({ cwd: root });
   t.after(async () => {
     await environment.cleanup();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const session = await new InMemorySessionRepo().create({ id: "denied-confirmation-session" });
   const models = createModels();

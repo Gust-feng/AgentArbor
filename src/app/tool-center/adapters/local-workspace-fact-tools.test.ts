@@ -45,7 +45,7 @@ test("local grep JS fallback reports factual skipped file counts", async () => {
     assert.equal(samples.some((sample) => sample.path === "src/large.txt" && sample.reason === "too_large"), true);
     assert.equal(samples.some((sample) => sample.path === "dist" && sample.reason === "skipped_directory"), true);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -64,7 +64,7 @@ test("local grep rg engine leaves skipped facts unavailable", async () => {
     assert.equal(result.skippedFiles, undefined);
     assert.deepEqual(result.matches, [{ path: "src/from-rg.txt", line: 1, preview: "needle" }]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -93,7 +93,7 @@ test("local edit reports replacement facts after writing", async () => {
     assert.equal(applyPatch(original, String(diff.unifiedDiff)), original.replace("beta", "BETA"));
     assert.equal(await readFile(file, "utf8"), original.replace("beta", "BETA"));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -112,7 +112,7 @@ test("local edit records an unchanged canonical diff without fabricating a patch
     assert.equal(result.replacements, 0);
     assert.equal(await readFile(file, "utf8"), "same\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -136,7 +136,7 @@ test("local edit reports the canonical diff input limit without blocking the wri
     assert.equal(diff.unifiedDiff, undefined);
     assert.equal(await readFile(file, "utf8"), `b${original.slice(1)}`);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -158,7 +158,7 @@ test("local edit failure messages include facts without next-step suggestions", 
       }
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

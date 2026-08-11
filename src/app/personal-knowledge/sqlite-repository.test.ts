@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -8,6 +6,7 @@ import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import { PersonalKnowledgeError } from "./contracts.js";
 import { createPersonalKnowledgeFeature } from "./personal-knowledge-feature.js";
 import { createSqlitePersonalKnowledgeRepository } from "./sqlite-repository.js";
+import { makeTestDirectory, removeTestDirectory } from "../testing/fs-test-directories.js";
 
 test("personal knowledge persists Markdown notes and rejects stale revisions", async (t) => {
   const { database, feature } = await fixture(t);
@@ -516,7 +515,7 @@ async function fixture(
     } | undefined>;
   } = {},
 ) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-personal-knowledge-"));
+  const directory = await makeTestDirectory("agentarbor-personal-knowledge-");
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   const feature = createPersonalKnowledgeFeature({
     repository: createSqlitePersonalKnowledgeRepository(database),
@@ -529,7 +528,7 @@ async function fixture(
   t.after(async () => {
     await feature.release();
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   });
   return { database, feature };
 }

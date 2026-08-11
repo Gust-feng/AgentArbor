@@ -109,7 +109,7 @@ test("default command shell follows AgentArbor Windows auto-detection order", as
     assert.equal(externalPowerShellPreference.kind, "bash");
     assert.equal(fallback.kind === "bash" || fallback.kind === "pwsh" || fallback.kind === "powershell" || fallback.kind === "cmd", true);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -152,7 +152,7 @@ test("local workspace tools read and grep within workspace boundary", async () =
     const matches = asDirectToolFacts(grep).matches as readonly { readonly path: string; readonly line: number }[];
     assert.deepEqual(matches, [{ path: "src/note.txt", line: 2, preview: "needle beta" }]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -183,7 +183,7 @@ test("C05 permits modifying existing files without a prior Read", async () => {
     await editTool.execute({ path: "note.txt", edits: [{ oldText: "external", newText: "updated" }] }, context);
     assert.equal(await readFile(target, "utf8"), "updated change\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -203,7 +203,7 @@ test("same-run concurrent edits of one file compose in source order without losi
     assert.equal(results.length, 2);
     assert.equal(await readFile(target, "utf8"), "ALPHA\nBETA\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -225,7 +225,7 @@ test("same-run overlapping edits preserve the first change and reject the stale 
     assert.match(String(results[1]?.status === "rejected" ? results[1].reason : ""), /must match exactly once.*matches=0/);
     assert.equal(await readFile(target, "utf8"), "ALPHA\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -247,7 +247,7 @@ test("shared mutation coordination composes independent edits across runs", asyn
     assert.equal(results[1]?.status, "fulfilled");
     assert.equal(await readFile(target, "utf8"), "ALPHA\nBETA\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -311,7 +311,7 @@ test("local grep returns complete executable continuations", async () => {
     assert.equal(exactGrepResult.hasMoreAfter, false);
     assert.equal(exactGrepResult.continuation, undefined);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -349,7 +349,7 @@ test("local read keeps output-budget continuations executable without text gaps"
     assert.equal(pages > 1, true);
     assert.equal(reconstructed, content);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -384,7 +384,7 @@ test("local read excludes a producer ellipsis from a second output-budget cursor
     assert.equal(pages > 1, true);
     assert.equal(reconstructed, content);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -439,7 +439,7 @@ test("local glob and grep keep output-budget continuation filters complete", asy
     const secondGrep = asDirectToolFacts(await grepFiles.execute(firstGrepNextInput, context));
     assert.equal(secondGrep.offset, firstGrep.matchesReturned);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -471,7 +471,7 @@ test("local grep caps oversized offsets before collecting matches", async () => 
     assert.equal(result.reachedOffsetCeiling, false);
     assert.equal(result.continuation, undefined);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -510,7 +510,7 @@ test("local grep fails honestly when matches exceed the supported offset ceiling
     assert.equal(firstMatches[0]?.path, "src/match-10000.txt");
     assert.deepEqual(observedCollectLimits, [10_081]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -531,7 +531,7 @@ test("local grep does not emit a non-forward output-budget continuation at the o
       /Grep metadata exceeds the fixed model result budget/,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -564,7 +564,7 @@ test("local read returns a complete character continuation for maxLength windows
       startChar: 8,
     });
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -591,7 +591,7 @@ test("local read next character offset keeps emoji surrogate pairs intact", asyn
       /must not split a UTF-16 surrogate pair/,
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -607,7 +607,7 @@ test("local read rejects a character window too small to advance", async () => {
       /read maxLength must be at least 3/
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -631,7 +631,7 @@ test("local read rejects invalid explicit maxLength values instead of using the 
       );
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -647,7 +647,7 @@ test("local read rejects line ranges with maxLength to avoid skipped text", asyn
       /cannot combine maxLength with startLine\/endLine/
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -672,7 +672,7 @@ test("local grep prefers ripgrep runner and records the search engine", async ()
     assert.equal(result.engine, "rg");
     assert.deepEqual(matches, [{ path: "src/from-rg.txt", line: 7, preview: "Needle from rg" }]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -692,7 +692,7 @@ test("local grep falls back to JS recursion when ripgrep is unavailable", async 
     assert.equal(result.engine, "js");
     assert.deepEqual(matches, [{ path: "src/note.txt", line: 2, preview: "needle beta" }]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -711,7 +711,7 @@ test("local grep JS fallback skips Git internals like the ripgrep path", async (
       { path: "src/note.txt", line: 1, preview: "needle source" },
     ]);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -724,13 +724,13 @@ test("local read rejects paths outside workspace", async () => {
       /outside the workspace boundary/
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
 test("workspace boundary follows symlinks so links cannot escape the workspace", async (t) => {
   const base = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-symlink-"));
-  t.after(async () => { await rm(base, { recursive: true, force: true }); });
+  t.after(async () => { await rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const root = path.join(base, "workspace");
   const outside = path.join(base, "outside");
   await mkdir(root, { recursive: true });
@@ -791,7 +791,7 @@ test("local read preserves line endings so returned ranges can be edited exactly
     }, context);
     assert.equal(await readFile(file, "utf8"), "ALPHA\r\nBETA\r\ngamma\r\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -818,7 +818,7 @@ test("local read preserves line endings while streaming a large line range", asy
       startLine: 4,
     });
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -835,7 +835,7 @@ test("local read reports invalid UTF-8 instead of returning replacement text", a
     assert.equal(result.reason, "invalid_utf8");
     assert.equal(result.content, undefined);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -870,7 +870,7 @@ test("local Write creates or rewrites and Edit stays inside the local strategy s
     assert.equal(asDirectToolFacts(overwritten).operation, "write");
     assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "overwritten");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -916,7 +916,7 @@ test("local edit validates every exact replacement before writing", async () => 
     );
     assert.equal(await readFile(file, "utf8"), "same\nsame\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -937,7 +937,7 @@ test("local edit rejects binary targets", async () => {
     );
     assert.deepEqual(await readFile(file), original);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -960,7 +960,7 @@ test("local edit preserves an existing UTF-8 byte order mark", async () => {
     assert.deepEqual([...updated.subarray(0, 3)], [0xEF, 0xBB, 0xBF]);
     assert.equal(updated.subarray(3).toString("utf8"), "alpha\nBETA\n");
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1048,7 +1048,7 @@ test("local shell uses the workspace shell and confirmation metadata", async () 
       /outside the workspace boundary/
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1083,7 +1083,7 @@ test("local shell bounds foreground process lifetime and output volume", async (
     assert.equal(largeResult.stdoutOmittedChars, 128_000);
     assert.equal(largeResult.stderrOmittedChars, 66_000);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1312,7 +1312,7 @@ test("local shell falls back to shell execution for Windows cmd shims while pres
     } else {
       process.env.PATH = originalPath;
     }
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1332,7 +1332,7 @@ test("local strategy sandbox can disable writes and command execution", async ()
       /does not allow local command execution/
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

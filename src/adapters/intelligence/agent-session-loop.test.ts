@@ -2829,7 +2829,7 @@ async function createFixture(
   const env = new NodeExecutionEnv({ cwd: root });
   t.after(async () => {
     await env.cleanup();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const faux = fauxProvider(options);
   const models = createModels();

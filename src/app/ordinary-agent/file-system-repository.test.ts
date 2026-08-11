@@ -874,7 +874,7 @@ test("a broken disposable manifest cannot invalidate a committed snapshot", asyn
   const revisionOne = await repository.save(initial, 0);
   assert.equal((await repository.get("manifest-run"))?.revision, 1);
   assert.equal((await repository.list())[0]?.runId, "manifest-run", "directory scan repairs a missing manifest index");
-  await fs.rm(path.join(root, "manifest.json"), { recursive: true, force: true });
+  await fs.rm(path.join(root, "manifest.json"), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   const running = transitionOrdinaryRun({
     state: initial,
     transition: { type: "start" },

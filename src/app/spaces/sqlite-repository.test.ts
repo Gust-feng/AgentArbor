@@ -14,7 +14,7 @@ test("SpaceTree persists its current SQLite snapshot without inferring demo data
   const repository = createSqliteSpaceRepository(database);
   t.after(async () => {
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const snapshot: SpaceTreeSnapshot = {
     schemaVersion: "space-tree/v5" as const,
@@ -63,7 +63,7 @@ test("SpaceTree migration removes legacy unavailable references", async (t) => {
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   t.after(async () => {
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   database.connection.exec(`
     CREATE TABLE spaces (
@@ -108,7 +108,7 @@ test("SpaceTree SQLite repository round-trips annotations and image captions aft
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   t.after(async () => {
     database.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const repository = createSqliteSpaceRepository(database);
   const annotation = {

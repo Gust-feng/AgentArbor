@@ -226,7 +226,7 @@ export function BrainPage({
               style={{ color: 'var(--aa-text-1, #292722)' }}
             />
             {searching && (
-              <button onClick={() => setQuery('')} className="p-1 rounded-full hover:bg-black/5">
+              <button onClick={() => setQuery('')} className="p-1 rounded-full hover:bg-[var(--aa-hover-tint)]">
                 <X size={15} style={{ color: 'var(--aa-text-3, #aba39b)' }} />
               </button>
             )}
@@ -410,7 +410,7 @@ function KnowledgeViewMenu({
               key={char}
               className="text-lg font-semibold leading-none"
               variants={{
-                rest: { y: 0, color: '#292722' },
+                rest: { y: 0, color: 'var(--aa-text-1, #292722)' },
                 hover: { y: reducedMotion ? 0 : -2, color: 'var(--aa-accent, #6865a7)' },
                 active: { y: 0, color: 'var(--aa-accent, #6865a7)' },
               }}
@@ -515,7 +515,7 @@ function KnowledgeViewOption({
       aria-checked={selected}
       tabIndex={selected ? 0 : -1}
       onClick={onSelect}
-      className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-black/[0.035]"
+      className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--aa-hover-tint)]"
     >
       <span className="mt-0.5 shrink-0" style={{ color: selected ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-3, #aba39b)' }}>
         {icon}
@@ -584,7 +584,7 @@ function LeftNav({
       style={{
         width: 224,
         borderRight: '1px solid var(--aa-border, rgba(45,40,34,0.08))',
-        background: 'var(--aa-surface-2, #faf8f5)',
+        background: 'var(--aa-surface, #faf9f7)',
       }}
     >
       <div className="flex min-h-0 flex-1 flex-col px-4 py-6">
@@ -616,7 +616,7 @@ function LeftNav({
               </span>
               <button
                 onClick={() => setAdding(true)}
-                className="p-0.5 rounded hover:bg-black/5"
+                className="p-0.5 rounded hover:bg-[var(--aa-hover-tint)]"
                 style={{ color: 'var(--aa-text-3, #aba39b)' }}
               >
                 <Plus size={13} />
@@ -783,9 +783,9 @@ function NavItem({
     <button
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
-      className="relative isolate flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-black/[0.035]"
+      className="relative isolate flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[var(--aa-hover-tint)]"
       style={{
-        color: active ? '#fff' : 'var(--aa-text-1, #292722)',
+        color: active ? 'var(--aa-accent-fg, #fff)' : 'var(--aa-text-1, #292722)',
       }}
     >
       {active && (
@@ -867,7 +867,7 @@ function ThemeHeader({
       {theme.origin === 'agent' && (
         <span
           className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded"
-          style={{ background: '#6865a712', color: 'var(--aa-accent, #6865a7)' }}
+          style={{ background: 'var(--aa-accent-bg, #6865a712)', color: 'var(--aa-accent, #6865a7)' }}
         >
           <Sparkles size={10} />
           agent
@@ -879,7 +879,7 @@ function ThemeHeader({
           themeApi.deleteTheme(theme.id)
           onDeleted()
         }}
-        className="p-1 rounded hover:bg-black/5"
+        className="p-1 rounded hover:bg-[var(--aa-hover-tint)]"
         style={{ color: 'var(--aa-text-3, #aba39b)' }}
       >
         <Trash2 size={14} />
@@ -974,7 +974,7 @@ function ReadingView({
               brain.uncollect(page.refId)
               onBack()
             }}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-[var(--aa-hover-tint)]"
             style={{ color: 'var(--aa-text-3, #aba39b)' }}
           >
             <Trash2 size={12} />
@@ -1047,7 +1047,7 @@ function ReadingView({
                         brain.addLink(page.refId, p.refId)
                         setLinkPickerOpen(false)
                       }}
-                      className="w-full flex items-center gap-2 px-1.5 py-1.5 rounded text-left text-xs transition-colors hover:bg-black/5"
+                      className="w-full flex items-center gap-2 px-1.5 py-1.5 rounded text-left text-xs transition-colors hover:bg-[var(--aa-hover-tint)]"
                       style={{ color: 'var(--aa-text-1, #292722)' }}
                     >
                       {knowledgePageIcon(p, 12)}
@@ -1060,7 +1060,7 @@ function ReadingView({
           ) : (
             <button
               onClick={() => setLinkPickerOpen(true)}
-              className="mt-2 w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5"
+              className="mt-2 w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs transition-colors hover:bg-[var(--aa-hover-tint)]"
               style={{ color: 'var(--aa-accent, #6865a7)' }}
             >
               <Plus size={12} />
@@ -1126,8 +1126,8 @@ function StartPicker({
         key={id}
         data-wiki-start-item
         onClick={() => onPick(id)}
-        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-black/[0.035]"
-        style={{ color: '#292722' }}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-[var(--aa-hover-tint)]"
+        style={{ color: 'var(--aa-text-1, #292722)' }}
       >
         <span className="shrink-0">{knowledgePageIcon(p, 15)}</span>
         <span className="flex-1 min-w-0 truncate text-sm">{p.title}</span>
@@ -1152,7 +1152,7 @@ function StartPicker({
         type="button"
         onClick={onReveal}
         aria-label="展开起点索引"
-        className="shrink-0 flex flex-col items-center gap-3 pt-4 pb-4 transition-colors hover:bg-black/[0.03]"
+        className="shrink-0 flex flex-col items-center gap-3 pt-4 pb-4 transition-colors hover:bg-[var(--aa-hover-tint)]"
         style={{
           width: SPINE_W,
           background: 'var(--aa-surface, #fff)',
@@ -1390,7 +1390,7 @@ function Pane({
       <button
         onClick={onReveal}
         aria-label={`展开${page.title}`}
-        className="shrink-0 flex flex-col items-center gap-3 pt-4 pb-4 transition-colors hover:bg-black/[0.03]"
+        className="shrink-0 flex flex-col items-center gap-3 pt-4 pb-4 transition-colors hover:bg-[var(--aa-hover-tint)]"
         style={{
           width: SPINE_W,
           background: 'var(--aa-surface, #fff)',
@@ -1438,7 +1438,7 @@ function Pane({
             <button
               onClick={onClose}
               aria-label={`关闭${page.title}`}
-              className="p-1 rounded hover:bg-black/5 shrink-0"
+              className="p-1 rounded hover:bg-[var(--aa-hover-tint)] shrink-0"
               style={{ color: 'var(--aa-text-3, #aba39b)' }}
             >
               <X size={15} />
@@ -1536,7 +1536,7 @@ function RelRow({
   return (
     <button
       onClick={onClick}
-      className="group flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-black/[0.035] focus-visible:bg-black/[0.035]"
+      className="group flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b px-3 py-2 text-left transition-colors last:border-b-0 hover:bg-[var(--aa-hover-tint)] focus-visible:bg-[var(--aa-hover-tint)]"
       style={{ borderColor: 'var(--aa-border, rgba(45,40,34,0.08))' }}
     >
       <span className="shrink-0">{knowledgePageIcon(page, 14)}</span>
@@ -1677,7 +1677,7 @@ function Card({
               width: 26,
               height: 26,
               background: tagOpen ? 'var(--aa-accent, #6865a7)' : 'rgba(255,255,255,0.92)',
-              color: tagOpen ? '#fff' : 'var(--aa-text-2, #87827c)',
+              color: tagOpen ? 'var(--aa-accent-fg, #fff)' : 'var(--aa-text-2, #87827c)',
               boxShadow: '0 1px 4px rgba(45,40,34,0.15)',
             }}
           >
@@ -1773,7 +1773,7 @@ function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) 
   }
   if (kind === 'pdf' && page.previewText) {
     return <div className="w-full overflow-hidden px-4 pt-4" style={{ height: 132, background: 'var(--aa-surface-hover, #eeebe6)' }}>
-      <div className="w-full h-full rounded-t-md overflow-hidden" style={{ background: '#fff', border: '1px solid rgba(45,40,34,0.08)', padding: '14px 16px' }}>
+      <div className="w-full h-full rounded-t-md overflow-hidden" style={{ background: 'var(--aa-paper, #ffffff)', border: '1px solid var(--aa-border, rgba(45,40,34,0.08))', padding: '14px 16px' }}>
         <p className="m-0 whitespace-pre-wrap" style={{ color: 'var(--aa-text-2, #6b655e)', fontSize: 8.5, lineHeight: 1.5, fontFamily: 'var(--reading-font)' }}>{cleanKnowledgeText(page.previewText).slice(0, 240)}</p>
       </div>
     </div>
@@ -1821,7 +1821,7 @@ function TagPopover({
           const on = myThemeIds.includes(t.id)
           const locked = themeApi.isLocked(page.refId, t.id)
           return (
-            <div key={t.id} className="flex items-center gap-2 px-3 py-2 hover:bg-black/[0.03]">
+            <div key={t.id} className="flex items-center gap-2 px-3 py-2 hover:bg-[var(--aa-hover-tint)]">
               <button
                 onClick={() => (on ? themeApi.unassign(page.refId, t.id) : themeApi.assign(page.refId, t.id))}
                 className="flex items-center gap-2 flex-1 text-left"
@@ -1844,7 +1844,7 @@ function TagPopover({
               {on && (
                 <button
                   onClick={() => themeApi.toggleLock(page.refId, t.id)}
-                  className="p-0.5 rounded hover:bg-black/5"
+                  className="p-0.5 rounded hover:bg-[var(--aa-hover-tint)]"
                   style={{ color: locked ? t.color : 'var(--aa-text-3, #cfc9c1)' }}
                 >
                   <Lock size={12} />
@@ -1882,7 +1882,7 @@ function TagPopover({
         ) : (
           <button
             onClick={() => setCreating(true)}
-            className="flex items-center gap-1.5 w-full px-3 py-2 text-sm hover:bg-black/[0.03]"
+            className="flex items-center gap-1.5 w-full px-3 py-2 text-sm hover:bg-[var(--aa-hover-tint)]"
             style={{ color: 'var(--aa-accent, #6865a7)' }}
           >
             <Plus size={13} />
@@ -1912,7 +1912,7 @@ function FilterChip({
       style={{
         height: 30,
         background: active ? 'var(--aa-accent, #6865a7)' : 'transparent',
-        color: active ? '#fff' : 'var(--aa-text-2, #87827c)',
+        color: active ? 'var(--aa-accent-fg, #fff)' : 'var(--aa-text-2, #87827c)',
         border: active ? '1px solid transparent' : '1px solid var(--aa-border, rgba(45,40,34,0.09))',
       }}
     >

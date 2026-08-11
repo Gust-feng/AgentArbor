@@ -25,6 +25,8 @@
   --aa-text-3: #aba39b;
   --aa-accent: #6865a7;
   --aa-accent-bg: rgba(104, 101, 167, 0.08);
+  --aa-accent-fg: #ffffff;
+  --aa-hover-tint: rgba(45, 40, 34, 0.05);
   --aa-lavender: #ece9f5;
   --aa-lavender-mid: #6865a7;
   --aa-sage: #E8F0E4;
@@ -34,6 +36,17 @@
   --aa-status-wait: #D49020;
   --aa-status-error: #C84040;
   --aa-status-done: #48A870;
+
+  /* 文档/材料语义色：与 --aa-* 一样在深色下整体替换，组件不得硬编码浅色。 */
+  --aa-paper: #ffffff;
+  --aa-warn-text: #8b611d;
+  --aa-warn-text-strong: #765116;
+  --aa-warn-hover: rgba(128, 88, 23, 0.09);
+  --aa-danger-text: #a5483b;
+  --aa-teal-text: #4f7e79;
+  --aa-verify-text: #6f9279;
+  --aa-diff-added: #315f42;
+  --aa-diff-removed: #934439;
 
   /* 阅读偏好由共享设置入口写入，被对话流、专注模式和材料视图消费。 */
   --reading-sans: "Noto Sans SC", Inter, system-ui, -apple-system, sans-serif;
@@ -112,6 +125,8 @@ html[data-style="default"][data-color="dark"] {
   --aa-text-3: #7e7b7c;
   --aa-accent: #9892b0;
   --aa-accent-bg: rgba(152, 146, 176, 0.13);
+  --aa-accent-fg: #1b1b20;
+  --aa-hover-tint: rgba(232, 229, 226, 0.06);
   --aa-lavender: #302d38;
   --aa-lavender-mid: #b5aec6;
   --aa-sage: #2b302d;
@@ -121,6 +136,17 @@ html[data-style="default"][data-color="dark"] {
   --aa-status-wait: #b99a6d;
   --aa-status-error: #d97782;
   --aa-status-done: #8db599;
+
+  /* 深色下的文档/材料语义色（对应 :root 中的浅色默认值）。 */
+  --aa-paper: #2b2a31;
+  --aa-warn-text: #c9a25f;
+  --aa-warn-text-strong: #d9b877;
+  --aa-warn-hover: rgba(201, 162, 95, 0.14);
+  --aa-danger-text: #d97782;
+  --aa-teal-text: #8fb3a9;
+  --aa-verify-text: #8db599;
+  --aa-diff-added: #8db599;
+  --aa-diff-removed: #d97782;
 
   --background: #1b1b20;
   --foreground: #e8e5e2;

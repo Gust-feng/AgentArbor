@@ -35,7 +35,7 @@ export function FocusModeHeader(props: FocusModeHeaderProps) {
         <button
           type="button"
           onClick={props.onExit}
-          className="ml-1 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors hover:bg-black/5"
+          className="ml-1 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--aa-hover-tint)]"
           style={{ background: 'var(--aa-surface-hover)', color: 'var(--aa-text-1)' }}
         >
           <Minimize2 size={11} />

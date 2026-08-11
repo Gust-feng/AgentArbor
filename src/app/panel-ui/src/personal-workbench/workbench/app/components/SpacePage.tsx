@@ -84,9 +84,9 @@ function fileIcon(name: string, size: number) {
     return <FileText size={size} style={{ color: '#c25b45' }} />
   }
   if (['doc', 'docx', 'txt', 'md', 'rtf'].includes(extension)) {
-    return <FileText size={size} style={{ color: '#87827c' }} />
+    return <FileText size={size} style={{ color: 'var(--aa-text-2, #87827c)' }} />
   }
-  return <File size={size} style={{ color: '#87827c' }} />
+  return <File size={size} style={{ color: 'var(--aa-text-2, #87827c)' }} />
 }
 
 function itemIcon(item: SpaceItem, size = 13) {
@@ -238,7 +238,7 @@ function TreeNode({
       {creatingEntry?.parentId === item.id && (
         <div className="flex items-center gap-2" style={{ height: 30, paddingLeft: 10 + (depth + 1) * 14, paddingRight: 8 }}>
           <span style={{ width: 12, flexShrink: 0 }} />
-          <FileText size={13} style={{ color: '#87827c' }} />
+          <FileText size={13} style={{ color: 'var(--aa-text-2, #87827c)' }} />
           <InlineName value="" label="文件名称" onCommit={onCreateEntryCommit} onCancel={onCreateEntryCancel} />
           <span style={{ width: 20, flexShrink: 0 }} />
         </div>
@@ -502,6 +502,10 @@ export function SpacePage({
       openConversationId !== null || activeConversationId === pendingConversationId
     ))
   )
+  const visibleConversationId = openConversationId ?? activeConversationId
+  const visibleConversationTitle = space?.conversations?.find(
+    (conversation) => conversation.conversationId === visibleConversationId,
+  )?.title ?? '对话'
 
   function handleCreateNote() {
     if (notes.length === 0) {
@@ -770,7 +774,7 @@ export function SpacePage({
             </h1>
             <button
               onClick={() => onNavigate('search')}
-              className="p-1 rounded transition-colors hover:bg-black/5"
+              className="p-1 rounded transition-colors hover:bg-[var(--aa-hover-tint)]"
               style={{ color: 'var(--aa-text-3, #aba39b)' }}
             >
               <Search size={13} />
@@ -779,7 +783,7 @@ export function SpacePage({
           <p className="text-xs m-0 pl-[22px]" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
             {itemCount} 个对象
           </p>
-          {actionError && <p role="alert" className="text-xs mt-2 mb-0 pl-[22px]" style={{ color: '#b3543f' }}>{actionError}</p>}
+          {actionError && <p role="alert" className="text-xs mt-2 mb-0 pl-[22px]" style={{ color: 'var(--aa-status-error, #b3543f)' }}>{actionError}</p>}
         </header>
 
         <div
@@ -802,7 +806,7 @@ export function SpacePage({
             <button
               onClick={handleCreateNote}
               aria-label="新建笔记"
-              className="p-0.5 rounded transition-colors hover:bg-black/5"
+              className="p-0.5 rounded transition-colors hover:bg-[var(--aa-hover-tint)]"
               style={{ color: 'var(--aa-text-3, #aba39b)' }}
             >
               <Plus size={13} />
@@ -958,8 +962,37 @@ export function SpacePage({
 
       {/* 右侧资料 / 笔记 / 正式对话主区 */}
       {conversationSurfaceVisible ? (
-        <div className="flex min-w-0 flex-1 overflow-hidden" data-space-conversation>
-          {conversationContent}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden" data-space-conversation>
+          <header
+            className="flex h-11 shrink-0 items-center justify-between border-b px-5"
+            style={{ borderColor: 'var(--aa-border, rgba(45,40,34,0.09))' }}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              <MessageSquare size={14} style={{ color: 'var(--aa-text-3, #aba39b)' }} aria-hidden="true" />
+              <span className="truncate text-xs font-medium" style={{ color: 'var(--aa-text-2, #5f5a53)' }}>
+                {visibleConversationTitle}
+              </span>
+            </div>
+            {onEnterFocus !== undefined && (
+              <button
+                type="button"
+                onClick={onEnterFocus}
+                aria-label="专注阅读"
+                title="专注阅读"
+                className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors hover:bg-[var(--aa-hover-tint)] focus-visible:outline-none focus-visible:ring-2"
+                style={{
+                  borderColor: 'var(--aa-border, rgba(45,40,34,0.09))',
+                  color: 'var(--aa-text-3, #aba39b)',
+                }}
+              >
+                <Maximize2 size={12} aria-hidden="true" />
+                <span>专注阅读</span>
+              </button>
+            )}
+          </header>
+          <div className="flex min-w-0 flex-1 overflow-hidden">
+            {conversationContent}
+          </div>
         </div>
       ) : selectedNote ? (
         <DeferredSurfaceBoundary resetKey={selectedNote.id} label="笔记编辑器暂时无法打开">

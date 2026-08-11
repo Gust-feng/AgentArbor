@@ -247,7 +247,7 @@ export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spac
             {query && (
               <button
                 onClick={() => setQuery('')}
-                className="p-0.5 rounded shrink-0 transition-colors hover:bg-black/5"
+                className="p-0.5 rounded shrink-0 transition-colors hover:bg-[var(--aa-hover-tint)]"
                 style={{ color: 'var(--aa-text-3)' }}
               >
                 <X size={14} />

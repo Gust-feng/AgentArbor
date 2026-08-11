@@ -258,11 +258,11 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
           {durableSaveState.startsWith('error:') ? '保存失败' : saved && durableSaveState === 'saved' ? '已保存' : '保存中…'}
         </span>
         <div className="flex-1" />
-        <button onClick={toggleSourceMode} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: sourceMode ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}>
+        <button onClick={toggleSourceMode} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-[var(--aa-hover-tint)]" style={{ color: sourceMode ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}>
           <Code2 size={12} />{sourceMode ? '编辑' : '源码'}
         </button>
-        {onOpenFocus && <button onClick={onOpenFocus} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: 'var(--aa-text-2, #87827c)' }}><Maximize2 size={12} />专注</button>}
-        <button onClick={() => (collected ? brain.uncollect(note.id) : brain.collect(note.id, 'note'))} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-black/5" style={{ color: collected ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}>
+        {onOpenFocus && <button onClick={onOpenFocus} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-[var(--aa-hover-tint)]" style={{ color: 'var(--aa-text-2, #87827c)' }}><Maximize2 size={12} />专注</button>}
+        <button onClick={() => (collected ? brain.uncollect(note.id) : brain.collect(note.id, 'note'))} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors hover:bg-[var(--aa-hover-tint)]" style={{ color: collected ? 'var(--aa-accent, #6865a7)' : 'var(--aa-text-2, #87827c)' }}>
           <Brain size={12} />{collected ? '已收藏' : '收藏'}
         </button>
       </header>

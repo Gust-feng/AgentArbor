@@ -146,6 +146,16 @@
   border: 0;
 }
 
+/* 深色下修正设置桥接 token：强调/琥珀文本改为向白混合，浮层阴影去掉浅色内高光。 */
+html[data-style="default"][data-color="dark"] .aa-workbench-root .settings-overlay {
+  --accent-active: color-mix(in oklch, var(--aa-accent) 82%, white);
+  --amber-text: color-mix(in oklch, var(--aa-status-wait) 78%, white);
+  --floating-panel-shadow:
+    0 1px 0 color-mix(in oklch, var(--aa-surface-hover) 60%, transparent) inset,
+    0 18px 48px -20px rgba(5, 5, 7, 0.45),
+    0 2px 10px rgba(5, 5, 7, 0.22);
+}
+
 .aa-workbench-root .settings-dialog {
   z-index: 1;
   color: var(--fg);

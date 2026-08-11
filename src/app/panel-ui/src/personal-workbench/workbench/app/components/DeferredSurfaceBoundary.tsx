@@ -64,7 +64,7 @@ function DeferredFailure(props: {
           <button
             type="button"
             onClick={props.onRetry}
-            className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors hover:bg-[var(--aa-hover-tint)] focus-visible:outline-2 focus-visible:outline-offset-2"
             style={{ background: 'var(--aa-accent-bg)', color: 'var(--aa-accent)' }}
           >
             <RotateCcw size={12} />

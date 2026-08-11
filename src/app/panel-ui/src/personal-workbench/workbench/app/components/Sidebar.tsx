@@ -282,7 +282,7 @@ export function Sidebar({
               onClick={addSpace}
               disabled={onCreateSpace === undefined || spaceLoadState?.mutationPending === true}
               aria-label="新建空间"
-              className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/spaces:opacity-50 hover:!opacity-100"
+              className="flex items-center justify-center rounded transition-opacity hover:bg-[var(--aa-hover-tint)] opacity-0 group-hover/spaces:opacity-50 hover:!opacity-100"
               style={{ width: 18, height: 18, color: 'var(--aa-text-3)', marginRight: -3 }}
             >
               <Plus size={12}/>
@@ -326,7 +326,7 @@ export function Sidebar({
               onClick={() => void onAddWorkspace?.()}
               disabled={onAddWorkspace === undefined || workspaceLoadState?.mutationPending === true}
               aria-label="添加工作区"
-              className="flex items-center justify-center rounded transition-opacity hover:bg-black/5 opacity-0 group-hover/workspaces:opacity-50 hover:!opacity-100"
+              className="flex items-center justify-center rounded transition-opacity hover:bg-[var(--aa-hover-tint)] opacity-0 group-hover/workspaces:opacity-50 hover:!opacity-100"
               style={{ width: 18, height: 18, color: 'var(--aa-text-3)', marginRight: -3 }}
             >
               <Plus size={12}/>
@@ -553,7 +553,7 @@ function SpaceLoadFailure(props: {
         type="button"
         aria-label="重新加载空间"
         onClick={() => void props.onRetry()}
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-black/5"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-[var(--aa-hover-tint)]"
         style={{ color: 'var(--aa-text-3)' }}
       >
         <RotateCcw size={11} />

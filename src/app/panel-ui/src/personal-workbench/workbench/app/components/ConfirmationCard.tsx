@@ -94,7 +94,7 @@ export function ConfirmationCard(props: {
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors hover:bg-[var(--aa-hover-tint)] disabled:cursor-not-allowed disabled:opacity-50"
             style={{ color: "var(--aa-text-2)" }}
             onClick={() => props.onDecision?.("deny")}
             disabled={props.busy}

@@ -1,5 +1,5 @@
 import { requestJson } from '../../../../api'
-import type { DocumentPreview, DocumentTextUpdateInput } from '../../../../../../panel-api-contracts'
+import type { DocumentCaptionUpdateInput, DocumentPreview, DocumentTextUpdateInput } from '../../../../../../panel-api-contracts'
 
 export type { DocumentPreview } from '../../../../../../panel-api-contracts'
 
@@ -151,6 +151,31 @@ export async function saveDocumentText(
   let request!: Promise<DocumentPreview>
   request = requestJson<{ preview: DocumentPreview }>(
     `${apiBase}/${encodeURIComponent(itemId)}/content`,
+    {
+      method: 'PUT',
+      headers: { accept: 'application/json' },
+      body: JSON.stringify(input),
+    },
+  ).then((response) => {
+    if ((previewGeneration.get(key) ?? 0) === generation) setCachedPreview(apiBase, key, response.preview)
+    return response.preview
+  }).finally(() => {
+    if (previewMutationInFlight.get(key) === request) previewMutationInFlight.delete(key)
+  })
+  previewMutationInFlight.set(key, request)
+  return await request
+}
+
+export async function saveDocumentCaption(
+  itemId: string,
+  input: DocumentCaptionUpdateInput,
+  apiBase = '/api/spaces/references',
+): Promise<DocumentPreview> {
+  const key = previewCacheKey(apiBase, itemId, '')
+  const generation = advanceGeneration(key)
+  let request!: Promise<DocumentPreview>
+  request = requestJson<{ preview: DocumentPreview }>(
+    `${apiBase}/${encodeURIComponent(itemId)}/caption`,
     {
       method: 'PUT',
       headers: { accept: 'application/json' },

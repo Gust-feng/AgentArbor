@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
+import { workbenchAssetCaptionFingerprint } from "./asset-caption.js";
 import { workbenchAssetTextFingerprint } from "./asset-text.js";
 import { createSqliteWorkbenchAssetRepository } from "./sqlite-repository.js";
 import type { WorkbenchAsset } from "./contracts.js";
@@ -36,7 +37,13 @@ test("Workbench asset repository atomically updates editable text using the expe
     title: "论文.pdf",
     pdf: { pages: ["只读正文"] },
   };
-  await repository.upsertMany([markdown, code, pdf]);
+  const image: WorkbenchAsset = {
+    id: "image-one",
+    kind: "image",
+    title: "结构图.png",
+    image: { src: "/image.png", alt: "结构图", caption: "初始说明" },
+  };
+  await repository.upsertMany([markdown, code, pdf, image]);
 
   const expectedFingerprint = workbenchAssetTextFingerprint(markdown.markdown ?? "");
   const updated = await repository.updateText({
@@ -78,6 +85,18 @@ test("Workbench asset repository atomically updates editable text using the expe
     text: "不允许写入",
   }), { status: "not_editable", kind: "pdf" });
   assert.equal((await repository.get(pdf.id))?.pdf?.pages[0], "只读正文");
+
+  const imageFingerprint = workbenchAssetCaptionFingerprint(image.image?.caption);
+  const imageUpdated = await repository.updateCaption({ id: image.id, expectedFingerprint: imageFingerprint, caption: "新的说明" });
+  assert.equal(imageUpdated.status, "updated");
+  assert.equal((await repository.get(image.id))?.image?.caption, "新的说明");
+  assert.deepEqual(await repository.updateCaption({ id: image.id, expectedFingerprint: imageFingerprint, caption: "不应覆盖" }), {
+    status: "conflict",
+    fingerprint: workbenchAssetCaptionFingerprint("新的说明"),
+  });
+  const imageCleared = await repository.updateCaption({ id: image.id, expectedFingerprint: workbenchAssetCaptionFingerprint("新的说明"), caption: "" });
+  assert.equal(imageCleared.status, "updated");
+  assert.equal((await repository.get(image.id))?.image?.caption, undefined);
   assert.deepEqual(await repository.updateText({
     id: "missing",
     expectedFingerprint: "irrelevant",

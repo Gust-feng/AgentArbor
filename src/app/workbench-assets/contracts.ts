@@ -22,7 +22,20 @@ export type UpdateWorkbenchAssetTextInput = {
   readonly text: string;
 };
 
+export type UpdateWorkbenchAssetCaptionInput = {
+  readonly id: string;
+  readonly expectedFingerprint: string;
+  readonly caption: string;
+};
+
 export type UpdateWorkbenchAssetTextResult =
+  | { readonly status: "updated"; readonly asset: WorkbenchAsset; readonly fingerprint: string }
+  | { readonly status: "not_found" }
+  | { readonly status: "not_editable"; readonly kind: WorkbenchAssetKind }
+  | { readonly status: "conflict"; readonly fingerprint: string }
+  | { readonly status: "too_large" };
+
+export type UpdateWorkbenchAssetCaptionResult =
   | { readonly status: "updated"; readonly asset: WorkbenchAsset; readonly fingerprint: string }
   | { readonly status: "not_found" }
   | { readonly status: "not_editable"; readonly kind: WorkbenchAssetKind }
@@ -36,4 +49,5 @@ export interface WorkbenchAssetRepository {
   /** Removes software-owned assets by id. Missing ids are ignored for idempotent Space cleanup. */
   removeMany(assetIds: readonly string[]): Promise<void>;
   updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult>;
+  updateCaption(input: UpdateWorkbenchAssetCaptionInput): Promise<UpdateWorkbenchAssetCaptionResult>;
 }

@@ -11,6 +11,7 @@ import {
   type WorkbenchAssetRepository,
   workbenchAssetTextFingerprint,
 } from "../workbench-assets/index.js";
+import { workbenchAssetCaptionFingerprint } from "../workbench-assets/index.js";
 import { PanelHttpError, writeJson, writePanelError } from "./http-utils.js";
 import { handlePanelWorkbenchAssetRoute } from "./workbench-asset-routes.js";
 
@@ -38,6 +39,11 @@ test("Workbench asset routes return editable previews and enforce SQLite fingerp
     kind: "pdf",
     title: "论文.pdf",
     pdf: { pages: ["只读正文"] },
+  }, {
+    id: "image-one",
+    kind: "image",
+    title: "结构图.png",
+    image: { src: "/image.png", alt: "结构图", caption: "初始说明" },
   }]);
   const server = await startServer(repository);
   const baseUrl = serverBaseUrl(server);
@@ -87,6 +93,16 @@ test("Workbench asset routes return editable previews and enforce SQLite fingerp
   assert.equal(readOnly.status, 409);
   assert.equal(readOnly.body.error?.code, "workbench_asset_not_editable");
   assert.deepEqual((await repository.get("paper-one"))?.pdf?.pages, ["只读正文"]);
+
+  const image = await request(baseUrl, "/api/workbench-assets/image-one/preview");
+  assert.equal(image.body.preview?.fingerprint, workbenchAssetCaptionFingerprint("初始说明"));
+  const caption = await request(baseUrl, "/api/workbench-assets/image-one/caption", {
+    method: "PUT",
+    body: { expectedFingerprint: image.body.preview?.fingerprint, caption: "更新说明" },
+  });
+  assert.equal(caption.status, 200);
+  assert.equal((await repository.get("image-one"))?.image?.caption, "更新说明");
+  assert.equal(caption.body.preview?.fingerprint, workbenchAssetCaptionFingerprint("更新说明"));
 });
 
 async function startServer(repository: WorkbenchAssetRepository): Promise<Server> {

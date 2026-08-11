@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { DocumentPreview } from "../panel-api-contracts.js";
 import {
   editableWorkbenchAssetText,
+  MAX_WORKBENCH_ASSET_CAPTION_BYTES,
   MAX_WORKBENCH_ASSET_TEXT_BYTES,
   type WorkbenchAsset,
   type WorkbenchAssetRepository,
@@ -23,6 +24,12 @@ const updateTextSchema = z.object({
   relativePath: z.literal("").optional(),
   expectedFingerprint: z.string().min(1).max(512),
   text: z.string(),
+}).strict();
+
+const updateCaptionSchema = z.object({
+  itemId: z.string().min(1).max(512).optional(),
+  expectedFingerprint: z.string().min(1).max(512),
+  caption: z.string(),
 }).strict();
 
 export async function handlePanelWorkbenchAssetRoute(
@@ -54,6 +61,21 @@ export async function handlePanelWorkbenchAssetRoute(
     return true;
   }
 
+  const captionMatch = /^\/api\/workbench-assets\/([^/]+)\/caption$/u.exec(url.pathname);
+  if (captionMatch !== null && request.method === "PUT") {
+    await runtime.ensureInitialWorkbenchData();
+    const assetId = decode(captionMatch[1]);
+    const input = parseCaptionUpdateInput(await readJsonBody(request, { maxChars: MAX_WORKBENCH_ASSET_CAPTION_BYTES * 2 + 2_048 }));
+    if (input.itemId !== undefined && input.itemId !== assetId) {
+      throw new PanelHttpError(400, "invalid_workbench_asset_input", "请求资产与路径中的资产不一致。");
+    }
+    writeJson(response, 200, { ok: true, preview: await updateWorkbenchAssetCaptionPreview(
+      runtime.workbenchAssets,
+      { assetId, expectedFingerprint: input.expectedFingerprint, caption: input.caption },
+    ) });
+    return true;
+  }
+
   return false;
 }
 
@@ -76,6 +98,28 @@ export async function updateWorkbenchAssetTextPreview(
     case "not_editable": throw new PanelHttpError(409, "workbench_asset_not_editable", "只有 Markdown 和代码文本资产可以编辑。");
     case "conflict": throw new PanelHttpError(409, "workbench_asset_revision_conflict", "工作台资产已发生变化，请先比较更改。");
     case "too_large": throw new PanelHttpError(413, "workbench_asset_text_too_large", "工作台文本资产超过可编辑大小上限。");
+  }
+}
+
+export async function updateWorkbenchAssetCaptionPreview(
+  repository: WorkbenchAssetRepository,
+  input: { readonly assetId: string; readonly expectedFingerprint: string; readonly caption: string },
+  itemId = input.assetId,
+): Promise<DocumentPreview> {
+  if (Buffer.byteLength(input.caption, "utf8") > MAX_WORKBENCH_ASSET_CAPTION_BYTES) {
+    throw new PanelHttpError(413, "workbench_asset_caption_too_large", "图片说明超过可编辑大小上限。");
+  }
+  const result = await repository.updateCaption({
+    id: input.assetId,
+    expectedFingerprint: input.expectedFingerprint,
+    caption: input.caption,
+  });
+  switch (result.status) {
+    case "updated": return createWorkbenchAssetPreviewFromAsset(result.asset, itemId);
+    case "not_found": throw new PanelHttpError(404, "workbench_asset_not_found", "工作台资产已不存在。");
+    case "not_editable": throw new PanelHttpError(409, "workbench_asset_caption_not_editable", "只有图片资产可以编辑说明。");
+    case "conflict": throw new PanelHttpError(409, "workbench_asset_revision_conflict", "图片说明已发生变化，请重新加载后再编辑。");
+    case "too_large": throw new PanelHttpError(413, "workbench_asset_caption_too_large", "图片说明超过可编辑大小上限。");
   }
 }
 
@@ -117,6 +161,14 @@ function parseUpdateInput(raw: unknown): z.infer<typeof updateTextSchema> {
   const result = updateTextSchema.safeParse(raw);
   if (!result.success) {
     throw new PanelHttpError(400, "invalid_workbench_asset_input", "工作台资产编辑请求无效。");
+  }
+  return result.data;
+}
+
+function parseCaptionUpdateInput(raw: unknown): z.infer<typeof updateCaptionSchema> {
+  const result = updateCaptionSchema.safeParse(raw);
+  if (!result.success) {
+    throw new PanelHttpError(400, "invalid_workbench_asset_input", "图片说明编辑请求无效。");
   }
   return result.data;
 }

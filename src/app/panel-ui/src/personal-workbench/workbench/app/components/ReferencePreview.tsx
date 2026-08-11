@@ -1,7 +1,7 @@
 import { Fragment, forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ForwardedRef, type ReactNode, type UIEvent } from 'react'
 import { diffLines, type Change } from 'diff'
 import { AlertTriangle, Check, ChevronRight, Code2, ExternalLink, FileText, Folder, RefreshCw } from 'lucide-react'
-import { fetchDocumentPreview, getCachedReferencePreview, refreshDocumentPreview, saveDocumentText, subscribeReferencePreviewCache, type DocumentPreview } from './referencePreviewClient'
+import { fetchDocumentPreview, getCachedReferencePreview, refreshDocumentPreview, saveDocumentCaption, saveDocumentText, subscribeReferencePreviewCache, type DocumentPreview } from './referencePreviewClient'
 import type { SpaceReferenceAnnotation } from '../../../../../../spaces/contracts'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
@@ -313,6 +313,14 @@ function ReferenceDocumentSessionView({
     }
   }
 
+  async function saveCaption(caption: string) {
+    if (readOnly || preview?.content.kind !== 'media' || preview.content.mediaKind !== 'image' || preview.content.captionEditable !== true || preview.annotation !== undefined || preview.fingerprint === undefined) return
+    const saved = await saveDocumentCaption(itemId, { expectedFingerprint: preview.fingerprint, caption }, apiBase)
+    setPreview(saved)
+    setIncoming(undefined)
+    setError(undefined)
+  }
+
   if (preview === undefined) {
     return (
       <div className="aa-reference-preview__session">
@@ -355,7 +363,7 @@ function ReferenceDocumentSessionView({
         {preview.annotation !== undefined && preview.presentation.kind !== 'web' && (
           <ReferenceAnnotation annotation={preview.annotation} sourceVersion={`${targetKey}:annotation:${preview.annotation.revision}`} />
         )}
-        <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />
+        <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} captionEditable={!readOnly && !loading && preview.content.kind === 'media' && preview.content.mediaKind === 'image' && preview.content.captionEditable === true && preview.annotation === undefined} onChange={scheduleSave} onCaptionChange={saveCaption} onReload={() => void reload()} onNavigatePath={onNavigatePath} />
       </>}
     </div>
   )
@@ -472,7 +480,7 @@ function ReferenceBreadcrumb({ rootTitle, relativePath, source }: { rootTitle: s
   )
 }
 
-function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft, editable, onChange, onReload, onNavigatePath }: { preview: DocumentPreview; itemId: string; apiBase: string; relativePath: string; targetKey: string; draft: string; editable: boolean; onChange: (value: string) => void; onReload: () => void; onNavigatePath?: (relativePath: string) => void }) {
+function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft, editable, captionEditable, onChange, onCaptionChange, onReload, onNavigatePath }: { preview: DocumentPreview; itemId: string; apiBase: string; relativePath: string; targetKey: string; draft: string; editable: boolean; captionEditable: boolean; onChange: (value: string) => void; onCaptionChange: (value: string) => Promise<void>; onReload: () => void; onNavigatePath?: (relativePath: string) => void }) {
   const content = preview.content
   // Presentation owns renderer selection; source-specific content only supplies that surface's payload.
   switch (preview.presentation.kind) {
@@ -557,7 +565,7 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'image':
       return content.kind === 'media' && content.mediaKind === 'image'
-        ? <ImageDocumentSurface url={content.url} sourceVersion={preview.fingerprint} alt={content.alt ?? preview.title} caption={preview.annotation === undefined ? content.caption : undefined} />
+        ? <ImageDocumentSurface url={content.url} sourceVersion={preview.fingerprint} alt={content.alt ?? preview.title} caption={preview.annotation === undefined ? content.caption : undefined} editable={captionEditable} onCaptionChange={onCaptionChange} />
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'video':
       return content.kind === 'media' && content.mediaKind === 'video'

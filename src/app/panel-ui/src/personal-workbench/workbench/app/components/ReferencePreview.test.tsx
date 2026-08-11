@@ -404,6 +404,58 @@ test('hides the legacy image caption when the Space reference has an annotation'
   expect(screen.getByText('手绘的网络结构与推导草稿')).toBeTruthy()
 })
 
+test('edits an image caption and allows adding one to a captionless image', async () => {
+  const user = userEvent.setup()
+  let current: DocumentPreview = {
+    ...previewWithPresentation('image-caption', 'image', {
+      kind: 'media',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      url: '/image.png',
+      alt: '图像',
+      caption: '旧说明',
+      captionEditable: true,
+    }),
+    fingerprint: 'caption-v1',
+  }
+  const emptyPreview: DocumentPreview = {
+    ...current,
+    itemId: 'image-caption-empty',
+    fingerprint: 'caption-empty',
+    content: { ...(current.content as Extract<DocumentPreview['content'], { kind: 'media' }>), caption: undefined },
+  }
+  const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const empty = String(_input).includes('image-caption-empty')
+    if (init?.method === 'PUT') {
+      const body = JSON.parse(String(init.body)) as { caption: string }
+      current = {
+        ...current,
+        fingerprint: `caption-${body.caption || 'empty'}`,
+        content: { ...(current.content as Extract<DocumentPreview['content'], { kind: 'media' }>), caption: body.caption || undefined },
+      }
+    }
+    return new Response(JSON.stringify({ preview: empty ? emptyPreview : current }), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<ReferencePreview itemId="image-caption" fallbackTitle="结构图.png" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByText('旧说明')).toBeTruthy()
+  const editor = screen.getByRole('textbox', { name: '图片说明' })
+  await user.click(editor)
+  await user.clear(editor)
+  await user.type(editor, '新说明')
+  fireEvent.blur(editor)
+  await waitFor(() => expect(screen.getByText('新说明')).toBeTruthy())
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+
+  const emptyRendered = render(<ReferencePreview itemId="image-caption-empty" fallbackTitle="结构图.png" canOpen={false} onOpen={() => undefined} />)
+  const entry = await screen.findByRole('button', { name: '添加图片说明' })
+  expect(emptyRendered.container.querySelector('.aa-reference-preview__caption-add')).toBe(entry)
+  await user.click(entry)
+  expect(screen.getAllByRole('textbox', { name: '图片说明' })).toHaveLength(2)
+  emptyRendered.unmount()
+})
+
 test('keeps an edited reference stable until the user loads the external version', async () => {
   const user = userEvent.setup()
   const original = textPreview('1:4', '原始内容')

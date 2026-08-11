@@ -41,7 +41,7 @@
 .aa-code-document { min-width: 0; overflow: hidden; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 6px; background: #1e1c1a; box-shadow: 0 1px 8px rgba(45,40,34,.05); }
 .aa-code-document__header { min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--aa-border, rgba(45,40,34,.09)); background: var(--aa-surface-hover, #eeebe6); }
 .aa-code-document__filename { min-width: 0; overflow: hidden; color: var(--aa-text-2, #87827c); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.aa-code-document__language { flex: none; padding: 2px 7px; border-radius: 4px; background: rgba(95,138,134,.13); color: #4f7e79; font-size: 10px; text-transform: lowercase; }
+.aa-code-document__language { flex: none; padding: 2px 7px; border-radius: 4px; background: rgba(95,138,134,.13); color: var(--aa-teal-text, #4f7e79); font-size: 10px; text-transform: lowercase; }
 .aa-code-document__encoding { margin-left: auto; flex: none; color: var(--aa-text-3, #aba39b); font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: lowercase; }
 .aa-code-document__source { margin: 0; padding: 22px 24px 28px; overflow: auto; color: #e8e3da; white-space: pre; tab-size: 2; font: 12px/1.72 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .aa-code-document--cover { width: 100%; height: 132px; border: 0; border-radius: 0; box-shadow: none; }

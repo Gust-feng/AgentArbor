@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { z } from "zod";
-import type { DocumentTextUpdateInput } from "../panel-api-contracts.js";
+import type { DocumentCaptionUpdateInput, DocumentTextUpdateInput } from "../panel-api-contracts.js";
 import type { SpaceAddableReference, SpaceFeatureError, SpaceReference, SpaceReferenceItem, SpaceTarget } from "../spaces/index.js";
 import { spaceExternalReferenceStatus } from "../spaces/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
@@ -9,7 +9,7 @@ import type { PanelRuntime } from "./runtime.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
 import { spaceReferenceMutationKey } from "./space-reference-deletion.js";
 import { attachSpaceAnnotation, createPanelDocumentPreview, writePanelSpaceReferenceContent } from "./space-reference-preview.js";
-import { getWorkbenchAssetPreview, updateWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
+import { getWorkbenchAssetPreview, updateWorkbenchAssetCaptionPreview, updateWorkbenchAssetTextPreview } from "./workbench-asset-routes.js";
 import { createPanelSpaceReferenceEntry, deletePanelSpaceReferenceEntry, renamePanelSpaceReferenceEntry, updatePanelSpaceReferenceText } from "./space-reference-mutations.js";
 
 const titleSchema = z.string().trim().min(1).max(160);
@@ -31,6 +31,10 @@ const updateTextSchema: z.ZodType<DocumentTextUpdateInput> = z.object({
   relativePath: z.string().max(4_096).optional(),
   expectedFingerprint: z.string().min(1).max(512),
   text: z.string().max(512 * 1024),
+}).strict();
+const updateCaptionSchema: z.ZodType<DocumentCaptionUpdateInput> = z.object({
+  expectedFingerprint: z.string().min(1).max(512),
+  caption: z.string().max(16 * 1024),
 }).strict();
 const referenceEntrySchema = z.object({ relativePath: z.string().min(1).max(4_096) }).strict();
 const renameReferenceEntrySchema = referenceEntrySchema.extend({ name: z.string().trim().min(1).max(255) }).strict();
@@ -300,6 +304,23 @@ export async function handlePanelSpaceRoute(
       ok: true,
       preview: await runReferenceMutation(runtime, item, () => updatePanelSpaceReferenceText(item, input)),
     });
+    return true;
+  }
+
+  const referenceCaption = /^\/api\/spaces\/references\/([^/]+)\/caption$/u.exec(url.pathname);
+  if (referenceCaption !== null && request.method === "PUT") {
+    const item = await feature.queries.getReference(decode(referenceCaption[1]));
+    if (item === undefined) throw new PanelHttpError(404, "space_reference_not_found", "未找到空间引用。");
+    runtime.spaceConversationDeletion.assertAvailable(item.spaceId);
+    const input = parse(updateCaptionSchema, await readJsonBody(request), "图片说明编辑请求无效。");
+    if (item.reference.kind !== "workbench_asset") {
+      throw new PanelHttpError(409, "space_reference_caption_unavailable", "只有工作台图片资产可以编辑说明。");
+    }
+    writeJson(response, 200, { ok: true, preview: await updateWorkbenchAssetCaptionPreview(
+      runtime.workbenchAssets,
+      { assetId: item.reference.assetId, expectedFingerprint: input.expectedFingerprint, caption: input.caption },
+      item.id,
+    ) });
     return true;
   }
 

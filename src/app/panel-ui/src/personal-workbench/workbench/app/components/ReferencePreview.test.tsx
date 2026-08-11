@@ -264,6 +264,108 @@ test('shows an explicit unannotated state and the source entry for a bare web re
   expect(rendered.container.querySelector('.aa-reference-preview__web a')?.getAttribute('href')).toBe('https://example.test/private')
 })
 
+test('refreshes an opened preview immediately when the Agent updates its annotation', async () => {
+  const base = { kind: 'web' as const, url: 'https://distill.pub/2017/feature-visualization', site: 'distill.pub' }
+  let current: DocumentPreview = {
+    ...previewWithPresentation('web-annotation-live', 'web', base),
+    title: '特征可视化',
+    sourceKind: 'web_page',
+    annotation: {
+      markdown: '# v1 整理',
+      revision: 1,
+      updatedAt: '2026-08-11T00:00:00.000Z',
+      updatedBy: 'agent',
+    },
+  }
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ preview: current }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  vi.stubGlobal('fetch', fetchMock)
+
+  render(<ReferencePreview itemId="web-annotation-live" fallbackTitle="特征可视化" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByRole('heading', { name: 'v1 整理' })).toBeTruthy()
+
+  current = {
+    ...current,
+    annotation: {
+      markdown: '# v2 整理\n\nAgent 补充了与 Transformer 的关系。',
+      revision: 2,
+      updatedAt: '2026-08-11T01:00:00.000Z',
+      updatedBy: 'agent',
+    },
+  }
+  invalidateDocumentPreviews(['web-annotation-live'])
+
+  expect(await screen.findByRole('heading', { name: 'v2 整理' })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: 'v1 整理' })).toBeNull()
+  expect(screen.queryByText('来源已更新，当前内容仍保持不变。')).toBeNull()
+})
+
+test('keeps the user text draft when only the annotation changes on refresh', async () => {
+  const user = userEvent.setup()
+  const base = textPreview('1:4', '正文内容')
+  let current: DocumentPreview = {
+    ...base,
+    annotation: {
+      markdown: '# 整理 v1',
+      revision: 1,
+      updatedAt: '2026-08-11T00:00:00.000Z',
+      updatedBy: 'agent',
+    },
+  }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ preview: current }), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+  render(<ReferencePreview itemId="reference-one" fallbackTitle="note.txt" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByDisplayValue('正文内容')).toBeTruthy()
+  const editor = screen.getByRole('textbox')
+  await user.clear(editor)
+  await user.type(editor, '我的草稿')
+
+  current = {
+    ...current,
+    annotation: {
+      markdown: '# 整理 v2',
+      revision: 2,
+      updatedAt: '2026-08-11T02:00:00.000Z',
+      updatedBy: 'agent',
+    },
+  }
+  invalidateDocumentPreviews(['reference-one'])
+
+  expect(await screen.findByRole('heading', { name: '整理 v2' })).toBeTruthy()
+  expect(screen.getByDisplayValue('我的草稿')).toBeTruthy()
+  expect(screen.getByRole('textbox')).toBeTruthy()
+})
+
+test('hides the legacy image caption when the Space reference has an annotation', async () => {
+  const annotated = {
+    ...previewWithPresentation('image-annotated', 'image', { kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image.png', alt: '图像', caption: '手绘的网络结构与推导草稿' }),
+    title: '神经网络结构图.png',
+    annotation: {
+      markdown: '# Agent 描述\n\n手绘网络结构与推导草稿，属于课程学习辅助素材。',
+      revision: 1,
+      updatedAt: '2026-08-11T00:00:00.000Z',
+      updatedBy: 'agent',
+    },
+  }
+  const bare = {
+    ...previewWithPresentation('image-bare', 'image', { kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image.png', alt: '图像', caption: '手绘的网络结构与推导草稿' }),
+    title: '神经网络结构图.png',
+  }
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const id = String(input).includes('image-annotated') ? 'image-annotated' : 'image-bare'
+    return new Response(JSON.stringify({ preview: id === 'image-annotated' ? annotated : bare }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }))
+
+  const rendered = render(<ReferencePreview itemId="image-annotated" fallbackTitle="神经网络结构图.png" canOpen={false} onOpen={() => undefined} />)
+  expect(await screen.findByAltText('图像')).toBeTruthy()
+  expect(rendered.container.querySelector('.aa-reference-preview__media--described')).toBeNull()
+  expect(screen.queryByText('手绘的网络结构与推导草稿')).toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation')).not.toBeNull()
+
+  rendered.rerender(<ReferencePreview itemId="image-bare" fallbackTitle="神经网络结构图.png" canOpen={false} onOpen={() => undefined} />)
+  await waitFor(() => expect(rendered.container.querySelector('.aa-reference-preview__media--described')).not.toBeNull())
+  expect(screen.getByText('手绘的网络结构与推导草稿')).toBeTruthy()
+})
+
 test('keeps an edited reference stable until the user loads the external version', async () => {
   const user = userEvent.setup()
   const original = textPreview('1:4', '原始内容')

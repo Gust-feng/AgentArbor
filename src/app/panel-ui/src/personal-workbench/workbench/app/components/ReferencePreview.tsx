@@ -230,6 +230,15 @@ function ReferenceDocumentSessionView({
       try {
         const next = await fetchDocumentPreview(itemId, relativePath, undefined, apiBase)
         if (disposed) return
+        if (annotationRevisionChanged(preview, next)) {
+          // annotation 是 Space 自己的维护内容：Agent/用户更新后应当即生效，
+          // 不进入“来源已更新，等待用户决定”的流程。来源正文未变化时
+          // preview.content 相同，用户当前草稿（draft）不受影响。
+          setPreview(next)
+          setIncoming(undefined)
+          setShowDiff(false)
+          return
+        }
         if (hasSourceChanged(preview, next)) setIncoming(next)
       } catch {
         // Keep the visible projection stable. Explicit reload still reports failures.
@@ -524,7 +533,7 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'image':
       return content.kind === 'media' && content.mediaKind === 'image'
-        ? <ImageDocumentSurface url={content.url} sourceVersion={preview.fingerprint} alt={content.alt ?? preview.title} caption={content.caption} />
+        ? <ImageDocumentSurface url={content.url} sourceVersion={preview.fingerprint} alt={content.alt ?? preview.title} caption={preview.annotation === undefined ? content.caption : undefined} />
         : <InvalidPresentationState preview={preview} onReload={onReload} />
     case 'video':
       return content.kind === 'media' && content.mediaKind === 'video'
@@ -602,4 +611,8 @@ function PreviewState({ title, message, error, onRetry }: { title: string; messa
 
 function hasSourceChanged(current: DocumentPreview, next: DocumentPreview): boolean {
   return current.fingerprint !== next.fingerprint || current.status !== next.status
+}
+
+function annotationRevisionChanged(current: DocumentPreview, next: DocumentPreview): boolean {
+  return current.annotation?.revision !== next.annotation?.revision
 }

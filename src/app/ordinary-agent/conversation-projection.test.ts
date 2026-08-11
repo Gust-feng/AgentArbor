@@ -132,9 +132,9 @@ test("conversation title precedence keeps user override over model auto title ov
     },
   };
 
-  assert.equal(projectOrdinaryConversation({ control: base, runs: [run] })?.title, "继续回答");
-  assert.equal(projectOrdinaryConversation({ control: withAutoTitle, runs: [run] })?.title, "模型生成的标题");
-  assert.equal(projectOrdinaryConversation({ control: withOverride, runs: [run] })?.title, "用户重命名");
+  assert.equal(projectOrdinaryConversation({ control: base, runs: [run], completedAssistantTextByRunId: new Map([[run.runId, "答案"]]) })?.title, "继续回答");
+  assert.equal(projectOrdinaryConversation({ control: withAutoTitle, runs: [run], completedAssistantTextByRunId: new Map([[run.runId, "答案"]]) })?.title, "模型生成的标题");
+  assert.equal(projectOrdinaryConversation({ control: withOverride, runs: [run], completedAssistantTextByRunId: new Map([[run.runId, "答案"]]) })?.title, "用户重命名");
 });
 
 function interruptedRun(runId: string, status: OrdinaryRunStatus): OrdinaryRunState {

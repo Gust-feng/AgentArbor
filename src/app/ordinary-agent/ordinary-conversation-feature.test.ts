@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
-import { OrdinaryFeatureError, type OrdinaryConversationControlRepository, type OrdinaryExecutionOutcome, type OrdinaryExecutionPort, type OrdinaryFeatureDiagnostic, type OrdinaryRunRepository, type OrdinaryRunState } from "./contracts.js";
+import { OrdinaryFeatureError, type OrdinaryConversationControlRepository, type OrdinaryConversationTitleGenerator, type OrdinaryExecutionOutcome, type OrdinaryExecutionPort, type OrdinaryFeatureDiagnostic, type OrdinaryRunRepository, type OrdinaryRunState } from "./contracts.js";
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
@@ -789,11 +789,91 @@ test("deleteConversation removes Session and tool evidence after writing a tombs
   assert.equal(tombstone?.state.deletedAt !== undefined, true);
 });
 
+test("first completed run generates an auto title that replaces the first-message fallback", async (t) => {
+  const generated: string[] = [];
+  const run = await fixture(t, immediateExecution, undefined, undefined, async (input) => {
+    generated.push(input.userMessage);
+    return `标题：${input.userMessage}`;
+  });
+  const first = await submitAndComplete(run.feature, undefined, "帮我看一下项目结构");
+  await waitForCondition(async () => {
+    const conversation = await run.feature.queries.getConversation(first.conversation.conversationId);
+    return conversation?.title === "标题：帮我看一下项目结构";
+  });
+  assert.deepEqual(generated, ["帮我看一下项目结构"]);
+  const conversation = await run.feature.queries.getConversation(first.conversation.conversationId);
+  assert.equal(conversation?.titleEditedAt, undefined);
+});
+
+test("a failed generation keeps the first-message fallback and later runs never retry it", async (t) => {
+  const attempts: string[] = [];
+  const run = await fixture(t, immediateExecution, undefined, undefined, async (input) => {
+    attempts.push(input.userMessage);
+    return undefined;
+  });
+  const first = await submitAndComplete(run.feature, undefined, "第一条消息");
+  await waitForCondition(() => attempts.length === 1);
+  const second = await run.feature.commands.submitTurn({
+    conversationId: first.conversation.conversationId,
+    input: { userMessage: "第二条消息" },
+    birth: ordinaryRunBirth(),
+  });
+  const secondStable = waitForStableTerminal(run.feature, second.run.runId);
+  await waitForStatus(run.feature, second.run.runId, "completed");
+  await secondStable;
+  assert.deepEqual(attempts, ["第一条消息"]);
+  const conversation = await run.feature.queries.getConversation(first.conversation.conversationId);
+  assert.equal(conversation?.title, "第一条消息");
+});
+
+test("a user rename before the generated title lands wins and is never overwritten", async (t) => {
+  const gate = createGate();
+  const run = await fixture(t, immediateExecution, undefined, undefined, async () => {
+    await gate.released;
+    return "自动标题";
+  });
+  const first = await submitAndComplete(run.feature, undefined, "第一条消息");
+  await run.feature.commands.renameConversation(first.conversation.conversationId, "手动命名");
+  gate.release();
+  await waitForCondition(async () => {
+    const conversation = await run.feature.queries.getConversation(first.conversation.conversationId);
+    return conversation?.title === "手动命名" && conversation?.titleEditedAt !== undefined;
+  });
+  const conversation = await run.feature.queries.getConversation(first.conversation.conversationId);
+  assert.equal(conversation?.title, "手动命名");
+  const control = await createFileSystemOrdinaryConversationControlRepository(run.root).get(first.conversation.conversationId);
+  assert.equal(control?.state.autoTitle, undefined);
+});
+
+test("auto title generator errors surface as diagnostics and keep the fallback title", async (t) => {
+  const diagnostics: OrdinaryFeatureDiagnostic[] = [];
+  const run = await fixture(t, immediateExecution, undefined, (diagnostic) => {
+    diagnostics.push(diagnostic);
+  }, async () => {
+    throw new Error("model unavailable");
+  });
+  const first = await submitAndComplete(run.feature, undefined, "第一条消息");
+  await waitForCondition(() =>
+    diagnostics.length === 1 &&
+    diagnostics[0]?.kind === "conversation_title_generation_failed" &&
+    diagnostics[0].conversationId === first.conversation.conversationId);
+  const conversation = await run.feature.queries.getConversation(first.conversation.conversationId);
+  assert.equal(conversation?.title, "第一条消息");
+});
+
+test("without a wired generator the conversation keeps the first-message fallback title", async (t) => {
+  const run = await fixture(t, immediateExecution);
+  const first = await submitAndComplete(run.feature, undefined, "第一条消息");
+  const conversation = await run.feature.queries.getConversation(first.conversation.conversationId);
+  assert.equal(conversation?.title, "第一条消息");
+});
+
 async function fixture(
   t: test.TestContext,
   executionFactory: ((sessions: SessionHarness) => OrdinaryExecutionPort | Promise<OrdinaryExecutionPort>) | OrdinaryExecutionPort,
   releaseToolEvidenceOwner?: (ownerId: string) => void | Promise<void>,
   onDiagnostic?: (diagnostic: OrdinaryFeatureDiagnostic) => void,
+  generateConversationTitle?: OrdinaryConversationTitleGenerator,
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-conversation-"));
   const sessions = new SessionHarness();
@@ -805,11 +885,22 @@ async function fixture(
     sessionRepository: sessions,
     releaseToolEvidenceOwner,
     onDiagnostic,
+    ...(generateConversationTitle === undefined ? {} : { generateConversationTitle }),
     now: clock(),
     idFactory: ids(),
   });
   t.after(async () => { await feature.release(); await removeTestDirectory(root); });
   return { root, feature, sessions };
+}
+
+function waitForStableTerminal(feature: ReturnType<typeof createOrdinaryAgentFeature>, runId: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const unsubscribe = feature.events.subscribeStableTerminalRuns((notifiedRunId) => {
+      if (notifiedRunId !== runId) return;
+      unsubscribe();
+      resolve();
+    });
+  });
 }
 
 function immediateExecution(sessions: SessionHarness): OrdinaryExecutionPort {

@@ -3273,42 +3273,45 @@ function durableActivities(
       },
     });
   }
+
+  // A reasoning/output pair is one semantic unit for replay. Anchoring both
+  // activities to the earlier timestamp makes the precedence deterministic
+  // even when persistence records the pair out of time order.
+  const messageStartAtByRequest = new Map<string, string>();
+  for (const item of pending) {
+    if (durableMessagePhase(item.activity) === undefined) continue;
+    const requestId = durableModelRequestId(item.activity);
+    if (requestId === undefined) continue;
+    const current = messageStartAtByRequest.get(requestId);
+    if (current === undefined || item.recordedAt.localeCompare(current) < 0) {
+      messageStartAtByRequest.set(requestId, item.recordedAt);
+    }
+  }
+
   return pending
-    .sort((left, right) => durableMessageOrder(left, right) ||
-      left.recordedAt.localeCompare(right.recordedAt) ||
-      left.priority - right.priority ||
-      left.insertion - right.insertion)
-    .map((item, index) => ({ ...item.activity, sequence: index + 1 }));
+    .map((item) => {
+      const phase = durableMessagePhase(item.activity);
+      const requestId = durableModelRequestId(item.activity);
+      return {
+        item,
+        sortAt: phase === undefined || requestId === undefined
+          ? item.recordedAt
+          : messageStartAtByRequest.get(requestId) ?? item.recordedAt,
+        phase: phase ?? 0,
+      };
+    })
+    .sort((left, right) => left.sortAt.localeCompare(right.sortAt) ||
+      left.phase - right.phase ||
+      left.item.priority - right.item.priority ||
+      left.item.insertion - right.item.insertion)
+    .map(({ item }, index) => ({ ...item.activity, sequence: index + 1 }));
 }
 
-/**
- * 同一模型请求的思考完成事实必须排在同请求的消息正文检查点之前：原始流中
- * 思考先于正文出现，而检查点与思考完成可能在不同时刻落库（记录顺序不反映
- * 内容顺序）。不同请求之间仍按 recordedAt 排序。
- */
-function durableMessageOrder(
-  left: { readonly activity: OrdinaryRunActivity },
-  right: { readonly activity: OrdinaryRunActivity },
-): number {
-  const leftReasoning = durableReasoningCompletedActivity(left.activity);
-  const rightReasoning = durableReasoningCompletedActivity(right.activity);
-  if (!leftReasoning && !rightReasoning) return 0;
-  const leftOutput = durableOutputCompletedActivity(left.activity);
-  const rightOutput = durableOutputCompletedActivity(right.activity);
-  if (leftReasoning && rightOutput &&
-    sameDurableModelRequest(left.activity, right.activity)) return -1;
-  if (leftOutput && rightReasoning &&
-    sameDurableModelRequest(left.activity, right.activity)) return 1;
-  return 0;
-}
-
-function sameDurableModelRequest(
-  left: OrdinaryRunActivity,
-  right: OrdinaryRunActivity,
-): boolean {
-  const leftRequestId = durableModelRequestId(left);
-  const rightRequestId = durableModelRequestId(right);
-  return leftRequestId !== undefined && leftRequestId === rightRequestId;
+/** Returns the semantic phase within one model request's replay unit. */
+function durableMessagePhase(activity: OrdinaryRunActivity): 0 | 1 | undefined {
+  if (durableReasoningCompletedActivity(activity)) return 0;
+  if (durableOutputCompletedActivity(activity)) return 1;
+  return undefined;
 }
 
 function durableModelRequestId(activity: OrdinaryRunActivity): string | undefined {

@@ -29,7 +29,7 @@ import type {
 import { createFileSystemOrdinaryConversationControlRepository } from "./conversation-control-repository.js";
 import { createFileSystemOrdinaryRunRepository } from "./file-system-repository.js";
 import { createOrdinaryAgentLoopExecutionPort } from "./agent-loop-execution.js";
-import { createOrdinaryAgentFeature } from "./ordinary-agent-feature.js";
+import { createOrdinaryAgentFeature, durableOrdinaryRunReplayFromState } from "./ordinary-agent-feature.js";
 import {
   createFileSystemOrdinaryManagedAttachmentRepository,
   OrdinaryManagedAttachmentRepositoryError,
@@ -55,6 +55,94 @@ import type {
   AgentSessionRef,
   AgentSessionRepository,
 } from "../model-runtime/agent-session.js";
+
+test("durable replay keeps same-request reasoning before output without a non-transitive sort", () => {
+  const sessionRef = ordinaryAgentSessionRef("replay-order-session");
+  const assistantEntryRef = { sessionId: sessionRef.sessionId, entryId: "assistant-tool-call" };
+  const compactionEntryRef = { sessionId: sessionRef.sessionId, entryId: "compaction" };
+  let state = createInitialOrdinaryRunState({
+    runId: "replay-order-run",
+    sessionRef,
+    turn: ordinaryRunTurn("replay-order-run"),
+    runInput: { userMessage: "replay" },
+    birth: ordinaryRunBirth(),
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    eventId: "created",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:00.100Z",
+    eventId: "started",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: { kind: "start_leaf_captured", sessionId: sessionRef.sessionId, startLeafRef: null },
+    },
+    recordedAt: "2026-01-01T00:00:00.200Z",
+    eventId: "start-captured",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: {
+        kind: "input_entry_committed",
+        sessionId: sessionRef.sessionId,
+        inputEntryRef: { sessionId: sessionRef.sessionId, entryId: "input" },
+      },
+    },
+    recordedAt: "2026-01-01T00:00:00.300Z",
+    eventId: "input-committed",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: {
+        kind: "assistant_tool_call_entry_committed",
+        sessionId: sessionRef.sessionId,
+        assistantEntryRef,
+        toolCallIds: ["tool-call"],
+      },
+      modelRequestId: "model-request",
+    },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "output-committed",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: {
+        kind: "compaction_entry_committed",
+        sessionId: sessionRef.sessionId,
+        compactionEntryRef,
+        tokensBefore: 100,
+      },
+    },
+    recordedAt: "2026-01-01T00:00:02.000Z",
+    eventId: "compaction-committed",
+  });
+  state = transitionOrdinaryRun({
+    state,
+    transition: { type: "record_reasoning", modelRequestId: "model-request", content: "thinking" },
+    recordedAt: "2026-01-01T00:00:03.000Z",
+    eventId: "reasoning-committed",
+  });
+
+  const replay = durableOrdinaryRunReplayFromState(state, [{ entryRef: assistantEntryRef, text: "tool call" }]);
+  assert.deepEqual(replay.activities.map((activity) =>
+    activity.type === "run.transition" ? activity.event.type : activity.type), [
+    "run.created",
+    "run.started",
+    "model.reasoning.completed",
+    "model.output.completed",
+    "context.compaction.completed",
+  ]);
+});
 
 test("Ordinary feature persists completed, failed, and cancelled outcomes with Session phases", async (t) => {
   const completed = await fixture(t, { execute: async (input) => completedOutcome(input, "done", completed.sessions) });

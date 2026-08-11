@@ -9,7 +9,6 @@ import {
   Trash2,
   ChevronDown,
   Search,
-  Sparkles,
   Tag,
   Lock,
   Check,
@@ -630,7 +629,6 @@ function LeftNav({
                   label={t.name}
                   count={countIn(t.id)}
                   active={nav === t.id}
-                  agent={t.origin === 'agent'}
                   onClick={() => setNav(t.id)}
                 />
               ))}
@@ -769,14 +767,12 @@ function NavItem({
   label,
   count,
   active,
-  agent,
   onClick,
 }: {
   icon: ReactNode
   label: string
   count?: number
   active?: boolean
-  agent?: boolean
   onClick: () => void
 }) {
   return (
@@ -802,11 +798,6 @@ function NavItem({
         {icon}
       </span>
       <span className="relative z-[1] flex-1 truncate text-sm">{label}</span>
-      {agent && (
-        <span className="relative z-[1] flex">
-          <Sparkles size={11} style={{ opacity: active ? 0.9 : 0.5 }} />
-        </span>
-      )}
       {count != null && (
         <span className="relative z-[1] text-xs" style={{ opacity: 0.6 }}>
           {count}
@@ -816,7 +807,7 @@ function NavItem({
   )
 }
 
-/* 主区里某个主题的标题条:改名 / 删除 / agent 标记。 */
+/* 主区里某个主题的标题条:改名 / 删除。 */
 function ThemeHeader({
   theme,
   count,
@@ -864,15 +855,6 @@ function ThemeHeader({
       <span className="text-xs" style={{ color: 'var(--aa-text-3, #aba39b)' }}>
         {count}
       </span>
-      {theme.origin === 'agent' && (
-        <span
-          className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded"
-          style={{ background: 'var(--aa-accent-bg, #6865a712)', color: 'var(--aa-accent, #6865a7)' }}
-        >
-          <Sparkles size={10} />
-          agent
-        </span>
-      )}
       <div className="flex-1" />
       <button
         onClick={() => {
@@ -1786,7 +1768,7 @@ function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) 
 
 const WAVE = [30, 55, 40, 80, 60, 95, 50, 70, 45, 85, 35, 65, 50, 90, 40, 60, 30]
 
-/** 卡片上的「归入主题」浮层:勾选归属 + 锁定(锁定 = agent 别再动)。 */
+/** 卡片上的「归入主题」浮层:勾选归属 + 锁定归类。 */
 function TagPopover({
   page,
   themeApi,

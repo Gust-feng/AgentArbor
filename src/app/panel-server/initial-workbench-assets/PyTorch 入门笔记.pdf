@@ -1,0 +1,157 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 9 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 676 >>
+stream
+BT
+/F1 24 Tf
+70 770 Td
+(PyTorch Quick Start) Tj
+/F1 17 Tf
+1 0 0 1 70 720 Tm
+(1. Tensors and basic operations) Tj
+/F1 12 Tf
+1 0 0 1 70 686 Tm
+(PyTorch uses tensors as its central data structure.) Tj
+/F1 12 Tf
+1 0 0 1 70 652 Tm
+(A tensor is similar to a NumPy ndarray, but it can run on a GPU) Tj
+/F1 12 Tf
+1 0 0 1 70 618 Tm
+(and participate in automatic differentiation.) Tj
+/F1 12 Tf
+1 0 0 1 70 584 Tm
+() Tj
+/F1 12 Tf
+1 0 0 1 70 560 Tm
+(x = torch.tensor\([1.0, 2.0, 3.0]\)) Tj
+/F1 12 Tf
+1 0 0 1 70 526 Tm
+(y = torch.zeros\(2, 3\)) Tj
+/F1 12 Tf
+1 0 0 1 70 492 Tm
+() Tj
+/F1 12 Tf
+1 0 0 1 70 468 Tm
+(Set requires_grad=True when an operation should enter the dynamic graph.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 9 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 694 >>
+stream
+BT
+/F1 24 Tf
+70 770 Td
+(PyTorch Quick Start) Tj
+/F1 17 Tf
+1 0 0 1 70 720 Tm
+(2. Automatic differentiation) Tj
+/F1 12 Tf
+1 0 0 1 70 686 Tm
+(Calling backward\(\) follows the computation graph in reverse.) Tj
+/F1 12 Tf
+1 0 0 1 70 652 Tm
+(Gradients accumulate on leaf tensors in their grad attributes.) Tj
+/F1 12 Tf
+1 0 0 1 70 618 Tm
+() Tj
+/F1 12 Tf
+1 0 0 1 70 594 Tm
+(x = torch.tensor\(2.0, requires_grad=True\)) Tj
+/F1 12 Tf
+1 0 0 1 70 560 Tm
+(y = x ** 2) Tj
+/F1 12 Tf
+1 0 0 1 70 526 Tm
+(y.backward\(\)) Tj
+/F1 12 Tf
+1 0 0 1 70 492 Tm
+(print\(x.grad\)  # 4.0) Tj
+/F1 12 Tf
+1 0 0 1 70 458 Tm
+() Tj
+/F1 12 Tf
+1 0 0 1 70 434 Tm
+(Gradients accumulate, so clear them before every training step.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 9 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 727 >>
+stream
+BT
+/F1 24 Tf
+70 770 Td
+(PyTorch Quick Start) Tj
+/F1 17 Tf
+1 0 0 1 70 720 Tm
+(3. A minimal training loop) Tj
+/F1 12 Tf
+1 0 0 1 70 686 Tm
+(Most training loops repeat five steps:) Tj
+/F1 12 Tf
+1 0 0 1 70 652 Tm
+(forward pass, loss, zero gradients, backward pass, parameter update.) Tj
+/F1 12 Tf
+1 0 0 1 70 618 Tm
+() Tj
+/F1 12 Tf
+1 0 0 1 70 594 Tm
+(pred = model\(inputs\)) Tj
+/F1 12 Tf
+1 0 0 1 70 560 Tm
+(loss = loss_fn\(pred, targets\)) Tj
+/F1 12 Tf
+1 0 0 1 70 526 Tm
+(optimizer.zero_grad\(\)) Tj
+/F1 12 Tf
+1 0 0 1 70 492 Tm
+(loss.backward\(\)) Tj
+/F1 12 Tf
+1 0 0 1 70 458 Tm
+(optimizer.step\(\)) Tj
+/F1 12 Tf
+1 0 0 1 70 424 Tm
+() Tj
+/F1 12 Tf
+1 0 0 1 70 400 Tm
+(This sequence is the backbone of most PyTorch training code.) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000133 00000 n 
+0000000259 00000 n 
+0000000986 00000 n 
+0000001112 00000 n 
+0000001857 00000 n 
+0000001983 00000 n 
+0000002761 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+2831
+%%EOF

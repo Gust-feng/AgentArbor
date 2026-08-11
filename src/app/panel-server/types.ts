@@ -33,8 +33,6 @@ export type PanelServerOptions = {
   readonly testOnlyAllowFakeModel?: boolean;
   /** Test-only opt-out for the product's first-install initial assets. */
   readonly testOnlySkipInitialWorkbenchData?: boolean;
-  /** Test/development-only opt-in for the retired example dataset. */
-  readonly testOnlySeedInitialWorkbenchDemoData?: boolean;
 };
 
 export type PanelExternalResourceTarget =

@@ -242,7 +242,6 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       ordinaryAgentExecution: options.ordinaryAgentExecution,
       testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
       testOnlySkipInitialWorkbenchData: options.testOnlySkipInitialWorkbenchData,
-      testOnlySeedInitialWorkbenchDemoData: options.testOnlySeedInitialWorkbenchDemoData,
       runtimePaths,
     });
   }
@@ -269,7 +268,6 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     ordinaryAgentExecution: options.ordinaryAgentExecution,
     testOnlyAllowFakeModel: options.testOnlyAllowFakeModel,
     testOnlySkipInitialWorkbenchData: options.testOnlySkipInitialWorkbenchData,
-    testOnlySeedInitialWorkbenchDemoData: options.testOnlySeedInitialWorkbenchDemoData,
     runtimePaths,
   });
 }
@@ -361,7 +359,6 @@ function assemblePanelRuntime(input: {
   readonly ordinaryAgentExecution?: import("../ordinary-agent/contracts.js").OrdinaryExecutionPort;
   readonly testOnlyAllowFakeModel?: boolean;
   readonly testOnlySkipInitialWorkbenchData?: boolean;
-  readonly testOnlySeedInitialWorkbenchDemoData?: boolean;
 }): PanelRuntime {
   const activeRequestJobs = new Set<Promise<void>>();
   const contextAttachmentMedia = new Map<string, PanelContextAttachmentMediaEntry>();
@@ -525,7 +522,7 @@ function assemblePanelRuntime(input: {
           personalKnowledgeFeature,
           workbenchAssets,
           managedSpaceRoot,
-          seedDemo: input.testOnlySeedInitialWorkbenchDemoData,
+          managedSpaceFolderRoot,
         }),
   );
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {

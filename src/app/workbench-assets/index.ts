@@ -19,4 +19,3 @@ export {
   workbenchAssetCaptionFingerprint,
 } from "./asset-caption.js";
 export { createSqliteWorkbenchAssetRepository } from "./sqlite-repository.js";
-export { getAllMaterials as getInitialWorkbenchAssets } from "./initial-assets.js";

@@ -130,12 +130,12 @@
 .aa-reference-preview__annotation-tags span { padding: 2px 9px; border-radius: 10px; background: var(--aa-surface-hover, #eeebe6); color: var(--aa-text-2, #87827c); font-size: 11px; }
 .aa-reference-preview__annotation-empty { font-size: 12px; }
 .aa-pdf-document { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 32px 24px 80px; background: var(--aa-canvas, #f7f5f2); }
-.aa-pdf-document__page { position: relative; width: min(100%, 720px); min-height: 480px; overflow: hidden; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 4px; background: #fff; box-shadow: 0 1px 8px rgba(45,40,34,.06); }
+.aa-pdf-document__page { position: relative; width: min(100%, 720px); min-height: 480px; overflow: hidden; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 4px; background: var(--aa-paper, #ffffff); box-shadow: 0 1px 8px rgba(45,40,34,.06); }
 .aa-pdf-document__page--text { padding: 56px 64px; }
 .aa-pdf-document__page--text pre { margin: 0; color: var(--aa-text-1, #292722); white-space: pre-wrap; font: 14px/1.8 var(--reading-font, ui-serif, Georgia, serif); }
 .aa-pdf-document__page--canvas { min-height: 0; }
 .aa-pdf-document__page--canvas canvas { display: block; width: 100%; height: 100%; }
-.aa-pdf-document__page-number { position: absolute; right: 24px; bottom: 20px; padding: 2px 4px; border-radius: 3px; background: rgba(255,255,255,.86); color: var(--aa-text-3, #aba39b); font-size: 11px; }
+.aa-pdf-document__page-number { position: absolute; right: 24px; bottom: 20px; padding: 2px 4px; border-radius: 3px; background: color-mix(in srgb, var(--aa-paper, #ffffff) 86%, transparent); color: var(--aa-text-3, #aba39b); font-size: 11px; }
 .aa-pdf-document__continuation { display: flex; min-height: 42px; align-items: center; gap: 10px; color: var(--aa-text-3, #aba39b); font-size: 11px; }
 .aa-pdf-document__continuation button { min-height: 30px; padding: 0 10px; border: 1px solid var(--aa-border, rgba(45,40,34,.09)); border-radius: 5px; background: var(--aa-surface, #fff); color: var(--aa-accent, #6865a7); }
 .aa-pdf-document__page-error, .aa-pdf-document__state { color: var(--aa-text-3, #aba39b); font-size: 12px; }

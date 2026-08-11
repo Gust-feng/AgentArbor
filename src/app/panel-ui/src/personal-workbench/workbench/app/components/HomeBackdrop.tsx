@@ -25,17 +25,17 @@ export function HomeBackdrop() {
           </radialGradient>
 
           <linearGradient id="aa-home-night-paper" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#2a282e" />
-            <stop offset="0.46" stopColor="#222127" />
+            <stop offset="0" stopColor="#22242c" />
+            <stop offset="0.46" stopColor="#1f2128" />
             <stop offset="1" stopColor="#1b1b20" />
           </linearGradient>
           <linearGradient id="aa-home-night-sheet-a" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#323038" />
-            <stop offset="1" stopColor="#2a2930" />
+            <stop offset="0" stopColor="#45475a" />
+            <stop offset="1" stopColor="#3a3c4d" />
           </linearGradient>
           <linearGradient id="aa-home-night-sheet-b" x1="0" y1="0" x2="0.9" y2="1">
-            <stop offset="0" stopColor="#2a2930" />
-            <stop offset="1" stopColor="#232329" />
+            <stop offset="0" stopColor="#30353e" />
+            <stop offset="1" stopColor="#2a2f36" />
           </linearGradient>
         </defs>
 
@@ -83,17 +83,17 @@ export function HomeBackdrop() {
           <path
             d="M0 430 C228 392 420 418 620 402 C850 383 1060 420 1260 406 C1360 399 1420 408 1440 404 L1440 900 L0 900 Z"
             fill="url(#aa-home-night-sheet-a)"
-            fillOpacity="0.52"
+            fillOpacity="0.66"
           />
           <path
-            d="M0 514 C220 474 408 502 606 486 C830 468 1040 504 1240 492 C1350 485 1412 501 1440 496 L1440 900 L0 900 Z"
+            d="M0 560 C220 520 408 548 606 532 C830 514 1040 550 1240 538 C1350 531 1412 547 1440 542 L1440 900 L0 900 Z"
             fill="url(#aa-home-night-sheet-b)"
             fillOpacity="0.72"
           />
           <path
-            d="M0 628 C210 594 392 620 588 610 C806 598 1020 628 1218 616 C1332 609 1402 626 1440 620 L1440 900 L0 900 Z"
-            fill="#1d1e23"
-            fillOpacity="0.84"
+            d="M0 700 C210 666 392 692 588 682 C806 670 1020 700 1218 688 C1332 681 1402 698 1440 692 L1440 900 L0 900 Z"
+            fill="#292c33"
+            fillOpacity="0.68"
           />
         </g>
       </svg>

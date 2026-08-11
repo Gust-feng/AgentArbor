@@ -94,7 +94,42 @@ test("session context compaction reports overflow when one retained turn still e
   assert.equal(faux.state.callCount, 1);
 });
 
-test("session context compaction refuses to summarize image content until Pi preserves it", async () => {
+test("session context compaction substitutes a text notice for image content when the model is text-only", async () => {
+  const session = await new InMemorySessionRepo().create({ id: "session-one" });
+  await session.appendMessage({
+    role: "user",
+    content: [
+      { type: "text", text: "old image context" },
+      { type: "image", mimeType: "image/png", data: Buffer.from("image").toString("base64") },
+    ],
+    timestamp: 1,
+  });
+  for (let index = 0; index < 30; index += 1) {
+    await session.appendMessage({ role: "user", content: `old context ${index} `.repeat(50), timestamp: index * 2 + 3 });
+    await session.appendMessage(fauxAssistantMessage(`old answer ${index}`));
+  }
+  await session.appendMessage({ role: "user", content: "current request", timestamp: 100 });
+  const faux = fauxProvider({ models: [{ id: "text-only-model", contextWindow: 3_000, maxTokens: 500, input: ["text"] }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([fauxAssistantMessage("summary of old context")]);
+
+  const result = await compactSessionContextIfNeeded({
+    agentSession: session,
+    activeContextMessages: (await session.buildContext()).messages,
+    modelRegistry: models,
+    selectedModel: faux.getModel(),
+    abortSignal: new AbortController().signal,
+    compactionSettings: TEST_SETTINGS,
+  });
+
+  assert.equal(result.status, "compacted", result.status === "failed" ? result.error : undefined);
+  if (result.status !== "compacted") return;
+  assert.equal((await session.getEntry(result.compactionEntryRef.entryId))?.type, "compaction");
+  assert.equal(faux.state.callCount, 1);
+});
+
+test("session context compaction still refuses image summarization for vision-capable models", async () => {
   const session = await new InMemorySessionRepo().create({ id: "session-one" });
   await session.appendMessage({
     role: "user",

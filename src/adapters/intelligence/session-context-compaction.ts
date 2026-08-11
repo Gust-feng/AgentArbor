@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import type { AgentSessionEntryRef } from "../../app/model-runtime/agent-session.js";
+import { replaceUnsupportedImageBlocks } from "./session-image-placeholder.js";
 
 export type SessionContextCompactionResult =
   | { readonly status: "unchanged" }
@@ -68,10 +69,22 @@ export async function compactSessionContextIfNeeded(
   }
   if (prepared.value.messagesToSummarize.some(containsImageContent) ||
       prepared.value.turnPrefixMessages.some(containsImageContent)) {
-    return {
-      status: "failed",
-      code: "context_compaction_images_unsupported",
-      error: "The active Session contains image content in the compaction prefix; Pi image-aware request-boundary compaction is required.",
+    // Pi has no image-aware compaction, so a summary cannot preserve image
+    // content. A vision-capable model must fail rather than silently lose
+    // the images; a text-only model substitutes an observable text notice so
+    // the run keeps working without faking or summarizing the pixels.
+    const modelInputSupportsImage = input.selectedModel.input.includes("image");
+    if (modelInputSupportsImage) {
+      return {
+        status: "failed",
+        code: "context_compaction_images_unsupported",
+        error: "The active Session contains image content in the compaction prefix; Pi image-aware request-boundary compaction is required.",
+      };
+    }
+    prepared.value = {
+      ...prepared.value,
+      messagesToSummarize: [...replaceUnsupportedImageBlocks(prepared.value.messagesToSummarize, modelInputSupportsImage)],
+      turnPrefixMessages: [...replaceUnsupportedImageBlocks(prepared.value.turnPrefixMessages, modelInputSupportsImage)],
     };
   }
   const compacted = await compact(

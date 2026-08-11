@@ -78,29 +78,69 @@ test("Desktop Agent resolves authorized local image refs into ephemeral model at
   }
 });
 
-test("Desktop Agent rejects image input for non-vision models", async () => {
+test("Desktop Agent still resolves image bytes for non-vision models so a later vision model can read them", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-no-vision-"));
   const imagePath = path.join(root, "screen.png");
-  await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await fs.writeFile(imagePath, bytes);
   try {
     const taskSoil = createTaskSoil({
       rawGoal: "describe the image",
       goalId: "goal-no-vision",
       traceId: "trace-no-vision",
-      contextRefs: [{ ref: `local-file:${imagePath}`, kind: "file" }],
+      contextRefs: [{ ref: `local-file:${imagePath}`, kind: "file", title: "screen.png" }],
       permissionBoundaryRefs: [`read:local-file:${imagePath}`],
     });
     const messages: readonly ModelMessage[] = [{ role: "user", content: "Describe the image." }];
 
-    await assert.rejects(
-      attachDesktopFileInputsToModelMessages({
-        messages,
-        taskSoil,
-        modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
-        workspaceRoot: root,
-      }),
-      (error: unknown) => error instanceof CodedExecutionError && error.code === "model_vision_input_unsupported",
-    );
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages,
+      taskSoil,
+      modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
+      workspaceRoot: root,
+    });
+
+    // Bytes must still be attached: they enter the durable Pi Session and the
+    // loop context boundary substitutes a text notice for this text-only run.
+    const user = resolved.at(-1);
+    assert.equal(user?.role, "user");
+    assert.equal(user?.content, "Describe the image.");
+    assert.equal(user?.attachments?.length, 1);
+    assert.deepEqual(user?.attachments?.[0]?.source, {
+      kind: "data",
+      mimeType: "image/png",
+      data: bytes.toString("base64"),
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent reports unreadable image refs as a text notice for non-vision models instead of failing", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-missing-no-vision-"));
+  const imagePath = path.join(root, "missing.png");
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the image",
+      goalId: "goal-missing-no-vision",
+      traceId: "trace-missing-no-vision",
+      contextRefs: [{ ref: `local-file:${imagePath}`, kind: "file", metadata: { mimeType: "image/png" } }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages: [{ role: "user", content: "Describe the image." }],
+      taskSoil,
+      modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
+      workspaceRoot: root,
+    });
+
+    const user = resolved.at(-1);
+    assert.equal(user?.role, "user");
+    assert.equal(user?.attachments, undefined);
+    assert.equal(user?.content.includes("could not be delivered"), true);
+    assert.equal(user?.content.includes(`local-file:${imagePath}`), true);
+    assert.equal(user?.content.includes("Describe the image."), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

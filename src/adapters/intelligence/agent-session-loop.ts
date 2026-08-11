@@ -60,6 +60,7 @@ import {
 } from "../../domain/tools/index.js";
 import { modelFailureKindFromError } from "../../kernel/intelligence/failures.js";
 import { compactSessionContextIfNeeded } from "./session-context-compaction.js";
+import { replaceUnsupportedImageBlocks } from "./session-image-placeholder.js";
 import type { ModelProviderPayloadTransformer } from "./model-provider-binding.js";
 import { errorMessage } from "../../kernel/values/index.js";
 
@@ -232,13 +233,6 @@ export function createAgentSessionLoop(options: AgentSessionLoopOptions): AgentL
         usage: {},
       };
       const prompt = preparePromptInput(input);
-      if (prompt.images !== undefined && !state.modelInputSupportsImage) {
-        return failedResult(
-          state,
-          "The active Pi model does not accept image input for this run.",
-          "model_image_input_unsupported",
-        );
-      }
       await input.onSessionWriteCheckpoint?.({
         kind: "start_leaf_captured",
         sessionId,
@@ -372,18 +366,6 @@ function compactionPreparationContainsImage(preparation: {
 }): boolean {
   return preparation.messagesToSummarize.some(messageContainsImage) ||
     preparation.turnPrefixMessages.some(messageContainsImage);
-}
-
-function assertModelContextAcceptsImages(
-  messages: readonly AgentMessage[],
-  state: AgentSessionExecutionState,
-): void {
-  if (state.modelInputSupportsImage || !messages.some(messageContainsImage)) return;
-  state.maintenanceFailure = {
-    code: "model_image_input_unsupported",
-    error: "The active Pi model does not accept image content already present in the Session.",
-  };
-  throw new Error(state.maintenanceFailure.error);
 }
 
 function createHarnessTools(
@@ -1130,8 +1112,12 @@ function attachDelegatedHarnessHooks(
   const pendingRequests = new Map<string, PendingToolRequest>();
   const preparedToolCallIds = new Set<string>();
   attachProviderPayloadHook(harness, options, metadataByName);
-  harness.on("context", async ({ messages }) => {
-    assertModelContextAcceptsImages(messages, state);
+  harness.on("context", async ({ messages: contextMessages }) => {
+    // A text-only model cannot see image blocks already present in the
+    // Session; replace them with an observable text notice so the turn still
+    // runs. The Session itself keeps the original image bytes so a later
+    // vision-capable model can still reference them.
+    const messages = [...replaceUnsupportedImageBlocks(contextMessages, state.modelInputSupportsImage)];
     const compaction = await compactSessionContextIfNeeded({
       agentSession,
       activeContextMessages: messages,
@@ -1144,14 +1130,13 @@ function attachDelegatedHarnessHooks(
     if (compaction.status === "failed") throw new Error(compaction.error);
     return compaction.status === "compacted"
       ? { messages: [...compaction.compactedContextMessages] }
-      : undefined;
+      : { messages: [...messages] };
   });
   harness.on("session_before_compact", ({ preparation }) => {
+    // Pi-native compaction cannot summarize image content for a text-only
+    // model; the request-boundary compaction path already replaces images
+    // with text notices. Skipping this compaction must not fail the run.
     if (!compactionPreparationContainsImage(preparation)) return undefined;
-    state.maintenanceFailure = {
-      code: "context_compaction_images_unsupported",
-      error: "The active Session contains image content in the compaction prefix; Pi image-aware compaction is required.",
-    };
     return { cancel: true };
   });
   harness.on("tool_result", ({ details }) => {
@@ -1239,8 +1224,12 @@ function attachHarnessHooks(
   metadataByName: ReadonlyMap<string, ToolDefinition["metadata"]>,
 ): void {
   attachProviderPayloadHook(harness, options, metadataByName);
-  harness.on("context", async ({ messages }) => {
-    assertModelContextAcceptsImages(messages, state);
+  harness.on("context", async ({ messages: contextMessages }) => {
+    // A text-only model cannot see image blocks already present in the
+    // Session; replace them with an observable text notice so the turn still
+    // runs. The Session itself keeps the original image bytes so a later
+    // vision-capable model can still reference them.
+    const messages = [...replaceUnsupportedImageBlocks(contextMessages, state.modelInputSupportsImage)];
     const sessionCompaction = await compactSessionContextIfNeeded({
       agentSession: runtimeSession,
       activeContextMessages: messages,
@@ -1273,14 +1262,13 @@ function attachHarnessHooks(
       state.safeLeafEntryId = sessionCompaction.compactionEntryRef.entryId;
       return { messages: [...sessionCompaction.compactedContextMessages] };
     }
-    return undefined;
+    return { messages: [...messages] };
   });
   harness.on("session_before_compact", ({ preparation }) => {
+    // Pi-native compaction cannot summarize image content for a text-only
+    // model; the request-boundary compaction path already replaces images
+    // with text notices. Skipping this compaction must not fail the run.
     if (!compactionPreparationContainsImage(preparation)) return undefined;
-    state.maintenanceFailure = {
-      code: "context_compaction_images_unsupported",
-      error: "The active Session contains image content in the compaction prefix; Pi image-aware compaction is required.",
-    };
     return { cancel: true };
   });
   harness.on("tool_result", ({ details }) => {

@@ -30,11 +30,34 @@ export async function attachDesktopFileInputsToModelMessages(input: {
   if (imageRefs.length === 0) {
     return input.messages;
   }
-  if (input.modelCapabilities?.supportsVisionInput !== true) {
+  if (input.modelCapabilities === undefined) {
+    // Capability is unknown: the run cannot claim that image delivery works,
+    // so it must not silently drop the user's attachments.
     throw new CodedExecutionError(
       "model_vision_input_unsupported",
-      "This run contains image attachments, but the frozen model capability does not support image input.",
+      "This run contains image attachments, but the frozen model capability is unknown.",
     );
+  }
+  if (input.modelCapabilities.supportsVisionInput !== true) {
+    // A text-only model cannot consume the images right now, but the bytes
+    // must still be resolved and attached: they enter the Pi durable Session
+    // so a later vision-capable model in the same conversation can rebuild
+    // and inspect them. Model visibility is substituted later by the loop's
+    // context boundary with an observable text notice. Resolution failures
+    // are reported as a text notice instead of failing the run, so the
+    // text-only model keeps answering the rest of the turn.
+    const attachments = await resolveImageAttachments({
+      taskSoil: input.taskSoil,
+      workspaceRoot: input.workspaceRoot ?? process.cwd(),
+      resolveManagedAttachmentPath: input.resolveManagedAttachmentPath,
+      readAuthorization: input.readAuthorization,
+    });
+    const resolved = attachments.items.length === 0
+      ? input.messages
+      : appendAttachmentsToCurrentUserMessage(input.messages, attachments.items);
+    return attachments.failures.length === 0
+      ? resolved
+      : appendNoticeToCurrentUserMessage(resolved, undeliverableAttachmentNotice(attachments.failures));
   }
   const attachments = await resolveImageAttachments({
     taskSoil: input.taskSoil,
@@ -221,6 +244,37 @@ function appendAttachmentsToCurrentUserMessage(
     return {
       ...message,
       attachments: [...(message.attachments ?? []), ...attachments],
+    };
+  });
+}
+
+function undeliverableAttachmentNotice(failures: readonly string[]): string {
+  return `[${failures.length} image attachment(s) could not be delivered: ` +
+    `${failures.join("; ")}. Tell the user which images were not delivered.]`;
+}
+
+function appendNoticeToCurrentUserMessage(
+  messages: readonly ModelMessage[],
+  notice: string,
+): readonly ModelMessage[] {
+  let targetIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "user") {
+      targetIndex = index;
+      break;
+    }
+  }
+  if (targetIndex < 0) {
+    return messages;
+  }
+  return messages.map((message, index) => {
+    if (index !== targetIndex) {
+      return message;
+    }
+    return {
+      ...message,
+      content: message.content.length === 0 ? notice : `${message.content}\n\n${notice}`,
     };
   });
 }

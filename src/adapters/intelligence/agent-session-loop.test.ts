@@ -1672,10 +1672,15 @@ test("agent session loop rejects tool-origin images when the frozen run capabili
   await loop.release();
 });
 
-test("agent session loop rejects current user images when Pi model.input is text-only", async (t) => {
+test("agent session loop replaces current user images with a text notice when Pi model.input is text-only", async (t) => {
   const fixture = await createFixture(t);
   const imageData = Buffer.from("current-user-image").toString("base64");
   const textOnlyModel = { ...fixture.selectedModel, input: ["text"] as ("text" | "image")[] };
+  let capturedContext: Context | undefined;
+  fixture.faux.setResponses([(context) => {
+    capturedContext = context;
+    return fauxAssistantMessage("The image was not delivered.");
+  }]);
   const loop = createAgentSessionLoop({ ...fixture, selectedModel: textOnlyModel });
 
   const result = await loop.execute(loopInput(emptyGateway(), {
@@ -1690,13 +1695,60 @@ test("agent session loop rejects current user images when Pi model.input is text
     }],
   }));
 
-  assert.equal(result.status, "failed");
-  assert.equal(result.status === "failed" ? result.errorCode : undefined, "model_image_input_unsupported");
-  assert.equal(fixture.faux.state.callCount, 0);
+  assert.equal(result.status, "completed");
+  assert.equal(fixture.faux.state.callCount, 1);
+  assert.equal(JSON.stringify(capturedContext?.messages).includes(imageData), false);
+  assert.equal(JSON.stringify(capturedContext?.messages).includes("Image not delivered"), true);
   await loop.release();
 });
 
-test("agent session loop rejects historical Session images when Pi model.input is text-only", async (t) => {
+test("agent session loop persists images sent under a text-only model so a later vision model can inspect them", async (t) => {
+  const fixture = await createFixture(t);
+  const imageData = Buffer.from("deferred-vision-image").toString("base64");
+  const textOnlyModel = { ...fixture.selectedModel, input: ["text"] as ("text" | "image")[] };
+  let textOnlyContext: Context | undefined;
+  fixture.faux.setResponses([(context) => {
+    textOnlyContext = context;
+    return fauxAssistantMessage("Image could not be inspected.");
+  }]);
+  const textOnlyLoop = createAgentSessionLoop({ ...fixture, selectedModel: textOnlyModel });
+
+  const first = await textOnlyLoop.execute(loopInput(emptyGateway(), {
+    messages: [{
+      role: "user",
+      content: "inspect this image",
+      attachments: [{
+        kind: "image",
+        attachmentId: "deferred-image",
+        source: { kind: "data", mimeType: "image/png", data: imageData },
+      }],
+    }],
+  }));
+
+  assert.equal(first.status, "completed");
+  assert.equal(JSON.stringify(textOnlyContext?.messages).includes(imageData), false);
+  assert.equal(JSON.stringify(textOnlyContext?.messages).includes("Image not delivered"), true);
+  assert.equal(JSON.stringify(await fixture.session.getBranch()).includes(imageData), true);
+  await textOnlyLoop.release();
+
+  let visionContext: Context | undefined;
+  fixture.faux.setResponses([(context) => {
+    visionContext = context;
+    return fauxAssistantMessage("Now I can see the image.");
+  }]);
+  const visionLoop = createAgentSessionLoop(fixture);
+
+  const second = await visionLoop.execute(loopInput(emptyGateway(), {
+    messages: [{ role: "user", content: "now inspect it" }],
+  }));
+
+  assert.equal(second.status, "completed");
+  assert.equal(JSON.stringify(visionContext?.messages).includes(imageData), true);
+  assert.equal(JSON.stringify(visionContext?.messages).includes("Image not delivered"), false);
+  await visionLoop.release();
+});
+
+test("agent session loop replaces historical Session images with a text notice when Pi model.input is text-only", async (t) => {
   const fixture = await createFixture(t);
   const imageData = Buffer.from("historical-session-image").toString("base64");
   await fixture.session.appendMessage({
@@ -1704,7 +1756,11 @@ test("agent session loop rejects historical Session images when Pi model.input i
     content: [{ type: "image", mimeType: "image/png", data: imageData }],
     timestamp: Date.now(),
   });
-  fixture.faux.setResponses([fauxAssistantMessage("must not reach provider")]);
+  let capturedContext: Context | undefined;
+  fixture.faux.setResponses([(context) => {
+    capturedContext = context;
+    return fauxAssistantMessage("History image could not be inspected.");
+  }]);
   const textOnlyModel = { ...fixture.selectedModel, input: ["text"] as ("text" | "image")[] };
   const loop = createAgentSessionLoop({ ...fixture, selectedModel: textOnlyModel });
 
@@ -1712,9 +1768,10 @@ test("agent session loop rejects historical Session images when Pi model.input i
     messages: [{ role: "user", content: "continue" }],
   }));
 
-  assert.equal(result.status, "failed");
-  assert.equal(result.status === "failed" ? result.errorCode : undefined, "model_image_input_unsupported");
-  assert.equal(fixture.faux.state.callCount, 0);
+  assert.equal(result.status, "completed");
+  assert.equal(fixture.faux.state.callCount, 1);
+  assert.equal(JSON.stringify(capturedContext?.messages).includes(imageData), false);
+  assert.equal(JSON.stringify(capturedContext?.messages).includes("Image not delivered"), true);
   await loop.release();
 });
 

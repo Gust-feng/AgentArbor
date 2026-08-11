@@ -5,15 +5,12 @@ import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse }
 import { modelOptionsFromConfig } from "../model-options";
 import type { ChatModelOption, ConversationFollowUpMode } from "../contracts/composer";
 import { ModelOptionPicker } from "./model-option-picker";
+import { SettingsSelectControl } from "./settings-select-control";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import "./capability-settings.css";
 
 const SAVED_API_KEY_MASK = "****************";
 type McpCatalogServer = NonNullable<ToolsResponse["mcpCatalog"]>[number];
-type SettingsSelectOption = {
-  readonly value: string;
-  readonly label: string;
-};
 type ModelCapabilityTarget = {
   readonly key: string;
   readonly option: ChatModelOption;
@@ -1460,98 +1457,6 @@ function McpConfirmationModeField(props: {
         onChange={(value) => props.setForm({ ...props.form, confirmationMode: confirmationModeFromValue(value) })}
       />
     </label>
-  );
-}
-
-function SettingsSelectControl(props: {
-  readonly id: string;
-  readonly ariaLabel: string;
-  readonly value: string;
-  readonly options: readonly SettingsSelectOption[];
-  readonly onChange: (value: string) => void;
-  readonly disabled?: boolean;
-}): React.ReactElement {
-  const [open, setOpen] = React.useState(false);
-  const selectedIndex = Math.max(0, props.options.findIndex((option) => option.value === props.value));
-  const selectedOption = props.options[selectedIndex] ?? props.options[0];
-  const listId = `${props.id}-listbox`;
-  const updateSelection = (value: string): void => {
-    props.onChange(value);
-    setOpen(false);
-  };
-  const stepSelection = (direction: 1 | -1): void => {
-    if (props.options.length === 0) return;
-    const nextIndex = (selectedIndex + direction + props.options.length) % props.options.length;
-    const nextOption = props.options[nextIndex];
-    if (nextOption !== undefined) {
-      props.onChange(nextOption.value);
-      setOpen(true);
-    }
-  };
-  return (
-    <div
-      className={`settings-select-control ${open ? "open" : ""}`}
-      onBlur={(event) => {
-        const nextFocus = event.relatedTarget as Node | null;
-        if (!event.currentTarget.contains(nextFocus)) {
-          setOpen(false);
-        }
-      }}
-    >
-      <button
-        id={props.id}
-        type="button"
-        className="settings-select-trigger"
-        aria-label={props.ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listId}
-        disabled={props.disabled}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown") {
-            event.preventDefault();
-            stepSelection(1);
-          } else if (event.key === "ArrowUp") {
-            event.preventDefault();
-            stepSelection(-1);
-          } else if (event.key === "Escape") {
-            setOpen(false);
-          }
-        }}
-      >
-        <span>{selectedOption?.label ?? props.value}</span>
-        <span className="settings-select-chevron" aria-hidden="true" />
-      </button>
-      {open && (
-        <div id={listId} className="settings-select-popover" role="listbox" aria-label={props.ariaLabel}>
-          {props.options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className="settings-select-option"
-              role="option"
-              aria-selected={option.value === props.value}
-              data-selected={option.value === props.value}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                updateSelection(option.value);
-              }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                updateSelection(option.value);
-              }}
-              onClick={() => updateSelection(option.value)}
-            >
-              <span>{option.label}</span>
-              <span className="settings-select-option-mark" aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 

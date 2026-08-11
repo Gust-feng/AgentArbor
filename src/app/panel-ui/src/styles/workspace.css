@@ -855,8 +855,8 @@
   white-space: nowrap;
 }
 
-.settings-select-option:hover,
-.settings-select-option:focus-visible {
+.settings-select-option:not(:disabled):hover,
+.settings-select-option:not(:disabled):focus-visible {
   background: color-mix(in oklch, var(--accent-soft) 52%, var(--surface));
   color: var(--fg);
   outline: none;
@@ -879,6 +879,20 @@
 
 .settings-select-option[data-selected="true"] .settings-select-option-mark {
   opacity: 1;
+}
+
+.settings-select-option:disabled {
+  cursor: not-allowed;
+  color: color-mix(in oklch, var(--muted) 84%, var(--fg));
+  opacity: 1;
+}
+
+.settings-select-option-status {
+  justify-self: end;
+  color: color-mix(in oklch, var(--muted) 78%, transparent);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .mcp-form-grid textarea,

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { CommandShellConfig, CommandShellKind, ConfiguredCommandShellKind } from "../contracts/config";
+import { SettingsSelectControl } from "./settings-select-control";
 import { SettingRow } from "./workspace-common";
 
 export function CommandShellSelection(props: {
@@ -32,18 +33,22 @@ export function CommandShellSelection(props: {
     <section className="settings-card">
       <h3>命令 Shell</h3>
       <SettingRow label="运行环境">
-        <select
-          aria-busy={commandShellPending ? "true" : undefined}
+        <SettingsSelectControl
+          id="command-shell"
+          ariaLabel="运行环境"
           value={selectedCommandShellKind}
-          onChange={(event) => saveCommandShell(commandShellKind(event.target.value))}
-        >
-          <option value="auto">自动</option>
-          {commandShellOptions(props.commandShell).map((option) => (
-            <option key={option.kind} value={option.kind} disabled={option.disabled}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "auto", label: "自动" },
+            ...commandShellOptions(props.commandShell).map((option) => ({
+              value: option.kind,
+              label: option.label,
+              disabled: option.disabled,
+              ...(option.disabledLabel === undefined ? {} : { disabledLabel: option.disabledLabel }),
+            })),
+          ]}
+          busy={commandShellPending}
+          onChange={(value) => saveCommandShell(commandShellKind(value))}
+        />
       </SettingRow>
       <SettingRow label="当前执行">
         <span className="settings-value">{commandShellSummary(props.commandShell, commandShellPending ? selectedCommandShellKind : undefined)}</span>
@@ -66,6 +71,7 @@ function commandShellOptions(shell: CommandShellConfig | undefined): readonly {
   readonly kind: CommandShellKind;
   readonly label: string;
   readonly disabled: boolean;
+  readonly disabledLabel?: string;
 }[] {
   const detected = shell?.availableShells?.filter((option): option is {
     readonly kind: CommandShellKind;
@@ -81,6 +87,9 @@ function commandShellOptions(shell: CommandShellConfig | undefined): readonly {
       kind: option.kind,
       label: option.label ?? defaultShellOptionLabel(option.kind),
       disabled: option.availability === "missing" && option.kind !== shell?.configuredKind,
+      ...(option.availability === "missing" && option.kind !== shell?.configuredKind
+        ? { disabledLabel: "未检测到" }
+        : {}),
     }));
   }
   return [

@@ -650,8 +650,8 @@ html[data-style="classic"] .message-queue-count {
 }
 
 html[data-style="classic"] .sidebar-conversation-menu button:hover:not(:disabled),
-html[data-style="classic"] .settings-select-option:hover,
-html[data-style="classic"] .settings-select-option:focus-visible {
+html[data-style="classic"] .settings-select-option:not(:disabled):hover,
+html[data-style="classic"] .settings-select-option:not(:disabled):focus-visible {
   background: var(--nav-hover-bg);
 }
 

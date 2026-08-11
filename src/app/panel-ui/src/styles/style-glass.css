@@ -1171,8 +1171,8 @@ html[data-style="glass"] .composer-reasoning-popover button:hover,
 html[data-style="glass"] .composer-reasoning-popover button.selected,
 html[data-style="glass"] .composer-access-popover button:hover,
 html[data-style="glass"] .composer-access-popover button.selected,
-html[data-style="glass"] .settings-select-option:hover,
-html[data-style="glass"] .settings-select-option:focus-visible {
+html[data-style="glass"] .settings-select-option:not(:disabled):hover,
+html[data-style="glass"] .settings-select-option:not(:disabled):focus-visible {
   background:
     linear-gradient(180deg, color-mix(in oklch, white 22%, transparent), transparent 60%),
     color-mix(in oklch, var(--accent) 6%, transparent);

@@ -334,12 +334,13 @@ test('keeps the user text draft when only the annotation changes on refresh', as
   }
   invalidateDocumentPreviews(['reference-one'])
 
-  expect(await screen.findByRole('heading', { name: '整理 v2' })).toBeTruthy()
+  await waitFor(() => expect(getCachedReferencePreview('reference-one')?.annotation?.revision).toBe(2))
+  expect(screen.queryByRole('heading', { name: '整理 v2' })).toBeNull()
   expect(screen.getByDisplayValue('我的草稿')).toBeTruthy()
   expect(screen.getByRole('textbox')).toBeTruthy()
 })
 
-test('applies a refreshed annotation but keeps the source-change notice when both changed', async () => {
+test('keeps hidden annotation refreshed while preserving a source-change notice', async () => {
   const base = textPreview('1:4', '正文内容')
   let current: DocumentPreview = {
     ...base,
@@ -354,7 +355,7 @@ test('applies a refreshed annotation but keeps the source-change notice when bot
 
   render(<ReferencePreview itemId="reference-one" fallbackTitle="note.txt" canOpen={false} onOpen={() => undefined} />)
   expect(await screen.findByDisplayValue('正文内容')).toBeTruthy()
-  expect(await screen.findByRole('heading', { name: '整理 v1' })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: '整理 v1' })).toBeNull()
 
   current = {
     ...textPreview('2:6', '外部新版正文'),
@@ -367,13 +368,14 @@ test('applies a refreshed annotation but keeps the source-change notice when bot
   }
   invalidateDocumentPreviews(['reference-one'])
 
-  expect(await screen.findByRole('heading', { name: '整理 v2' })).toBeTruthy()
+  await waitFor(() => expect(getCachedReferencePreview('reference-one')?.annotation?.revision).toBe(2))
+  expect(screen.queryByRole('heading', { name: '整理 v2' })).toBeNull()
   expect(screen.getByText('来源已更新，当前内容仍保持不变。')).toBeTruthy()
   expect(screen.getByDisplayValue('正文内容')).toBeTruthy()
   expect(screen.getByRole('button', { name: '加载新版' })).toBeTruthy()
 })
 
-test('keeps the image caption editable alongside the Space annotation', async () => {
+test('keeps the image caption editable while hiding the Space annotation', async () => {
   const annotated = {
     ...previewWithPresentation('image-annotated', 'image', { kind: 'media', mediaKind: 'image', mimeType: 'image/png', url: '/image.png', alt: '图像', caption: '手绘的网络结构与推导草稿', captionEditable: true, captionFingerprint: 'space-image-caption:1' }),
     title: '神经网络结构图.png',
@@ -398,7 +400,8 @@ test('keeps the image caption editable alongside the Space annotation', async ()
   expect(rendered.container.querySelector('.aa-reference-preview__media--described')).not.toBeNull()
   expect(screen.getByText('手绘的网络结构与推导草稿')).toBeTruthy()
   expect(screen.getByRole('textbox', { name: '图片说明' })).toBeTruthy()
-  expect(rendered.container.querySelector('.aa-reference-preview__annotation')).not.toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation')).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Agent 描述' })).toBeNull()
 
   rendered.rerender(<ReferencePreview itemId="image-bare" fallbackTitle="神经网络结构图.png" canOpen={false} onOpen={() => undefined} />)
   await waitFor(() => expect(rendered.container.querySelector('.aa-reference-preview__media--described')).not.toBeNull())

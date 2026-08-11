@@ -367,36 +367,9 @@ function ReferenceDocumentSessionView({
       {changes !== undefined ? <TextDiff changes={changes} /> : sourceModeActive && markdownDocument ? (
         <textarea className="aa-reference-preview__editor" data-document-scroll="source" value={draft} onChange={(event) => scheduleSave(event.target.value)} spellCheck={false} />
       ) : <>
-        {preview.annotation !== undefined && preview.presentation.kind !== 'web' && (
-          <ReferenceAnnotation annotation={preview.annotation} sourceVersion={`${targetKey}:annotation:${preview.annotation.revision}`} />
-        )}
         <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} captionEditable={!readOnly && !loading && preview.content.kind === 'media' && preview.content.mediaKind === 'image' && preview.content.captionEditable === true} onChange={scheduleSave} onCaptionChange={saveCaption} onReload={() => void reload()} onNavigatePath={onNavigatePath} />
       </>}
     </div>
-  )
-}
-
-function ReferenceAnnotation({ annotation, sourceVersion }: { annotation: SpaceReferenceAnnotation; sourceVersion: string }) {
-  return (
-    <section className="aa-reference-preview__annotation" aria-label="Agent 整理">
-      <div className="aa-reference-preview__annotation-label">
-        <span>Agent 整理</span>
-        <span className="aa-reference-preview__annotation-actor" data-actor={annotation.updatedBy}>{annotation.updatedBy === 'user' ? '用户维护' : 'Agent 维护'}</span>
-      </div>
-      <div className="aa-reference-preview__annotation-markdown reading-prose">
-        <MarkdownDocumentSurface markdown={annotation.markdown} sourceVersion={sourceVersion} />
-      </div>
-      {annotation.keyPoints !== undefined && annotation.keyPoints.length > 0 && (
-        <ul className="aa-reference-preview__annotation-points">
-          {annotation.keyPoints.map((point, index) => <li key={index}>{point}</li>)}
-        </ul>
-      )}
-      {annotation.tags !== undefined && annotation.tags.length > 0 && (
-        <div className="aa-reference-preview__annotation-tags">
-          {annotation.tags.map((tag, index) => <span key={index}>{tag}</span>)}
-        </div>
-      )}
-    </section>
   )
 }
 

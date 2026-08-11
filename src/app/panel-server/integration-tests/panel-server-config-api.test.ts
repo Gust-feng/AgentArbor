@@ -19,16 +19,22 @@ test("panel config API keeps model provider and search keys out of ordinary resp
   const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
-    const update = await requestJson(server.url, "/api/config/model-provider", {
+    const created = await requestJson(server.url, "/api/config/model-profiles", {
       method: "POST",
       body: {
+        profileId: "openai-router",
         label: "OpenAI Router",
         logoDataUrl,
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
         baseUrl: "https://provider.example/",
         model: "panel-model",
         defaultAiMode: "openai-compatible",
         apiKey: secret,
       },
+    });
+    const update = await requestJson(server.url, "/api/config/model-profiles/openai-router/activate", {
+      method: "POST",
     });
     const informationUpdate = await requestJson(server.url, "/api/config/information-sources", {
       method: "POST",
@@ -43,6 +49,7 @@ test("panel config API keeps model provider and search keys out of ordinary resp
     assert.equal(update.status, 200);
     assert.equal(informationUpdate.status, 200);
     assert.equal(config.status, 200);
+    assert.equal(created.text.includes(secret), false);
     assert.equal(update.text.includes(secret), false);
     assert.equal(informationUpdate.text.includes(tavilySecret), false);
     assert.equal(config.text.includes(secret), false);
@@ -50,12 +57,17 @@ test("panel config API keeps model provider and search keys out of ordinary resp
     assert.equal(config.text.includes(tavilySecret), false);
     assert.equal(settingsRaw.includes(secret), false);
     assert.equal(settingsRaw.includes(tavilySecret), false);
+    assert.equal(created.body.profile.secretConfigured, true);
     assert.equal(update.body.config.secretConfigured, true);
     assert.equal(informationUpdate.body.informationAccess.web.secretConfigured, true);
     assert.equal(informationUpdate.body.informationAccess.web.maxResults, 2);
     assert.equal(config.body.informationAccess.web.secretConfigured, true);
     assert.equal(config.body.capabilities.activeModel.secretConfigured, true);
-    assert.equal(config.body.profiles.length, 1);
+    assert.equal(config.body.profiles.length, 2);
+    assert.equal(
+      config.body.profiles.some((profile: { profileId?: string }) => profile.profileId === "openai-router"),
+      true,
+    );
     assert.deepEqual(config.body.modelCatalogs, []);
     assert.equal(
       config.body.modelProviderMarket.presets.some((preset: { presetId?: string; baseUrl?: string }) =>
@@ -95,6 +107,7 @@ test("panel config API keeps model provider and search keys out of ordinary resp
     const clearLogo = await requestJson(server.url, "/api/config/model-provider", {
       method: "POST",
       body: {
+        profileId: "openai-router",
         clearLogoDataUrl: true,
       },
     });
@@ -144,15 +157,21 @@ test("panel config API persists 3MiB model provider logos", async () => {
   const largeLogoDataUrl = `data:image/png;base64,${Buffer.alloc(3 * 1024 * 1024).toString("base64")}`;
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
-    const update = await requestJson(server.url, "/api/config/model-provider", {
+    const created = await requestJson(server.url, "/api/config/model-profiles", {
       method: "POST",
       body: {
+        profileId: "large-logo-router",
         label: "Large Logo Router",
         logoDataUrl: largeLogoDataUrl,
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
         baseUrl: "https://provider.example/v1",
         model: "panel-model",
         defaultAiMode: "openai-compatible",
       },
+    });
+    const update = await requestJson(server.url, "/api/config/model-profiles/large-logo-router/activate", {
+      method: "POST",
     });
     const config = await requestJson(server.url, "/api/config");
 
@@ -351,11 +370,14 @@ test("panel config API keeps built-in provider label and logo immutable", async 
   const builtInLogoAttempt = "data:image/png;base64,aGVsbG8=";
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
-    const custom = await requestJson(server.url, "/api/config/model-provider", {
+    const custom = await requestJson(server.url, "/api/config/model-profiles", {
       method: "POST",
       body: {
+        profileId: "openai-router",
         label: "OpenAI Router",
         logoDataUrl: customLogoDataUrl,
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
         baseUrl: "https://openrouter.ai/api/v1",
         model: "openai/gpt-4.1",
         defaultAiMode: "openai-compatible",
@@ -375,8 +397,8 @@ test("panel config API keeps built-in provider label and logo immutable", async 
     assert.equal(custom.status, 200);
     assert.equal(builtIn.status, 200);
     assert.equal(config.status, 200);
-    assert.equal(custom.body.config.label, "OpenAI Router");
-    assert.equal(custom.body.config.logoDataUrl, customLogoDataUrl);
+    assert.equal(custom.body.profile.label, "OpenAI Router");
+    assert.equal(custom.body.profile.logoDataUrl, customLogoDataUrl);
     assert.equal(builtIn.body.config.label, "OpenAI");
     assert.equal(builtIn.body.config.logoDataUrl, undefined);
     assert.equal(config.body.config.label, "OpenAI");

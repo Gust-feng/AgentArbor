@@ -91,9 +91,10 @@ test("Ordinary Panel entry submits directly to the feature and exposes the canon
     ordinaryAgentExecution: completedExecution(directory, "ordinary answer", { inputTokens: 8, outputTokens: 3, totalTokens: 11, cachedInputTokens: 5 }),
   });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "finish an ordinary task" },
+      body: { goal: "finish an ordinary task", spaceId },
     });
     assert.equal(submitted.status, 202);
     assert.equal(["running", "completed"].includes(submitted.body.run.status), true);
@@ -213,9 +214,10 @@ test("deleting an Ordinary conversation only unlinks its Space conversation refe
     ordinaryAgentExecution: completedExecution(directory, "done", {}),
   });
   try {
+    const ownerSpaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "start" },
+      body: { goal: "start", spaceId: ownerSpaceId },
     });
     const conversationId = submitted.body.conversation.conversationId as string;
     await waitForView(server.url, submitted.body.run.runId, "completed");
@@ -299,13 +301,14 @@ test("Ordinary conversation ignores the retired per-conversation workspace input
     ordinaryAgentExecution: completedExecution(directory, "workspace answer", {}),
   });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "ignore this workspace", workspaceDirectory },
+      body: { goal: "ignore this workspace", workspaceDirectory, spaceId },
     });
     const conversationId = submitted.body.conversation.conversationId;
     await waitForView(server.url, submitted.body.run.runId, "completed");
-    assert.equal(submitted.body.conversation.workspaceFolder.selection, "default");
+    assert.equal(submitted.body.conversation.spaceId, spaceId);
     assert.notEqual(submitted.body.conversation.workspaceFolder.path, workspaceDirectory);
     assert.deepEqual(
       (await requestJson(server.url, "/api/conversations")).body.conversations[0].workspaceFolder,
@@ -327,6 +330,13 @@ test("Ordinary conversation ignores the retired per-conversation workspace input
     await removeTemporaryTree(directory);
   }
 });
+
+async function firstSpaceId(baseUrl: string): Promise<string> {
+  const spaces = await requestJson(baseUrl, "/api/spaces");
+  const spaceId = spaces.body.spaces?.[0]?.id;
+  assert.equal(typeof spaceId, "string");
+  return spaceId as string;
+}
 
 test("Ordinary submit admitted before shutdown returns an explicit quiescing response", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-shutdown-admission-"));

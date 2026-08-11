@@ -67,14 +67,12 @@ export function contextWindowTokensForActiveRun(input: {
   return positiveNumber(input.runContextWindowTokens) ?? positiveNumber(input.selectedModelContextWindowTokens);
 }
 
-export function latestModelUsageForRunFromTranscript(
-  runId: string,
+export function latestModelUsageFromTranscript(
   nodes: readonly ContextWindowUsageTranscriptNode[]
 ): ContextWindowUsageModelUsage | undefined {
   for (let index = nodes.length - 1; index >= 0; index -= 1) {
     const node = nodes[index];
-    if (node?.runId !== runId) continue;
-    const usage = node.modelUsage;
+    const usage = node?.modelUsage;
     if (finiteTokenCount(usage?.latestAgentRequest?.inputTokens) !== undefined) {
       return usage;
     }

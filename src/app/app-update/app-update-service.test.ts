@@ -68,6 +68,26 @@ test("app update service detects newer manifests without executing installers", 
   assert.equal(checked.canInstall, false);
 });
 
+test("app update service omits release details when the current version is latest", async () => {
+  const service = createAppUpdateService({
+    currentVersion: "0.4.0",
+    manifestUrl: "https://updates.example/agentarbor.json",
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        version: "0.4.0",
+        body: "<h1>AgentArbor v0.4.0</h1><p>不应投影当前版本的更新说明。</p>",
+      }),
+    }),
+  });
+
+  const checked = await service.check();
+
+  assert.equal(checked.status, "up_to_date");
+  assert.equal(checked.latest, undefined);
+});
+
 test("app update service records failed checks as update state", async () => {
   const updateFetch: AppUpdateFetch = async () => ({
     ok: true,

@@ -61,6 +61,10 @@ class FakeElectronUpdater extends EventEmitter implements ElectronUpdaterLike {
 
 test("electron app update service reports up to date checks", async () => {
   const updater = new FakeElectronUpdater();
+  updater.updateInfo = {
+    version: "0.1.0",
+    releaseNotes: "<p>不应投影当前版本的更新说明。</p>",
+  };
   const service = createElectronAppUpdateService({
     updater,
     currentVersion: "0.1.0",
@@ -75,6 +79,7 @@ test("electron app update service reports up to date checks", async () => {
   assert.equal(checked.runtime, "electron");
   assert.equal(checked.canCheck, true);
   assert.equal(checked.canInstall, false);
+  assert.equal(checked.latest, undefined);
 });
 
 test("electron app update service downloads available updates before install", async () => {

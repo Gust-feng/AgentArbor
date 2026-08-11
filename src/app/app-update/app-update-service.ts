@@ -155,16 +155,17 @@ export class ManifestAppUpdateService implements AppUpdateServiceLike {
       if (comparison === undefined) {
         return this.recordFailure("更新清单版本号无效。", checkedAt);
       }
+      const updateAvailable = comparison > 0;
       this.current = {
         ok: true,
-        status: comparison > 0 ? "available" : "up_to_date",
+        status: updateAvailable ? "available" : "up_to_date",
         runtime: "manifest",
         currentVersion: this.options.currentVersion,
         manifestUrlConfigured: true,
         canCheck: true,
         canInstall: false,
         checkedAt,
-        latest: manifest,
+        ...(updateAvailable ? { latest: manifest } : {}),
       };
       return this.current;
     } catch (error) {

@@ -91,7 +91,40 @@ test("disabling developer mode removes the prompt editor from an open settings d
   expect(screen.queryByLabelText("Desktop Agent")).toBeNull();
 });
 
-test("about settings renders release notes instead of exposing raw HTML", () => {
+test("about settings renders release notes for a newer version instead of exposing raw HTML", () => {
+  render(
+    <AboutSettings
+      config={{ product: { name: "AgentArbor", version: "0.4.0" } }}
+      appUpdate={{
+        ok: true,
+        status: "available",
+        runtime: "manifest",
+        currentVersion: "0.4.0",
+        manifestUrlConfigured: true,
+        canCheck: true,
+        canInstall: false,
+        latest: {
+          version: "0.5.0",
+          notes: "<h1>AgentArbor v0.5.0</h1><p>本版本包含更新。</p><h2>主要更新</h2><ul><li>渲染更新说明</li></ul>",
+        },
+      }}
+      agentClusterEnabled={false}
+      onAgentClusterEnabledChange={() => undefined}
+      developerModeEnabled={false}
+      onDeveloperModeChange={() => undefined}
+      onCheckAppUpdate={() => undefined}
+      onInstallAppUpdate={() => undefined}
+    />,
+  );
+
+  expect(screen.getByLabelText("更新说明")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "AgentArbor v0.5.0" })).toBeTruthy();
+  expect(screen.getByText("本版本包含更新。")).toBeTruthy();
+  expect(screen.getByText("渲染更新说明")).toBeTruthy();
+  expect(screen.queryByText("<h1>AgentArbor v0.5.0</h1>")).toBeNull();
+});
+
+test("about settings hides release notes when the current version is latest", () => {
   render(
     <AboutSettings
       config={{ product: { name: "AgentArbor", version: "0.4.0" } }}
@@ -105,7 +138,7 @@ test("about settings renders release notes instead of exposing raw HTML", () => 
         canInstall: false,
         latest: {
           version: "0.4.0",
-          notes: "<h1>AgentArbor v0.4.0</h1><p>本版本包含更新。</p><ul><li>渲染更新说明</li></ul>",
+          notes: "旧状态中残留的更新说明也不应显示。",
         },
       }}
       agentClusterEnabled={false}
@@ -117,10 +150,9 @@ test("about settings renders release notes instead of exposing raw HTML", () => 
     />,
   );
 
-  expect(screen.getByRole("heading", { name: "AgentArbor v0.4.0" })).toBeTruthy();
-  expect(screen.getByText("本版本包含更新。")).toBeTruthy();
-  expect(screen.getByText("渲染更新说明")).toBeTruthy();
-  expect(screen.queryByText("<h1>AgentArbor v0.4.0</h1>")).toBeNull();
+  expect(screen.getByText("当前版本已是最新。")).toBeTruthy();
+  expect(screen.queryByLabelText("更新说明")).toBeNull();
+  expect(screen.queryByText("旧状态中残留的更新说明也不应显示。")).toBeNull();
 });
 
 function renderSettingsDialog(

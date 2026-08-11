@@ -348,7 +348,9 @@ export function AboutSettings(props: {
   const runtimeDirectory = product?.runtimeDirectory ?? "未提供";
   const updateStatus = checkingUpdate ? "checking" : props.appUpdate?.status ?? "idle";
   const updateLink = appUpdateActionUrl(props.appUpdate);
-  const releaseNotes = nonEmptyUpdateNotes(props.appUpdate?.latest?.notes);
+  const releaseNotes = appUpdateHasNewVersion(updateStatus)
+    ? nonEmptyUpdateNotes(props.appUpdate?.latest?.notes)
+    : undefined;
   const canCheckUpdate = props.appUpdate?.canCheck !== false && updateStatus !== "downloading" && updateStatus !== "installing";
   const canInstallUpdate = props.appUpdate?.canInstall === true && updateStatus === "downloaded";
   const developerModeGesture = useRef({ count: 0, startedAt: 0 });
@@ -581,6 +583,13 @@ function appUpdateSummary(update: AppUpdateInfo | undefined, checking: boolean):
 function appUpdateActionUrl(update: AppUpdateInfo | undefined): string | undefined {
   if (update?.status !== "available") return undefined;
   return update.latest?.releasePageUrl ?? update.latest?.downloadUrl;
+}
+
+function appUpdateHasNewVersion(status: AppUpdateStatus): boolean {
+  return status === "available"
+    || status === "downloading"
+    || status === "downloaded"
+    || status === "installing";
 }
 
 function nonEmptyUpdateNotes(value: string | undefined): string | undefined {

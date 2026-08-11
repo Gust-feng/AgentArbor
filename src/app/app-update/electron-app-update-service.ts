@@ -176,7 +176,7 @@ export class ElectronAppUpdateService implements AppUpdateServiceLike {
       };
     });
 
-    this.options.updater.on("update-not-available", (info) => {
+    this.options.updater.on("update-not-available", () => {
       if (!this.options.enabled) return;
       this.current = {
         ...this.current,
@@ -185,7 +185,7 @@ export class ElectronAppUpdateService implements AppUpdateServiceLike {
         canCheck: true,
         canInstall: false,
         checkedAt: new Date().toISOString(),
-        latest: updateManifestFromElectronInfo(info),
+        latest: undefined,
         progress: undefined,
         errorSummary: undefined,
       };

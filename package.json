@@ -26,6 +26,7 @@
     "panel": "pnpm build && node dist/app/panel.js",
     "panel:dev": "node scripts/panel-dev.mjs",
     "panel:desktop:dev": "node scripts/panel-dev.mjs --desktop",
+    "panel:desktop:dev:no-restart": "node scripts/panel-dev.mjs --desktop --no-restart",
     "panel:smoke": "pnpm build && node dist/app/panel.js --port 0 --smoke",
     "panel:desktop": "pnpm build && pnpm exec electron dist/app/panel-desktop.js",
     "panel:desktop:smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --smoke",

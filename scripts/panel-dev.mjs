@@ -67,6 +67,11 @@ const childEnv = {
   AGENTARBOR_PANEL_API_PORT: String(apiPort),
 };
 const shouldStartPanelApi = !args.desktop || args.smoke;
+// --no-restart 模式：不随 dist 重建自动重启 Electron 与 panel-api，
+// 避免“改一个文件就整窗重启”的开发体验；需要生效时手动重启整个会话。
+if (args.noRestart) {
+  console.log("  No-restart mode: Electron and panel-api will NOT auto-restart on rebuild.");
+}
 const children = [];
 let desktopChild;
 let desktopLaunch;
@@ -89,9 +94,11 @@ pushChild(spawnLabeled("tsc-watch", process.execPath, [
     "false",
   ]));
 if (shouldStartPanelApi) {
+  // --no-restart 时去掉 node --watch，panel-api 进程不再随 dist 重编译重启
+  const panelApiWatchArgs = args.noRestart ? [] : ["--watch"];
   pushChild(spawnLabeled("panel-api", process.execPath, [
       ...maglevWorkaroundArgs,
-      "--watch",
+      ...panelApiWatchArgs,
       panelEntry,
       "--host",
       args.host,
@@ -162,6 +169,7 @@ function parseCliArgs(argv) {
         "desktop": { type: "boolean", default: false },
         "smoke": { type: "boolean", default: false },
         "exact-port": { type: "boolean", default: false },
+        "no-restart": { type: "boolean", default: false },
         "help": { type: "boolean", short: "h", default: false },
       },
       strict: true,
@@ -189,6 +197,7 @@ function parseCliArgs(argv) {
     portExplicit,
     apiPortExplicit,
     exactPort: values["exact-port"],
+    noRestart: values["no-restart"],
     desktop: values.desktop,
     help: values.help,
     smoke: values.smoke,
@@ -302,6 +311,12 @@ function pushChild(child) {
 function startRestartableDesktop(commandArgs, options) {
   desktopLaunch = { commandArgs, options };
   startDesktopChild();
+  if (args.noRestart) {
+    // --no-restart 模式不启动 dist 监听器，Electron 窗口保持稳定；
+    // 后端代码改动需要手动重启整个 dev 会话才能生效。
+    console.log("[dev] --no-restart: skipping desktop runtime watcher (no auto-restart).");
+    return;
+  }
   desktopRuntimeWatcher = watchFileSystem(path.join(root, "dist"), { recursive: true }, (_event, filename) => {
     if (typeof filename !== "string" || !/\.(?:c?js|json)$/i.test(filename)) {
       return;
@@ -465,12 +480,17 @@ async function stopAll(exitCode) {
 }
 
 function printHelp() {
-  console.log(`Usage: pnpm panel:dev [-- --host 127.0.0.1 --port 4305 --api-port 4306 --config-dir <path> --desktop --smoke --exact-port]
+  console.log(`Usage: pnpm panel:dev [-- --host 127.0.0.1 --port 4305 --api-port 4306 --config-dir <path> --desktop --smoke --exact-port --no-restart]
 
 Starts:
   - TypeScript compiler in watch mode
   - Panel API with node --watch
   - Vite panel UI with HMR and API proxy
   - Electron desktop shell with backend reload when --desktop is provided
+
+--no-restart disables auto-restarts while still rebuilding:
+  - panel-api runs without node --watch
+  - Electron desktop never auto-restarts on dist changes
+  (use with pnpm panel:desktop:dev:no-restart)
 `);
 }

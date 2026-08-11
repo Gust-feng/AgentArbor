@@ -2,12 +2,19 @@ import {
   FakeModelProvider,
   OpenAICompatibleChatCompletionsProvider,
   OpenAIResponsesProvider,
+  createModelCollectionChannel,
+  createModelProviderBinding,
   fetchOpenAICompatibleModelCatalog,
   type ModelCatalogFetchLike,
 } from "../../adapters/intelligence/index.js";
 import { NativeIntelligenceChannel } from "../../kernel/intelligence/channel.js";
 import type { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
-import type { IntelligenceChannel, ModelOutputDelta } from "../../domain/intelligence/index.js";
+import type {
+  IntelligenceChannel,
+  ModelOutputDelta,
+  ModelProviderKind,
+  ModelPurpose,
+} from "../../domain/intelligence/index.js";
 import type {
   ModelProviderModelCatalog,
   ProviderProtocolProfileId,
@@ -120,6 +127,49 @@ export type ResolvedOpenAIModelRuntimeConfig = {
   readonly enableWebSearch: boolean;
   readonly summaryInput: ModelRuntimeSummaryInput;
 };
+
+export type OpenAIAuxiliaryModelChannelInput = {
+  readonly resolved: ResolvedOpenAIModelRuntimeConfig;
+  readonly profileId: SanitizedModelProviderConfig["profileId"];
+  readonly providerKind: ModelProviderKind;
+  readonly resolveApiKey: () => Promise<string | undefined>;
+  readonly supportsVisionInput: boolean;
+  readonly supportsReasoningOutput: boolean;
+  readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
+  readonly bus: InMemoryMessageBus;
+  readonly supportedPurposes: readonly ModelPurpose[];
+};
+
+/** Builds a no-tool Pi-backed channel behind the neutral model capability boundary. */
+export function createOpenAIAuxiliaryModelChannel(
+  input: OpenAIAuxiliaryModelChannelInput,
+): IntelligenceChannel {
+  const binding = createModelProviderBinding({
+    protocol: input.resolved.protocol,
+    baseUrl: input.resolved.baseUrl,
+    model: input.resolved.model,
+    profileId: input.profileId,
+    apiKey: input.resolved.apiKey,
+    resolveApiKey: input.resolveApiKey,
+    providerProfileId: input.resolved.providerProfileId,
+    requestSettings: input.resolved.requestSettings,
+    enableWebSearch: input.resolved.enableWebSearch,
+    supportsVisionInput: input.supportsVisionInput,
+    supportsReasoningOutput: input.supportsReasoningOutput,
+    contextWindow: input.contextWindow,
+    maxOutputTokens: input.maxOutputTokens,
+  });
+  return createModelCollectionChannel({
+    modelRegistry: binding.modelRegistry,
+    selectedModel: binding.selectedModel,
+    transformProviderPayload: binding.transformProviderPayload,
+    providerKind: input.providerKind,
+    thinkingLevel: "off",
+    bus: input.bus,
+    supportedPurposes: input.supportedPurposes,
+  });
+}
 
 /** Shared OpenAI connection resolution for both IntelligenceChannel and AgentLoop factories. */
 export function resolveOpenAIModelRuntimeConfig(input: {

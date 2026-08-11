@@ -2,12 +2,9 @@ import type { ModelMessage, ModelOutputContract, ModelResponse } from "../../dom
 import { InMemoryEventLog } from "../../kernel/events/in-memory-event-log.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { InMemoryMessageBus } from "../../kernel/messages/in-memory-message-bus.js";
-import {
-  createModelCollectionChannel,
-  createModelProviderBinding,
-} from "../../adapters/intelligence/index.js";
 import type { ConfigCenter } from "../config-center/index.js";
 import {
+  createOpenAIAuxiliaryModelChannel,
   ModelRuntimeConfigurationError,
   resolveOpenAIModelRuntimeConfig,
   type OpenAIModelRuntimeMode,
@@ -27,11 +24,9 @@ const TITLE_PROMPT_REF = "prompt:desktop.conversation_title.v1";
  */
 export function createOrdinaryConversationTitleGenerator(input: {
   readonly configCenter: ConfigCenter;
-  readonly createProviderBinding?: typeof createModelProviderBinding;
-  readonly createCollectionChannel?: typeof createModelCollectionChannel;
+  readonly createModelChannel?: typeof createOpenAIAuxiliaryModelChannel;
 }): OrdinaryConversationTitleGenerator {
-  const createProviderBinding = input.createProviderBinding ?? createModelProviderBinding;
-  const createCollectionChannel = input.createCollectionChannel ?? createModelCollectionChannel;
+  const createModelChannel = input.createModelChannel ?? createOpenAIAuxiliaryModelChannel;
   return async ({ conversationId, userMessage, birth }) => {
     const mode = birth.aiMode;
     if (mode !== "openai-compatible" && mode !== "openai-responses") return undefined;
@@ -42,12 +37,9 @@ export function createOrdinaryConversationTitleGenerator(input: {
     });
     const resolved = resolveRuntimeConfig({ mode, environment, birth });
     if (resolved === undefined) return undefined;
-    const binding = createProviderBinding({
-      protocol: resolved.protocol,
-      baseUrl: resolved.baseUrl,
-      model: resolved.model,
+    const channel = createModelChannel({
+      resolved,
       profileId: birth.config.profileId,
-      apiKey: resolved.apiKey,
       resolveApiKey: async () => {
         const current = await input.configCenter.createModelRuntimeEnvironment({
           modelProvider: birth.config,
@@ -55,19 +47,10 @@ export function createOrdinaryConversationTitleGenerator(input: {
         });
         return resolveRuntimeConfig({ mode, environment: current, birth })?.apiKey;
       },
-      providerProfileId: resolved.providerProfileId,
-      requestSettings: resolved.requestSettings,
-      enableWebSearch: resolved.enableWebSearch,
       supportsVisionInput: birth.capabilitySnapshot.modelCapabilities.supportsVisionInput === true,
       supportsReasoningOutput: birth.capabilitySnapshot.modelCapabilities.supportsReasoningOutput === true,
       contextWindow: birth.capabilitySnapshot.modelCapabilities.contextWindowTokens,
       maxOutputTokens: birth.capabilitySnapshot.modelCapabilities.maxOutputTokens,
-    });
-    const channel = createCollectionChannel({
-      modelRegistry: binding.modelRegistry,
-      selectedModel: binding.selectedModel,
-      thinkingLevel: "off",
-      transformProviderPayload: binding.transformProviderPayload,
       providerKind: birth.config.providerKind,
       bus: new InMemoryMessageBus(new InMemoryEventLog()),
       supportedPurposes: ["conversation_title"],

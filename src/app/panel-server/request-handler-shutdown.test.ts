@@ -82,3 +82,71 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
   assert.equal(processCleanupCount, 1);
   assert.equal(await outputStore.read(retained.ref, { startChar: 0, maxChars: 64 }), undefined);
 });
+
+test("Panel shutdown preserves active requests beyond the short drain window", async () => {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  let releaseActiveRequest!: () => void;
+  const activeRequest = new Promise<void>((resolve) => {
+    releaseActiveRequest = resolve;
+  });
+  const activeRequestJobs = new Set<Promise<void>>();
+  const trackedRequest = activeRequest.finally(() => {
+    activeRequestJobs.delete(trackedRequest);
+  });
+  activeRequestJobs.add(trackedRequest);
+  const outputStore = new InMemoryToolOutputStore();
+  const runtime = {
+    isQuiescing: false,
+    activeRequestJobs,
+    ordinaryAgentFeature: { async release() {} },
+    pathDependencyFeature: { async release() {} },
+    releaseWorkbenchProjectionChanges() {},
+    async flushSpaceProcessCleanup() {},
+    async flushSpaceKnowledgeSync() {},
+    personalKnowledgeFeature: { async release() {} },
+    spaceFeature: { async release() {} },
+    workbenchDatabase: { close() {} },
+    async releaseAgentSessionStorage() {},
+    processRegistry: { async cleanupOwnedProcesses() { return undefined; } },
+    processTerminator: {},
+    toolOutputStore: outputStore,
+  } as unknown as PanelRuntime;
+  const originalCloseIdleConnections = server.closeIdleConnections.bind(server);
+  const originalCloseAllConnections = server.closeAllConnections.bind(server);
+  let idleConnectionsClosed!: () => void;
+  const idleConnectionsClosedPromise = new Promise<void>((resolve) => {
+    idleConnectionsClosed = resolve;
+  });
+  let closeIdleConnectionsCount = 0;
+  let closeAllConnectionsCount = 0;
+  server.closeIdleConnections = () => {
+    closeIdleConnectionsCount += 1;
+    originalCloseIdleConnections();
+    // Node closes already-idle sockets when server.close() begins. The second
+    // call is the explicit short-drain action for the still-active request.
+    if (closeIdleConnectionsCount === 2) idleConnectionsClosed();
+  };
+  server.closeAllConnections = () => {
+    closeAllConnectionsCount += 1;
+    originalCloseAllConnections();
+  };
+
+  const closing = closePanelServer(server, runtime);
+  await idleConnectionsClosedPromise;
+  assert.equal(closeIdleConnectionsCount, 2);
+  assert.equal(closeAllConnectionsCount, 0);
+  assert.equal(activeRequestJobs.size, 1);
+
+  releaseActiveRequest();
+  await closing;
+
+  assert.equal(activeRequestJobs.size, 0);
+  assert.equal(closeAllConnectionsCount, 1);
+});

@@ -491,18 +491,16 @@ function resolveRuntimeCleanupTimeout(value: number | undefined): number {
 }
 
 async function waitForPanelRequestIdle(server: Server, runtime: PanelRuntime): Promise<void> {
-  let forcedConnectionsClosed = false;
   while (runtime.activeRequestJobs.size > 0) {
     const jobs = [...runtime.activeRequestJobs];
-    if (!forcedConnectionsClosed) {
-      const drained = await settleWithin(jobs, PANEL_REQUEST_DRAIN_TIMEOUT_MS);
-      if (drained) {
-        continue;
-      }
-      server.closeAllConnections();
-      forcedConnectionsClosed = true;
+    const drained = await settleWithin(jobs, PANEL_REQUEST_DRAIN_TIMEOUT_MS);
+    if (drained) {
       continue;
     }
+    // An admitted request may need to observe quiescing and write its explicit
+    // response. Only idle sockets are disposable here; the Host-level cleanup
+    // deadline owns the eventual hard close for requests that never settle.
+    server.closeIdleConnections();
     await Promise.allSettled(jobs);
   }
 }

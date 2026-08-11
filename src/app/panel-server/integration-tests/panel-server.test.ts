@@ -169,10 +169,15 @@ test("panel tools route can disable web search without using the stored Tavily k
         method: "POST",
         body: { provider: "none" },
       });
+      const space = await requestJson(server.url, "/api/spaces", {
+        method: "POST",
+        body: { title: "禁用工具" },
+      });
+      const spaceId = space.body.space.id as string;
 
       const started = await requestJson(server.url, "/api/conversations", {
         method: "POST",
-        body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible" },
+        body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible", spaceId },
       });
       const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");
 
@@ -237,8 +242,15 @@ test("panel Ordinary completes a real tool round through the configured model tr
       });
       const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");
 
+      // run 的工具轮固定使用两次模型请求（工具声明 + 工具结果收尾）；completed
+      // 后 Ordinary 还会异步发起一次无工具 auto title 请求，同样命中同一 provider。
+      const titleDeadline = Date.now() + 4_000;
+      while (modelProvider.requestCount < 3 && Date.now() < titleDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
       assert.equal(started.status, 202);
-      assert.equal(modelProvider.requestCount, 2);
+      assert.equal(modelProvider.requestCount, 3);
       assert.equal(run.body.view.workView.answer.content, "The requested file was read successfully.");
       assert.equal(run.body.view.detail.toolResults.length, 1);
       assert.equal(run.body.view.detail.toolResults[0].toolName, "Read");

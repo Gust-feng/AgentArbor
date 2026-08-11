@@ -56,6 +56,10 @@ const submitSchema = z.object({
   conversation: z.object({ conversationId: z.string().min(1) }).passthrough(),
   run: z.object({ runId: z.string().min(1) }).passthrough(),
 }).passthrough();
+const spaceSchema = z.object({
+  ok: z.literal(true),
+  space: z.object({ id: z.string().min(1) }).passthrough(),
+}).passthrough();
 const viewSchema = z.object({
   ok: z.literal(true),
   view: z.object({
@@ -87,7 +91,10 @@ export async function runRealAiSmoke(
   const local = createLocalConfigCenter({ configDirectory });
   let server: Awaited<ReturnType<typeof startLocalPanelServer>> | undefined;
   try {
-    await local.configCenter.updateModelProviderConfig({
+    const smokeProfileId = "real-ai-smoke";
+    await local.configCenter.createModelProviderProfile({
+      profileId: smokeProfileId,
+      label: "Real AI Smoke",
       providerKind: "openai_compatible",
       protocolKind: configuration.protocol,
       baseUrl: configuration.baseUrl,
@@ -96,6 +103,7 @@ export async function runRealAiSmoke(
       defaultAiMode: configuration.protocol === "openai_responses" ? "openai-responses" : "openai-compatible",
       enabled: true,
     });
+    await local.configCenter.activateModelProviderProfile(smokeProfileId);
     server = await startLocalPanelServer({
       port: 0,
       configDirectory,
@@ -103,9 +111,13 @@ export async function runRealAiSmoke(
       providerFetch: options.providerFetch,
       ordinaryAgentExecution: options.ordinaryAgentExecution?.(configDirectory),
     });
+    const space = spaceSchema.parse(await requestJson(new URL("api/spaces", server.url), {
+      method: "POST",
+      body: JSON.stringify({ title: "Real AI Smoke" }),
+    }));
     const submitted = submitSchema.parse(await requestJson(new URL("api/conversations", server.url), {
       method: "POST",
-      body: JSON.stringify({ goal }),
+      body: JSON.stringify({ goal, spaceId: space.space.id }),
     }));
     const view = await waitForTerminalView(server.url, submitted.run.runId, options.timeoutMs ?? 120_000);
     if (view.view.run.status !== "completed" || view.view.workView.answer === undefined) {

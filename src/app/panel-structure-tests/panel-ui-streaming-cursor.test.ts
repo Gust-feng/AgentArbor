@@ -12,7 +12,8 @@ test("streaming assistant answers render through RichText without a visible curs
   ]);
 
   assert.match(transcript, /props\.live \? <StreamingRichText text=\{props\.text\} live \/>/u);
-  assert.match(richText, /splitStreamingMarkdown\(text\)/u);
+  assert.match(richText, /splitStreamingMarkdownWithOffsets\(displayed\)/u);
+  assert.match(richText, /key=\{`block:\$\{block\.start\}`\}/u);
   assert.match(richText, /stabilizeStreamingMarkdown\(segments\.activeBlock\)/u);
   assert.doesNotMatch(transcript, /stream-cursor|data-entering/u);
   assert.doesNotMatch(richText, /stream-cursor|data-entering/u);

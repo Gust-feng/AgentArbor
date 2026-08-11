@@ -150,6 +150,13 @@ test("Host selects feature-owned Space and Personal Knowledge contributions", ()
     "KnowledgeUpdateNote",
     "KnowledgeDeleteNote",
     "KnowledgeCollect",
+    "KnowledgeList",
+    "KnowledgeReadPage",
+    "KnowledgeUpdateAssetText",
+    "KnowledgeUncollect",
+    "KnowledgeCreateTheme",
+    "KnowledgeAssignTheme",
+    "KnowledgeUnassignTheme",
   ]);
 });
 

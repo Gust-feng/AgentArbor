@@ -30,9 +30,10 @@ test("real AI smoke traverses the production Agent Session loop through a local 
   if (summary.status !== "completed") return;
   assert.equal(summary.answer, "Observed the workspace root through list.");
   assert.equal(summary.toolCallCount, 1);
-  assert.equal(provider.requests.length, 2);
+  assert.equal(provider.requests.length, 3);
   assert.equal(provider.requests[0]?.authorization, "Bearer sk-smoke-test");
   assert.equal(hasToolResultMessage(provider.requests[1]?.body), true);
+  assert.equal(hasToolResultMessage(provider.requests[2]?.body), false);
 });
 
 test("real AI smoke uses the formal Ordinary feature entry and reports canonical completion", async () => {
@@ -228,7 +229,10 @@ async function handleOpenAICompatibleRequest(
   requests: Array<{ readonly authorization?: string; readonly body: unknown }>,
 ): Promise<void> {
   if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
-    response.writeHead(404).end();
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      error: { message: `Unexpected fixture request: ${request.method ?? "UNKNOWN"} ${request.url ?? "UNKNOWN"}` },
+    }));
     return;
   }
   const body = JSON.parse(await readRequestBody(request)) as unknown;

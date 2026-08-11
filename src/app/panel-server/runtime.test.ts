@@ -462,8 +462,15 @@ test("Panel composition restores the durable Workspace deleting gate", async () 
       (error: unknown) => error instanceof Error && "code" in error && error.code === "workspace_deletion_in_progress",
     );
   } finally {
-    await cleanupRuntime(first, directory);
-    await cleanupRuntime(restarted, directory);
+    try {
+      if (first !== undefined) await releasePanelRuntimeResources(first);
+    } finally {
+      try {
+        if (restarted !== undefined) await releasePanelRuntimeResources(restarted);
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      }
+    }
   }
 });
 

@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Model, Models } from "@earendil-works/pi-ai";
 import type { ModelRequest, ModelResponse, IntelligenceChannel } from "../../domain/intelligence/index.js";
 import type { ConfigCenter } from "../config-center/index.js";
+import type { OpenAIAuxiliaryModelChannelInput } from "../model-runtime/factory.js";
 import { ordinaryRunBirth } from "../ordinary-agent/test-support.js";
-import type { ModelProviderBinding, ModelProviderBindingOptions, ModelCollectionChannelOptions } from "../../adapters/intelligence/index.js";
 import { createOrdinaryConversationTitleGenerator } from "./ordinary-conversation-title.js";
 
 test("conversation title generator extracts the JSON title field from the model text", async () => {
@@ -42,21 +41,15 @@ test("conversation title generator returns undefined for empty or failed model o
 test("conversation title generator sends one no-tool title request with reasoning off", async () => {
   const captured: {
     channelRequest: ModelRequest | undefined;
-    channelOptions: ModelCollectionChannelOptions | undefined;
-    providerBindingOptions: ModelProviderBindingOptions | undefined;
+    channelInput: OpenAIAuxiliaryModelChannelInput | undefined;
   } = {
     channelRequest: undefined,
-    channelOptions: undefined,
-    providerBindingOptions: undefined,
+    channelInput: undefined,
   };
   const generator = createOrdinaryConversationTitleGenerator({
     configCenter: stubConfigCenter(),
-    createProviderBinding: (options) => {
-      captured.providerBindingOptions = options;
-      return stubBinding();
-    },
-    createCollectionChannel: (options) => {
-      captured.channelOptions = options;
+    createModelChannel: (input) => {
+      captured.channelInput = input;
       return {
         async request(request: ModelRequest) {
           captured.channelRequest = request;
@@ -68,8 +61,7 @@ test("conversation title generator sends one no-tool title request with reasonin
   const birth = ordinaryRunBirth();
   const title = await generator({ conversationId: "conversation-1", userMessage: "测试一下", birth });
   assert.equal(title, "测试标题");
-  assert.equal(captured.channelOptions?.thinkingLevel, "off");
-  assert.deepEqual(captured.channelOptions?.supportedPurposes, ["conversation_title"]);
+  assert.deepEqual(captured.channelInput?.supportedPurposes, ["conversation_title"]);
   assert.equal(captured.channelRequest?.purpose, "conversation_title");
   assert.equal(captured.channelRequest?.toolChoice, "none");
   assert.deepEqual(captured.channelRequest?.tools, []);
@@ -77,15 +69,14 @@ test("conversation title generator sends one no-tool title request with reasonin
   assert.equal(captured.channelRequest?.sanitizedMessages[0]?.role, "system");
   assert.match(String(captured.channelRequest?.sanitizedMessages[0]?.content), /JSON/u);
   assert.equal(captured.channelRequest?.sanitizedMessages[1]?.content, "测试一下");
-  assert.equal(captured.providerBindingOptions?.model, "gpt-5");
+  assert.equal(captured.channelInput?.resolved.model, "gpt-5");
 });
 
 test("conversation title generator skips fake mode and unconfigured secrets without any model call", async () => {
   const calls: string[] = [];
   const generator = createOrdinaryConversationTitleGenerator({
     configCenter: stubConfigCenter(),
-    createProviderBinding: () => { calls.push("binding"); return stubBinding(); },
-    createCollectionChannel: () => { calls.push("channel"); throw new Error("must not be created"); },
+    createModelChannel: () => { calls.push("channel"); throw new Error("must not be created"); },
   });
   const fakeModeBirth = { ...ordinaryRunBirth(), aiMode: "fake" as const };
   assert.equal(await generator({ conversationId: "conversation-1", userMessage: "hi", birth: fakeModeBirth }), undefined);
@@ -104,8 +95,7 @@ async function generate(options: {
 }): Promise<{ readonly title: string | undefined; readonly requestText: string }> {
   const generator = createOrdinaryConversationTitleGenerator({
     configCenter: stubConfigCenter(),
-    createProviderBinding: () => stubBinding(),
-    createCollectionChannel: () => ({
+    createModelChannel: () => ({
       async request(_request: ModelRequest) {
         if (options.failed === true) return failedResponse();
         return completedResponse(options.textOutput ?? "");
@@ -127,14 +117,6 @@ function stubConfigCenter(): ConfigCenter {
       };
     },
   } as unknown as ConfigCenter;
-}
-
-function stubBinding(): ModelProviderBinding {
-  return {
-    modelRegistry: {} as Models,
-    selectedModel: {} as Model<import("@earendil-works/pi-ai").Api>,
-    thinkingLevel: "off",
-  };
 }
 
 function completedResponse(textOutput: string): ModelResponse {

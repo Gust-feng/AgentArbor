@@ -359,9 +359,10 @@ test("Ordinary submit admitted before shutdown returns an explicit quiescing res
   });
   let closed = false;
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitting = requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "request already admitted" },
+      body: { goal: "request already admitted", spaceId },
     });
     await birthGate.entered;
     const closing = server.close();
@@ -503,9 +504,10 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, ordinaryAgentExecution: execution });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const approvalStart = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "needs approval" },
+      body: { goal: "needs approval", spaceId },
     });
     const approvalView = await waitForView(server.url, approvalStart.body.run.runId, "approval_needed");
     const confirmationId = approvalView.body.view.workView.pendingConfirmation.confirmationId;
@@ -528,7 +530,7 @@ test("Ordinary Panel confirmation and cancellation commands return the establish
 
     const cancelStart = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "wait until cancelled" },
+      body: { goal: "wait until cancelled", spaceId },
     });
     const cancelled = await requestJson(server.url, `/api/basic-agent/runs/${cancelStart.body.run.runId}/cancel`, { method: "POST" });
     assert.equal(cancelled.status, 200);
@@ -560,10 +562,12 @@ test("Ordinary conversation HTTP commands preserve queue ownership and attachmen
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, ordinaryAgentExecution: execution });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const first = await requestJson(server.url, "/api/conversations", {
       method: "POST",
       body: {
         goal: "use attached context",
+        spaceId,
         taskSoilInput: {
           contextRefs: [{
             attachmentId: "attachment-1",
@@ -631,9 +635,10 @@ test("Ordinary SSE replays the complete terminal activity history through final.
     ordinaryAgentExecution: completedExecution(directory, "streamed answer", { inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
   });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "replay a completed run" },
+      body: { goal: "replay a completed run", spaceId },
     });
     await waitForView(server.url, submitted.body.run.runId, "completed");
 
@@ -665,9 +670,10 @@ test("Ordinary SSE preserves tool.completed before final.result in terminal repl
     ordinaryAgentExecution: completedExecutionWithTool(directory, "tool-backed answer", { inputTokens: 2, outputTokens: 1, totalTokens: 3 }),
   });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "use a tool then finish" },
+      body: { goal: "use a tool then finish", spaceId },
     });
     await waitForView(server.url, submitted.body.run.runId, "completed");
 
@@ -705,9 +711,10 @@ test("Ordinary SSE delivers request, progress and completion continuously withou
     },
   });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "observe one long command" },
+      body: { goal: "observe one long command", spaceId },
     });
     await entered;
     const streamPromise = requestSse(
@@ -772,9 +779,10 @@ test("Ordinary SSE reports an opaque-cursor reset and completes terminal replay 
     ordinaryAgentExecution: completedExecutionWithTool(directory, "persisted answer", { inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
   });
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "persist and restart" },
+      body: { goal: "persist and restart", spaceId },
     });
     const firstView = await waitForView(server.url, submitted.body.run.runId, "completed");
     const oldCursor = firstView.body.view.replay.cursor.token;
@@ -825,9 +833,10 @@ test("Panel close aborts the active Ordinary run without starting its queued suc
   });
   let closed = false;
   try {
+    const spaceId = await firstSpaceId(server.url);
     const first = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "stay active until close" },
+      body: { goal: "stay active until close", spaceId },
     });
     await waitForView(server.url, first.body.run.runId, "running");
     const second = await requestJson(server.url, `/api/conversations/${first.body.conversation.conversationId}/messages`, {
@@ -875,9 +884,10 @@ test("Panel close releases a pending Ordinary approval continuation once", async
   });
   let closed = false;
   try {
+    const spaceId = await firstSpaceId(server.url);
     const submitted = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "wait for approval until close" },
+      body: { goal: "wait for approval until close", spaceId },
     });
     await waitForView(server.url, submitted.body.run.runId, "approval_needed");
     await server.close();

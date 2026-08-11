@@ -13,7 +13,7 @@ import {
   requestJson,
 } from "./panel-server-test-utils.js";
 import {
-  hasChatCompletionsToolOutput,
+  countChatCompletionsToolOutputs,
   parseChatCompletionsRequestBody,
 } from "../../testing/openai-test-fixtures.js";
 
@@ -202,10 +202,10 @@ test("panel Ordinary completes a real tool round through the configured model tr
   await fs.mkdir(workspace, { recursive: true });
   const readmePath = path.join(workspace, "README.md");
   await fs.writeFile(readmePath, "native session tool evidence", "utf8");
-  const modelProvider = await startPanelChatCompletionsProvider({
+  const modelProvider = await startPanelChatCompletionsProvider([{
     name: "Read",
     input: { path: readmePath },
-  });
+  }]);
   try {
     const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
     try {
@@ -249,6 +249,84 @@ test("panel Ordinary completes a real tool round through the configured model tr
     }
   } finally {
     await modelProvider.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel Ordinary reads a page before writing the Space reference with its own annotation", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-annotation-behavior-"));
+  const pageUrl = "https://example.com/feature-visualization";
+  const agentAnnotation = {
+    markdown: "# 特征可视化\n\n通过优化输入观察神经元激活，深层网络倾向于表示更抽象的概念。",
+    keyPoints: ["通过优化输入观察神经元激活"],
+    tags: ["深度学习", "可视化"],
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  let modelProvider: Awaited<ReturnType<typeof startPanelChatCompletionsProvider>> | undefined;
+  try {
+    const space = await requestJson(server.url, "/api/spaces", {
+      method: "POST",
+      body: { title: "机器学习" },
+    });
+    const spaceId = space.body.space.id as string;
+    // 模型脚本：先 WebFetch 阅读来源，再 SpaceAddReference 提交自己的整理内容。
+    modelProvider = await startPanelChatCompletionsProvider([
+      { name: "WebFetch", input: { url: pageUrl } },
+      {
+        name: "SpaceAddReference",
+        input: {
+          spaceId,
+          title: "特征可视化",
+          reference: { kind: "web_page", url: pageUrl },
+          annotation: agentAnnotation,
+        },
+      },
+    ], "The requested page was added to the Space with an Agent summary.");
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: modelProvider.baseUrl,
+        model: "session-tool-model",
+        apiKey: "sk-session-tool-test",
+      },
+    });
+    const started = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: {
+        goal: `把 ${pageUrl} 加入机器学习空间，并整理一份自己的理解。`,
+        aiMode: "openai-compatible",
+        spaceId,
+      },
+    });
+    const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");
+
+    assert.equal(started.status, 202);
+    assert.deepEqual(
+      run.body.view.detail.toolResults.map((tool: { readonly toolName: string }) => tool.toolName),
+      ["WebFetch", "SpaceAddReference"],
+    );
+    assert.equal(run.body.view.workView.answer.content, "The requested page was added to the Space with an Agent summary.");
+
+    const tree = await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}`);
+    const item = (tree.body.tree.entries as readonly { readonly item: { readonly id: string; readonly title: string; readonly annotation?: { readonly revision: number; readonly updatedBy: string; readonly markdown: string; readonly actor?: Record<string, unknown> } } }[])
+      .find((entry) => entry.item.title === "特征可视化");
+    assert.notEqual(item, undefined);
+    assert.equal(item!.item.annotation?.revision, 1);
+    assert.equal(item!.item.annotation?.updatedBy, "agent");
+    assert.equal(item!.item.annotation?.markdown, agentAnnotation.markdown);
+    const actor = item!.item.annotation?.actor;
+    assert.equal(actor?.kind, "agent");
+    assert.equal(typeof actor?.actorId, "string");
+    assert.equal(typeof actor?.traceId, "string");
+    assert.equal(typeof actor?.goalId, "string");
+
+    const preview = await requestJson(server.url, `/api/spaces/references/${encodeURIComponent(item!.item.id)}/preview`);
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.preview.annotation.markdown, agentAnnotation.markdown);
+    assert.equal(preview.body.preview.content.kind, "web");
+  } finally {
+    await modelProvider?.close();
+    await server.close();
     await removeTemporaryTree(directory);
   }
 });
@@ -452,10 +530,10 @@ function extractPanelAssetPaths(html: string): readonly string[] {
   return [...paths].filter((value) => value.length > 0);
 }
 
-async function startPanelChatCompletionsProvider(toolCall?: {
+async function startPanelChatCompletionsProvider(toolCalls?: readonly {
   readonly name: string;
   readonly input: Readonly<Record<string, unknown>>;
-}): Promise<{
+}[], finalText = "The requested file was read successfully."): Promise<{
   readonly baseUrl: string;
   readonly requestCount: number;
   close(): Promise<void>;
@@ -473,8 +551,11 @@ async function startPanelChatCompletionsProvider(toolCall?: {
         chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
       }
       const body = parseChatCompletionsRequestBody(Buffer.concat(chunks).toString("utf8"));
-      const shouldCallTool = toolCall !== undefined && !hasChatCompletionsToolOutput(body);
-      const payload = shouldCallTool
+      // 每个 tool 结果推进一次脚本：第 n 个请求携带 n-1 个 tool 结果，
+      // 返回 toolCalls 序列中的下一个工具，序列用尽后返回最终文本。
+      const toolOutputCount = countChatCompletionsToolOutputs(body);
+      const toolCall = toolCalls === undefined ? undefined : toolCalls[toolOutputCount];
+      const payload = toolCall !== undefined
         ? {
             id: "chatcmpl-panel-tool-call",
             object: "chat.completion.chunk",
@@ -486,7 +567,7 @@ async function startPanelChatCompletionsProvider(toolCall?: {
                 role: "assistant",
                 tool_calls: [{
                   index: 0,
-                  id: "call-panel-session-tool",
+                  id: `call-panel-session-tool-${toolOutputCount + 1}`,
                   type: "function",
                   function: {
                     name: toolCall.name,
@@ -501,14 +582,14 @@ async function startPanelChatCompletionsProvider(toolCall?: {
             id: "chatcmpl-panel-complete",
             object: "chat.completion.chunk",
             created: 1_776_000_001,
-            model: toolCall === undefined ? "disabled-tools-model" : "session-tool-model",
+            model: toolCalls === undefined ? "disabled-tools-model" : "session-tool-model",
             choices: [{
               index: 0,
               delta: {
                 role: "assistant",
-                content: toolCall === undefined
+                content: toolCalls === undefined
                   ? "Configured tools remained disabled."
-                  : "The requested file was read successfully.",
+                  : finalText,
               },
               finish_reason: "stop",
             }],

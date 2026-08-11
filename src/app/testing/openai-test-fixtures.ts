@@ -98,6 +98,11 @@ export function hasChatCompletionsToolOutput(body: ChatCompletionsRequestBody): 
   return (body.messages ?? []).some((message) => message.role === "tool");
 }
 
+/** 请求中已携带的 tool 结果数量；多工具脚本按此推进下一个工具调用。 */
+export function countChatCompletionsToolOutputs(body: ChatCompletionsRequestBody): number {
+  return (body.messages ?? []).filter((message) => message.role === "tool").length;
+}
+
 export function hasChatCompletionsToolDefinition(body: ChatCompletionsRequestBody, name: string): boolean {
   return (body.tools ?? []).some((tool) => asTestRecord(asTestRecord(tool).function).name === name);
 }

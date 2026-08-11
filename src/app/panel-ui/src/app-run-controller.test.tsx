@@ -592,6 +592,64 @@ describe("new conversation submission", () => {
     expect(submissionAttemptRef.current).toBeUndefined();
     expect(app.conversation?.conversationId).toBe("conversation-retry");
   });
+
+  it("refreshes the owning Space read-model after creating a space-owned conversation", async () => {
+    const completed = run("completed");
+    const freshRun = {
+      ...completed,
+      runId: "run-space",
+      conversationId: "conversation-space",
+      title: "Space run",
+      goalSummary: "Space goal",
+    };
+    const freshConversation = {
+      ...conversation(runView(freshRun)),
+      conversationId: "conversation-space",
+      title: "Space goal",
+      latestRunId: freshRun.runId,
+      owner: { kind: "space" as const, id: "space-study" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/conversations" && init?.method === "POST") {
+        return jsonResponse({ conversation: freshConversation, run: freshRun });
+      }
+      if (path === "/api/conversations/conversation-space") {
+        return jsonResponse({ conversation: freshConversation });
+      }
+      if (path === "/api/conversations") {
+        return jsonResponse({ conversations: [{ conversationId: "conversation-space", title: "Space goal", owner: freshConversation.owner }] });
+      }
+      return jsonResponse({}, 404);
+    }));
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: conversation(runView(completed)),
+      run: completed,
+      workView: runView(completed).workView,
+    };
+    let goal = "Space goal";
+    let attachments: readonly ContextAttachment[] = [];
+    const refreshSpaceConversations = vi.fn().mockResolvedValue(undefined);
+    const controller = submissionController({
+      readApp: () => app,
+      writeApp: (next) => { app = next; },
+      readGoal: () => goal,
+      writeGoal: (next) => { goal = next; },
+      readAttachments: () => attachments,
+      writeAttachments: (next) => { attachments = next; },
+      writeLegacyConversationScreen: () => undefined,
+      activeRunIdRef: { current: completed.runId },
+      refreshSpaceConversations,
+    });
+
+    await expect(controller.startNewConversation({ kind: "space", id: "space-study" })).resolves.toBe(true);
+
+    expect(app.conversation?.conversationId).toBe("conversation-space");
+    await vi.waitFor(() => {
+      expect(refreshSpaceConversations).toHaveBeenCalledWith("space-study");
+    });
+  });
 });
 
 function dispatch<T>(
@@ -643,6 +701,7 @@ function submissionController(input: {
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly submissionAttemptRef?: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly viewEpochRef?: React.MutableRefObject<number>;
+  readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 }) {
   return createAppRunController({
     app: input.readApp(),
@@ -668,6 +727,7 @@ function submissionController(input: {
     submissionAttemptRef: input.submissionAttemptRef ?? { current: undefined },
     conversationLoadAbortRef: { current: undefined },
     setCancellingRunId: () => undefined,
+    refreshSpaceConversations: input.refreshSpaceConversations,
   });
 }
 

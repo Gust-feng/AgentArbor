@@ -60,7 +60,7 @@ export type AppWorkbenchRuntimeOptions = {
   readonly selectedModelContextWindowTokens?: number;
   readonly agentClusterActive: boolean;
   readonly setInputCloseSignal: React.Dispatch<React.SetStateAction<number>>;
-  /** Owner 为空间的会话控制变更（置顶/重命名/删除）成功后刷新对应空间 read-model。 */
+  /** Owner 为空间的会话变更（创建/置顶/重命名/删除）成功后刷新对应空间 read-model。 */
   readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 };
 
@@ -257,6 +257,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     submissionAttemptRef,
     conversationLoadAbortRef,
     setCancellingRunId,
+    refreshSpaceConversations: options.refreshSpaceConversations,
   }), [
     confirmationBusy,
     options.aiMode,
@@ -264,6 +265,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.attachments,
     options.composerReasoningEffort,
     options.goal,
+    options.refreshSpaceConversations,
     options.selectedModelId,
     options.selectedModelSupportsReasoningEffort,
     options.setApp,

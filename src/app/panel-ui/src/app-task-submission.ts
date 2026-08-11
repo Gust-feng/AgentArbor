@@ -60,6 +60,8 @@ export type PanelTaskSubmissionOptions = {
   readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
   readonly refreshConversations: () => Promise<void>;
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
+  /** Owner 为空间的对话提交成功后刷新对应空间 read-model；失败静默。 */
+  readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 };
 
 export type PanelTaskConversationBehavior = "continue" | "new";
@@ -324,6 +326,18 @@ export async function submitPanelTask(
     });
   }
   void options.refreshConversations().catch(() => undefined);
+  // 对话出生/续接不再写 Space 树引用，也不会触发后端 spaces change feed；
+  // 与置顶/重命名/删除一致，由前端在提交成功后主动刷新所属空间的 owner read-model。
+  const submittedSpaceId = response.conversation.owner?.kind === "space"
+    ? response.conversation.owner.id
+    : startsNewConversation && newConversationOwner?.kind === "space"
+      ? newConversationOwner.id
+      : startsNewConversation
+        ? newConversationSpaceId
+        : undefined;
+  if (submittedSpaceId !== undefined && options.refreshSpaceConversations !== undefined) {
+    void Promise.resolve(options.refreshSpaceConversations(submittedSpaceId)).catch(() => undefined);
+  }
   try {
     // Parallel-load historical run transcript nodes into the external cache
     // (same pattern as loadConversationSession — no onPartial setApp calls).

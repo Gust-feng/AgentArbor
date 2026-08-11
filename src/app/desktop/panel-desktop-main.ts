@@ -44,6 +44,16 @@ import {
 
 const activeWindows = new Set<BrowserWindow>();
 const activeDesktopSessions = new Set<PanelDesktopSession>();
+
+// node:sqlite 是项目正式采用的运行时存储，其 ExperimentalWarning 每次启动都会
+// 打印且无信息量；接管 warning 事件后 Node 不再走默认打印，这里只静默该条，
+// 其余警告保持原有可见性。
+process.on("warning", (warning) => {
+  if (warning.name === "ExperimentalWarning" && warning.message.includes("SQLite")) {
+    return;
+  }
+  console.warn(warning.stack ?? warning.message);
+});
 const startupWindowStates = new WeakMap<BrowserWindow, DesktopStartupWindowState>();
 const mainWindowStates = new WeakMap<BrowserWindow, DesktopMainWindowState>();
 let desktopLocalPreferenceStore: DesktopLocalPreferenceStore | undefined;

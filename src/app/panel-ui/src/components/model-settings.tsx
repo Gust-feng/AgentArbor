@@ -84,7 +84,7 @@ export function ModelSettings(props: {
   );
   const activeProfileId = projectedConfig?.config?.profileId ?? "";
   const providerItems = useMemo(() => modelProviderItems(projectedConfig), [projectedConfig]);
-  const items = useMemo(() => providerItems.filter((item) => item.configured), [providerItems]);
+  const items = providerItems;
   providerOrderRef.current = items.map((item) => item.key);
   const filteredItems = items.filter((item) => {
     const normalized = query.trim().toLowerCase();

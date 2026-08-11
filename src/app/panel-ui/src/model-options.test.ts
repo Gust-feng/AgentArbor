@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
+import { resolveModelIconSvg } from "./model-icons";
 import { modelOptionsFromConfig } from "./model-options";
 
 describe("modelOptionsFromConfig", () => {
@@ -15,6 +16,9 @@ describe("modelOptionsFromConfig", () => {
           profileId: "profile-openai",
           label: "OpenAI",
           model: "configured-model",
+          defaultAiMode: "openai-responses",
+          enabled: true,
+          secretConfigured: true,
         },
       ],
       modelCapabilityProfiles: [
@@ -52,5 +56,50 @@ describe("modelOptionsFromConfig", () => {
       "catalog-model",
       "retired-model",
     ]);
+  });
+
+  test("keeps unconfigured provider presets out of the model picker", () => {
+    const config: ConfigResponse = {
+      profiles: [
+        {
+          profileId: "moonshot",
+          label: "月之暗面",
+          model: "kimi-k3",
+          defaultAiMode: "openai-compatible",
+          enabled: true,
+          secretConfigured: false,
+        },
+        {
+          profileId: "glm",
+          label: "智谱 AI",
+          model: "glm-5.1",
+          defaultAiMode: "openai-compatible",
+          enabled: true,
+          secretConfigured: false,
+        },
+      ],
+    };
+
+    expect(modelOptionsFromConfig(config, {})).toEqual([]);
+  });
+
+  test("uses model-family icons immediately for configured profiles", () => {
+    const config: ConfigResponse = {
+      profiles: [
+        {
+          profileId: "moonshot",
+          label: "月之暗面",
+          model: "kimi-k3",
+          defaultAiMode: "openai-compatible",
+          enabled: true,
+          secretConfigured: true,
+        },
+      ],
+    };
+
+    const [option] = modelOptionsFromConfig(config, {});
+    expect(option?.modelId).toBe("kimi-k3");
+    expect(option?.providerIdentity).toBe("kimi");
+    expect(option?.iconSvg).toBe(resolveModelIconSvg("kimi"));
   });
 });

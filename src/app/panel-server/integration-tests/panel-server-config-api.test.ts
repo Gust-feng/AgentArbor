@@ -12,6 +12,29 @@ import type {
 import { startLocalPanelServer, type PanelModelCatalogFetch } from "../../panel-server.js";
 import { removeTemporaryTree, requestJson } from "./panel-server-test-utils.js";
 
+test("fresh panel config keeps provider presets separate from configured profiles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-fresh-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const config = await requestJson(server.url, "/api/config");
+
+    assert.equal(config.status, 200);
+    assert.deepEqual(
+      config.body.profiles.map((profile: { profileId?: string }) => profile.profileId),
+      ["default"],
+    );
+    assert.equal(config.body.profiles[0].model, undefined);
+    assert.equal(config.body.profiles[0].secretConfigured, false);
+    assert.deepEqual(
+      config.body.modelProviderMarket.presets.map((preset: { presetId?: string }) => preset.presetId),
+      ["openai", "deepseek", "moonshot", "glm", "minimax"],
+    );
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel config API keeps model provider and search keys out of ordinary responses", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-"));
   const secret = "sk-panel-secret";

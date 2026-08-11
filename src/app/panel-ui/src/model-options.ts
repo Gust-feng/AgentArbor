@@ -15,6 +15,7 @@ export function modelOptionsFromConfig(
   const capabilityLookup = modelCapabilityLookup(config);
   return (config?.profiles ?? [])
     .filter(modelProfileHasId)
+    .filter(modelProfileIsSelectable)
     .map((profile, index) => ({ profile, index }))
     .sort((left, right) => {
       const leftOrder = orderIndex(order, `profile:${left.profile.profileId}`);
@@ -60,9 +61,11 @@ export function modelOptionsFromConfig(
           profileId: profile.profileId,
           modelId: model.id,
           capabilities: capabilityLookup.get(modelOptionId(profile.profileId, model.id)),
-          iconSvg: shouldShowProviderIcon(profile)
-            ? resolveModelIconSvgForModel({ providerIdentity: identity, modelId: model.id, displayName: model.displayName })
-            : undefined,
+          iconSvg: resolveModelIconSvgForModel({
+            providerIdentity: identity,
+            modelId: model.id,
+            displayName: model.displayName,
+          }),
         }));
     });
 }
@@ -118,8 +121,9 @@ function modelProfileHasId(profile: ConfigModelProfile): profile is ConfigModelP
   return typeof profile.profileId === "string" && profile.profileId.trim().length > 0;
 }
 
-function shouldShowProviderIcon(profile: ConfigModelProfile): boolean {
-  return profile.secretConfigured === true &&
+function modelProfileIsSelectable(profile: ConfigModelProfileWithId): boolean {
+  return profile.enabled !== false &&
+    profile.secretConfigured === true &&
     profile.defaultAiMode !== "none";
 }
 

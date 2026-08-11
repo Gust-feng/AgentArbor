@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Monitor, Moon, Settings2, Sun } from 'lucide-react'
+import { Check, ChevronUp, Monitor, Moon, Settings, Sun } from 'lucide-react'
 import {
   applyTheme,
   getInitialTheme,
@@ -13,18 +13,16 @@ type AppearanceColorId = Extract<ThemeColorId, 'system' | 'light' | 'dark'>
 const APPEARANCE_OPTIONS: readonly {
   readonly id: AppearanceColorId
   readonly label: string
-  readonly description: string
   readonly icon: typeof Sun
 }[] = [
-  { id: 'light', label: '浅色', description: '明亮界面', icon: Sun },
-  { id: 'dark', label: '深色', description: '低照度界面', icon: Moon },
-  { id: 'system', label: '跟随系统', description: '使用系统偏好', icon: Monitor },
+  { id: 'light', label: '浅色', icon: Sun },
+  { id: 'dark', label: '深色', icon: Moon },
+  { id: 'system', label: '跟随系统', icon: Monitor },
 ]
 
 /**
- * 侧边栏左下角是本机工作台的稳定身份锚点，同时只承载已经可用的
- * 全局入口：设置和三种主题偏好。账号、订阅等尚未存在的产品事实不
- * 在这里预留空菜单项。
+ * 侧边栏左下角沿用导航行语法，只承载已经可用的设置和主题入口。
+ * 账号、订阅等尚未存在的产品事实不在这里预留空菜单项。
  */
 export function SidebarFooter({ onOpenSettings }: { readonly onOpenSettings: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -94,29 +92,19 @@ export function SidebarFooter({ onOpenSettings }: { readonly onOpenSettings: () 
           aria-expanded={menuOpen}
           className="aa-sidebar-footer__trigger"
         >
-          <span className="aa-sidebar-footer__brand" aria-hidden="true">A</span>
-          <span className="aa-sidebar-footer__identity">
-            <span className="aa-sidebar-footer__name">AgentArbor</span>
-            <small>本机工作台</small>
+          <span className="aa-sidebar-footer__icon" aria-hidden="true">
+            <Settings size={14} />
           </span>
-          <Settings2 className="aa-sidebar-footer__action" size={15} aria-hidden="true" />
+          <span className="aa-sidebar-footer__label">设置</span>
+          <ChevronUp
+            className={`aa-sidebar-footer__chevron${menuOpen ? ' open' : ''}`}
+            size={13}
+            aria-hidden="true"
+          />
         </button>
 
         {menuOpen && (
           <div className="aa-sidebar-footer-menu__popover" role="menu" aria-label="设置与外观">
-            <div className="aa-sidebar-footer-menu__heading">设置</div>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={openSettings}
-              className="aa-sidebar-footer-menu__item"
-            >
-              <Settings2 size={14} aria-hidden="true" />
-              <span>打开设置</span>
-            </button>
-
-            <div role="separator" className="aa-sidebar-footer-menu__separator" />
-
             <div className="aa-sidebar-footer-menu__heading">主题</div>
             {APPEARANCE_OPTIONS.map((option) => {
               const Icon = option.icon
@@ -131,14 +119,23 @@ export function SidebarFooter({ onOpenSettings }: { readonly onOpenSettings: () 
                   onClick={() => selectAppearance(option.id)}
                 >
                   <Icon size={14} aria-hidden="true" />
-                  <span className="aa-sidebar-footer-menu__copy">
-                    <span>{option.label}</span>
-                    <small>{option.description}</small>
-                  </span>
+                  <span className="aa-sidebar-footer-menu__copy">{option.label}</span>
                   {active && <Check size={14} aria-hidden="true" />}
                 </button>
               )
             })}
+
+            <div role="separator" className="aa-sidebar-footer-menu__separator" />
+
+            <button
+              type="button"
+              role="menuitem"
+              onClick={openSettings}
+              className="aa-sidebar-footer-menu__item"
+            >
+              <Settings size={14} aria-hidden="true" />
+              <span>打开设置</span>
+            </button>
           </div>
         )}
       </div>

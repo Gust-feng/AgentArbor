@@ -46,8 +46,9 @@ test('offers settings without presenting a fabricated account identity', () => {
     />,
   )
 
-  expect(screen.getByText('AgentArbor')).toBeTruthy()
-  expect(screen.getByText('本机工作台')).toBeTruthy()
+  expect(screen.getByText('设置')).toBeTruthy()
+  expect(screen.queryByText('AgentArbor')).toBeNull()
+  expect(screen.queryByText('本机工作台')).toBeNull()
   expect(screen.queryByText('张明')).toBeNull()
   expect(screen.queryByText('张')).toBeNull()
 

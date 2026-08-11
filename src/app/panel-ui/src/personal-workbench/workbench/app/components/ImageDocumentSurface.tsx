@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
-import { getWarmedImageUrl, subscribeImagePreview } from './imagePreviewRuntime'
+import { getWarmedImageUrl } from './imagePreviewRuntime'
 
 export function ImageDocumentSurface({
   url,
@@ -17,11 +17,7 @@ export function ImageDocumentSurface({
   readonly editable?: boolean
   readonly onCaptionChange?: (caption: string) => Promise<void>
 }) {
-  const warmedUrl = useSyncExternalStore(
-    subscribeImagePreview,
-    () => getWarmedImageUrl(url, sourceVersion),
-    () => undefined,
-  )
+  const sourceKey = `${url}\u0000${sourceVersion ?? ''}`
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -105,7 +101,7 @@ export function ImageDocumentSurface({
       className={`aa-reference-preview__media${caption || editable ? ' aa-reference-preview__media--described' : ''}${editable ? ' aa-reference-preview__media--caption-editable' : ''}`}
       data-document-scroll="content"
     >
-      <img src={warmedUrl ?? url} alt={alt} />
+      <StableImage key={sourceKey} url={url} sourceVersion={sourceVersion} alt={alt} />
       {showCaptionEntry ? (
         <button className="aa-reference-preview__caption-add" type="button" onClick={beginEditing}>
           <Plus size={13} aria-hidden="true" />
@@ -115,6 +111,7 @@ export function ImageDocumentSurface({
         ref={editorRef}
         className="aa-reference-preview__caption-text"
         contentEditable={editable && !saving}
+        spellCheck={false}
         suppressContentEditableWarning
         role={editable && !saving ? 'textbox' : undefined}
         aria-label={editable && !saving ? '图片说明' : undefined}
@@ -129,8 +126,22 @@ export function ImageDocumentSurface({
         onBlur={() => void commit()}
         onKeyDown={handleKeyDown}
       >{editable ? null : caption}</p>}
-      {saving && <span className="aa-reference-preview__caption-status">保存中…</span>}
       {error && <span className="aa-reference-preview__caption-status" role="alert">{error}</span>}
     </div>
   )
+}
+
+function StableImage({
+  url,
+  sourceVersion,
+  alt,
+}: {
+  readonly url: string
+  readonly sourceVersion?: string
+  readonly alt: string
+}) {
+  // Pick the warmed source once per source version. A later cache fill must not
+  // replace the mounted image URL and trigger a second decode/repaint.
+  const [displayUrl] = useState(() => getWarmedImageUrl(url, sourceVersion) ?? url)
+  return <img src={displayUrl} alt={alt} />
 }

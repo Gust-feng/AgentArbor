@@ -211,15 +211,25 @@ test('connects frameless desktop window controls to the preload bridge', () => {
   const minimizeWindow = vi.fn()
   const toggleMaximizeWindow = vi.fn()
   const closeWindow = vi.fn()
+  const desktopBridge = {
+    getWindowState: vi.fn().mockResolvedValue({ maximized: false, animating: false }),
+    onWindowStateChanged: vi.fn(() => vi.fn()),
+    minimizeWindow() {
+      expect(this).toBe(desktopBridge)
+      minimizeWindow()
+    },
+    toggleMaximizeWindow() {
+      expect(this).toBe(desktopBridge)
+      toggleMaximizeWindow()
+    },
+    closeWindow() {
+      expect(this).toBe(desktopBridge)
+      closeWindow()
+    },
+  }
   Object.defineProperty(window, 'agentarborDesktop', {
     configurable: true,
-    value: {
-      getWindowState: vi.fn().mockResolvedValue({ maximized: false, animating: false }),
-      onWindowStateChanged: vi.fn(() => vi.fn()),
-      minimizeWindow,
-      toggleMaximizeWindow,
-      closeWindow,
-    },
+    value: desktopBridge,
   })
 
   const rendered = render(

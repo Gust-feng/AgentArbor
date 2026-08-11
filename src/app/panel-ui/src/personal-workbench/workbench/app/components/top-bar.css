@@ -6,8 +6,11 @@
 
 .topbar-shell[data-desktop-shell='true'] {
   padding-right: 8px;
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
+  /* 标准无边框窗口模式：整条标题栏可拖动，交互元素单独声明 no-drag。
+     不能让 drag 命中区域与窗口控制按钮矩形存在任何相邻/重叠可能，
+     否则不同 Electron 版本的原生命中测试会把按钮点击吞进拖拽区。 */
+  app-region: drag;
+  -webkit-app-region: drag;
 }
 
 .topbar-shell[data-desktop-shell='true'] button,
@@ -15,15 +18,14 @@
 .topbar-shell[data-desktop-shell='true'] input,
 .topbar-shell[data-desktop-shell='true'] select,
 .topbar-shell[data-desktop-shell='true'] textarea,
-.topbar-shell[data-desktop-shell='true'] [role='button'] {
+.topbar-shell[data-desktop-shell='true'] [role='button'],
+.topbar-shell[data-desktop-shell='true'] .topbar-window-controls {
   app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
 .topbar-shell[data-desktop-shell='true'] .topbar-drag-region {
   min-width: 24px;
-  app-region: drag;
-  -webkit-app-region: drag;
 }
 
 .topbar-nav-button {

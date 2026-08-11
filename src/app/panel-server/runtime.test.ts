@@ -285,6 +285,7 @@ test("Panel composition does not assemble or capture legacy PathMemory archives"
     });
     assert.equal(Object.hasOwn(runtime, "pathMemoryFeature"), false);
     assert.equal(Object.hasOwn(runtime, "experienceCandidateFeature"), false);
+    assert.equal(Object.hasOwn(runtime, "ordinaryPathMemoryConnector"), false);
     await runtime.ordinaryAgentFeature.commands.start({
       runId: "wired-run",
       sessionRef,
@@ -301,9 +302,7 @@ test("Panel composition does not assemble or capture legacy PathMemory archives"
     await assert.rejects(fs.access(path.join(directory, "runtime", "path-memory")), { code: "ENOENT" });
     await assert.rejects(fs.access(path.join(directory, "runtime", "experience-candidates")), { code: "ENOENT" });
   } finally {
-    if (runtime !== undefined) await releasePanelRuntimeResources(runtime);
-    await sessionEnvironment.cleanup();
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await cleanupRuntime(runtime, directory);
   }
 });
 

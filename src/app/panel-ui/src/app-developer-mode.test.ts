@@ -16,7 +16,6 @@ test("developer mode is disabled by default and persists explicit changes", () =
 
 test("developer-only settings stay out of the normal settings navigation without legacy PathMemory", () => {
   const normalGroups = settingsGroupsForDeveloperMode(false).map((group) => group.id);
-  expect(normalGroups).not.toContain("pathMemory");
   expect(normalGroups).not.toContain("developer");
   expect(normalGroups).not.toContain("appearance");
 

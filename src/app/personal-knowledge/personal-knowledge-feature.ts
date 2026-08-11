@@ -3,13 +3,16 @@ import { randomUUID } from "node:crypto";
 import {
   PersonalKnowledgeError,
   type PersonalKnowledgeCommand,
-  type PersonalKnowledgeFeature,
   type PersonalKnowledgeEvent,
+  type PersonalKnowledgeFeature,
   type KnowledgePage,
+  type KnowledgePageReadResult,
+  type KnowledgeListQuery,
+  type ManagedKnowledgeAssetReadPort,
   type PersonalKnowledgeRepository,
 } from "./contracts.js";
 
-export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = unknown>(options: {
+export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult extends { readonly fingerprint?: string } = { readonly fingerprint?: string }>(options: {
   readonly repository: PersonalKnowledgeRepository;
   readonly spaceExists: (spaceId: string) => Promise<boolean>;
   readonly captureSpaceReference?: (input: { readonly assetId: string; readonly referenceId: string; readonly relativePath: string }) => Promise<NonNullable<import("./contracts.js").KnowledgePage["asset"]> | undefined>;
@@ -25,6 +28,7 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = un
     readonly expectedFingerprint: string;
     readonly text: string;
   }) => Promise<TManagedAssetTextWriteResult>;
+  readonly readManagedKnowledgeAsset?: ManagedKnowledgeAssetReadPort;
 }): PersonalKnowledgeFeature<TManagedAssetTextWriteResult> {
   const repository = options.repository;
   let released = false;
@@ -154,6 +158,20 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = un
             expectedFingerprint: input.expectedFingerprint,
             text: input.text,
           });
+          const actor = input.actor ?? SYSTEM_ACTOR;
+          // 写入端口在成功时总是报告新指纹；缺失指纹时跳过审计记录而不是伪造事实。
+          if (typeof writeResult.fingerprint === "string") {
+            await repository.appendChangeRecord({
+              id: randomUUID(),
+              type: "knowledge.asset_updated",
+              refId,
+              relativePath: input.relativePath,
+              beforeFingerprint: input.expectedFingerprint,
+              afterFingerprint: writeResult.fingerprint,
+              actor,
+              occurredAt: Date.now(),
+            });
+          }
           publish({ type: "personal_knowledge.changed", refIds: [refId] });
           return { page, writeResult };
         });
@@ -179,9 +197,13 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = un
           });
         });
       },
-      async uncollect(refIdInput) {
-        await run(() => runManagedAssetMutation(async () => {
+      async uncollect(refIdInput, actor) {
+        return await run(() => runManagedAssetMutation(async () => {
           const refId = required(refIdInput, "refId");
+          const page = (await repository.readSnapshot()).pages.find((candidate) => candidate.refId === refId);
+          if (page === undefined) {
+            throw new PersonalKnowledgeError("knowledge_asset_not_found", "知识条目已不存在。");
+          }
           const staged = await options.stageManagedAssetRemoval?.(refId);
           try {
             await repository.execute({ type: "knowledge.uncollect", refId });
@@ -190,8 +212,89 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = un
             throw error;
           }
           await staged?.commit();
+          await repository.appendChangeRecord({
+            id: randomUUID(),
+            type: "knowledge.uncollected",
+            refId,
+            kind: page.kind,
+            actor: actor ?? SYSTEM_ACTOR,
+            occurredAt: Date.now(),
+          });
           publish({ type: "personal_knowledge.changed", refIds: [refId] });
+          return { managedCopyRemoved: staged !== undefined };
         }));
+      },
+      async createTheme(input) {
+        return await run(async () => {
+          const name = required(input.name, "name");
+          const normalized = normalizeThemeName(name);
+          const snapshot = await repository.readSnapshot();
+          const existing = snapshot.themes.find((theme) => normalizeThemeName(theme.name) === normalized);
+          if (existing !== undefined) return { theme: existing, created: false };
+          const theme = {
+            id: randomUUID(),
+            name,
+            color: themeColorFor(snapshot.themes.length),
+            origin: input.actor.kind === "user" ? "user" as const : "agent" as const,
+          };
+          await repository.execute({ type: "theme.create", theme });
+          await repository.appendChangeRecord({
+            id: randomUUID(),
+            type: "knowledge.theme_created",
+            themeId: theme.id,
+            name: theme.name,
+            actor: input.actor,
+            occurredAt: Date.now(),
+          });
+          publish({ type: "personal_knowledge.changed" });
+          return { theme, created: true };
+        });
+      },
+      async assignTheme(input) {
+        return await run(async () => {
+          const themeId = required(input.themeId, "themeId");
+          const refIds = uniqueRefIds(input.refIds);
+          const result = await repository.assignTheme({ themeId, refIds, by: input.actor.kind === "user" ? "user" : "agent" });
+          if (result.assigned.length > 0) {
+            await repository.appendChangeRecord({
+              id: randomUUID(),
+              type: "knowledge.theme_assigned",
+              themeId,
+              refIds: result.assigned,
+              actor: input.actor,
+              occurredAt: Date.now(),
+            });
+            publish({ type: "personal_knowledge.changed", refIds: result.assigned });
+          }
+          return { themeId, assigned: result.assigned, unchanged: result.unchanged };
+        });
+      },
+      async unassignTheme(input) {
+        return await run(async () => {
+          const themeId = required(input.themeId, "themeId");
+          const refIds = uniqueRefIds(input.refIds);
+          const snapshot = await repository.readSnapshot();
+          const locked = new Set(
+            input.actor.kind === "agent"
+              ? snapshot.assignments.filter((assignment) => assignment.themeId === themeId && assignment.locked).map((assignment) => assignment.refId)
+              : [],
+          );
+          const unassignable = refIds.filter((refId) => !locked.has(refId));
+          const lockedRefIds = refIds.filter((refId) => locked.has(refId));
+          await repository.unassignTheme({ themeId, refIds: unassignable });
+          if (unassignable.length > 0) {
+            await repository.appendChangeRecord({
+              id: randomUUID(),
+              type: "knowledge.theme_unassigned",
+              themeId,
+              refIds: unassignable,
+              actor: input.actor,
+              occurredAt: Date.now(),
+            });
+            publish({ type: "personal_knowledge.changed", refIds: unassignable });
+          }
+          return { themeId, unassigned: unassignable, locked: lockedRefIds };
+        });
       },
       async execute(command) {
         await run(async () => {
@@ -237,6 +340,63 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = un
         }
         return await repository.searchNotes({ query, spaceId, limit });
       },
+      async list(input = {}) {
+        ensureActive();
+        await queue;
+        const validated = validateListQuery(input);
+        const snapshot = await repository.readSnapshot();
+        const { pages, nextCursor } = await repository.listPages(validated);
+        return {
+          pages,
+          themes: snapshot.themes,
+          assignments: snapshot.assignments,
+          ...(nextCursor === undefined ? {} : { nextInput: { ...validated, cursor: nextCursor } }),
+        };
+      },
+      async readPage(input) {
+        ensureActive();
+        await queue;
+        const refId = required(input.refId, "refId");
+        const maxLength = validateMaxLength(input.maxLength);
+        const page = (await repository.readSnapshot()).pages.find((candidate) => candidate.refId === refId);
+        if (page === undefined) return { status: "missing", refId, message: "知识条目已不存在。" };
+        if (page.kind === "note") {
+          const note = await repository.getNote(refId);
+          if (note === undefined) return { status: "missing", refId, message: "知识条目已不存在。" };
+          return readNotePage(note, maxLength, input.continuation);
+        }
+        if (page.kind === "material") {
+          return { status: "material", refId, kind: "material", collectedAt: page.collectedAt, note: "遗留只读事实，无托管内容。" };
+        }
+        if (options.readManagedKnowledgeAsset === undefined) {
+          throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "Managed knowledge asset storage is unavailable.");
+        }
+        const relativePath = normalizeSpaceReferenceRelativePath(input.relativePath);
+        // 先在此验证续读位置，避免把未规范化的 continuation 泄漏给 Host 端口。
+        const continuation = input.continuation === undefined ? undefined : String(parseContinuation(input.continuation));
+        const content = await options.readManagedKnowledgeAsset({
+          page,
+          relativePath,
+          maxLength,
+          continuation,
+        });
+        return { status: "space_reference", refId, relativePath, content };
+      },
+      async recentChanges(input = {}) {
+        ensureActive();
+        await queue;
+        const limit = input.limit ?? 50;
+        if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+          throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "limit must be an integer from 1 to 200.");
+        }
+        const { records, nextCursor } = await repository.recentChanges({
+          ...(input.refId === undefined ? {} : { refId: required(input.refId, "refId") }),
+          ...(input.themeId === undefined ? {} : { themeId: required(input.themeId, "themeId") }),
+          limit,
+          ...(input.cursor === undefined ? {} : { cursor: required(input.cursor, "cursor") }),
+        });
+        return { records, ...(nextCursor === undefined ? {} : { nextCursor }) };
+      },
     },
     events: {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
@@ -251,6 +411,98 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult = un
 }
 
 const SYSTEM_ACTOR = { kind: "system" } as const;
+
+const THEME_COLOR_PALETTE = [
+  "#6865a7",
+  "#b0885a",
+  "#3f7d68",
+  "#a3564f",
+  "#4a6fa5",
+  "#8a5a9e",
+  "#b08a3a",
+  "#5a7d8a",
+] as const;
+
+function themeColorFor(existingThemeCount: number): string {
+  return THEME_COLOR_PALETTE[existingThemeCount % THEME_COLOR_PALETTE.length] ?? THEME_COLOR_PALETTE[0];
+}
+
+function normalizeThemeName(name: string): string {
+  return name.trim().toLocaleLowerCase();
+}
+
+function uniqueRefIds(values: readonly string[]): string[] {
+  const unique = new Set<string>();
+  for (const value of values) {
+    if (value.trim().length === 0) {
+      throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "refIds must not contain empty values.");
+    }
+    unique.add(value.trim());
+  }
+  return [...unique];
+}
+
+function readNotePage(
+  note: import("./contracts.js").PersonalNote,
+  maxLength: number,
+  continuation: string | undefined,
+): KnowledgePageReadResult {
+  const offset = parseContinuation(continuation);
+  const bodyMarkdown = note.bodyMarkdown.slice(offset, offset + maxLength);
+  const truncated = offset + bodyMarkdown.length < note.bodyMarkdown.length;
+  return {
+    status: "note",
+    refId: note.id,
+    kind: "note",
+    title: note.title,
+    bodyMarkdown,
+    truncated,
+    revision: note.revision,
+    materialRefs: note.materialRefs,
+    ...(truncated ? { continuation: String(offset + bodyMarkdown.length) } : {}),
+  };
+}
+
+function parseContinuation(value: string | undefined): number {
+  if (value === undefined) return 0;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "continuation must be a non-negative integer string.");
+  }
+  return parsed;
+}
+
+function validateMaxLength(value: number | undefined): number {
+  const maxLength = value ?? 30_000;
+  if (!Number.isInteger(maxLength) || maxLength < 1 || maxLength > 1_000_000) {
+    throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "maxLength must be an integer from 1 to 1000000.");
+  }
+  return maxLength;
+}
+
+function validateListQuery(input: KnowledgeListQuery): KnowledgeListQuery {
+  const limit = input.limit ?? 100;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "limit must be an integer from 1 to 200.");
+  }
+  if (input.kind !== undefined && input.kind !== "note" && input.kind !== "space_reference" && input.kind !== "material") {
+    throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "kind must be note, space_reference or material.");
+  }
+  if (input.cursor !== undefined) parseContinuationCursor(input.cursor);
+  return { ...input, limit };
+}
+
+function parseContinuationCursor(value: string): { readonly collectedAt: number; readonly refId: string } {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (typeof parsed === "object" && parsed !== null
+      && typeof (parsed as Record<string, unknown>).collectedAt === "number"
+      && typeof (parsed as Record<string, unknown>).refId === "string") {
+      return { collectedAt: (parsed as Record<string, number>).collectedAt, refId: (parsed as Record<string, string>).refId };
+    }
+  } catch { /* fall through to invalid input. */ }
+  throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "cursor is invalid.");
+}
 
 function normalizeSpaceReferenceRelativePath(value: string | undefined): string {
   return (value ?? "").trim().replaceAll("\\", "/").replace(/^\/+|\/+$/gu, "");

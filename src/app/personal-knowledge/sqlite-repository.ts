@@ -3,12 +3,16 @@ import type { SQLInputValue } from "node:sqlite";
 import type { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import {
   PersonalKnowledgeError,
+  type PersonalKnowledgeChangeRecord,
   type PersonalKnowledgeCommand,
   type PersonalKnowledgeRepository,
   type PersonalKnowledgeSearchResult,
   type PersonalKnowledgeSnapshot,
   type PersonalNote,
   type PersonalNoteRevision,
+  type KnowledgeListQuery,
+  type KnowledgePage,
+  type KnowledgePageSummary,
 } from "./contracts.js";
 
 const MIGRATIONS = [{
@@ -141,6 +145,32 @@ const MIGRATIONS = [{
 }, {
   version: 8,
   sql: `UPDATE knowledge_pages SET kind = 'space_reference' WHERE asset_json IS NOT NULL;`,
+}, {
+  version: 9,
+  sql: `
+    CREATE TABLE knowledge_change_records (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK(type IN (
+        'knowledge.asset_updated',
+        'knowledge.uncollected',
+        'knowledge.theme_created',
+        'knowledge.theme_assigned',
+        'knowledge.theme_unassigned'
+      )),
+      ref_id TEXT,
+      theme_id TEXT,
+      payload_json TEXT NOT NULL,
+      actor_kind TEXT NOT NULL CHECK(actor_kind IN ('user', 'agent', 'system')),
+      actor_id TEXT,
+      trace_id TEXT,
+      goal_id TEXT,
+      tool_call_id TEXT,
+      occurred_at INTEGER NOT NULL
+    ) STRICT;
+    CREATE INDEX knowledge_change_records_occurred_idx ON knowledge_change_records(occurred_at DESC, id DESC);
+    CREATE INDEX knowledge_change_records_ref_idx ON knowledge_change_records(ref_id, occurred_at DESC);
+    CREATE INDEX knowledge_change_records_theme_idx ON knowledge_change_records(theme_id, occurred_at DESC);
+  `,
 }] as const;
 
 export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeDatabase): PersonalKnowledgeRepository {
@@ -260,6 +290,183 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
         return [...results.values()];
       } catch (error) {
         throw repositoryError("Could not search personal knowledge in SQLite.", error);
+      }
+    },
+    async listPages(input: KnowledgeListQuery): Promise<{ readonly pages: readonly KnowledgePageSummary[]; readonly nextCursor?: string }> {
+      try {
+        const limit = input.limit ?? 100;
+        const themeId = input.themeId === undefined ? undefined : requiredValue(input.themeId);
+        const spaceId = input.spaceId === undefined ? undefined : requiredValue(input.spaceId);
+        const kind = input.kind;
+        const query = input.query?.trim();
+        const cursor = input.cursor === undefined ? undefined : parsePageCursor(input.cursor);
+        const pages = database.connection.prepare(
+          "SELECT ref_id AS refId, kind, collected_at AS collectedAt, asset_json AS assetJson FROM knowledge_pages",
+        ).all().map((row) => {
+          const value = row as Record<string, SQLInputValue>;
+          return {
+            refId: String(value.refId),
+            kind: String(value.kind) as PersonalKnowledgeSnapshot["pages"][number]["kind"],
+            collectedAt: Number(value.collectedAt),
+            ...(value.assetJson === null ? {} : { asset: JSON.parse(String(value.assetJson)) as Record<string, unknown> }),
+          };
+        });
+        const noteTitles = new Map<string, string>();
+        for (const row of database.connection.prepare(
+          "SELECT id, title FROM personal_notes",
+        ).all()) {
+          const value = row as Record<string, SQLInputValue>;
+          noteTitles.set(String(value.id), String(value.title));
+        }
+        const pageSpaceIds = new Map<string, string>();
+        for (const row of database.connection.prepare(
+          "SELECT id, space_id AS spaceId FROM personal_notes",
+        ).all()) {
+          const value = row as Record<string, SQLInputValue>;
+          pageSpaceIds.set(String(value.id), String(value.spaceId));
+        }
+        const themeAssignments = new Map<string, Set<string>>();
+        for (const row of database.connection.prepare(
+          "SELECT ref_id AS refId, theme_id AS themeId FROM knowledge_theme_assignments",
+        ).all()) {
+          const value = row as Record<string, SQLInputValue>;
+          const refId = String(value.refId);
+          const set = themeAssignments.get(String(value.themeId)) ?? new Set<string>();
+          set.add(refId);
+          themeAssignments.set(String(value.themeId), set);
+        }
+        const titleOf = (page: { readonly kind: string; readonly refId: string; readonly asset?: Record<string, unknown> }): string | undefined =>
+          page.kind === "note" ? noteTitles.get(page.refId)
+            : page.kind === "space_reference" && typeof page.asset?.title === "string" ? page.asset.title
+              : undefined;
+        const matchesQuery = (title: string | undefined): boolean =>
+          query === undefined || query.length === 0 || title?.toLocaleLowerCase().includes(query.toLocaleLowerCase()) === true;
+        const candidates = pages
+          .filter((page) => kind === undefined || page.kind === kind)
+          .filter((page) => spaceId === undefined || (page.kind === "note" && pageSpaceIds.get(page.refId) === spaceId))
+          .filter((page) => themeId === undefined || themeAssignments.get(themeId)?.has(page.refId) === true)
+          .filter((page) => matchesQuery(titleOf(page)))
+          .sort((left, right) => right.collectedAt - left.collectedAt
+            || (left.refId < right.refId ? 1 : left.refId > right.refId ? -1 : 0));
+        const startIndex = cursor === undefined ? 0 : candidates.findIndex((page) =>
+          page.collectedAt === cursor.collectedAt && page.refId === cursor.refId) + 1;
+        const sliced = candidates.slice(startIndex, startIndex + limit);
+        const summaries: KnowledgePageSummary[] = sliced.map((page) => ({
+          refId: page.refId,
+          kind: page.kind,
+          ...(titleOf(page) === undefined ? {} : { title: titleOf(page) }),
+          collectedAt: page.collectedAt,
+        }));
+        const last = sliced[sliced.length - 1];
+        const hasMore = startIndex + sliced.length < candidates.length;
+        return {
+          pages: summaries,
+          ...(hasMore && last !== undefined ? { nextCursor: JSON.stringify({ collectedAt: last.collectedAt, refId: last.refId }) } : {}),
+        };
+      } catch (error) {
+        if (error instanceof PersonalKnowledgeError) throw error;
+        throw repositoryError("Could not list personal knowledge pages from SQLite.", error);
+      }
+    },
+    async recentChanges(input: {
+      readonly refId?: string;
+      readonly themeId?: string;
+      readonly limit: number;
+      readonly cursor?: string;
+    }): Promise<{ readonly records: readonly PersonalKnowledgeChangeRecord[]; readonly nextCursor?: string }> {
+      try {
+        // 主题归类的 refIds 保存在 payload 中，无法用单一 ref_id 列过滤，
+        // 因此与 listPages 一样在 JS 侧过滤后分页（个人知识库规模有限）。
+        const cursor = input.cursor === undefined ? undefined : parseChangeCursor(input.cursor);
+        const rows = database.connection.prepare(`
+          SELECT id, type, ref_id AS refId, theme_id AS themeId, payload_json AS payloadJson,
+                 actor_kind AS actorKind, actor_id AS actorId, trace_id AS traceId,
+                 goal_id AS goalId, tool_call_id AS toolCallId, occurred_at AS occurredAt
+          FROM knowledge_change_records
+          ORDER BY occurred_at DESC, id DESC
+        `).all().map((row) => changeRecordFromRow(row as Record<string, SQLInputValue>));
+        const matches = rows.filter((record) =>
+          (input.refId === undefined || recordRefId(record) === input.refId || ("refIds" in record && record.refIds.includes(input.refId)))
+          && (input.themeId === undefined || recordThemeId(record) === input.themeId));
+        const startIndex = cursor === undefined ? 0 : matches.findIndex((record) =>
+          record.occurredAt === cursor.occurredAt && record.id === cursor.id) + 1;
+        const sliced = matches.slice(startIndex, startIndex + input.limit);
+        const last = sliced[sliced.length - 1];
+        const hasMore = startIndex + sliced.length < matches.length;
+        return {
+          records: sliced,
+          ...(hasMore && last !== undefined ? { nextCursor: JSON.stringify({ occurredAt: last.occurredAt, id: last.id }) } : {}),
+        };
+      } catch (error) {
+        if (error instanceof PersonalKnowledgeError) throw error;
+        throw repositoryError("Could not read personal knowledge change records from SQLite.", error);
+      }
+    },
+    async appendChangeRecord(record: PersonalKnowledgeChangeRecord): Promise<void> {
+      try {
+        const payload = changeRecordPayload(record);
+        database.connection.prepare(`
+          INSERT INTO knowledge_change_records(
+            id, type, ref_id, theme_id, payload_json,
+            actor_kind, actor_id, trace_id, goal_id, tool_call_id, occurred_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          record.id, record.type, payload.refId ?? null, payload.themeId ?? null, JSON.stringify(payload.rest),
+          record.actor.kind, record.actor.actorId ?? null, record.actor.traceId ?? null,
+          record.actor.goalId ?? null, record.actor.toolCallId ?? null, record.occurredAt,
+        );
+      } catch (error) {
+        throw repositoryError("Could not append a personal knowledge change record to SQLite.", error);
+      }
+    },
+    async assignTheme(input: {
+      readonly themeId: string;
+      readonly refIds: readonly string[];
+      readonly by: "agent" | "user";
+    }): Promise<{ readonly assigned: readonly string[]; readonly unchanged: readonly string[] }> {
+      try {
+        return database.transaction(() => {
+          requireTheme(database, input.themeId);
+          const pageLookup = database.connection.prepare("SELECT 1 FROM knowledge_pages WHERE ref_id = ?");
+          const insert = database.connection.prepare(`
+            INSERT OR IGNORE INTO knowledge_theme_assignments(ref_id, theme_id, assigned_by, locked)
+            VALUES (?, ?, ?, 0)
+          `);
+          const assigned: string[] = [];
+          const unchanged: string[] = [];
+          for (const refId of input.refIds) {
+            if (pageLookup.get(refId) === undefined) {
+              throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Knowledge page ${refId} was not found.`);
+            }
+            const result = insert.run(refId, input.themeId, input.by);
+            (Number(result.changes) > 0 ? assigned : unchanged).push(refId);
+          }
+          return { assigned, unchanged };
+        });
+      } catch (error) {
+        if (error instanceof PersonalKnowledgeError) throw error;
+        throw repositoryError("Could not assign knowledge pages to a theme in SQLite.", error);
+      }
+    },
+    async unassignTheme(input: { readonly themeId: string; readonly refIds: readonly string[] }): Promise<readonly string[]> {
+      try {
+        return database.transaction(() => {
+          requireTheme(database, input.themeId);
+          const pageLookup = database.connection.prepare("SELECT 1 FROM knowledge_pages WHERE ref_id = ?");
+          const deleteAssignment = database.connection.prepare(
+            "DELETE FROM knowledge_theme_assignments WHERE ref_id = ? AND theme_id = ?",
+          );
+          for (const refId of input.refIds) {
+            if (pageLookup.get(refId) === undefined) {
+              throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Knowledge page ${refId} was not found.`);
+            }
+            deleteAssignment.run(refId, input.themeId);
+          }
+          return input.refIds;
+        });
+      } catch (error) {
+        if (error instanceof PersonalKnowledgeError) throw error;
+        throw repositoryError("Could not unassign knowledge pages from a theme in SQLite.", error);
       }
     },
     async execute(command: PersonalKnowledgeCommand): Promise<void> {
@@ -488,6 +695,99 @@ function requireKnowledgePages(database: SqliteRuntimeDatabase, ...refIds: reado
       throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `Knowledge page ${refId} was not found.`);
     }
   }
+}
+
+function requireTheme(database: SqliteRuntimeDatabase, themeId: string): void {
+  if (database.connection.prepare("SELECT 1 FROM knowledge_themes WHERE id = ?").get(themeId) === undefined) {
+    throw new PersonalKnowledgeError("knowledge_theme_not_found", `Theme ${themeId} was not found.`);
+  }
+}
+
+function parsePageCursor(value: string): { readonly collectedAt: number; readonly refId: string } {
+  const parsed = JSON.parse(value) as unknown;
+  if (typeof parsed === "object" && parsed !== null
+    && typeof (parsed as Record<string, unknown>).collectedAt === "number"
+    && typeof (parsed as Record<string, unknown>).refId === "string") {
+    return { collectedAt: (parsed as Record<string, number>).collectedAt, refId: (parsed as Record<string, string>).refId };
+  }
+  throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "cursor is invalid.");
+}
+
+function parseChangeCursor(value: string): { readonly occurredAt: number; readonly id: string } {
+  const parsed = JSON.parse(value) as unknown;
+  if (typeof parsed === "object" && parsed !== null
+    && typeof (parsed as Record<string, unknown>).occurredAt === "number"
+    && typeof (parsed as Record<string, unknown>).id === "string") {
+    return { occurredAt: (parsed as Record<string, number>).occurredAt, id: (parsed as Record<string, string>).id };
+  }
+  throw new PersonalKnowledgeError("personal_knowledge_invalid_input", "cursor is invalid.");
+}
+
+type ChangeRecordRow = {
+  readonly type: PersonalKnowledgeChangeRecord["type"];
+  readonly refId?: string;
+  readonly themeId?: string;
+  readonly payload: Record<string, unknown>;
+  readonly actor: PersonalKnowledgeChangeRecord["actor"];
+  readonly occurredAt: number;
+};
+
+function changeRecordPayload(record: PersonalKnowledgeChangeRecord): { readonly refId?: string; readonly themeId?: string; readonly rest: Record<string, unknown> } {
+  switch (record.type) {
+    case "knowledge.asset_updated":
+      return { refId: record.refId, rest: { relativePath: record.relativePath, beforeFingerprint: record.beforeFingerprint, afterFingerprint: record.afterFingerprint } };
+    case "knowledge.uncollected":
+      return { refId: record.refId, rest: { kind: record.kind } };
+    case "knowledge.theme_created":
+      return { themeId: record.themeId, rest: { name: record.name } };
+    case "knowledge.theme_assigned":
+    case "knowledge.theme_unassigned":
+      return { themeId: record.themeId, rest: { refIds: record.refIds } };
+  }
+}
+
+function changeRecordFromRow(value: Record<string, SQLInputValue>): PersonalKnowledgeChangeRecord {
+  const row: ChangeRecordRow = {
+    type: String(value.type) as PersonalKnowledgeChangeRecord["type"],
+    ...(value.refId === null ? {} : { refId: String(value.refId) }),
+    ...(value.themeId === null ? {} : { themeId: String(value.themeId) }),
+    payload: JSON.parse(String(value.payloadJson)) as Record<string, unknown>,
+    actor: {
+      kind: String(value.actorKind) as PersonalKnowledgeChangeRecord["actor"]["kind"],
+      ...(value.actorId === null ? {} : { actorId: String(value.actorId) }),
+      ...(value.traceId === null ? {} : { traceId: String(value.traceId) }),
+      ...(value.goalId === null ? {} : { goalId: String(value.goalId) }),
+      ...(value.toolCallId === null ? {} : { toolCallId: String(value.toolCallId) }),
+    },
+    occurredAt: Number(value.occurredAt),
+  };
+  const id = String(value.id);
+  const actor = row.actor;
+  const occurredAt = row.occurredAt;
+  switch (row.type) {
+    case "knowledge.asset_updated":
+      return { id, type: row.type, refId: requiredValue(row.refId), relativePath: String(row.payload.relativePath), beforeFingerprint: String(row.payload.beforeFingerprint), afterFingerprint: String(row.payload.afterFingerprint), actor, occurredAt };
+    case "knowledge.uncollected":
+      return { id, type: row.type, refId: requiredValue(row.refId), kind: row.payload.kind as KnowledgePage["kind"], actor, occurredAt };
+    case "knowledge.theme_created":
+      return { id, type: row.type, themeId: requiredValue(row.themeId), name: String(row.payload.name), actor, occurredAt };
+    case "knowledge.theme_assigned":
+    case "knowledge.theme_unassigned":
+      return { id, type: row.type, themeId: requiredValue(row.themeId), refIds: row.payload.refIds as readonly string[], actor, occurredAt };
+  }
+}
+
+function requiredValue(value: string | undefined): string {
+  if (value === undefined) throw new Error("knowledge_change_records row is missing a required value.");
+  return value;
+}
+
+function recordRefId(record: PersonalKnowledgeChangeRecord): string | undefined {
+  return "refId" in record ? record.refId : undefined;
+}
+
+function recordThemeId(record: PersonalKnowledgeChangeRecord): string | undefined {
+  return "themeId" in record ? record.themeId : undefined;
 }
 
 function noteWriteError(database: SqliteRuntimeDatabase, id: string): PersonalKnowledgeError {

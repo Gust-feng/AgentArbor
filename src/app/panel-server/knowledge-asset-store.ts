@@ -2,10 +2,18 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { KnowledgePage } from "../personal-knowledge/index.js";
+import type { KnowledgeAssetReadResult, KnowledgePage } from "../personal-knowledge/index.js";
 import type { SpaceReferenceItem } from "../spaces/index.js";
 import { PanelHttpError } from "./http-utils.js";
-import { resolveWithinRoot } from "../local-filesystem/index.js";
+import {
+  MAX_TEXT_PREVIEW_BYTES,
+  isKnownBinaryPath,
+  joinRelativePath,
+  mediaKindForMimeType,
+  mimeTypeForPath,
+  readFileText,
+  resolveWithinRoot,
+} from "../local-filesystem/index.js";
 import type { LocalDocumentMeta } from "./local-document-preview.js";
 
 const MAX_CAPTURE_BYTES = 256 * 1024 * 1024;
@@ -156,6 +164,110 @@ export function managedKnowledgeDocumentTarget(root: string, page: KnowledgePage
       ? path.join(asset.sourceLabel, ...relativePath.split("/"))
       : asset.sourceLabel,
   };
+}
+
+const MAX_READ_PAGE_LENGTH = 30_000;
+const MAX_READ_DIRECTORY_ENTRIES = 200;
+
+/**
+ * PersonalKnowledgeFeature 注入的托管资产机械读取端口：
+ * 只做路径解析、目录扫描、MIME/文本分段，不参与知识业务判断。
+ */
+export async function readManagedKnowledgeAsset(
+  root: string,
+  page: KnowledgePage,
+  input: { readonly relativePath: string; readonly maxLength?: number; readonly continuation?: string },
+): Promise<KnowledgeAssetReadResult> {
+  const target = managedKnowledgeDocumentTarget(root, page);
+  const relativePath = normalizeReadPath(input.relativePath);
+  let source: string;
+  try {
+    source = await resolveWithinRoot(target.rootDir, relativePath);
+  } catch {
+    return { status: "invalid", relativePath, message: "路径超出托管内容范围。" };
+  }
+  const stat = await fs.stat(source).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (stat === undefined) return { status: "missing", relativePath, message: "托管内容已不存在。" };
+
+  if (stat.isDirectory()) {
+    const offset = readOffset(input.continuation);
+    const pageLength = input.maxLength ?? MAX_READ_DIRECTORY_ENTRIES;
+    const entries = await listManagedDirectory(source);
+    const slice = entries.slice(offset, offset + pageLength).map((entry) => ({
+      name: entry.name,
+      relativePath: joinRelativePath(relativePath, entry.name),
+      kind: entry.kind,
+    }));
+    const truncated = offset + slice.length < entries.length;
+    return {
+      status: "directory",
+      relativePath,
+      entries: slice,
+      truncated,
+      ...(truncated ? { continuation: String(offset + slice.length) } : {}),
+    };
+  }
+  if (!stat.isFile()) {
+    return { status: "unsupported", relativePath, message: "来源不再是普通文件。" };
+  }
+
+  const typePath = target.contentTypeHintPath(relativePath);
+  const mediaKind = mediaKindForMimeType(mimeTypeForPath(typePath));
+  if (mediaKind !== undefined) {
+    return {
+      status: "media",
+      relativePath,
+      mediaKind,
+      mimeType: mimeTypeForPath(typePath),
+      byteLength: stat.size,
+      contentUrl: `/api/personal-knowledge/assets/${encodeURIComponent(page.refId)}/content${relativePath.length === 0 ? "" : `?path=${encodeURIComponent(relativePath)}`}`,
+    };
+  }
+  if (isKnownBinaryPath(typePath)) {
+    return { status: "unsupported", relativePath, message: "这个二进制文件暂不支持读取。" };
+  }
+
+  const offset = readOffset(input.continuation);
+  const maxLength = input.maxLength ?? MAX_READ_PAGE_LENGTH;
+  const maxBytes = Math.min(stat.size, Math.max(MAX_TEXT_PREVIEW_BYTES, offset + maxLength * 4));
+  const preview = await readFileText(source, { maxBytes, typeHintPath: typePath });
+  if (!preview.ok) return { status: "unsupported", relativePath, message: "内容不是可解码的文本。" };
+  const text = preview.value.text.slice(offset, offset + maxLength);
+  const truncated = preview.value.truncated || offset + text.length < preview.value.text.length;
+  return {
+    status: "text",
+    relativePath,
+    text,
+    truncated,
+    fingerprint: preview.value.fingerprint,
+    byteLength: preview.value.byteLength,
+    ...(preview.value.language === null ? {} : { language: preview.value.language }),
+    ...(truncated ? { continuation: String(offset + text.length) } : {}),
+  };
+}
+
+function normalizeReadPath(value: string): string {
+  return value.trim().replaceAll("\\", "/").replace(/^\/+|\/+$/gu, "");
+}
+
+function readOffset(continuation: string | undefined): number {
+  if (continuation === undefined) return 0;
+  const parsed = Number(continuation);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new PanelHttpError(400, "invalid_space_reference_path", "续读位置无效。");
+  return parsed;
+}
+
+async function listManagedDirectory(source: string): Promise<readonly { readonly name: string; readonly kind: "file" | "directory" | "other" }[]> {
+  const entries = await fs.readdir(source, { withFileTypes: true });
+  return entries.map((entry) => ({
+    name: entry.name,
+    kind: entry.isDirectory() ? "directory" as const : entry.isFile() ? "file" as const : "other" as const,
+  })).sort((left, right) =>
+    (left.kind === "directory" ? 0 : 1) - (right.kind === "directory" ? 0 : 1)
+    || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }));
 }
 
 function safeAssetId(value: string): string {

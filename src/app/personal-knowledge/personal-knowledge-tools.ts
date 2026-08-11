@@ -15,6 +15,13 @@ export function createPersonalKnowledgeTools(options: PersonalKnowledgeToolOptio
     createKnowledgeUpdateNoteTool(options),
     createKnowledgeDeleteNoteTool(options),
     createKnowledgeCollectTool(options),
+    createKnowledgeListTool(options),
+    createKnowledgeReadPageTool(options),
+    createKnowledgeUpdateAssetTextTool(options),
+    createKnowledgeUncollectTool(options),
+    createKnowledgeCreateThemeTool(options),
+    createKnowledgeAssignThemeTool(options),
+    createKnowledgeUnassignThemeTool(options),
   ];
 }
 
@@ -179,6 +186,207 @@ export function createKnowledgeCollectTool(options: PersonalKnowledgeToolOptions
   });
 }
 
+export function createKnowledgeListTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeList",
+    description: "List the Personal Knowledge overview the Agent can operate on: knowledge pages (notes, collected Space references and legacy materials), themes and theme assignments. Results use stable refIds and themeIds; when the result is capped, a replayable nextInput is returned.",
+    metadata: readMetadata,
+    inputSchema: schema({
+      query: { type: "string", description: "Optional title text filter." },
+      kind: { type: "string", enum: ["note", "space_reference", "material"], description: "Optional page kind filter." },
+      spaceId: { type: "string", description: "Optional Space id filter; only notes belong to a Space." },
+      themeId: { type: "string", description: "Optional theme id filter; only pages assigned to that theme are listed." },
+      limit: { type: "number", description: "Optional page limit from 1 to 200. Defaults to 100." },
+      cursor: { type: "string", description: "Opaque continuation cursor returned as nextInput of a previous call." },
+    }, []),
+    execute: async (input) => {
+      const record = asRecord(input);
+      const query = optionalString(record.query);
+      const kind = knowledgeListKind(record.kind);
+      const spaceId = optionalString(record.spaceId);
+      const themeId = optionalString(record.themeId);
+      const limit = optionalInteger(record.limit);
+      const cursor = optionalString(record.cursor);
+      if (query === null || kind === undefined || spaceId === null || themeId === null || limit === null || cursor === null) {
+        return invalid("query, spaceId, themeId, limit and cursor must be omitted or valid values; kind must be note, space_reference or material.");
+      }
+      return resultFor(
+        () => options.knowledge.queries.list({
+          ...(query === undefined ? {} : { query }),
+          ...(kind === undefined ? {} : { kind }),
+          ...(spaceId === undefined ? {} : { spaceId }),
+          ...(themeId === undefined ? {} : { themeId }),
+          ...(limit === undefined ? {} : { limit }),
+          ...(cursor === undefined ? {} : { cursor }),
+        }),
+        (result) => ({ status: "found", ...result }),
+      );
+    },
+  });
+}
+
+export function createKnowledgeReadPageTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeReadPage",
+    description: "Read one knowledge page by its stable refId from KnowledgeList or KnowledgeCollect. Notes return their current body, revision and material refs; collected Space references return managed file or directory content, media metadata or an explicit unreadable fact; legacy materials return read-only metadata. Large text must be continued with the returned continuation.",
+    metadata: readMetadata,
+    inputSchema: schema({
+      refId: { type: "string", description: "Stable knowledge page refId." },
+      relativePath: { type: "string", description: "Optional child file or folder path inside a collected folder." },
+      maxLength: { type: "number", description: "Optional maximum text length per read from 1 to 1000000. Defaults to 30000." },
+      continuation: { type: "string", description: "Opaque continuation offset returned by a previous read of the same page." },
+    }, ["refId"]),
+    execute: async (input) => {
+      const record = asRecord(input);
+      const refId = stringOrUndefined(record.refId);
+      const relativePath = record.relativePath === undefined ? undefined : stringOrUndefined(record.relativePath);
+      const maxLength = optionalInteger(record.maxLength);
+      const continuation = record.continuation === undefined ? undefined : stringOrUndefined(record.continuation);
+      if (refId === undefined || (record.relativePath !== undefined && relativePath === undefined) || maxLength === null
+        || (record.continuation !== undefined && continuation === undefined)) {
+        return invalid("refId is required; relativePath, maxLength and continuation must be omitted or valid values.");
+      }
+      return resultFor(
+        () => options.knowledge.queries.readPage({
+          refId,
+          ...(relativePath === undefined ? {} : { relativePath }),
+          ...(maxLength === undefined ? {} : { maxLength }),
+          ...(continuation === undefined ? {} : { continuation }),
+        }),
+        (result) => result,
+      );
+    },
+  });
+}
+
+export function createKnowledgeUpdateAssetTextTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeUpdateAssetText",
+    description: "Update the UTF-8 text of a managed knowledge asset using the fingerprint returned by KnowledgeReadPage. A stale fingerprint is rejected and never silently overwrites newer content. Directories, binary files and uneditable content are rejected.",
+    metadata: writeMetadata,
+    inputSchema: schema({
+      refId: { type: "string", description: "Stable knowledge page refId of a managed asset." },
+      relativePath: { type: "string", description: "Optional child file path inside a collected folder; defaults to the collected root." },
+      expectedFingerprint: { type: "string", description: "Current file fingerprint returned by KnowledgeReadPage." },
+      text: { type: "string", description: "New UTF-8 text content." },
+    }, ["refId", "expectedFingerprint", "text"]),
+    execute: async (input, context) => {
+      const record = asRecord(input);
+      const refId = stringOrUndefined(record.refId);
+      const relativePath = record.relativePath === undefined ? undefined : stringOrUndefined(record.relativePath);
+      const expectedFingerprint = stringOrUndefined(record.expectedFingerprint);
+      const text = stringOrUndefined(record.text);
+      if (refId === undefined || expectedFingerprint === undefined || text === undefined
+        || (record.relativePath !== undefined && relativePath === undefined)) {
+        return invalid("refId, expectedFingerprint and text are required; relativePath must be omitted or a string.");
+      }
+      return resultFor(
+        () => options.knowledge.commands.updateManagedAssetText({
+          refId,
+          relativePath: relativePath ?? "",
+          expectedFingerprint,
+          text,
+          actor: agentActor(context),
+        }),
+        (updated) => ({
+          status: "updated",
+          refId,
+          relativePath: relativePath ?? "",
+          fingerprint: updated.writeResult.fingerprint ?? null,
+        }),
+      );
+    },
+  });
+}
+
+export function createKnowledgeUncollectTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeUncollect",
+    description: "Explicitly uncollect a knowledge page, deleting its managed knowledge copy. This is destructive: the page and its copied content are removed and cannot be restored.",
+    metadata: destructiveMetadata,
+    inputSchema: schema({
+      refId: { type: "string", description: "Stable knowledge page refId to uncollect." },
+    }, ["refId"]),
+    execute: async (input, context) => {
+      const record = asRecord(input);
+      const refId = stringOrUndefined(record.refId);
+      if (refId === undefined) return invalid("refId is required.");
+      return resultFor(
+        () => options.knowledge.commands.uncollect(refId, agentActor(context)),
+        (result) => ({ status: "uncollected", refId, managedCopyRemoved: result.managedCopyRemoved }),
+      );
+    },
+  });
+}
+
+export function createKnowledgeCreateThemeTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeCreateTheme",
+    description: "Create a global Personal Knowledge theme. The color is chosen by the system, not by the model. A theme whose normalized name already exists is returned as-is instead of creating a duplicate.",
+    metadata: writeMetadata,
+    inputSchema: schema({
+      name: { type: "string", description: "Theme name." },
+    }, ["name"]),
+    execute: async (input, context) => {
+      const record = asRecord(input);
+      const name = stringOrUndefined(record.name);
+      if (name === undefined) return invalid("name is required.");
+      return resultFor(
+        () => options.knowledge.commands.createTheme({ name, actor: agentActor(context) }),
+        (result) => ({ status: result.created ? "created" : "exists", theme: result.theme }),
+      );
+    },
+  });
+}
+
+export function createKnowledgeAssignThemeTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeAssignTheme",
+    description: "Assign one or more knowledge pages to an existing theme in one atomic batch. Already-assigned pages are reported as unchanged; any invalid refId or themeId rejects the whole batch.",
+    metadata: writeMetadata,
+    inputSchema: schema({
+      themeId: { type: "string", description: "Existing theme id from KnowledgeList." },
+      refIds: { type: "array", items: { type: "string" }, description: "Knowledge page refIds to assign." },
+    }, ["themeId", "refIds"]),
+    execute: async (input, context) => {
+      const record = asRecord(input);
+      const themeId = stringOrUndefined(record.themeId);
+      const refIds = optionalStringArray(record.refIds);
+      if (themeId === undefined || refIds === null || refIds === undefined || refIds.length === 0) {
+        return invalid("themeId and a non-empty refIds array are required.");
+      }
+      return resultFor(
+        () => options.knowledge.commands.assignTheme({ themeId, refIds, actor: agentActor(context) }),
+        (result) => ({ status: "assigned", themeId, assigned: result.assigned, unchanged: result.unchanged }),
+      );
+    },
+  });
+}
+
+export function createKnowledgeUnassignThemeTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeUnassignTheme",
+    description: "Remove one or more knowledge pages from a theme. User-locked assignments cannot be removed by the Agent and are reported as locked; the rest are removed in one atomic batch. There is no Agent tool to lock or unlock assignments.",
+    metadata: writeMetadata,
+    inputSchema: schema({
+      themeId: { type: "string", description: "Existing theme id from KnowledgeList." },
+      refIds: { type: "array", items: { type: "string" }, description: "Knowledge page refIds to unassign." },
+    }, ["themeId", "refIds"]),
+    execute: async (input, context) => {
+      const record = asRecord(input);
+      const themeId = stringOrUndefined(record.themeId);
+      const refIds = optionalStringArray(record.refIds);
+      if (themeId === undefined || refIds === null || refIds === undefined || refIds.length === 0) {
+        return invalid("themeId and a non-empty refIds array are required.");
+      }
+      return resultFor(
+        () => options.knowledge.commands.unassignTheme({ themeId, refIds, actor: agentActor(context) }),
+        (result) => ({ status: "unassigned", themeId, unassigned: result.unassigned, locked: result.locked }),
+      );
+    },
+  });
+}
+
 type ToolSpec = {
   readonly name: string;
   readonly description: string;
@@ -238,6 +446,10 @@ function knowledgePageKind(value: unknown): "note" | "space_reference" | undefin
   return value === "note" || value === "space_reference" ? value : undefined;
 }
 
+function knowledgeListKind(value: unknown): "note" | "space_reference" | "material" | undefined {
+  return value === "note" || value === "space_reference" || value === "material" ? value : undefined;
+}
+
 async function resultFor<T>(operation: () => Promise<T>, project: (value: T) => unknown): Promise<unknown> {
   try {
     return project(await operation());
@@ -253,5 +465,10 @@ function isExpectedKnowledgeOperationError(code: PersonalKnowledgeError["code"])
   return code === "personal_knowledge_invalid_input"
     || code === "personal_note_not_found"
     || code === "personal_note_revision_conflict"
-    || code === "knowledge_theme_not_found";
+    || code === "knowledge_theme_not_found"
+    || code === "knowledge_asset_not_found"
+    || code === "knowledge_asset_revision_conflict"
+    || code === "knowledge_asset_source_missing"
+    || code === "knowledge_asset_not_editable"
+    || code === "knowledge_asset_write_failed";
 }

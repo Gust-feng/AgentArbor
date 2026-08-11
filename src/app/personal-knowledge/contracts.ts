@@ -43,7 +43,64 @@ export type KnowledgePage = {
   };
 };
 
+/** Agent 可操作的 Personal Knowledge 页面概览。material 是遗留只读事实，title 不可得。 */
+export type KnowledgePageSummary = {
+  readonly refId: string;
+  readonly kind: KnowledgePage["kind"];
+  readonly title?: string;
+  readonly collectedAt: number;
+};
+
+export type KnowledgeListQuery = {
+  readonly query?: string;
+  readonly kind?: "note" | "space_reference" | "material";
+  readonly spaceId?: string;
+  readonly themeId?: string;
+  readonly limit?: number;
+  readonly cursor?: string;
+};
+
+export type KnowledgeListResult = {
+  readonly pages: readonly KnowledgePageSummary[];
+  readonly themes: readonly KnowledgeTheme[];
+  readonly assignments: readonly KnowledgeThemeAssignment[];
+  readonly nextInput?: KnowledgeListQuery;
+};
+
+/**
+ * 托管知识资产读取端口的结果，表达 feature-owned 内容事实。
+ * 具体路径解析、MIME、目录扫描和文本分段由 Host/中性文件能力实现。
+ */
+export type KnowledgeAssetReadResult =
+  | { readonly status: "directory"; readonly relativePath: string; readonly entries: readonly { readonly name: string; readonly relativePath: string; readonly kind: "file" | "directory" | "other" }[]; readonly truncated: boolean; readonly continuation?: string }
+  | { readonly status: "text"; readonly relativePath: string; readonly text: string; readonly truncated: boolean; readonly fingerprint: string; readonly byteLength: number; readonly language?: string; readonly continuation?: string }
+  | { readonly status: "media"; readonly relativePath: string; readonly mediaKind: "image" | "pdf" | "video" | "audio"; readonly mimeType: string; readonly byteLength: number; readonly contentUrl: string }
+  | { readonly status: "unsupported"; readonly relativePath: string; readonly message: string }
+  | { readonly status: "missing"; readonly relativePath: string; readonly message: string }
+  | { readonly status: "invalid"; readonly relativePath: string; readonly message: string };
+
+export type ManagedKnowledgeAssetReadPort = (input: {
+  readonly page: KnowledgePage;
+  readonly relativePath: string;
+  readonly maxLength?: number;
+  readonly continuation?: string;
+}) => Promise<KnowledgeAssetReadResult>;
+
+export type KnowledgePageReadResult =
+  | { readonly status: "note"; readonly refId: string; readonly kind: "note"; readonly title: string; readonly bodyMarkdown: string; readonly truncated: boolean; readonly revision: number; readonly materialRefs: readonly string[]; readonly continuation?: string }
+  | { readonly status: "space_reference"; readonly refId: string; readonly relativePath: string; readonly content: KnowledgeAssetReadResult }
+  | { readonly status: "material"; readonly refId: string; readonly kind: "material"; readonly collectedAt: number; readonly note: string }
+  | { readonly status: "missing"; readonly refId: string; readonly message: string };
+
 export type KnowledgeLink = { readonly from: string; readonly to: string };
+
+/** Personal Knowledge 长期业务变更的 append-only 审计记录，不复制工具结果与正文。 */
+export type PersonalKnowledgeChangeRecord =
+  | { readonly id: string; readonly type: "knowledge.asset_updated"; readonly refId: string; readonly relativePath: string; readonly beforeFingerprint: string; readonly afterFingerprint: string; readonly actor: PersonalKnowledgeActor; readonly occurredAt: number }
+  | { readonly id: string; readonly type: "knowledge.uncollected"; readonly refId: string; readonly kind: KnowledgePage["kind"]; readonly actor: PersonalKnowledgeActor; readonly occurredAt: number }
+  | { readonly id: string; readonly type: "knowledge.theme_created"; readonly themeId: string; readonly name: string; readonly actor: PersonalKnowledgeActor; readonly occurredAt: number }
+  | { readonly id: string; readonly type: "knowledge.theme_assigned"; readonly themeId: string; readonly refIds: readonly string[]; readonly actor: PersonalKnowledgeActor; readonly occurredAt: number }
+  | { readonly id: string; readonly type: "knowledge.theme_unassigned"; readonly themeId: string; readonly refIds: readonly string[]; readonly actor: PersonalKnowledgeActor; readonly occurredAt: number };
 
 export type KnowledgeTheme = {
   readonly id: string;
@@ -103,15 +160,20 @@ export interface PersonalKnowledgeRepository {
   getNote(id: string): Promise<PersonalNote | undefined>;
   listNoteRevisions(id: string, limit: number): Promise<readonly PersonalNoteRevision[]>;
   searchNotes(input: { readonly query: string; readonly spaceId?: string; readonly limit: number }): Promise<readonly PersonalKnowledgeSearchResult[]>;
+  listPages(input: KnowledgeListQuery): Promise<{ readonly pages: readonly KnowledgePageSummary[]; readonly nextCursor?: string }>;
+  recentChanges(input: { readonly refId?: string; readonly themeId?: string; readonly limit: number; readonly cursor?: string }): Promise<{ readonly records: readonly PersonalKnowledgeChangeRecord[]; readonly nextCursor?: string }>;
+  appendChangeRecord(record: PersonalKnowledgeChangeRecord): Promise<void>;
+  assignTheme(input: { readonly themeId: string; readonly refIds: readonly string[]; readonly by: "agent" | "user" }): Promise<{ readonly assigned: readonly string[]; readonly unchanged: readonly string[] }>;
+  unassignTheme(input: { readonly themeId: string; readonly refIds: readonly string[] }): Promise<readonly string[]>;
   execute(command: PersonalKnowledgeCommand): Promise<void>;
 }
 
-export type PersonalKnowledgeManagedAssetTextUpdate<TWriteResult = unknown> = {
+export type PersonalKnowledgeManagedAssetTextUpdate<TWriteResult> = {
   readonly page: KnowledgePage;
   readonly writeResult: TWriteResult;
 };
 
-export type PersonalKnowledgeFeature<TManagedAssetTextWriteResult = unknown> = {
+export type PersonalKnowledgeFeature<TManagedAssetTextWriteResult extends { readonly fingerprint?: string } = { readonly fingerprint?: string }> = {
   readonly commands: {
     createNote(input: { readonly id?: string; readonly spaceId: string; readonly title?: string; readonly bodyMarkdown?: string; readonly materialRefs?: readonly string[]; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<PersonalNote>;
     updateNote(input: { readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
@@ -123,8 +185,12 @@ export type PersonalKnowledgeFeature<TManagedAssetTextWriteResult = unknown> = {
       readonly relativePath: string;
       readonly expectedFingerprint: string;
       readonly text: string;
+      readonly actor?: PersonalKnowledgeActor;
     }): Promise<PersonalKnowledgeManagedAssetTextUpdate<TManagedAssetTextWriteResult>>;
-    uncollect(refId: string): Promise<void>;
+    uncollect(refId: string, actor?: PersonalKnowledgeActor): Promise<{ readonly managedCopyRemoved: boolean }>;
+    createTheme(input: { readonly name: string; readonly actor: PersonalKnowledgeActor }): Promise<{ readonly theme: KnowledgeTheme; readonly created: boolean }>;
+    assignTheme(input: { readonly themeId: string; readonly refIds: readonly string[]; readonly actor: PersonalKnowledgeActor }): Promise<{ readonly themeId: string; readonly assigned: readonly string[]; readonly unchanged: readonly string[] }>;
+    unassignTheme(input: { readonly themeId: string; readonly refIds: readonly string[]; readonly actor: PersonalKnowledgeActor }): Promise<{ readonly themeId: string; readonly unassigned: readonly string[]; readonly locked: readonly string[] }>;
     /** Deletes Space-owned notes and detaches copied knowledge assets from Space references. */
     cleanupSpace(input: { readonly spaceId: string; readonly referenceIds: readonly string[] }): Promise<void>;
     execute(command: Exclude<PersonalKnowledgeCommand, {
@@ -136,6 +202,9 @@ export type PersonalKnowledgeFeature<TManagedAssetTextWriteResult = unknown> = {
     note(id: string): Promise<PersonalNote | undefined>;
     noteRevisions(id: string, limit?: number): Promise<readonly PersonalNoteRevision[]>;
     search(input: { readonly query: string; readonly spaceId?: string; readonly limit?: number }): Promise<readonly PersonalKnowledgeSearchResult[]>;
+    list(input?: KnowledgeListQuery): Promise<KnowledgeListResult>;
+    readPage(input: { readonly refId: string; readonly relativePath?: string; readonly maxLength?: number; readonly continuation?: string }): Promise<KnowledgePageReadResult>;
+    recentChanges(input?: { readonly refId?: string; readonly themeId?: string; readonly limit?: number; readonly cursor?: string }): Promise<{ readonly records: readonly PersonalKnowledgeChangeRecord[]; readonly nextCursor?: string }>;
   };
   readonly events: { subscribe(listener: (event: PersonalKnowledgeEvent) => void): () => void };
   release(): Promise<void>;

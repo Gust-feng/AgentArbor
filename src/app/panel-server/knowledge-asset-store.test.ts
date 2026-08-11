@@ -1,90 +1,98 @@
 import assert from "node:assert/strict";
-import { promises as fs } from "node:fs";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import type { SpaceReferenceItem } from "../spaces/index.js";
-import { removeTestDirectory } from "../testing/fs-test-directories.js";
-import { PanelHttpError } from "./http-utils.js";
-import { captureKnowledgeAsset, reconcileKnowledgeAssets, stageKnowledgeAssetRemoval } from "./knowledge-asset-store.js";
+import type { KnowledgePage } from "../personal-knowledge/index.js";
+import { readManagedKnowledgeAsset } from "./knowledge-asset-store.js";
 
-test("knowledge asset capture copies only the selected child file", async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-child-"));
-  t.after(() => removeTestDirectory(directory));
-  const source = path.join(directory, "source");
-  const assets = path.join(directory, "assets");
-  await fs.mkdir(path.join(source, "nested"), { recursive: true });
-  await fs.writeFile(path.join(source, "selected.md"), "# selected", "utf8");
-  await fs.writeFile(path.join(source, "other.md"), "# other", "utf8");
+const DIRECTORY_PAGE: KnowledgePage = {
+  refId: "directory-page",
+  kind: "space_reference",
+  collectedAt: 1,
+  asset: {
+    status: "managed",
+    title: "目录资产",
+    sourceLabel: "C:/source",
+    contentKind: "directory",
+    sourceReferenceId: "reference-one",
+    sourceRelativePath: "",
+  },
+};
 
-  const asset = await captureKnowledgeAsset(assets, "asset-one", workspaceReference(source), "selected.md");
+test("readManagedKnowledgeAsset reads text, continues large text and reports fingerprints", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-read-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(contentPath(root, "directory-page"), { recursive: true });
+  await writeFile(path.join(contentPath(root, "directory-page"), "note.txt"), "0123456789ABCDEFGHIJ", "utf8");
 
-  assert.equal(asset.sourceRelativePath, "selected.md");
-  assert.equal(asset.contentKind, "file");
-  assert.equal(await fs.readFile(path.join(assets, encoded("asset-one"), "content"), "utf8"), "# selected");
-  assert.equal(await fs.stat(path.join(assets, encoded("asset-one"), "other.md")).then(() => true, () => false), false);
+  const first = await readManagedKnowledgeAsset(root, DIRECTORY_PAGE, { relativePath: "note.txt", maxLength: 10 });
+  assert.equal(first.status, "text");
+  assert.equal(first.status === "text" && first.text, "0123456789");
+  assert.equal(first.status === "text" && first.truncated, true);
+  assert.equal(first.status === "text" && first.continuation, "10");
+  const second = await readManagedKnowledgeAsset(root, DIRECTORY_PAGE, {
+    relativePath: "note.txt",
+    maxLength: 10,
+    continuation: first.status === "text" ? first.continuation : undefined,
+  });
+  assert.equal(second.status, "text");
+  assert.equal(second.status === "text" && second.text, "ABCDEFGHIJ");
+  assert.equal(second.status === "text" && second.truncated, false);
+  assert.equal(second.status === "text" && second.fingerprint, first.status === "text" ? first.fingerprint : undefined);
+
+  const filePage: KnowledgePage = { ...DIRECTORY_PAGE, refId: "file-page", asset: { ...DIRECTORY_PAGE.asset!, contentKind: "file" } };
+  const invalid = await readManagedKnowledgeAsset(root, filePage, { relativePath: "../escape.md" });
+  assert.equal(invalid.status, "invalid");
+  const missing = await readManagedKnowledgeAsset(root, filePage, { relativePath: "" });
+  assert.equal(missing.status, "missing");
 });
 
-test("knowledge asset capture rejects oversized content and removes temporary directories", async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-limit-"));
-  t.after(() => removeTestDirectory(directory));
-  const source = path.join(directory, "large.bin");
-  const assets = path.join(directory, "assets");
-  await fs.writeFile(source, "");
-  await fs.truncate(source, 256 * 1024 * 1024 + 1);
+test("readManagedKnowledgeAsset lists directories with replayable continuation", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-list-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const content = contentPath(root, "directory-page");
+  await mkdir(path.join(content, "sub"), { recursive: true });
+  await writeFile(path.join(content, "a.md"), "a", "utf8");
+  await writeFile(path.join(content, "b.md"), "b", "utf8");
+  await writeFile(path.join(content, "sub", "c.md"), "c", "utf8");
 
-  await assert.rejects(
-    captureKnowledgeAsset(assets, "asset-large", localFileReference(source)),
-    (error: unknown) => error instanceof PanelHttpError && error.code === "knowledge_asset_capture_limit",
-  );
-  assert.deepEqual(await fs.readdir(assets).catch(() => []), []);
+  const first = await readManagedKnowledgeAsset(root, DIRECTORY_PAGE, { relativePath: "", maxLength: 2 });
+  assert.equal(first.status, "directory");
+  assert.deepEqual(first.status === "directory" && first.entries.map((entry) => entry.name), ["sub", "a.md"]);
+  assert.equal(first.status === "directory" && first.truncated, true);
+  const second = await readManagedKnowledgeAsset(root, DIRECTORY_PAGE, {
+    relativePath: "",
+    maxLength: 2,
+    continuation: first.status === "directory" ? first.continuation : undefined,
+  });
+  assert.equal(second.status, "directory");
+  assert.deepEqual(second.status === "directory" && second.entries.map((entry) => entry.name), ["b.md"]);
+  assert.equal(second.status === "directory" && second.truncated, false);
+  const child = await readManagedKnowledgeAsset(root, DIRECTORY_PAGE, { relativePath: "sub/c.md", maxLength: 10 });
+  assert.equal(child.status, "text");
+  assert.equal(child.status === "text" && child.text, "c");
 });
 
-test("knowledge asset reconciliation restores interrupted active deletions and removes completed ones", async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-reconcile-"));
-  t.after(() => removeTestDirectory(directory));
-  const active = encoded("active");
-  const interrupted = encoded("interrupted");
-  await Promise.all([
-    fs.mkdir(path.join(directory, active), { recursive: true }),
-    fs.mkdir(path.join(directory, `${active}.pending-interrupted`), { recursive: true }),
-    fs.mkdir(path.join(directory, `${interrupted}.deleting-staged`), { recursive: true }),
-    fs.mkdir(path.join(directory, `${encoded("deleted")}.deleting-staged`), { recursive: true }),
-    fs.mkdir(path.join(directory, encoded("orphan")), { recursive: true }),
-  ]);
+test("readManagedKnowledgeAsset reports media facts and rejects binary content", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-media-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const content = contentPath(root, "directory-page");
+  await mkdir(content, { recursive: true });
+  await writeFile(path.join(content, "diagram.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>", "utf8");
+  await writeFile(path.join(content, "blob.bin"), Buffer.from([0, 1, 2, 3, 255]));
 
-  await reconcileKnowledgeAssets(directory, new Set(["active", "interrupted"]));
+  const media = await readManagedKnowledgeAsset(root, DIRECTORY_PAGE, { relativePath: "diagram.svg" });
+  assert.equal(media.status, "media");
+  assert.equal(media.status === "media" && media.mediaKind, "image");
+  assert.equal(media.status === "media" && media.mimeType, "image/svg+xml");
+  assert.equal(media.status === "media" && media.contentUrl, "/api/personal-knowledge/assets/directory-page/content?path=diagram.svg");
 
-  assert.deepEqual((await fs.readdir(directory)).sort(), [active, interrupted].sort());
+  const binary = await readManagedKnowledgeAsset(root, DIRECTORY_PAGE, { relativePath: "blob.bin" });
+  assert.equal(binary.status, "unsupported");
 });
 
-test("knowledge asset removal can commit or roll back before metadata changes", async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-remove-"));
-  t.after(() => removeTestDirectory(directory));
-  const assetDirectory = path.join(directory, encoded("asset-one"));
-  await fs.mkdir(assetDirectory, { recursive: true });
-  await fs.writeFile(path.join(assetDirectory, "content"), "keep", "utf8");
-
-  const rollback = await stageKnowledgeAssetRemoval(directory, "asset-one");
-  assert.equal(await fs.stat(assetDirectory).then(() => true, () => false), false);
-  await rollback?.rollback();
-  assert.equal(await fs.readFile(path.join(assetDirectory, "content"), "utf8"), "keep");
-
-  const commit = await stageKnowledgeAssetRemoval(directory, "asset-one");
-  await commit?.commit();
-  assert.equal(await fs.stat(assetDirectory).then(() => true, () => false), false);
-  assert.deepEqual(await fs.readdir(directory), []);
-});
-
-function workspaceReference(source: string): SpaceReferenceItem {
-  return { id: "reference-one", spaceId: "space-one", title: "source", reference: { kind: "workspace_folder", path: source }, createdAt: "now", updatedAt: "now" };
-}
-
-function localFileReference(source: string): SpaceReferenceItem {
-  return { id: "reference-two", spaceId: "space-one", title: "large.bin", reference: { kind: "local_file", path: source }, createdAt: "now", updatedAt: "now" };
-}
-
-function encoded(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64url");
+function contentPath(root: string, refId: string): string {
+  return path.join(root, Buffer.from(refId, "utf8").toString("base64url"), "content");
 }

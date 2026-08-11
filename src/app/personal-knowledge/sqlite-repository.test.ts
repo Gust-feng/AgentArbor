@@ -155,7 +155,7 @@ test("managed asset text updates return the lease-captured result and publish on
     writeManagedAssetText: async ({ page, relativePath, expectedFingerprint, text }) => {
       if (writeError !== undefined) throw writeError;
       writes.push({ refId: page.refId, relativePath, expectedFingerprint, text });
-      return { committedText: text };
+      return { committedText: text, fingerprint: `after:${expectedFingerprint}` };
     },
   });
   const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
@@ -167,10 +167,11 @@ test("managed asset text updates return the lease-captured result and publish on
     relativePath: "chapter.md",
     expectedFingerprint: " 1:10 ",
     text: "updated",
+    actor: { kind: "agent", actorId: "ordinary", traceId: "trace-1", toolCallId: "call-1" },
   });
 
   assert.equal(updated.page.refId, page.refId);
-  assert.deepEqual(updated.writeResult, { committedText: "updated" });
+  assert.deepEqual(updated.writeResult, { committedText: "updated", fingerprint: "after: 1:10 " });
   assert.deepEqual(writes, [{
     refId: page.refId,
     relativePath: "chapter.md",
@@ -178,6 +179,14 @@ test("managed asset text updates return the lease-captured result and publish on
     text: "updated",
   }]);
   assert.deepEqual(events, [{ type: "personal_knowledge.changed", refIds: [page.refId] }]);
+  const records = await feature.queries.recentChanges();
+  assert.equal(records.records.length, 1);
+  assert.equal(records.records[0]?.type, "knowledge.asset_updated");
+  assert.equal(records.records[0]?.refId, page.refId);
+  assert.equal(records.records[0]?.relativePath, "chapter.md");
+  assert.equal(records.records[0]?.beforeFingerprint, " 1:10 ");
+  assert.equal(records.records[0]?.afterFingerprint, "after: 1:10 ");
+  assert.deepEqual(records.records[0]?.actor, { kind: "agent", actorId: "ordinary", traceId: "trace-1", toolCallId: "call-1" });
 
   writeError = new Error("write failed");
   await assert.rejects(feature.commands.updateManagedAssetText({
@@ -185,6 +194,7 @@ test("managed asset text updates return the lease-captured result and publish on
     relativePath: "chapter.md",
     expectedFingerprint: "1:10",
     text: "not committed",
+    actor: { kind: "agent" },
   }), writeError);
   await assert.rejects(feature.commands.updateManagedAssetText({
     refId: "missing",
@@ -193,6 +203,8 @@ test("managed asset text updates return the lease-captured result and publish on
     text: "not committed",
   }), (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "knowledge_asset_not_found");
   assert.deepEqual(events, [{ type: "personal_knowledge.changed", refIds: [page.refId] }]);
+  // 失败的写操作不产生伪变更记录。
+  assert.equal((await feature.queries.recentChanges()).records.length, 1);
 });
 
 test("concurrent managed asset writes keep each command's lease-captured result", async (t) => {
@@ -206,7 +218,7 @@ test("concurrent managed asset writes keep each command's lease-captured result"
         firstWriteEntered();
         await firstWriteRelease;
       }
-      return { committedText: text };
+      return { committedText: text, fingerprint: `fingerprint:${text}` };
     },
   });
   const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
@@ -226,8 +238,8 @@ test("concurrent managed asset writes keep each command's lease-captured result"
   });
   releaseFirstWrite();
 
-  assert.deepEqual((await first).writeResult, { committedText: "first" });
-  assert.deepEqual((await second).writeResult, { committedText: "second" });
+  assert.deepEqual((await first).writeResult, { committedText: "first", fingerprint: "fingerprint:first" });
+  assert.deepEqual((await second).writeResult, { committedText: "second", fingerprint: "fingerprint:second" });
 });
 
 test("Space cleanup deletes Space-owned notes and detaches copied assets without deleting the knowledge page", async (t) => {
@@ -261,6 +273,7 @@ test("migrates existing material knowledge pages before adding Space references"
   database.connection.exec(`
     DROP TABLE personal_note_revisions;
     DROP TABLE knowledge_pages;
+    DROP TABLE knowledge_change_records;
     CREATE TABLE knowledge_pages (
       ref_id TEXT PRIMARY KEY,
       kind TEXT NOT NULL CHECK(kind IN ('note', 'material')),
@@ -287,6 +300,7 @@ test("migrates existing material knowledge pages before adding Space references"
 test("migration removes relationships whose knowledge pages no longer exist", async (t) => {
   const { database } = await fixture(t);
   database.connection.exec(`
+    DROP TABLE knowledge_change_records;
     INSERT INTO knowledge_pages(ref_id, kind, collected_at, asset_json) VALUES ('alive', 'material', 1, NULL);
     INSERT INTO knowledge_links(from_ref_id, to_ref_id) VALUES ('alive', 'missing');
     INSERT INTO knowledge_themes(id, name, color, origin) VALUES ('theme-one', '主题', '#000000', 'user');
@@ -304,6 +318,7 @@ test("migration removes relationships whose knowledge pages no longer exist", as
 
 test("migration restores the managed knowledge asset kind", async (t) => {
   const { database } = await fixture(t);
+  database.connection.exec("DROP TABLE knowledge_change_records;");
   database.connection.prepare(
     "INSERT INTO knowledge_pages(ref_id, kind, collected_at, asset_json) VALUES (?, 'material', 1, ?)",
   ).run("managed-copy", JSON.stringify({
@@ -321,6 +336,169 @@ test("migration restores the managed knowledge asset kind", async (t) => {
   assert.equal((await migrated.readSnapshot()).pages[0]?.kind, "space_reference");
 });
 
+test("Agent theme creation derives origin from the actor and deduplicates normalized names", async (t) => {
+  const { feature } = await fixture(t);
+  const created = await feature.commands.createTheme({ name: " Transformer ", actor: { kind: "agent", actorId: "ordinary", traceId: "trace-1" } });
+  assert.equal(created.created, true);
+  assert.equal(created.theme.origin, "agent");
+  assert.match(created.theme.color, /^#[0-9a-f]{6}$/iu);
+  assert.equal((await feature.queries.snapshot()).themes.length, 1);
+
+  const duplicate = await feature.commands.createTheme({ name: "transformer", actor: { kind: "agent" } });
+  assert.equal(duplicate.created, false);
+  assert.equal(duplicate.theme.id, created.theme.id);
+  assert.equal((await feature.queries.snapshot()).themes.length, 1);
+
+  const userCreated = await feature.commands.createTheme({ name: "用户主题", actor: { kind: "user" } });
+  assert.equal(userCreated.created, true);
+  assert.equal(userCreated.theme.origin, "user");
+  assert.notEqual(userCreated.theme.color, created.theme.color);
+
+  const records = await feature.queries.recentChanges();
+  assert.deepEqual(records.records.map((record) => record.type), ["knowledge.theme_created", "knowledge.theme_created"]);
+  assert.deepEqual(records.records.map((record) => record.actor.kind), ["user", "agent"]);
+  assert.equal(records.records[0]?.type === "knowledge.theme_created" && records.records[0]?.name, "用户主题");
+});
+
+test("theme assignments are atomic and idempotent; locked assignments resist Agent unassignment", async (t) => {
+  const { feature } = await fixture(t);
+  const note = await feature.commands.createNote({ spaceId: "space-one", title: "归入主题" });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: note.id, kind: "note", collectedAt: 1 } });
+  const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: "material-one", kind: "material", collectedAt: 2 } });
+  const { theme } = await feature.commands.createTheme({ name: "研究", actor: { kind: "user" } });
+
+  const assigned = await feature.commands.assignTheme({
+    themeId: theme.id,
+    refIds: [note.id, page.refId, "material-one"],
+    actor: { kind: "agent", actorId: "ordinary", traceId: "trace-1" },
+  });
+  assert.deepEqual(assigned, { themeId: theme.id, assigned: [note.id, page.refId, "material-one"], unchanged: [] });
+
+  const repeated = await feature.commands.assignTheme({
+    themeId: theme.id,
+    refIds: [note.id, page.refId],
+    actor: { kind: "agent" },
+  });
+  assert.deepEqual(repeated, { themeId: theme.id, assigned: [], unchanged: [note.id, page.refId] });
+
+  await assert.rejects(
+    feature.commands.assignTheme({ themeId: theme.id, refIds: ["missing"], actor: { kind: "agent" } }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_knowledge_invalid_input",
+  );
+  await assert.rejects(
+    feature.commands.assignTheme({ themeId: "missing-theme", refIds: [note.id], actor: { kind: "agent" } }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "knowledge_theme_not_found",
+  );
+  assert.deepEqual((await feature.queries.snapshot()).assignments.length, 3);
+
+  await feature.commands.execute({ type: "theme.toggle_lock", refId: page.refId, themeId: theme.id });
+  const lockedUnassign = await feature.commands.unassignTheme({
+    themeId: theme.id,
+    refIds: [page.refId, note.id],
+    actor: { kind: "agent", actorId: "ordinary", traceId: "trace-1" },
+  });
+  assert.deepEqual(lockedUnassign, { themeId: theme.id, unassigned: [note.id], locked: [page.refId] });
+  const afterAgent = await feature.queries.snapshot();
+  assert.equal(afterAgent.assignments.some((assignment) => assignment.refId === page.refId), true);
+  assert.equal(afterAgent.assignments.some((assignment) => assignment.refId === note.id), false);
+
+  const userUnassign = await feature.commands.unassignTheme({
+    themeId: theme.id,
+    refIds: [page.refId],
+    actor: { kind: "user" },
+  });
+  assert.deepEqual(userUnassign, { themeId: theme.id, unassigned: [page.refId], locked: [] });
+
+  const records = await feature.queries.recentChanges({ themeId: theme.id });
+  assert.deepEqual(records.records.map((record) => record.type).sort(), [
+    "knowledge.theme_assigned",
+    "knowledge.theme_created",
+    "knowledge.theme_unassigned",
+    "knowledge.theme_unassigned",
+  ]);
+  const assignedRecord = records.records.find((record) => record.type === "knowledge.theme_assigned");
+  assert.equal(assignedRecord?.type === "knowledge.theme_assigned" && assignedRecord.refIds.length, 3);
+});
+
+test("knowledge list filters by kind, space, theme and title with replayable cursors", async (t) => {
+  const { feature } = await fixture(t, { spaceExists: async () => true });
+  const note = await feature.commands.createNote({ spaceId: "space-one", title: "反向传播", bodyMarkdown: "链式法则" });
+  const otherNote = await feature.commands.createNote({ spaceId: "space-one", title: "线性代数" });
+  const otherSpaceNote = await feature.commands.createNote({ spaceId: "space-two", title: "反向传播回顾" });
+  const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: "legacy-material", kind: "material", collectedAt: 1 } });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: note.id, kind: "note", collectedAt: 10_000 } });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: otherNote.id, kind: "note", collectedAt: 20_000 } });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: otherSpaceNote.id, kind: "note", collectedAt: 30_000 } });
+  const { theme } = await feature.commands.createTheme({ name: "深度学习", actor: { kind: "user" } });
+  await feature.commands.assignTheme({ themeId: theme.id, refIds: [note.id, page.refId], actor: { kind: "user" } });
+
+  const all = await feature.queries.list();
+  assert.deepEqual(all.pages.map((candidate) => candidate.refId), [page.refId, otherSpaceNote.id, otherNote.id, note.id, "legacy-material"]);
+  assert.equal(all.pages.find((candidate) => candidate.refId === note.id)?.title, "反向传播");
+  assert.equal(all.pages.find((candidate) => candidate.refId === "legacy-material")?.title, undefined);
+
+  const notes = await feature.queries.list({ kind: "note", spaceId: "space-one" });
+  assert.deepEqual(notes.pages.map((candidate) => candidate.refId), [otherNote.id, note.id]);
+
+  const themed = await feature.queries.list({ themeId: theme.id });
+  assert.deepEqual(themed.pages.map((candidate) => candidate.refId), [page.refId, note.id]);
+
+  const searched = await feature.queries.list({ query: "反向传播" });
+  assert.deepEqual(searched.pages.map((candidate) => candidate.refId), [otherSpaceNote.id, note.id]);
+
+  const firstPage = await feature.queries.list({ kind: "note", limit: 2 });
+  assert.equal(firstPage.pages.length, 2);
+  const secondPage = await feature.queries.list({ kind: "note", limit: 2, cursor: firstPage.nextInput?.cursor });
+  assert.equal(secondPage.pages.length, 1);
+  assert.deepEqual([...firstPage.pages.map((candidate) => candidate.refId), ...secondPage.pages.map((candidate) => candidate.refId)],
+    [otherSpaceNote.id, otherNote.id, note.id]);
+});
+
+test("change records persist append-only and support filtering and cursor pagination", async (t) => {
+  const { database, feature } = await fixture(t);
+  const { theme } = await feature.commands.createTheme({ name: "主题A", actor: { kind: "agent" } });
+  const note = await feature.commands.createNote({ spaceId: "space-one", title: "笔记" });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: note.id, kind: "note", collectedAt: 100 } });
+  await feature.commands.assignTheme({ themeId: theme.id, refIds: [note.id], actor: { kind: "agent" } });
+  await feature.commands.unassignTheme({ themeId: theme.id, refIds: [note.id], actor: { kind: "user" } });
+  await feature.commands.uncollect(note.id, { kind: "user" });
+
+  const byTheme = await feature.queries.recentChanges({ themeId: theme.id });
+  assert.deepEqual(byTheme.records.map((record) => record.type).sort(), ["knowledge.theme_assigned", "knowledge.theme_created", "knowledge.theme_unassigned"]);
+
+  const byRef = await feature.queries.recentChanges({ refId: note.id });
+  assert.deepEqual(byRef.records.map((record) => record.type).sort(), ["knowledge.theme_assigned", "knowledge.theme_unassigned", "knowledge.uncollected"]);
+
+  const all = await feature.queries.recentChanges({ limit: 2 });
+  assert.equal(all.records.length, 2);
+  assert.notEqual(all.nextCursor, undefined);
+  const rest = await feature.queries.recentChanges({ limit: 2, cursor: all.nextCursor });
+  assert.equal(rest.records.length, 2);
+  const ids = [...all.records, ...rest.records].map((record) => record.id);
+  assert.equal(new Set(ids).size, 4);
+  assert.equal(database.connection.prepare("SELECT COUNT(*) AS count FROM knowledge_change_records").get()?.count, 4);
+});
+
+test("uncollect reports whether a managed knowledge copy was actually removed", async (t) => {
+  const { feature } = await fixture(t, {
+    stageManagedAssetRemoval: async (itemId) => itemId === "legacy-material"
+      ? undefined
+      : { commit: async () => undefined, rollback: async () => undefined },
+  });
+  const page = await feature.commands.collectSpaceReference({ referenceId: "reference-one" });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: "legacy-material", kind: "material", collectedAt: 2 } });
+  assert.deepEqual(await feature.commands.uncollect(page.refId, { kind: "user" }), { managedCopyRemoved: true });
+  assert.deepEqual(await feature.commands.uncollect("legacy-material", { kind: "user" }), { managedCopyRemoved: false });
+  await assert.rejects(
+    feature.commands.uncollect("missing", { kind: "user" }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "knowledge_asset_not_found",
+  );
+  const records = await feature.queries.recentChanges();
+  assert.deepEqual(records.records.map((record) => record.type), ["knowledge.uncollected", "knowledge.uncollected"]);
+});
+
 async function fixture(
   t: import("node:test").TestContext,
   options: {
@@ -330,16 +508,22 @@ async function fixture(
       readonly relativePath: string;
       readonly expectedFingerprint: string;
       readonly text: string;
-    }) => Promise<unknown>;
+    }) => Promise<{ readonly fingerprint?: string } & Record<string, unknown>>;
+    readonly spaceExists?: (spaceId: string) => Promise<boolean>;
+    readonly stageManagedAssetRemoval?: (itemId: string) => Promise<{
+      readonly commit: () => Promise<void>;
+      readonly rollback: () => Promise<void>;
+    } | undefined>;
   } = {},
 ) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-personal-knowledge-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
   const feature = createPersonalKnowledgeFeature({
     repository: createSqlitePersonalKnowledgeRepository(database),
-    spaceExists: async (spaceId) => spaceId === "space-one",
+    spaceExists: options.spaceExists ?? (async (spaceId) => spaceId === "space-one"),
     captureSpaceReference: async () => ({ status: "managed", title: "参考资料", sourceLabel: "C:/source", contentKind: "directory", sourceReferenceId: "reference-one", sourceRelativePath: "" }),
     removeManagedAsset: options.removeManagedAsset ?? (async () => undefined),
+    stageManagedAssetRemoval: options.stageManagedAssetRemoval,
     writeManagedAssetText: options.writeManagedAssetText,
   });
   t.after(async () => {

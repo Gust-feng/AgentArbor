@@ -138,6 +138,12 @@ export type OrdinaryFeatureDiagnostic =
       readonly kind: "completion_commit_failed";
       readonly runId: string;
       readonly error: unknown;
+    }
+  | {
+      /** 会话标题模型生成失败；列表继续使用首条消息截断回退，不阻塞对话。 */
+      readonly kind: "conversation_title_generation_failed";
+      readonly conversationId: string;
+      readonly error: unknown;
     };
 
 export type OrdinaryRunBirth = {
@@ -185,6 +191,12 @@ export type OrdinaryConversationControlState = {
   readonly owner?: ConversationOwner;
   readonly titleOverride?: string;
   readonly titleEditedAt?: string;
+  /**
+   * 模型生成的会话标题（ADR 口径：UI 摘要字段的运行时事实）。用户手动
+   * 重命名（titleOverride）优先；生成失败或未接线时回退到首条消息截断。
+   */
+  readonly autoTitle?: string;
+  readonly autoTitleAt?: string;
   readonly pinnedAt?: string;
   readonly deletedAt?: string;
 };
@@ -566,6 +578,23 @@ export type OrdinaryConversationReadModel = {
   readonly queuedRunIds: readonly string[];
   readonly turns: readonly OrdinaryConversationTurnReadModel[];
 };
+
+/**
+ * Host 提供的模型标题生成能力（中性端口）。生成与持久化事实归 Ordinary
+ * 拥有；Host 负责用与 run 相同的冻结 provider 配置发起一次无工具模型调用。
+ * 返回 undefined 表示无法生成，列表继续使用首条消息截断回退。
+ */
+export type OrdinaryConversationTitleGenerationInput = {
+  readonly conversationId: string;
+  /** 会话第一条用户消息；生成器据此提炼简短标题。 */
+  readonly userMessage: string;
+  /** 冻结的 run birth，Host 据此重建 provider 绑定。 */
+  readonly birth: OrdinaryRunBirth;
+};
+
+export type OrdinaryConversationTitleGenerator = (
+  input: OrdinaryConversationTitleGenerationInput,
+) => Promise<string | undefined>;
 
 export type SubmitOrdinaryTurnResult = {
   readonly conversation: OrdinaryConversationReadModel;

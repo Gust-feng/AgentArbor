@@ -97,7 +97,7 @@ export function projectOrdinaryConversation(input: {
   );
   return {
     conversationId: input.control.state.conversationId,
-    title: input.control.state.titleOverride ?? compactTitle(first.input.userMessage),
+    title: input.control.state.titleOverride ?? input.control.state.autoTitle ?? compactTitle(first.input.userMessage),
     titleEditedAt: input.control.state.titleEditedAt,
     pinnedAt: input.control.state.pinnedAt,
     createdAt: input.control.state.createdAt,

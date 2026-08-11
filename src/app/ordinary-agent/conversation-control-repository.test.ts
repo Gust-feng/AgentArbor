@@ -99,6 +99,27 @@ test("conversation control repository list isolates incompatible and damaged sna
   await assert.rejects(repository.get("damaged-conversation"), OrdinaryConversationSnapshotIncompatibleError);
 });
 
+test("conversation control repository persists an auto title as an additive optional pair", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-auto-title-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  const repository = createFileSystemOrdinaryConversationControlRepository(root);
+  const initial = await repository.save(control(), 0, "2026-01-01T00:00:00.000Z");
+  const withAutoTitle = await repository.save({
+    ...control(),
+    autoTitle: "模型生成的标题",
+    autoTitleAt: "2026-01-01T00:00:01.000Z",
+  }, initial.revision, "2026-01-01T00:00:01.000Z");
+  assert.deepEqual(await repository.get(control().conversationId), withAutoTitle);
+  assert.equal(withAutoTitle.state.autoTitle, "模型生成的标题");
+
+  await assert.rejects(repository.save({
+    ...control(),
+    autoTitle: "只有标题没有时间",
+  }, withAutoTitle.revision, "2026-01-01T00:00:02.000Z"), (error: unknown) =>
+    error instanceof OrdinaryConversationSnapshotIncompatibleError &&
+    /auto title and generated time must appear together/u.test(error.message));
+});
+
 function control(): OrdinaryConversationControlState {
   return {
     conversationId: "conversation-1",

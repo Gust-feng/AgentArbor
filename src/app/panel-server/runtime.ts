@@ -104,6 +104,9 @@ import {
 } from "./workbench-data-maintenance.js";
 import { createSpaceReferenceDeletionFilePort } from "./space-reference-deletion.js";
 import {
+  createOrdinaryConversationTitleGenerator,
+} from "./ordinary-conversation-title.js";
+import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
   processCleanupHasUnresolvedStops,
@@ -683,6 +686,8 @@ function assemblePanelRuntime(input: {
         console.error(`[panel-server] Ordinary run ${diagnostic.runId} could not roll back managed attachment claims; the feature will retry and startup reconciliation remains the final fallback`, diagnostic.error);
       } else if (diagnostic.kind === "completion_commit_failed") {
         console.error(`[panel-server] Ordinary run ${diagnostic.runId} completed in Pi but its terminal snapshot could not be committed; the run remains blocked instead of being rewritten as failed`, diagnostic.error);
+      } else if (diagnostic.kind === "conversation_title_generation_failed") {
+        console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} title generation failed; the list keeps the first-message fallback`, diagnostic.error);
       } else {
         console.error(`[panel-server] Ordinary startup recovery could not enumerate ${diagnostic.source}; new live conversations remain available`, diagnostic.error);
       }
@@ -690,6 +695,9 @@ function assemblePanelRuntime(input: {
     execution: input.ordinaryAgentExecution ?? createOrdinaryAgentLoopExecutionPort({
       resources: ordinaryRunResources,
       onReleaseError: (error) => console.error("[panel-server] Ordinary run resource release failed", error),
+    }),
+    generateConversationTitle: createOrdinaryConversationTitleGenerator({
+      configCenter: input.configCenter,
     }),
     ...(input.ordinaryAgentExecution === undefined ? {} : { testOnlyAllowSessionlessExecution: true }),
   });

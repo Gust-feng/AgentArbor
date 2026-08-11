@@ -37,11 +37,16 @@ const stateSchema: z.ZodType<OrdinaryConversationControlState> = z.object({
   owner: ownerSchema.optional(),
   titleOverride: z.string().min(1).max(80).optional(),
   titleEditedAt: z.string().min(1).optional(),
+  autoTitle: z.string().min(1).max(80).optional(),
+  autoTitleAt: z.string().min(1).optional(),
   pinnedAt: z.string().min(1).optional(),
   deletedAt: z.string().min(1).optional(),
 }).strict().superRefine((state, context) => {
   if ((state.titleOverride === undefined) !== (state.titleEditedAt === undefined)) {
     context.addIssue({ code: "custom", message: "title override and edit time must appear together" });
+  }
+  if ((state.autoTitle === undefined) !== (state.autoTitleAt === undefined)) {
+    context.addIssue({ code: "custom", message: "auto title and generated time must appear together" });
   }
 });
 const documentSchema: z.ZodType<OrdinaryConversationControlDocument> = z.object({

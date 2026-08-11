@@ -31,6 +31,7 @@ import type {
   OrdinaryRunInput,
   OrdinaryMemoryFact,
   OrdinaryMemoryFactRepository,
+  OrdinaryConversationTitleGenerator,
   StartOrdinaryRunInput,
   SubmitOrdinaryTurnInput,
   SubmitOrdinaryTurnResult,
@@ -78,6 +79,11 @@ export function createOrdinaryAgentFeature(input: {
   readonly managedAttachmentInstanceId?: string;
   /** Durable Ordinary-owned read/reference facts for memory tools. */
   readonly memoryFactRepository?: OrdinaryMemoryFactRepository;
+  /**
+   * Host-provided neutral model capability for conversation title generation
+   * (ADR：UI 摘要字段）。未接线时列表继续使用首条消息截断回退。
+   */
+  readonly generateConversationTitle?: OrdinaryConversationTitleGenerator;
   /**
    * Observability hook for failures that never rewrite committed run facts but
    * would otherwise be invisible: Session finalization failures that keep the
@@ -142,6 +148,8 @@ export function createOrdinaryAgentFeature(input: {
   const managedAttachmentClaimRollbackFailureCounts = new Map<string, number>();
   const visibleAssistantBuffers = new Map<string, string>();
   const visibleAssistantCheckpointTimers = new Map<string, NodeJS.Timeout>();
+  // 每次会话只有一次生成机会：无论成败都记录，重启后首轮已完成也不会再触发。
+  const autoTitleAttemptedConversationIds = new Set<string>();
   let startupRunEnumerationFailed = false;
   let released = false;
   let releasePromise: Promise<void> | undefined;
@@ -1437,6 +1445,8 @@ export function createOrdinaryAgentFeature(input: {
       }
     }
     maybeReleaseTerminalStream(runId);
+    // 标题生成与用户消息展示无关，失败时列表继续使用首条消息截断回退。
+    trackPostExecutionTask(requestAutoConversationTitleIfMissing(runId));
   }
 
   /**
@@ -1453,6 +1463,53 @@ export function createOrdinaryAgentFeature(input: {
     const document = documents.get(runId);
     if (document === undefined || isHiddenRun(document.state) || !isStableTerminalState(document.state)) return;
     activityStreams.delete(runId);
+  }
+
+  /**
+   * 首轮 run 稳定终态后，用第一条用户消息请求一次模型标题（Host 端口）。
+   * 每次会话只有一次生成机会：失败不重试、用户重命名后让位、落盘前二次
+   * 检查防覆盖；任何失败都保持首条消息截断回退，不阻塞对话。
+   */
+  async function requestAutoConversationTitleIfMissing(runId: string): Promise<void> {
+    const generator = input.generateConversationTitle;
+    if (generator === undefined) return;
+    const document = documents.get(runId);
+    if (document === undefined || isHiddenRun(document.state) || !isStableTerminalState(document.state)) return;
+    // 只在首轮触发；旧会话不会批量回填。
+    if (document.state.turn.predecessorRunId !== undefined) return;
+    const conversationId = document.state.turn.conversationId;
+    if (autoTitleAttemptedConversationIds.has(conversationId)) return;
+    autoTitleAttemptedConversationIds.add(conversationId);
+    const control = conversationDocuments.get(conversationId);
+    if (control === undefined || control.state.deletedAt !== undefined ||
+        control.state.titleOverride !== undefined || control.state.autoTitle !== undefined) {
+      return;
+    }
+    try {
+      const generated = await generator({
+        conversationId,
+        userMessage: document.state.input.userMessage,
+        birth: document.state.birth,
+      });
+      if (generated === undefined || generated.trim().length === 0) return;
+      const normalized = normalizeOrdinaryConversationTitle(generated);
+      await enqueue(`conversation:${conversationId}`, async () => {
+        await settlePendingUncommittedConversationCleanup(conversationId);
+        const current = await loadConversationControl(conversationId);
+        if (current === undefined || current.state.deletedAt !== undefined) return;
+        // 落盘前防覆盖：用户手动重命名或已有自动标题时让位。
+        if (current.state.titleOverride !== undefined || current.state.autoTitle !== undefined) return;
+        const changedAt = now();
+        const saved = await input.conversationRepository.save(
+          { ...current.state, autoTitle: normalized, autoTitleAt: changedAt },
+          current.revision,
+          changedAt,
+        );
+        conversationDocuments.set(conversationId, saved);
+      });
+    } catch (error) {
+      emitDiagnostic({ kind: "conversation_title_generation_failed", conversationId, error });
+    }
   }
 
   function projectStableTerminalRunFacts(

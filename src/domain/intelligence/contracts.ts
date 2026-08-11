@@ -33,6 +33,7 @@ export type ModelPurpose =
   | "skill_routing"
   | "skill_quality_eval"
   | "desktop_context_compaction"
+  | "conversation_title"
   | "desktop_agent"
   | "work_session_decision"
   | "work_session_child_material"

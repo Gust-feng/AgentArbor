@@ -112,6 +112,31 @@ test("conversation visibility qualifies branch entries by their owning Session",
   );
 });
 
+test("conversation title precedence keeps user override over model auto title over first-message fallback", () => {
+  const run = completedRun("run-title", undefined, 1, "entry-title");
+  const base = control(run);
+  const withAutoTitle = {
+    ...base,
+    state: {
+      ...base.state,
+      autoTitle: "模型生成的标题",
+      autoTitleAt: "2026-01-01T00:00:02.000Z",
+    },
+  };
+  const withOverride = {
+    ...withAutoTitle,
+    state: {
+      ...withAutoTitle.state,
+      titleOverride: "用户重命名",
+      titleEditedAt: "2026-01-01T00:00:03.000Z",
+    },
+  };
+
+  assert.equal(projectOrdinaryConversation({ control: base, runs: [run] })?.title, "继续回答");
+  assert.equal(projectOrdinaryConversation({ control: withAutoTitle, runs: [run] })?.title, "模型生成的标题");
+  assert.equal(projectOrdinaryConversation({ control: withOverride, runs: [run] })?.title, "用户重命名");
+});
+
 function interruptedRun(runId: string, status: OrdinaryRunStatus): OrdinaryRunState {
   const turn = ordinaryRunTurn(runId);
   return {

@@ -114,7 +114,7 @@ export function TopBar({
               <ChevronLeft size={15} />
               {!isMinimal && (
                 <span className="text-xs" style={{ color: 'var(--aa-text-3)' }}>
-                  {view === 'search' ? '搜索' : '首页'}
+                  {topBarSectionLabel(view)}
                 </span>
               )}
             </button>
@@ -157,6 +157,11 @@ export function TopBar({
       <DesktopWindowControls />
     </header>
   )
+}
+
+function topBarSectionLabel(view: View): string {
+  if (view === 'search' || view === 'memory') return view === 'search' ? '搜索' : '记忆'
+  return '首页'
 }
 
 function ConversationHeaderStatus({ state }: { readonly state: VisibleConversationHeaderState }) {

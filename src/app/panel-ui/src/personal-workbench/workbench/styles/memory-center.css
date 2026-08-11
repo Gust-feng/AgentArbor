@@ -64,6 +64,11 @@
 .memory-center__result-count {
   color: var(--memory-faint);
   font-size: 11px;
+  transition: opacity 120ms ease;
+}
+
+.memory-center__result-count.is-refreshing {
+  opacity: 0.45;
 }
 
 .memory-center__scope-control {
@@ -93,58 +98,83 @@
   outline-offset: 1px;
 }
 
-.memory-center__kind-tabs {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  min-height: 43px;
-  border-bottom: 1px solid var(--memory-line);
+.memory-center__content {
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr);
+  gap: 34px;
+  margin-top: 28px;
 }
 
-.memory-center__kind-item {
+.memory-center__section-nav {
+  display: flex;
+  align-self: start;
+  flex-direction: column;
+  gap: 3px;
+  padding-right: 20px;
+  border-right: 1px solid var(--memory-line);
+}
+
+.memory-center__section-item {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 43px;
-  padding: 0;
+  display: flex;
+  min-height: 50px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 12px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--memory-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  text-align: left;
 }
 
-.memory-center__kind-item:hover,
-.memory-center__kind-item:focus-visible {
+.memory-center__section-item > span {
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.memory-center__section-item > small {
+  color: var(--memory-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.memory-center__section-item:hover,
+.memory-center__section-item:focus-visible {
+  background: var(--aa-surface-hover, #eeebe6);
   color: var(--memory-ink);
   outline: none;
 }
 
-.memory-center__kind-item.is-active {
+.memory-center__section-item.is-active {
+  background: color-mix(in srgb, var(--memory-accent) 10%, transparent);
   color: var(--memory-ink);
-  font-weight: 650;
 }
 
-.memory-center__kind-item.is-active::after {
+.memory-center__section-item.is-active::before {
   position: absolute;
-  right: 0;
-  bottom: -1px;
+  top: 50%;
   left: 0;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
+  width: 2px;
+  height: 22px;
+  border-radius: 0 2px 2px 0;
   background: var(--memory-accent);
   content: "";
+  transform: translateY(-50%);
 }
 
-.memory-center__kind-item > span:last-child {
-  color: var(--memory-faint);
-  font-size: 10px;
+.memory-center__content-main {
+  min-width: 0;
 }
 
 .memory-center__list-panel {
-  margin-top: 18px;
+  position: relative;
+  min-height: 220px;
+  margin-top: 0;
   overflow: hidden;
   border: 1px solid var(--memory-line);
   border-radius: 8px;
@@ -152,7 +182,7 @@
 }
 
 .memory-center__list-panel.is-empty {
-  min-height: 0;
+  min-height: 220px;
   overflow: visible;
   border: 0;
   border-top: 1px solid var(--memory-line);
@@ -160,46 +190,71 @@
   background: transparent;
 }
 
-.memory-center__list-empty {
+.memory-center__list-panel.is-error {
+  overflow: visible;
+  border: 0;
+  border-top: 1px solid var(--memory-line);
+  border-radius: 0;
+  background: transparent;
+}
+
+.memory-center__list-body {
+  transition: opacity 120ms ease;
+}
+
+.memory-center__list-panel.is-refreshing .memory-center__list-body {
+  opacity: 0.48;
+}
+
+.memory-center__scope-refresh {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--memory-line);
+  border-radius: 6px;
+  background: var(--memory-surface);
+  box-shadow: 0 4px 14px rgb(37 32 27 / 7%);
+  color: var(--memory-muted);
+  font-size: 10px;
+}
+
+.memory-center__list-load-error {
   display: flex;
-  align-items: baseline;
-  gap: 14px;
-  min-height: 58px;
-  padding: 18px 3px;
+  min-height: 120px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 28px 3px;
+  color: var(--aa-status-error, #c84040);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.memory-center__list-empty {
+  display: block;
+  padding: 42px 3px;
 }
 
 .memory-center__list-empty strong {
-  color: var(--memory-muted);
-  font-size: 12px;
-  font-weight: 650;
-  white-space: nowrap;
+  display: block;
+  color: var(--memory-ink);
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
 }
 
 .memory-center__list-empty span {
   display: block;
+  max-width: 420px;
+  margin-top: 9px;
   color: var(--memory-muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.memory-center__group + .memory-center__group {
-  border-top: 1px solid var(--memory-line);
-}
-
-.memory-center__group-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 15px 9px;
-  color: var(--memory-muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.memory-center__group-head > span:last-child {
-  color: var(--memory-faint);
-  font-size: 10px;
-  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.65;
 }
 
 .memory-center__notes {
@@ -366,8 +421,8 @@
 }
 
 .memory-center__verification {
-  color: #6f9279;
-  background: color-mix(in srgb, #6f9279 12%, transparent);
+  color: var(--aa-verify-text, #6f9279);
+  background: color-mix(in srgb, var(--aa-verify-text, #6f9279) 12%, transparent);
 }
 
 .memory-center__verification[data-status="not_recorded"] {
@@ -654,6 +709,36 @@
     max-width: 230px;
   }
 
+  .memory-center__content {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .memory-center__section-nav {
+    flex-direction: row;
+    gap: 6px;
+    padding-right: 0;
+    padding-bottom: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--memory-line);
+  }
+
+  .memory-center__section-item {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  .memory-center__section-item.is-active::before {
+    top: auto;
+    bottom: -11px;
+    left: 12px;
+    width: calc(100% - 24px);
+    height: 2px;
+    margin-left: 0;
+    border-radius: 2px 2px 0 0;
+    transform: none;
+  }
+
   .memory-center__notes,
   .memory-center__provenance-columns {
     grid-template-columns: minmax(0, 1fr);
@@ -665,7 +750,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .memory-center__dependency {
+  .memory-center__dependency,
+  .memory-center__result-count,
+  .memory-center__list-body {
     transition: none;
+  }
+
+  .memory-center__scope-refresh svg {
+    animation: none;
   }
 }

@@ -24,7 +24,7 @@ import type {
 } from "../../../../contracts/memory";
 
 type NoteScope = "global" | "owner";
-type MemoryKind = "all" | "notes" | "paths";
+type MemoryKind = "notes" | "paths";
 
 const GLOBAL_OWNER: MemoryOwnerSelection = { kind: "global" };
 
@@ -35,9 +35,10 @@ const GLOBAL_OWNER: MemoryOwnerSelection = { kind: "global" };
  */
 export function MemoryPage(): React.ReactElement {
   const [snapshot, setSnapshot] = useState<MemorySnapshot | undefined>(undefined);
+  const snapshotRef = useRef<MemorySnapshot | undefined>(undefined);
   const [ownerSelection, setOwnerSelection] = useState<MemoryOwnerSelection>(GLOBAL_OWNER);
-  const [memoryKind, setMemoryKind] = useState<MemoryKind>("all");
-  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const [memoryKind, setMemoryKind] = useState<MemoryKind>("notes");
+  const [loadState, setLoadState] = useState<"loading" | "refreshing" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [detail, setDetail] = useState<PathDependency | undefined>(undefined);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -48,6 +49,7 @@ export function MemoryPage(): React.ReactElement {
   const [noteDeleteArmed, setNoteDeleteArmed] = useState<NoteScope | null>(null);
   const [noteDeleting, setNoteDeleting] = useState<NoteScope | null>(null);
   const [noteError, setNoteError] = useState<string | undefined>(undefined);
+  const [showScopeRefresh, setShowScopeRefresh] = useState(false);
   const detailRequestRef = useRef<{ readonly id: number; readonly controller: AbortController } | undefined>(undefined);
   const detailRequestSequenceRef = useRef(0);
 
@@ -58,11 +60,12 @@ export function MemoryPage(): React.ReactElement {
   }, []);
 
   const reload = useCallback(async (signal?: AbortSignal): Promise<void> => {
-    setLoadState("loading");
+    setLoadState(snapshotRef.current === undefined ? "loading" : "refreshing");
     setLoadError(undefined);
     try {
       const next = await fetchMemorySnapshot({ owner: ownerSelection, signal });
       if (signal?.aborted) return;
+      snapshotRef.current = next;
       setSnapshot(next);
       setLoadState("ready");
     } catch (error) {
@@ -74,8 +77,6 @@ export function MemoryPage(): React.ReactElement {
 
   useEffect(() => {
     const controller = new AbortController();
-    setSnapshot(undefined);
-    setMemoryKind("all");
     setDetail(undefined);
     setDetailOpen(false);
     setNoteDeleteArmed(null);
@@ -92,26 +93,43 @@ export function MemoryPage(): React.ReactElement {
     () => uniqueOwners([GLOBAL_OWNER, ...(snapshot?.owners ?? []), ...(snapshot?.owner === undefined ? [] : [snapshot.owner])]),
     [snapshot?.owner, snapshot?.owners],
   );
-  const owner: MemoryOwner | undefined = snapshot?.owner ?? ownerSelection;
+  const snapshotMatchesSelection = snapshot !== undefined
+    && ownerKey(snapshot.owner ?? GLOBAL_OWNER) === ownerKey(ownerSelection);
+  const activeSnapshot = snapshotMatchesSelection ? snapshot : undefined;
+  const scopeRefreshing = !snapshotMatchesSelection && loadState !== "error";
+  const scopeLoadFailed = !snapshotMatchesSelection && loadState === "error";
+  // Keep the outgoing scope mounted until the next snapshot can replace it atomically.
+  // The body is inert while stale, so its mutation actions cannot target the new owner.
+  const displayedSnapshot = activeSnapshot ?? (scopeRefreshing ? snapshot : undefined);
+  const owner: MemoryOwner | undefined = displayedSnapshot?.owner ?? ownerSelection;
   const scopedOwner = isScopedOwner(owner) ? owner : undefined;
-  const dependencies = snapshot?.pathDependencies ?? [];
-  const ownerNote = snapshot?.ownerNote;
-  const globalNote = snapshot?.globalNote;
+  const dependencies = displayedSnapshot?.pathDependencies ?? [];
+  const ownerNote = displayedSnapshot?.ownerNote;
+  const globalNote = displayedSnapshot?.globalNote;
   const notes = useMemo(() => {
     const records: readonly { readonly scope: NoteScope; readonly note: MemoryNote; readonly label: string; readonly status: string }[] = [
       ...(scopedOwner !== undefined && hasNoteContent(ownerNote)
         ? [{ scope: "owner" as const, note: ownerNote, label: "当前范围", status: "只在此范围使用" }]
         : []),
       ...(hasNoteContent(globalNote)
-        ? [{ scope: "global" as const, note: globalNote, label: "全局记忆", status: "所有范围共用" }]
+        ? [{ scope: "global" as const, note: globalNote, label: "全局", status: "所有范围共用" }]
         : []),
     ];
     return records;
   }, [globalNote, ownerNote, scopedOwner]);
-  const visibleNotes = memoryKind === "paths" ? [] : notes;
-  const visibleDependencies = memoryKind === "notes" ? [] : dependencies;
-  const visibleCount = visibleNotes.length + visibleDependencies.length;
-  const kindLabel = memoryKind === "notes" ? "长期记忆" : memoryKind === "paths" ? "路径依赖" : "全部记忆";
+  const visibleNotes = memoryKind === "notes" ? notes : [];
+  const visibleDependencies = memoryKind === "paths" ? dependencies : [];
+  const visibleCount = memoryKind === "notes" ? visibleNotes.length : visibleDependencies.length;
+  const kindLabel = memoryKind === "notes" ? "记忆" : "路径依赖";
+
+  useEffect(() => {
+    if (!scopeRefreshing) {
+      setShowScopeRefresh(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowScopeRefresh(true), 180);
+    return () => window.clearTimeout(timer);
+  }, [scopeRefreshing]);
 
   const openDependency = useCallback((dependency: PathDependency): void => {
     cancelDetailRequest();
@@ -195,10 +213,10 @@ export function MemoryPage(): React.ReactElement {
     }
   }, [noteDeleteArmed, noteDeleting, ownerSelection, snapshot]);
 
-  if (loadState === "loading") {
+  if (loadState === "loading" && snapshot === undefined) {
     return <MemoryPageFrame><MemoryLoadingState /></MemoryPageFrame>;
   }
-  if (loadState === "error") {
+  if (loadState === "error" && snapshot === undefined) {
     return (
       <MemoryPageFrame>
         <div className="memory-center__error" role="alert">
@@ -216,8 +234,10 @@ export function MemoryPage(): React.ReactElement {
       <main className="memory-center__main">
         <header className="memory-center__masthead">
           <div className="memory-center__heading">
-            <h1 className="memory-center__title">记忆</h1>
-            <span className="memory-center__result-count">{visibleCount} 条</span>
+            <h1 className="memory-center__title">{kindLabel}</h1>
+            {!scopeLoadFailed && (
+              <span className={`memory-center__result-count${showScopeRefresh ? " is-refreshing" : ""}`}>{visibleCount} 条</span>
+            )}
           </div>
           <label className="memory-center__scope-control">
             <span>范围</span>
@@ -233,21 +253,28 @@ export function MemoryPage(): React.ReactElement {
             </select>
           </label>
         </header>
-        <nav className="memory-center__kind-tabs" aria-label="记忆类型">
-          <MemoryKindButton kind="all" label="全部" count={notes.length + dependencies.length} active={memoryKind === "all"} onClick={setMemoryKind} />
-          <MemoryKindButton kind="notes" label="长期记忆" count={notes.length} active={memoryKind === "notes"} onClick={setMemoryKind} />
-          <MemoryKindButton kind="paths" label="路径依赖" count={dependencies.length} active={memoryKind === "paths"} onClick={setMemoryKind} />
-        </nav>
-          {noteError !== undefined && <div className="memory-center__conflict" role="alert">{noteError}</div>}
+        <div className="memory-center__content">
+          <MemorySectionNav kind={memoryKind} onChange={setMemoryKind} />
+          <div className="memory-center__content-main">
+            {noteError !== undefined && <div className="memory-center__conflict" role="alert">{noteError}</div>}
 
-          <section className={`memory-center__list-panel${visibleCount === 0 ? " is-empty" : ""}`} aria-label={`${kindLabel}列表`}>
-            {visibleCount === 0 ? (
-              <MemoryListEmpty kind={memoryKind} />
-            ) : (
-              <>
-                {visibleNotes.length > 0 && (
-                  <div className="memory-center__group">
-                    <div className="memory-center__group-head"><span>长期记忆</span><span>{visibleNotes.length}</span></div>
+            <section
+              className={`memory-center__list-panel${visibleCount === 0 && !scopeLoadFailed ? " is-empty" : ""}${showScopeRefresh ? " is-refreshing" : ""}${scopeLoadFailed ? " is-error" : ""}`}
+              aria-busy={scopeRefreshing}
+              aria-label={`${kindLabel}列表`}
+            >
+              {showScopeRefresh && scopeRefreshing && <MemoryScopeRefreshStatus />}
+              {scopeLoadFailed ? (
+                <MemoryListLoadError message={loadError} onRetry={() => void reload()} />
+              ) : (
+                <div
+                  className="memory-center__list-body"
+                  aria-hidden={scopeRefreshing || undefined}
+                  inert={scopeRefreshing || undefined}
+                >
+                  {visibleCount === 0 ? (
+                    <MemoryListEmpty kind={memoryKind} />
+                  ) : memoryKind === "notes" ? (
                     <div className="memory-center__notes">
                       {visibleNotes.map((record) => (
                         <NoteCard
@@ -264,21 +291,18 @@ export function MemoryPage(): React.ReactElement {
                         />
                       ))}
                     </div>
-                  </div>
-                )}
-                {visibleDependencies.length > 0 && (
-                  <div className="memory-center__group">
-                    <div className="memory-center__group-head"><span>路径依赖</span><span>{visibleDependencies.length}</span></div>
+                  ) : (
                     <div className="memory-center__dependencies">
                       {visibleDependencies.map((dependency) => (
                         <DependencyRow key={dependency.id} dependency={dependency} onClick={() => openDependency(dependency)} />
                       ))}
                     </div>
-                  </div>
-                )}
-              </>
-            )}
-          </section>
+                  )}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
       </main>
 
       {detailOpen && (
@@ -303,7 +327,7 @@ export function MemoryPage(): React.ReactElement {
 
 function MemoryPageFrame({ children }: { readonly children: ReactNode }): React.ReactElement {
   return (
-    <section className="memory-center flex min-h-0 flex-1" aria-label="记忆中心">
+    <section className="memory-center flex min-h-0 flex-1" aria-label="记忆">
       <div className="memory-center__scroll w-full">
         <div className="memory-center__inner">{children}</div>
       </div>
@@ -322,37 +346,61 @@ function MemoryLoadingState(): React.ReactElement {
   );
 }
 
-function MemoryKindButton(props: {
+function MemorySectionNav(props: {
   readonly kind: MemoryKind;
-  readonly label: string;
-  readonly count: number;
-  readonly active: boolean;
-  readonly onClick: (kind: MemoryKind) => void;
+  readonly onChange: (kind: MemoryKind) => void;
 }): React.ReactElement {
   return (
-    <button
-      type="button"
-      className={`memory-center__kind-item${props.active ? " is-active" : ""}`}
-      aria-current={props.active ? "page" : undefined}
-      onClick={() => props.onClick(props.kind)}
-    >
-      <span>{props.label}</span>
-      <span>{props.count}</span>
-    </button>
+    <nav className="memory-center__section-nav" aria-label="记忆视图">
+      <button
+        type="button"
+        className={`memory-center__section-item${props.kind === "notes" ? " is-active" : ""}`}
+        aria-current={props.kind === "notes" ? "page" : undefined}
+        onClick={() => props.onChange("notes")}
+      >
+        <span>记忆</span>
+        <small>事实与约定</small>
+      </button>
+      <button
+        type="button"
+        className={`memory-center__section-item${props.kind === "paths" ? " is-active" : ""}`}
+        aria-current={props.kind === "paths" ? "page" : undefined}
+        onClick={() => props.onChange("paths")}
+      >
+        <span>路径依赖</span>
+        <small>可复用方法</small>
+      </button>
+    </nav>
   );
 }
 
 function MemoryListEmpty({ kind }: { readonly kind: MemoryKind }): React.ReactElement {
-  const title = kind === "notes" ? "长期记忆暂无内容" : kind === "paths" ? "路径依赖暂无内容" : "当前范围暂无记忆";
+  const title = kind === "paths" ? "还没有路径依赖" : "还没有记忆";
   const copy = kind === "paths"
-    ? "完成值得复用的任务后，模型会在这里留下方法。"
-    : kind === "notes"
-      ? "发现稳定的约定或事实后，模型会自动记录。"
-      : "模型会在需要时保存稳定信息和可复用方法。";
+    ? "当复杂任务形成可复用的方法时，模型会把方法保存到这里。"
+    : "模型会在判断某条信息对未来有帮助时自主保存。";
   return (
     <div className="memory-center__list-empty" role="status">
       <strong>{title}</strong>
       <span>{copy}</span>
+    </div>
+  );
+}
+
+function MemoryScopeRefreshStatus(): React.ReactElement {
+  return (
+    <div className="memory-center__scope-refresh" role="status" aria-label="正在切换记忆范围">
+      <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+      <span>正在切换</span>
+    </div>
+  );
+}
+
+function MemoryListLoadError(props: { readonly message?: string; readonly onRetry: () => void }): React.ReactElement {
+  return (
+    <div className="memory-center__list-load-error" role="alert">
+      <span>{props.message ?? "这个范围的记忆暂时无法加载。"}</span>
+      <button type="button" className="memory-center__text-button" onClick={props.onRetry}>重试</button>
     </div>
   );
 }
@@ -532,7 +580,7 @@ function verificationStatus(value: MemoryVerification | undefined): "not_recorde
 }
 
 function hasNoteContent(note: MemoryNote | undefined): note is MemoryNote {
-  return note?.content.trim().length !== 0;
+  return note !== undefined && note.content.trim().length !== 0;
 }
 
 function memoryMutationContext(
@@ -565,7 +613,7 @@ function isScopedOwner(owner: MemoryOwner | undefined): owner is Extract<MemoryO
 }
 
 function ownerOptionLabel(owner: MemoryOwner): string {
-  if (owner.kind === "global") return "全局记忆";
+  if (owner.kind === "global") return "全局";
   const prefix = owner.kind === "space" ? "空间" : "工作区";
   return owner.title === undefined || owner.title.trim().length === 0 ? `${prefix} · ${owner.id}` : `${prefix} · ${owner.title}`;
 }

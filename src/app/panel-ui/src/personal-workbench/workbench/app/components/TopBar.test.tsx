@@ -70,6 +70,28 @@ test('does not render the search trigger on the search page', () => {
   expect(screen.queryByRole('button', { name: '搜索内容与文件' })).toBeNull()
 })
 
+test('labels the memory destination in the top bar instead of falling back to home', () => {
+  const onNavigate = vi.fn()
+
+  render(
+    <TopBar
+      view="memory"
+      onNavigate={onNavigate}
+      onSearch={vi.fn()}
+      sidebarCollapsed={false}
+      onToggleSidebar={vi.fn()}
+      brainFileTitle={null}
+      onBrainRoot={vi.fn()}
+    />,
+  )
+
+  expect(screen.getByText('记忆')).toBeTruthy()
+  expect(screen.queryByText('首页')).toBeNull()
+
+  fireEvent.click(screen.getByRole('button', { name: '返回首页' }))
+  expect(onNavigate).toHaveBeenCalledWith('home')
+})
+
 test('renders the active surface title supplied by the workbench', () => {
   const onEnterFocus = vi.fn()
   render(

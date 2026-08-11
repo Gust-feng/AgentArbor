@@ -2,7 +2,8 @@ import React from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyActionButton } from "./copy-action-button";
-import { splitStreamingMarkdown, stabilizeStreamingMarkdown } from "../streaming-text";
+import { splitStreamingMarkdownWithOffsets, stabilizeStreamingMarkdown } from "../streaming-text";
+import { useStreamingText } from "../use-streaming-text";
 import "../styles/rich-text.css";
 
 export const RichText = React.memo(function RichText({ text }: { readonly text: string }): React.ReactElement {
@@ -14,6 +15,8 @@ export const RichText = React.memo(function RichText({ text }: { readonly text: 
 });
 
 export function StreamingRichText({ text, live = true }: { readonly text: string; readonly live?: boolean }): React.ReactElement {
+  // hook 必须无条件调用：run 结束瞬间 live 从 true 变 false 且实例被复用（segmentKey 不变）。
+  const displayed = useStreamingText(text, live);
   if (!live) {
     return (
       <div className="rich-text">
@@ -21,13 +24,15 @@ export function StreamingRichText({ text, live = true }: { readonly text: string
       </div>
     );
   }
-  const segments = splitStreamingMarkdown(text);
+  const segments = splitStreamingMarkdownWithOffsets(displayed);
   return (
     <div className="rich-text rich-text-streaming">
-      {segments.completedBlocks.map((block, index) => (
-        <RichTextContent key={index} text={block} />
+      {segments.completedBlocks.map((block) => (
+        <RichTextContent key={`block:${block.start}`} text={block.text} />
       ))}
-      {segments.activeBlock.length > 0 && <RichTextContent text={stabilizeStreamingMarkdown(segments.activeBlock)} />}
+      {segments.activeBlock.length > 0 && (
+        <RichTextContent key={`active:${segments.activeStart}`} text={stabilizeStreamingMarkdown(segments.activeBlock)} />
+      )}
     </div>
   );
 }

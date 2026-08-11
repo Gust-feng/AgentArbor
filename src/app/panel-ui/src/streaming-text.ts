@@ -126,13 +126,33 @@ export type StreamingMarkdownSegments = {
   readonly activeBlock: string;
 };
 
+export type StreamingMarkdownBlock = {
+  /** 块在完整文本中的起始字符偏移，作为 React key 在流式推进时保持稳定。 */
+  readonly start: number;
+  readonly text: string;
+};
+
+export type StreamingMarkdownSegmentsWithOffsets = {
+  readonly completedBlocks: readonly StreamingMarkdownBlock[];
+  readonly activeBlock: string;
+  readonly activeStart: number;
+};
+
 /**
  * A completed block cannot be changed by later append-only deltas, so its
  * Markdown tree can remain mounted while only the active tail is reparsed.
  */
 export function splitStreamingMarkdown(value: string): StreamingMarkdownSegments {
+  const segments = splitStreamingMarkdownWithOffsets(value);
+  return {
+    completedBlocks: segments.completedBlocks.map((block) => block.text),
+    activeBlock: segments.activeBlock,
+  };
+}
+
+export function splitStreamingMarkdownWithOffsets(value: string): StreamingMarkdownSegmentsWithOffsets {
   const text = value.replace(/\r\n/g, "\n");
-  const completedBlocks: string[] = [];
+  const completedBlocks: StreamingMarkdownBlock[] = [];
   let blockStart = 0;
   let lineStart = 0;
   let fenced = false;
@@ -147,7 +167,7 @@ export function splitStreamingMarkdown(value: string): StreamingMarkdownSegments
     if (!fenced && line.trim().length === 0 && end > blockStart) {
       const block = text.slice(blockStart, end);
       if (block.trim().length > 0) {
-        completedBlocks.push(block);
+        completedBlocks.push({ start: blockStart, text: block });
       }
       blockStart = end;
     }
@@ -157,6 +177,7 @@ export function splitStreamingMarkdown(value: string): StreamingMarkdownSegments
   return {
     completedBlocks,
     activeBlock: text.slice(blockStart),
+    activeStart: blockStart,
   };
 }
 

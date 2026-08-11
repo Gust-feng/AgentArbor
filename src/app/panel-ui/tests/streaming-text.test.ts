@@ -5,6 +5,7 @@ import {
   createInitialStreamingTextState,
   createStreamingTextState,
   splitStreamingMarkdown,
+  splitStreamingMarkdownWithOffsets,
   stabilizeStreamingMarkdown,
   streamingTextHasPendingDisplay,
   updateStreamingTextTarget,
@@ -82,6 +83,21 @@ test("streaming Markdown closes a finished fenced block at the following blank l
     completedBlocks: ["```ts\nconst value = 1;\n```\n\n"],
     activeBlock: "下一段",
   });
+});
+
+test("splitStreamingMarkdownWithOffsets reports stable block offsets across appends", () => {
+  const first = splitStreamingMarkdownWithOffsets("第一段\n\n第二段");
+  assert.deepEqual(first, {
+    completedBlocks: [{ start: 0, text: "第一段\n\n" }],
+    activeBlock: "第二段",
+    activeStart: 5,
+  });
+
+  const second = splitStreamingMarkdownWithOffsets("第一段\n\n第二段\n\n第三段");
+  assert.deepEqual(second.completedBlocks.map((block) => block.start), [0, 5]);
+  assert.deepEqual(second.completedBlocks.map((block) => block.text), ["第一段\n\n", "第二段\n\n"]);
+  assert.equal(second.activeBlock, "第三段");
+  assert.equal(second.activeStart, 10);
 });
 
 test("stabilizeStreamingMarkdown leaves complete markdown unchanged", () => {

@@ -39,6 +39,7 @@ import {
 } from "../../../../panel-ui-transcript-store";
 import type { ChatModelOption } from "../../../../contracts/composer";
 import { RichText, StreamingRichText } from "../../../../components/rich-text";
+import { useStreamingText } from "../../../../use-streaming-text";
 import { CopyActionButton } from "../../../../components/copy-action-button";
 import { ActivityEvidencePanel } from "./ActivityEvidence";
 import { toolResultForActivity } from "../../../../tool-result-association";
@@ -450,7 +451,9 @@ function ConversationThinkingBlock(props: { readonly items: readonly ActivityIte
     .map((item) => item.copy.expandedDetail ?? item.copy.detail)
     .filter((value): value is string => value !== undefined && value.trim().length > 0)
     .join("\n\n");
-  if (text.length === 0) return null;
+  // 思考进行中平滑逐字显示；思考完成或终态替换时立即结算为权威内容。
+  const displayed = useStreamingText(text, thinkingInProgress);
+  if (displayed.length === 0) return null;
   return (
     <div className="aa-thinking-block">
       <button
@@ -472,7 +475,7 @@ function ConversationThinkingBlock(props: { readonly items: readonly ActivityIte
           className="aa-thinking-content mt-1.5 border-l-2 pl-3 text-[12px] leading-[1.75]"
           style={{ borderColor: "var(--aa-border)", color: "var(--aa-text-2)", whiteSpace: "pre-wrap" }}
         >
-          {text}
+          {displayed}
         </div>
       )}
     </div>

@@ -400,6 +400,140 @@
   background: color-mix(in oklch, var(--aa-accent) 88%, var(--aa-text-1));
 }
 
+.aa-composer-access {
+  position: relative;
+}
+
+.aa-composer-access__chip {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aa-text-2);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.aa-composer-access__chip:hover {
+  background: var(--aa-surface-hover);
+  color: var(--aa-text-1);
+}
+
+.aa-composer-access__chip:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--aa-accent) 48%, transparent);
+  outline-offset: 2px;
+}
+
+.aa-composer-access__chip[data-policy="full_access"] {
+  border-color: color-mix(in oklch, var(--aa-accent) 18%, transparent);
+  background: color-mix(in oklch, var(--aa-accent) 8%, transparent);
+  color: var(--aa-accent);
+}
+
+.aa-composer-access__chip[data-policy="full_access"]:hover {
+  background: color-mix(in oklch, var(--aa-accent) 14%, transparent);
+  color: var(--aa-accent);
+}
+
+.aa-composer-access__chip[aria-expanded="true"] {
+  border-color: color-mix(in oklch, var(--aa-accent) 30%, transparent);
+  background: var(--aa-surface-hover);
+  color: var(--aa-text-1);
+}
+
+.aa-composer-access__chevron {
+  color: var(--aa-text-3);
+  transition: transform 140ms ease;
+}
+
+.aa-composer-access__chip[aria-expanded="true"] .aa-composer-access__chevron {
+  transform: rotate(180deg);
+}
+
+.aa-composer-access__popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  width: min(264px, calc(100vw - 32px));
+  border: 1px solid var(--aa-border);
+  border-radius: 8px;
+  background: var(--aa-surface);
+  padding: 6px;
+  box-shadow: 0 10px 28px rgba(45, 40, 34, 0.16);
+  animation: aa-composer-access-enter 140ms ease both;
+}
+
+.aa-composer-access__option {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  padding: 6px 9px;
+  color: var(--aa-text-1);
+  text-align: left;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.aa-composer-access__option:hover {
+  background: var(--aa-surface-hover);
+}
+
+.aa-composer-access__option.selected {
+  border-color: color-mix(in oklch, var(--aa-accent) 26%, transparent);
+  background: color-mix(in oklch, var(--aa-accent) 7%, transparent);
+}
+
+.aa-composer-access__option-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.aa-composer-access__option-copy strong {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.aa-composer-access__option-copy small {
+  color: var(--aa-text-2);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.aa-composer-access__option-check {
+  flex: 0 0 auto;
+  color: var(--aa-accent);
+}
+
+@keyframes aa-composer-access-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .aa-context-usage__popover {
   width: min(320px, calc(100vw - 32px));
   border: 1px solid var(--aa-border);

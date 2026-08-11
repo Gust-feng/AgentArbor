@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, FileText, Plus, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, FileText, Plus, ShieldCheck, X } from 'lucide-react'
 import type { ChatInputProps } from '../../../../contracts/composer'
+import type { ComposerToolConfirmationPolicy } from '../../../../app-config-projection'
 import { formatCompactTokenCount, formatContextUsagePercent } from '../../../../context-window-usage'
 import { ModelOptionPicker } from '../../../../components/model-option-picker'
+import { ActionConfirmationDialog } from './ActionConfirmationDialog'
 import { composerSurface } from './tokens'
 import { QueuedMessageList } from './QueuedMessageList'
 
@@ -99,6 +101,7 @@ export function ConversationComposer({ input, onCompositionChange }: Conversatio
         </div>
         <div className="aa-conversation-composer__toolbar-right">
           {input.contextUsage !== undefined && <ComposerContextUsage usage={input.contextUsage} />}
+          <ComposerAccessSelect input={input} />
           <ComposerModelSelect input={input} />
           {input.running && input.onCancel !== undefined && (
             <button
@@ -178,7 +181,7 @@ function ComposerContextUsage({ usage }: { readonly usage: NonNullable<ChatInput
     <div ref={popoverRef} className="aa-context-usage relative hidden shrink-0 sm:block">
       <button
         type="button"
-        className="aa-context-usage__trigger flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-black/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
+        className="aa-context-usage__trigger flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[var(--aa-hover-tint)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={usage.label}
@@ -218,7 +221,7 @@ function ContextUsagePopover({
           <button
             type="button"
             aria-label="关闭上下文用量"
-            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-black/5"
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[var(--aa-hover-tint)]"
             style={{ color: 'var(--aa-text-3)' }}
             onClick={onClose}
           >
@@ -293,7 +296,7 @@ function ComposerReasoningSelect({ input }: { readonly input: ChatInputProps }) 
         aria-label="推理力度"
         value={input.reasoningEffort}
         onChange={(event) => input.onReasoningEffortChange(event.target.value as ChatInputProps['reasoningEffort'])}
-        className="h-6 appearance-none rounded-md bg-transparent py-0 pl-2 pr-6 text-[11px] outline-none transition-colors hover:bg-black/5 focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
+        className="h-6 appearance-none rounded-md bg-transparent py-0 pl-2 pr-6 text-[11px] outline-none transition-colors hover:bg-[var(--aa-hover-tint)] focus-visible:ring-1 focus-visible:ring-[var(--aa-accent)]"
         style={{ color: 'var(--aa-text-2)' }}
       >
         <option value="">自动</option>
@@ -303,5 +306,107 @@ function ComposerReasoningSelect({ input }: { readonly input: ChatInputProps }) 
       </select>
       <ChevronDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--aa-text-3)' }} aria-hidden="true" />
     </label>
+  )
+}
+
+function accessPolicyLabel(policy: ComposerToolConfirmationPolicy): string {
+  return policy === 'full_access' ? '完全访问' : '标准访问'
+}
+
+function ComposerAccessSelect({ input }: { readonly input: ChatInputProps }) {
+  const policy = input.toolConfirmationPolicy
+  const [open, setOpen] = useState(false)
+  const [confirmingFullAccess, setConfirmingFullAccess] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  const select = (nextPolicy: ComposerToolConfirmationPolicy): void => {
+    setOpen(false)
+    if (nextPolicy === 'full_access' && policy !== 'full_access') {
+      setConfirmingFullAccess(true)
+      return
+    }
+    input.onToolConfirmationPolicyChange(nextPolicy)
+  }
+
+  return (
+    <div ref={rootRef} className="aa-composer-access hidden shrink-0 sm:inline-flex">
+      <button
+        type="button"
+        className="aa-composer-access__chip"
+        data-policy={policy}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="命令确认方式"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ShieldCheck size={12} strokeWidth={1.8} aria-hidden="true" />
+        <span>{accessPolicyLabel(policy)}</span>
+        <ChevronDown size={10} className="aa-composer-access__chevron" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="aa-composer-access__popover" role="listbox" aria-label="命令确认方式">
+          <AccessOption policy="prompt" selected={policy === 'prompt'} onSelect={select} />
+          <AccessOption policy="full_access" selected={policy === 'full_access'} onSelect={select} />
+        </div>
+      )}
+      <ActionConfirmationDialog
+        request={confirmingFullAccess ? {
+          eyebrow: '完全访问',
+          title: '要开启完全访问权限吗？',
+          description: '开启后，Agent 可以在不逐条询问的情况下运行命令，并访问当前引用范围之外的文件。',
+          consequence: '请只在你信任当前任务和执行结果时开启。',
+          confirmLabel: '开启完全访问',
+          destructive: false,
+        } : undefined}
+        onCancel={() => setConfirmingFullAccess(false)}
+        onConfirm={() => {
+          setConfirmingFullAccess(false)
+          input.onToolConfirmationPolicyChange('full_access')
+        }}
+      />
+    </div>
+  )
+}
+
+function AccessOption({
+  policy,
+  selected,
+  onSelect,
+}: {
+  readonly policy: ComposerToolConfirmationPolicy
+  readonly selected: boolean
+  readonly onSelect: (policy: ComposerToolConfirmationPolicy) => void
+}) {
+  const fullAccess = policy === 'full_access'
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      className={selected ? 'aa-composer-access__option selected' : 'aa-composer-access__option'}
+      onClick={() => onSelect(policy)}
+    >
+      <span className="aa-composer-access__option-copy">
+        <strong>{fullAccess ? '完全访问' : '标准访问'}</strong>
+        <small>{fullAccess ? '运行命令时不再逐条询问' : '运行命令前会先询问'}</small>
+      </span>
+      {selected && <Check size={13} className="aa-composer-access__option-check" aria-hidden="true" />}
+    </button>
   )
 }

@@ -146,6 +146,73 @@ test("Desktop Agent reports unreadable image refs as a text notice for non-visio
   }
 });
 
+test("Desktop Agent does not turn Space-injected image references into automatic model attachments", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-space-"));
+  const imagePath = path.join(root, "standing.png");
+  await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "continue",
+      goalId: "goal-space-injected",
+      traceId: "trace-space-injected",
+      contextRefs: [{
+        attachmentId: "space-reference:reference-1",
+        ref: `local-file:${imagePath}`,
+        kind: "file",
+        title: "standing.png",
+        summary: "当前对话所属空间授权的本地资源。",
+      }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+    const messages: readonly ModelMessage[] = [{ role: "user", content: "Continue." }];
+
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages,
+      taskSoil,
+      modelCapabilities: VISION_CAPABILITIES,
+      workspaceRoot: root,
+    });
+
+    // Standing Space context must not resurface as this turn's image input.
+    assert.equal(resolved, messages);
+    assert.equal(resolved[0]?.attachments, undefined);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent ignores Space-injected image references for non-vision models without a notice", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-space-no-vision-"));
+  const imagePath = path.join(root, "standing.png");
+  await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "continue",
+      goalId: "goal-space-injected-no-vision",
+      traceId: "trace-space-injected-no-vision",
+      contextRefs: [{
+        attachmentId: "space-reference:reference-1",
+        ref: `local-file:${imagePath}`,
+        kind: "file",
+        title: "standing.png",
+      }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+
+    const resolved = await attachDesktopFileInputsToModelMessages({
+      messages: [{ role: "user", content: "Continue." }],
+      taskSoil,
+      modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
+      workspaceRoot: root,
+    });
+
+    assert.equal(resolved[0]?.attachments, undefined);
+    assert.equal(resolved[0]?.content, "Continue.");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test("Desktop Agent rejects an image ref that becomes unreadable before model preparation", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-missing-"));
   const imagePath = path.join(root, "missing.png");
@@ -172,7 +239,7 @@ test("Desktop Agent rejects an image ref that becomes unreadable before model pr
   }
 });
 
-test("Desktop Agent rechecks live attachment authorization before reading a local image", async () => {
+test("Desktop Agent rechecks live attachment authorization before reading a user-selected image", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-revoked-"));
   const imagePath = path.join(root, "replaced.png");
   await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -180,7 +247,7 @@ test("Desktop Agent rechecks live attachment authorization before reading a loca
     const taskSoil = createTaskSoil({
       rawGoal: "describe the image",
       contextRefs: [{
-        attachmentId: "space-reference:reference-1",
+        attachmentId: "ctx:user-selected-image",
         ref: `local-file:${imagePath}`,
         kind: "file",
         metadata: { mimeType: "image/png" },
@@ -206,7 +273,7 @@ test("Desktop Agent rechecks live attachment authorization before reading a loca
         error.code === "model_input_attachment_unavailable" &&
         error.message.includes("no longer points to its original source"),
     );
-    assert.deepEqual(checked, ["space-reference:reference-1"]);
+    assert.deepEqual(checked, ["ctx:user-selected-image"]);
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

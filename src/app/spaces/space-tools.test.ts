@@ -284,6 +284,7 @@ test("SpaceAddReference saves an Agent annotation on first write and reports ann
     revision: 1,
     updatedAt: "2026-07-28T00:00:00.000Z",
     updatedBy: "agent",
+    actor: { kind: "agent", actorId: "agent", traceId: "trace", goalId: "goal" },
   });
   await spaces.release();
 });
@@ -347,7 +348,7 @@ test("SpaceReadReference returns the source and current annotation without touch
     title: "特征可视化",
     reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
     annotation: { markdown: "通过优化输入观察神经元激活。", tags: ["深度学习"] },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   const result = await execute(tools.get("SpaceReadReference")!, { itemId: added.id }) as {
     readonly status: string;
@@ -373,7 +374,7 @@ test("SpaceUpdateReferenceAnnotation updates content with expectedRevision and k
     title: "特征可视化",
     reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
     annotation: { markdown: "旧理解", keyPoints: ["旧要点"], tags: ["深度学习"] },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   const result = await execute(tools.get("SpaceUpdateReferenceAnnotation")!, {
     itemId: added.id,
@@ -398,7 +399,7 @@ test("SpaceUpdateReferenceAnnotation rejects stale revisions and empty patches a
     title: "特征可视化",
     reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
     annotation: { markdown: "v1 内容" },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   const update = tools.get("SpaceUpdateReferenceAnnotation")!;
   assert.deepEqual(await execute(update, { itemId: added.id, expectedRevision: 2, markdown: "基于过期版本" }), {
@@ -427,7 +428,7 @@ test("SpaceUpdateReferenceAnnotation rejects invalid keyPoints and tags without 
     title: "特征可视化",
     reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
     annotation: { markdown: "v1 内容" },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   const update = tools.get("SpaceUpdateReferenceAnnotation")!;
   assert.deepEqual(await execute(update, { itemId: added.id, expectedRevision: 1, markdown: "x", keyPoints: [1] }), {

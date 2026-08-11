@@ -54,7 +54,9 @@ export type SpaceReferenceAnnotation = {
   readonly tags?: readonly string[];
   readonly revision: number;
   readonly updatedAt: string;
-  readonly updatedBy: SpaceReferenceActor;
+  readonly updatedBy: SpaceReferenceActorKind;
+  /** 写入审计（对齐 Personal Knowledge actor）。旧数据不包含该字段。 */
+  readonly actor?: SpaceReferenceActorRecord;
 };
 
 /** 工具/用户提交的 annotation 内容字段；revision、时间与 actor 由 SpaceFeature 生成。 */
@@ -71,7 +73,17 @@ export type SpaceReferenceAnnotationPatch = {
   readonly tags?: readonly string[];
 };
 
-export type SpaceReferenceActor = "agent" | "user";
+export type SpaceReferenceActorKind = "agent" | "user";
+
+/** 一次 annotation 写入的完整审计来源；`kind` 是显示语义，其余字段来自执行上下文。 */
+export type SpaceReferenceActorRecord = {
+  readonly kind: SpaceReferenceActorKind;
+  /** Agent 侧为 callerAgentId；用户侧为平台用户身份（当前尚无）。 */
+  readonly actorId?: string;
+  readonly traceId?: string;
+  readonly goalId?: string;
+  readonly toolCallId?: string;
+};
 
 export type SpaceTreeSnapshot = {
   readonly schemaVersion: typeof SPACE_TREE_SCHEMA_VERSION;
@@ -148,9 +160,9 @@ export type SpaceFeature = {
     createSpace(input: { readonly id?: string; readonly title: string }): Promise<Space>;
     /** Deletes the Space container and Space-owned assets; external sources remain untouched. */
     deleteSpace(spaceId: string): Promise<void>;
-    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceAddableReference; readonly annotation?: SpaceReferenceAnnotationInput; readonly actor?: SpaceReferenceActor }): Promise<SpaceReferenceItem>;
+    addReference(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly parentId?: string; readonly reference: SpaceAddableReference; readonly annotation?: SpaceReferenceAnnotationInput; readonly actor?: SpaceReferenceActorRecord }): Promise<SpaceReferenceItem>;
     /** Updates the annotation content of one reference with optimistic concurrency; revision advances on success. */
-    updateReferenceAnnotation(input: { readonly itemId: string; readonly expectedRevision: number; readonly patch: SpaceReferenceAnnotationPatch; readonly actor?: SpaceReferenceActor }): Promise<SpaceReferenceItem>;
+    updateReferenceAnnotation(input: { readonly itemId: string; readonly expectedRevision: number; readonly patch: SpaceReferenceAnnotationPatch; readonly actor?: SpaceReferenceActorRecord }): Promise<SpaceReferenceItem>;
     /** Creates the sole owning link for a Conversation. This is reserved for the Conversation coordinator. */
     linkConversationOwner(input: { readonly id?: string; readonly spaceId: string; readonly title: string; readonly conversationId: string; readonly conversationTitle?: string }): Promise<SpaceReferenceItem>;
     rename(input: { readonly target: SpaceTarget; readonly title: string }): Promise<SpaceTarget>;

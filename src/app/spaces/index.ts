@@ -19,7 +19,8 @@ export {
   type SpaceOwnedAssetDeletionPort,
   type SpaceMovableTarget,
   type SpaceReference,
-  type SpaceReferenceActor,
+  type SpaceReferenceActorKind,
+  type SpaceReferenceActorRecord,
   type SpaceReferenceAnnotation,
   type SpaceReferenceAnnotationInput,
   type SpaceReferenceAnnotationPatch,
@@ -67,6 +68,8 @@ export {
   createSpaceTools,
   createSpaceUnlinkReferenceTool,
   createSpaceUpdateReferenceAnnotationTool,
+  spaceReferenceModelView,
+  type SpaceReferenceModelView,
   type SpaceRevocationOverlay,
   type SpaceToolOptions,
 } from "./space-tools.js";

@@ -645,7 +645,7 @@ test("Space reference annotation persists on add, reads back, and advances revis
     title: "特征可视化",
     reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
     annotation: { markdown: "通过优化输入观察神经元激活。", keyPoints: ["优化输入"], tags: ["深度学习"] },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   assert.deepEqual(withAnnotation.annotation, {
     markdown: "通过优化输入观察神经元激活。",
@@ -654,6 +654,7 @@ test("Space reference annotation persists on add, reads back, and advances revis
     revision: 1,
     updatedAt: "2026-08-11T00:00:00.000Z",
     updatedBy: "agent",
+    actor: { kind: "agent" },
   });
   assert.deepEqual((await feature.queries.getReference(withAnnotation.id))?.annotation, withAnnotation.annotation);
 
@@ -661,7 +662,7 @@ test("Space reference annotation persists on add, reads back, and advances revis
     itemId: withAnnotation.id,
     expectedRevision: 1,
     patch: { markdown: "更新后的理解", tags: ["深度学习", "Transformer"] },
-    actor: "user",
+    actor: { kind: "user" },
   });
   assert.equal(updated.annotation?.revision, 2);
   assert.equal(updated.annotation?.updatedBy, "user");
@@ -694,7 +695,7 @@ test("Space reference without annotation stays annotation-free and update create
     itemId: bare.id,
     expectedRevision: 0,
     patch: { markdown: "后续补上的理解" },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   assert.equal(first.annotation?.revision, 1);
   assert.equal(first.annotation?.markdown, "后续补上的理解");
@@ -715,7 +716,7 @@ test("Space reference annotation update rejects stale revisions, missing items, 
     title: "特征可视化",
     reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
     annotation: { markdown: "v1" },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   await assert.rejects(
     feature.commands.updateReferenceAnnotation({ itemId: item.id, expectedRevision: 2, patch: { markdown: "stale" } }),
@@ -764,7 +765,7 @@ test("Space deletion removes reference annotations with their references", async
     title: "特征可视化",
     reference: { kind: "web_page", url: "https://distill.pub/2017/feature-visualization" },
     annotation: { markdown: "v1" },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   assert.notEqual(item.annotation, undefined);
   await feature.commands.deleteSpace(space.id);
@@ -788,7 +789,7 @@ test("owned reference deletion journals an annotated removed reference", async (
     title: "内部资料",
     reference: { kind: "managed_folder", path: "C:/managed" },
     annotation: { markdown: "整理内容", tags: ["资料"] },
-    actor: "agent",
+    actor: { kind: "agent" },
   });
   await feature.commands.removeReference(material.id);
   assert.deepEqual(lifecycle, [

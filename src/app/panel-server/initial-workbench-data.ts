@@ -124,7 +124,7 @@ export async function initializeInitialWorkbenchData(input: {
           itemId: item.id,
           expectedRevision: 0,
           patch: { markdown: initialAnnotation.markdown, ...(initialAnnotation.keyPoints === undefined ? {} : { keyPoints: initialAnnotation.keyPoints }), ...(initialAnnotation.tags === undefined ? {} : { tags: initialAnnotation.tags }) },
-          actor: "agent",
+          actor: { kind: "agent" },
         });
       }
       continue;
@@ -145,7 +145,7 @@ export async function initializeInitialWorkbenchData(input: {
         title: item.title,
         ...(parentId === undefined ? {} : { parentId }),
         reference: item.reference,
-        ...(initialAnnotation === undefined ? {} : { annotation: initialAnnotation, actor: "agent" }),
+        ...(initialAnnotation === undefined ? {} : { annotation: initialAnnotation, actor: { kind: "agent" } }),
       });
     }
   }

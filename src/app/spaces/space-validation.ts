@@ -30,6 +30,14 @@ export const spaceReferenceSchema = z.discriminatedUnion("kind", [
 ]);
 
 /** 持久化/读模型中的完整 annotation 事实；revision、时间与 actor 由 SpaceFeature 生成。 */
+export const spaceReferenceActorRecordSchema = z.object({
+  kind: z.enum(["agent", "user"]),
+  actorId: z.string().min(1).max(256).optional(),
+  traceId: z.string().min(1).max(256).optional(),
+  goalId: z.string().min(1).max(256).optional(),
+  toolCallId: z.string().min(1).max(256).optional(),
+}).strict();
+
 export const spaceReferenceAnnotationSchema = z.object({
   markdown: z.string().min(1).max(MAX_SPACE_REFERENCE_ANNOTATION_MARKDOWN_LENGTH),
   keyPoints: z.array(z.string().min(1).max(MAX_SPACE_REFERENCE_ANNOTATION_KEY_POINT_LENGTH)).max(MAX_SPACE_REFERENCE_ANNOTATION_KEY_POINTS).optional(),
@@ -37,6 +45,7 @@ export const spaceReferenceAnnotationSchema = z.object({
   revision: z.number().int().min(1),
   updatedAt: z.string().min(1),
   updatedBy: z.enum(["agent", "user"]),
+  actor: spaceReferenceActorRecordSchema.optional(),
 }).strict();
 
 /** Validate the opaque edge, never by reading or resolving its external target. */

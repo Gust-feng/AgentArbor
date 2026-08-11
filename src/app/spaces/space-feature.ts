@@ -7,7 +7,7 @@ import {
   type SpaceAddableReference,
   type SpaceMovableTarget,
   type SpaceReference,
-  type SpaceReferenceActor,
+  type SpaceReferenceActorRecord,
   type SpaceReferenceAnnotation,
   type SpaceReferenceAnnotationInput,
   type SpaceReferenceAnnotationPatch,
@@ -365,7 +365,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
             ...(parentId === undefined ? {} : { parentId }),
             reference: validatedReference,
             ...(sourceIdentity === undefined ? {} : { sourceIdentity }),
-            ...(annotation === undefined ? {} : { annotation: initialAnnotation(annotation, at, actor ?? "agent") }),
+            ...(annotation === undefined ? {} : { annotation: initialAnnotation(annotation, at, actor ?? { kind: "agent" }) }),
             createdAt: at,
             updatedAt: at,
           };
@@ -391,7 +391,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
             );
           }
           const at = now();
-          const annotation = updatedAnnotation(current.annotation, patch, at, actor ?? "agent");
+          const annotation = updatedAnnotation(current.annotation, patch, at, actor ?? { kind: "agent" });
           const item: SpaceReferenceItem = { ...current, annotation, updatedAt: at };
           await input.repository.write({
             ...snapshot,
@@ -721,9 +721,9 @@ export function emptySpaceTreeSnapshot(): SpaceTreeSnapshot {
 function initialAnnotation(
   input: SpaceReferenceAnnotationInput,
   at: string,
-  actor: SpaceReferenceActor,
+  actor: SpaceReferenceActorRecord,
 ): SpaceReferenceAnnotation {
-  return validateSpaceReferenceAnnotation({ ...input, revision: 1, updatedAt: at, updatedBy: actor });
+  return validateSpaceReferenceAnnotation({ ...input, revision: 1, updatedAt: at, updatedBy: actor.kind, actor });
 }
 
 /**
@@ -736,7 +736,7 @@ function updatedAnnotation(
   current: SpaceReferenceAnnotation | undefined,
   patch: SpaceReferenceAnnotationPatch,
   at: string,
-  actor: SpaceReferenceActor,
+  actor: SpaceReferenceActorRecord,
 ): SpaceReferenceAnnotation {
   const hasMarkdown = patch.markdown !== undefined;
   const hasKeyPoints = patch.keyPoints !== undefined;
@@ -757,7 +757,8 @@ function updatedAnnotation(
       : current?.tags === undefined ? {} : { tags: current.tags }),
     revision: (current?.revision ?? 0) + 1,
     updatedAt: at,
-    updatedBy: actor,
+    updatedBy: actor.kind,
+    actor,
   };
   return validateSpaceReferenceAnnotation(next);
 }

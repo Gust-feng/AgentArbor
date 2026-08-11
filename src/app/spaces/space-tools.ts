@@ -10,7 +10,7 @@ import {
 import {
   spaceReferenceIdFromAttachmentId,
 } from "./space-file-access.js";
-import { SpaceFeatureError, type SpaceAddableReference, type SpaceFeature, type SpaceReference, type SpaceReferenceAnnotationInput, type SpaceReferenceAnnotationPatch, type SpaceTarget } from "./contracts.js";
+import { SpaceFeatureError, type SpaceAddableReference, type SpaceFeature, type SpaceReference, type SpaceReferenceActorRecord, type SpaceReferenceAnnotation, type SpaceReferenceAnnotationInput, type SpaceReferenceAnnotationPatch, type SpaceReferenceItem, type SpaceTarget } from "./contracts.js";
 
 export type SpaceToolOptions = {
   readonly spaces: Pick<SpaceFeature, "commands" | "queries">;
@@ -153,7 +153,7 @@ export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExec
     inputSchema: requiredSchema({
       spaceId: { type: "string" }, title: { type: "string" }, reference: referenceSchema, annotation: annotationSchema,
     }, ["spaceId", "title", "reference"]),
-    execute: async (input) => {
+    execute: async (input, context) => {
       const record = asRecord(input);
       const spaceId = stringOrUndefined(record.spaceId);
       const title = stringOrUndefined(record.title);
@@ -164,8 +164,8 @@ export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExec
       const annotation = parseAgentAnnotation(record.annotation);
       if (annotation === "invalid") return invalid("annotation must be an object with a markdown string.");
       return resultFor(
-        () => options.spaces.commands.addReference({ spaceId, title, reference: resolution.reference, ...(annotation === undefined ? {} : { annotation }), actor: "agent" }),
-        (item) => ({ status: "added", item, annotationStatus: item.annotation === undefined ? "missing" : "written" }),
+        () => options.spaces.commands.addReference({ spaceId, title, reference: resolution.reference, ...(annotation === undefined ? {} : { annotation }), actor: agentActor(context) }),
+        (item) => ({ status: "added", item: spaceReferenceModelView(item), annotationStatus: item.annotation === undefined ? "missing" : "written" }),
       );
     },
   });
@@ -181,7 +181,7 @@ export function createSpaceReadReferenceTool(options: SpaceToolOptions): ToolExe
       const itemId = stringOrUndefined(asRecord(input).itemId);
       if (itemId === undefined) return invalid("itemId must be a string.");
       const item = await options.spaces.queries.getReference(itemId);
-      return item === undefined ? { status: "space_reference_not_found", itemId } : { status: "found", item };
+      return item === undefined ? { status: "space_reference_not_found", itemId } : { status: "found", item: spaceReferenceModelView(item) };
     },
   });
 }
@@ -196,7 +196,7 @@ export function createSpaceUpdateReferenceAnnotationTool(options: SpaceToolOptio
       expectedRevision: { type: "number", description: "Current revision read from SpaceReadReference." },
       ...annotationContentProperties,
     }, ["itemId", "expectedRevision"]),
-    execute: async (input) => {
+    execute: async (input, context) => {
       const record = asRecord(input);
       const itemId = stringOrUndefined(record.itemId);
       const expectedRevision = typeof record.expectedRevision === "number" ? record.expectedRevision : undefined;
@@ -209,8 +209,8 @@ export function createSpaceUpdateReferenceAnnotationTool(options: SpaceToolOptio
       const patch = annotationPatchFromRecord(record);
       if (patch === undefined) return invalid("At least one content field (markdown, keyPoints or tags) is required.");
       return resultFor(
-        () => options.spaces.commands.updateReferenceAnnotation({ itemId, expectedRevision, patch, actor: "agent" }),
-        (updated) => ({ status: "updated", item: updated }),
+        () => options.spaces.commands.updateReferenceAnnotation({ itemId, expectedRevision, patch, actor: agentActor(context) }),
+        (updated) => ({ status: "updated", item: spaceReferenceModelView(updated) }),
       );
     },
   });
@@ -301,7 +301,7 @@ type ToolSpec = {
   readonly description: string;
   readonly metadata: NonNullable<ToolDefinition["metadata"]>;
   readonly inputSchema: ToolDefinition["inputSchema"];
-  readonly execute: (input: unknown) => Promise<unknown>;
+  readonly execute: (input: unknown, context: ToolExecutionContext) => Promise<unknown>;
 };
 function tool(spec: ToolSpec): ToolExecutor {
   return {
@@ -311,7 +311,7 @@ function tool(spec: ToolSpec): ToolExecutor {
       metadata: spec.metadata,
       inputSchema: spec.inputSchema,
     },
-    execute: (input: unknown, _context: ToolExecutionContext) => spec.execute(input),
+    execute: (input: unknown, context: ToolExecutionContext) => spec.execute(input, context),
   };
 }
 
@@ -536,4 +536,42 @@ function isExpectedSpaceOperationError(code: SpaceFeatureError["code"]): boolean
     || code === "space_reference_annotation_invalid"
     || code === "space_reference_annotation_revision_conflict"
     || code === "space_reference_annotation_too_large";
+}
+
+/**
+ * 模型可读的引用投影。只暴露 Agent 完成任务需要的事实：
+ * itemId/spaceId/title/reference/annotation/时间，绝不暴露
+ * `sourceIdentity` 等平台身份字段（它们只属于后端授权、审计与持久化层）。
+ */
+export type SpaceReferenceModelView = {
+  readonly itemId: string;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly reference: SpaceReference;
+  readonly annotation?: SpaceReferenceAnnotation;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+export function spaceReferenceModelView(item: SpaceReferenceItem): SpaceReferenceModelView {
+  return {
+    itemId: item.id,
+    spaceId: item.spaceId,
+    title: item.title,
+    reference: item.reference,
+    ...(item.annotation === undefined ? {} : { annotation: item.annotation }),
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+/** 工具执行者恒为 Agent：把 ToolExecutionContext 映射为完整审计 actor。 */
+function agentActor(context: ToolExecutionContext): SpaceReferenceActorRecord {
+  return {
+    kind: "agent",
+    actorId: context.callerAgentId,
+    ...(context.traceId === undefined ? {} : { traceId: context.traceId }),
+    ...(context.goalId === undefined ? {} : { goalId: context.goalId }),
+    ...(context.toolCallId === undefined ? {} : { toolCallId: context.toolCallId }),
+  };
 }

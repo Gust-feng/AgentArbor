@@ -213,7 +213,7 @@ test('keeps image, video, audio, and web content inside application-owned surfac
   expect(rendered.container.querySelector('.aa-reference-preview__web-source')).not.toBeNull()
 })
 
-test('shows the Agent annotation as the primary content for an annotated web reference', async () => {
+test('renders an annotated web reference in the same continuous reading surface as demo web content', async () => {
   const previews: Record<string, DocumentPreview> = {
     'web-annotated': {
       ...previewWithPresentation('web-annotated', 'web', { kind: 'web', url: 'https://distill.pub/2017/feature-visualization', site: 'distill.pub' }),
@@ -241,12 +241,16 @@ test('shows the Agent annotation as the primary content for an annotated web ref
 
   const rendered = render(<ReferencePreview itemId="web-annotated" fallbackTitle="特征可视化" canOpen={false} onOpen={() => undefined} />)
   expect(await screen.findByRole('heading', { name: 'Agent 整理' })).toBeTruthy()
-  expect(rendered.container.querySelector('.aa-reference-preview__annotation')).not.toBeNull()
-  expect(rendered.container.querySelector('.aa-reference-preview__annotation-markdown')?.textContent).toContain('通过优化输入观察神经元激活')
+  expect(rendered.container.querySelector('.aa-reference-preview__annotation')).toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-preview__web-document')).not.toBeNull()
+  expect(rendered.container.querySelector('.aa-reference-markdown-prose')?.textContent).toContain('通过优化输入观察神经元激活')
   expect(rendered.container.querySelector('.aa-reference-preview__annotation-points')?.textContent).toContain('深层网络倾向于表示更抽象的概念')
   expect(rendered.container.querySelector('.aa-reference-preview__annotation-tags')?.textContent).toContain('可视化')
-  expect(rendered.container.querySelector('.aa-reference-preview__web-source a')?.getAttribute('href')).toBe('https://distill.pub/2017/feature-visualization')
-  expect(rendered.container.querySelector('.aa-reference-preview__web--annotated')).not.toBeNull()
+  const source = rendered.container.querySelector('.aa-reference-preview__web-source')
+  const document = rendered.container.querySelector('.aa-reference-markdown-prose')
+  expect(source?.querySelector('a')?.getAttribute('href')).toBe('https://distill.pub/2017/feature-visualization')
+  if (source === null || document === null) throw new Error('Expected the web source and document surfaces to exist.')
+  expect(source.compareDocumentPosition(document) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(screen.queryByText('Agent 尚未整理此引用')).toBeNull()
 })
 

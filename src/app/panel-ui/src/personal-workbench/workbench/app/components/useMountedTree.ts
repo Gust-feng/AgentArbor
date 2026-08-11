@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type {
   PersonalSpaceItemProjection,
   PersonalSpaceProjection,
 } from '../../../space'
-import { refreshDocumentPreview } from './referencePreviewClient'
-import { invalidateDocumentPreviews } from './referencePreviewClient'
+import {
+  getCachedReferencePreview,
+  getReferencePreviewCacheVersion,
+  invalidateDocumentPreviews,
+  refreshDocumentPreview,
+  subscribeReferencePreviewCache,
+  type DocumentPreview,
+} from './referencePreviewClient'
 import { subscribeWorkbenchProjectionChanges } from '../../../../app-workbench-projection-changes'
 import { warmReferenceDirectoryPreviews } from './space-reference-preview-warmup'
 
@@ -52,7 +58,21 @@ export function isFileSystemFolderKind(
   return kind === 'workspace_folder' || kind === 'managed_folder'
 }
 
-function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['type'] {
+type ReferencePresentationKindResolver = (
+  item: PersonalSpaceItemProjection,
+) => DocumentPreview['presentation']['kind'] | undefined
+
+function cachedReferencePresentationKind(
+  item: PersonalSpaceItemProjection,
+): DocumentPreview['presentation']['kind'] | undefined {
+  if (item.kind !== 'workbench_asset') return undefined
+  return getCachedReferencePreview(item.referenceId ?? item.itemId)?.presentation.kind
+}
+
+function visualItemType(
+  kind: PersonalSpaceItemProjection['kind'],
+  presentationKind: DocumentPreview['presentation']['kind'] | undefined,
+): SpaceItem['type'] {
   switch (kind) {
     case 'folder':
     case 'workspace_folder':
@@ -60,6 +80,8 @@ function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['t
       return 'folder'
     case 'web_reference':
       return 'web'
+    case 'workbench_asset':
+      return presentationKind === 'web' ? 'web' : 'file'
     case 'conversation_reference':
       return 'conversation'
     default:
@@ -67,18 +89,23 @@ function visualItemType(kind: PersonalSpaceItemProjection['kind']): SpaceItem['t
   }
 }
 
-export function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem | undefined {
+export function projectSpaceItem(
+  item: PersonalSpaceItemProjection,
+  resolvePresentationKind: ReferencePresentationKindResolver = cachedReferencePresentationKind,
+): SpaceItem | undefined {
   // 对话不属于空间树（ADR-0035 §8.1）：旧 conversation 引用不再投影为树节点，
   // 关联对话从 owner read-model 在侧边栏空间行展开展示。
   if (item.kind === 'conversation_reference') return undefined
   return {
     id: item.itemId,
     name: item.title,
-    type: visualItemType(item.kind),
+    type: visualItemType(item.kind, resolvePresentationKind(item)),
     domainKind: item.kind,
     meta: item.detail ?? item.updatedAtLabel,
     defaultExpanded: item.kind === 'folder',
-    children: item.children?.map(projectSpaceItem).filter((child): child is SpaceItem => child !== undefined),
+    children: item.children
+      ?.map((child) => projectSpaceItem(child, resolvePresentationKind))
+      .filter((child): child is SpaceItem => child !== undefined),
     conversationId: item.conversationId,
     openUrl: item.openUrl,
     openable: item.openable,
@@ -89,7 +116,9 @@ export function projectSpaceItem(item: PersonalSpaceItemProjection): SpaceItem |
 
 function projectSpaceTree(space: PersonalSpaceProjection | undefined): SpaceItem[] {
   if (space === undefined) return []
-  return space.items.map(projectSpaceItem).filter((item): item is SpaceItem => item !== undefined)
+  return space.items
+    .map((item) => projectSpaceItem(item))
+    .filter((item): item is SpaceItem => item !== undefined)
 }
 
 /** 外部引用条目的稳定 id：`referenceId::<encoded relativePath>`。 */
@@ -236,7 +265,12 @@ export interface UseMountedTreeResult {
 export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeResult {
   const { spaceId, space, initialExpandedIds, onError } = options
 
-  const projectedTree = useMemo(() => projectSpaceTree(space), [space])
+  const previewCacheVersion = useSyncExternalStore(
+    subscribeReferencePreviewCache,
+    getReferencePreviewCacheVersion,
+    getReferencePreviewCacheVersion,
+  )
+  const projectedTree = useMemo(() => projectSpaceTree(space), [previewCacheVersion, space])
 
   const [directories, setDirectories] = useState<Map<string, DirectoryState>>(new Map())
   const [expandedIds, setExpandedIds] = useState<Set<string>>(

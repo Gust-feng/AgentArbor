@@ -3,10 +3,23 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import type { PersonalSpaceProjection } from '../../../space'
 import { refreshDocumentPreview } from './referencePreviewClient'
-import { useMountedTree } from './useMountedTree'
+import { projectSpaceItem, useMountedTree } from './useMountedTree'
+
+const previewCache = vi.hoisted(() => ({
+  listeners: new Set<() => void>(),
+  preview: undefined as { presentation: { kind: 'web' } } | undefined,
+  version: 0,
+}))
 
 vi.mock('./referencePreviewClient', () => ({
+  getCachedReferencePreview: vi.fn(() => previewCache.preview),
+  getReferencePreviewCacheVersion: vi.fn(() => previewCache.version),
+  invalidateDocumentPreviews: vi.fn(),
   refreshDocumentPreview: vi.fn(),
+  subscribeReferencePreviewCache: vi.fn((listener: () => void) => {
+    previewCache.listeners.add(listener)
+    return () => previewCache.listeners.delete(listener)
+  }),
 }))
 
 const refreshPreview = vi.mocked(refreshDocumentPreview)
@@ -14,6 +27,9 @@ const refreshPreview = vi.mocked(refreshDocumentPreview)
 describe('useMountedTree', () => {
   beforeEach(() => {
     refreshPreview.mockReset()
+    previewCache.listeners.clear()
+    previewCache.preview = undefined
+    previewCache.version = 0
   })
 
   test('discards a directory response from the previously selected Space', async () => {
@@ -85,6 +101,43 @@ describe('useMountedTree', () => {
     await waitFor(() => expect(result.current.tree[0]?.children?.[0]?.children?.[0]?.name).toBe('inside'))
 
     expect(result.current.tree[0]?.children?.[0]?.children?.[0]?.domainKind).toBe('managed_folder')
+  })
+
+  test('uses the preview presentation to distinguish web assets from document assets', () => {
+    const asset = {
+      itemId: 'course-home',
+      referenceId: 'course-home',
+      assetId: 'course-home',
+      title: '课程主页',
+      kind: 'workbench_asset' as const,
+    }
+
+    expect(projectSpaceItem(asset, () => 'web')?.type).toBe('web')
+    expect(projectSpaceItem(asset, () => 'pdf')?.type).toBe('file')
+  })
+
+  test('updates a mounted asset icon type when preview warmup identifies a web page', () => {
+    const space: PersonalSpaceProjection = {
+      spaceId: 'space-a',
+      title: 'space-a',
+      items: [{
+        itemId: 'course-home',
+        referenceId: 'course-home',
+        assetId: 'course-home',
+        title: '课程主页',
+        kind: 'workbench_asset',
+      }],
+    }
+    const { result } = renderHook(() => useMountedTree({ spaceId: 'space-a', space }))
+    expect(result.current.tree[0]?.type).toBe('file')
+
+    act(() => {
+      previewCache.preview = { presentation: { kind: 'web' } }
+      previewCache.version += 1
+      previewCache.listeners.forEach((listener) => listener())
+    })
+
+    expect(result.current.tree[0]?.type).toBe('web')
   })
 
 })

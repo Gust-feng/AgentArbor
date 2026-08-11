@@ -352,7 +352,9 @@ function ReferenceDocumentSessionView({
       {changes !== undefined ? <TextDiff changes={changes} /> : sourceModeActive && markdownDocument ? (
         <textarea className="aa-reference-preview__editor" data-document-scroll="source" value={draft} onChange={(event) => scheduleSave(event.target.value)} spellCheck={false} />
       ) : <>
-        {preview.annotation !== undefined && <ReferenceAnnotation annotation={preview.annotation} sourceVersion={`${targetKey}:annotation:${preview.annotation.revision}`} />}
+        {preview.annotation !== undefined && preview.presentation.kind !== 'web' && (
+          <ReferenceAnnotation annotation={preview.annotation} sourceVersion={`${targetKey}:annotation:${preview.annotation.revision}`} />
+        )}
         <PreviewBody preview={preview} itemId={itemId} apiBase={apiBase} relativePath={relativePath} targetKey={targetKey} draft={draft} editable={!readOnly && !loading && preview.content.kind === 'text' && preview.presentation.editable} onChange={scheduleSave} onReload={() => void reload()} onNavigatePath={onNavigatePath} />
       </>}
     </div>
@@ -380,6 +382,40 @@ function ReferenceAnnotation({ annotation, sourceVersion }: { annotation: SpaceR
         </div>
       )}
     </section>
+  )
+}
+
+function WebDocument({
+  content,
+  markdown,
+  sourceVersion,
+  annotation,
+}: {
+  content: Extract<DocumentPreview['content'], { kind: 'web' }>
+  markdown: string
+  sourceVersion: string
+  annotation?: SpaceReferenceAnnotation
+}) {
+  return (
+    <div className="aa-reference-preview__reader" data-document-scroll="content">
+      <article className="aa-reference-preview__markdown aa-reference-preview__web-document reading-prose">
+        <div className="aa-reference-preview__web-source">
+          <span>{content.site ?? content.url}</span>
+          <a href={content.url} target="_blank" rel="noreferrer">访问原网页<ExternalLink size={12} /></a>
+        </div>
+        <MarkdownDocumentSurface markdown={markdown} sourceVersion={sourceVersion} />
+        {annotation?.keyPoints !== undefined && annotation.keyPoints.length > 0 && (
+          <ul className="aa-reference-preview__annotation-points">
+            {annotation.keyPoints.map((point, index) => <li key={index}>{point}</li>)}
+          </ul>
+        )}
+        {annotation?.tags !== undefined && annotation.tags.length > 0 && (
+          <div className="aa-reference-preview__annotation-tags">
+            {annotation.tags.map((tag, index) => <span key={index}>{tag}</span>)}
+          </div>
+        )}
+      </article>
+    </div>
   )
 }
 
@@ -490,30 +526,10 @@ function PreviewBody({ preview, itemId, apiBase, relativePath, targetKey, draft,
     case 'web':
       if (content.kind !== 'web') return <InvalidPresentationState preview={preview} onReload={onReload} />
       if (preview.annotation !== undefined) {
-        // Space 引用：Agent 整理内容由 ReferenceAnnotation 区块展示，
-        // 这里只保留来源事实，绝不把资产里的 body 当作 Agent 整理内容。
-        return (
-          <div className="aa-reference-preview__web aa-reference-preview__web--annotated" data-document-scroll="content">
-            <div className="aa-reference-preview__web-source">
-              <span>{content.site ?? preview.title}</span>
-              <a href={content.url} target="_blank" rel="noreferrer">访问原网页<ExternalLink size={12} /></a>
-            </div>
-          </div>
-        )
+        return <WebDocument content={content} markdown={preview.annotation.markdown} sourceVersion={`${targetKey}:annotation:${preview.annotation.revision}`} annotation={preview.annotation} />
       }
       if (content.body !== undefined) {
-        // Personal Knowledge 旧素材预览兼容路径：正文是素材自身内容，不是 Space annotation。
-        return (
-          <div className="aa-reference-preview__reader" data-document-scroll="content">
-            <article className="aa-reference-preview__markdown reading-prose">
-              <div className="aa-reference-preview__web-source">
-                <span>{content.site ?? preview.title}</span>
-                <a href={content.url} target="_blank" rel="noreferrer">访问原网页<ExternalLink size={12} /></a>
-              </div>
-              <MarkdownDocumentSurface markdown={content.body} sourceVersion={`${targetKey}:${preview.fingerprint ?? ''}`} />
-            </article>
-          </div>
-        )
+        return <WebDocument content={content} markdown={content.body} sourceVersion={`${targetKey}:${preview.fingerprint ?? ''}`} />
       }
       return (
         <div className="aa-reference-preview__web" data-document-scroll="content">

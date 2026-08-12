@@ -1,3 +1,5 @@
+import type { SpaceReferenceAnnotationInput } from "../spaces/index.js";
+
 export const DEFAULT_SPACE_ID = "space-default";
 export const LEARNING_SPACE_ID = "space-learning";
 
@@ -11,6 +13,14 @@ export type InitialWorkbenchManagedFolderDefinition = {
   readonly title: string;
   readonly files: readonly InitialWorkbenchFileDefinition[];
   readonly imageCaptions?: Readonly<Record<string, string>>;
+};
+
+export type InitialWorkbenchWebReferenceDefinition = {
+  readonly id: string;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly url: string;
+  readonly annotation?: SpaceReferenceAnnotationInput;
 };
 
 export const INITIAL_WORKBENCH_SPACES = [
@@ -77,9 +87,11 @@ export const INITIAL_WORKBENCH_MANAGED_FOLDERS: readonly InitialWorkbenchManaged
     files: [
       { relativePath: "PyTorch 入门笔记.pdf", source: "bundled", assetFileName: "PyTorch 入门笔记.pdf" },
       { relativePath: "神经网络结构图.png", source: "bundled", assetFileName: "神经网络结构图.png" },
+      { relativePath: "训练损失曲线.png", source: "bundled", assetFileName: "训练损失曲线.png" },
     ],
     imageCaptions: {
-      "神经网络结构图.png": "输入层、隐藏层与输出层之间的全连接结构示意。",
+      "神经网络结构图.png": "手绘的网络结构与推导草稿",
+      "训练损失曲线.png": "第 3 次实验：验证集 loss 在第 12 轮后开始反弹，疑似过拟合",
     },
   },
   {
@@ -104,64 +116,52 @@ export const INITIAL_WORKBENCH_MANAGED_FOLDERS: readonly InitialWorkbenchManaged
       },
       {
         relativePath: "Transformer 精读.md",
-        source: "text",
-        content: `# Transformer 精读
-
-把 Transformer 拆成三块来理解。
-
-## 1. 为什么要抛弃 RNN
-
-RNN 必须按时间步串行计算，无法充分并行；长程依赖也会随距离增加而变难。自注意力把任意两个位置之间的路径长度压到常数级。
-
-## 2. 自注意力的本质
-
-每个 token 都在问：在这句话里，我应该关注谁？模型用注意力权重回答，再据此聚合上下文。
-
-## 3. 位置编码
-
-注意力本身没有顺序概念，因此需要额外注入位置信息。
-
-阅读时尽量用自己的话重写关键机制，并把结论链接到可以验证它的代码或实验。`,
-      },
-      {
-        relativePath: "train_loop.py",
-        source: "text",
-        content: `import torch
-import torch.nn as nn
-
-
-def train(model, loader, epochs=10, lr=1e-3):
-    """最小训练循环：前向、损失、清梯度、反向与更新。"""
-    loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
-    for epoch in range(epochs):
-        running_loss = 0.0
-        for inputs, targets in loader:
-            predictions = model(inputs)
-            loss = loss_fn(predictions, targets)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-        print(f"epoch {epoch:02d} loss={running_loss / len(loader):.4f}")
-
-    return model
-`,
+        source: "bundled",
+        assetFileName: "Transformer 精读.md",
       },
     ],
   },
 ];
 
-export const INITIAL_WORKBENCH_WEB_REFERENCES = [
+export const INITIAL_WORKBENCH_WEB_REFERENCES: readonly InitialWorkbenchWebReferenceDefinition[] = [
   {
     id: "builtin-learning-cs231n",
     spaceId: LEARNING_SPACE_ID,
     title: "CS231n 课程主页",
     url: "https://cs231n.stanford.edu",
+    annotation: {
+      markdown: `# CS231n：面向视觉识别的卷积神经网络
+
+这门课深入讲解深度学习在计算机视觉中的应用，尤其是图像分类。课程从最近邻、线性分类器讲起，逐步过渡到神经网络与卷积神经网络。
+
+## 核心主题
+
+- 反向传播与计算图：理解梯度如何在网络中流动
+- 卷积网络架构：卷积层、池化层、批归一化
+- 训练技巧：初始化、优化器选择、正则化与 dropout
+- 迁移学习：如何复用预训练模型
+
+作业围绕从零实现这些组件展开——先手写，再用框架，理解会深得多。`,
+      keyPoints: ["从最近邻到卷积网络的完整路径", "反向传播与计算图是理解主线", "作业要求先手写再框架实现"],
+      tags: ["CS231n", "计算机视觉", "卷积网络"],
+    },
+  },
+  {
+    id: "builtin-learning-distill",
+    spaceId: LEARNING_SPACE_ID,
+    title: "Distill：特征可视化",
+    url: "https://distill.pub/2017/feature-visualization",
+    annotation: {
+      markdown: `# 特征可视化（Feature Visualization）
+
+神经网络学到了什么？一种回答方式是：通过优化输入，找出能最大激活某个神经元的图像。
+
+从单个神经元，到通道，再到整层，可视化让我们得以“看见”网络内部的表示。越深的层，越倾向于表示越抽象、越语义化的概念。
+
+这类交互式文章的价值在于：把抽象的高维表示，翻译成人能直接看的图。`,
+      keyPoints: ["通过优化输入观察神经元激活", "从神经元到通道和整层逐步观察表示", "把抽象的高维表示翻译成可观察的图"],
+      tags: ["特征可视化", "神经网络", "Distill"],
+    },
   },
 ] as const;
 
@@ -169,9 +169,9 @@ export const INITIAL_KNOWLEDGE_COLLECTIONS = [
   { key: "inspiration", referenceId: "builtin-my-space-inspiration", relativePath: "灵感·山.jpg" },
   { key: "pytorch", referenceId: "builtin-learning-study-materials", relativePath: "PyTorch 入门笔记.pdf" },
   { key: "network-diagram", referenceId: "builtin-learning-study-materials", relativePath: "神经网络结构图.png" },
+  { key: "loss-curve", referenceId: "builtin-learning-study-materials", relativePath: "训练损失曲线.png" },
   { key: "card-notes", referenceId: "builtin-learning-reading-notes", relativePath: "卡片笔记法完整介绍.md" },
   { key: "transformer", referenceId: "builtin-learning-reading-notes", relativePath: "Transformer 精读.md" },
-  { key: "train-loop", referenceId: "builtin-learning-reading-notes", relativePath: "train_loop.py" },
 ] as const;
 
 export const INITIAL_KNOWLEDGE_THEMES = [
@@ -183,10 +183,9 @@ export const INITIAL_KNOWLEDGE_THEMES = [
 
 export const INITIAL_KNOWLEDGE_ASSIGNMENTS = [
   { collectionKey: "transformer", themeId: "builtin-theme-transformer" },
-  { collectionKey: "train-loop", themeId: "builtin-theme-transformer" },
   { collectionKey: "pytorch", themeId: "builtin-theme-training" },
   { collectionKey: "network-diagram", themeId: "builtin-theme-training" },
-  { collectionKey: "train-loop", themeId: "builtin-theme-training" },
+  { collectionKey: "loss-curve", themeId: "builtin-theme-training" },
   { collectionKey: "card-notes", themeId: "builtin-theme-method" },
   { collectionKey: "transformer", themeId: "builtin-theme-method" },
   { collectionKey: "inspiration", themeId: "builtin-theme-inspiration" },
@@ -194,6 +193,6 @@ export const INITIAL_KNOWLEDGE_ASSIGNMENTS = [
 
 export const INITIAL_KNOWLEDGE_LINKS = [
   { fromCollectionKey: "transformer", toCollectionKey: "card-notes" },
-  { fromCollectionKey: "train-loop", toCollectionKey: "pytorch" },
+  { fromCollectionKey: "loss-curve", toCollectionKey: "pytorch" },
   { fromCollectionKey: "network-diagram", toCollectionKey: "pytorch" },
 ] as const;

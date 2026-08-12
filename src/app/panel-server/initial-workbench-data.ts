@@ -278,6 +278,14 @@ async function ensureInitialWebReference(
     if (existing.reference.kind !== "web_page" || existing.reference.url !== definition.url) {
       throw new Error(`Initial Space reference ${definition.id} does not match its web source.`);
     }
+    if (existing.annotation === undefined && definition.annotation !== undefined) {
+      await feature.commands.updateReferenceAnnotation({
+        itemId: existing.id,
+        expectedRevision: 0,
+        patch: definition.annotation,
+        actor: { kind: "agent" },
+      });
+    }
     return;
   }
   await feature.commands.addReference({
@@ -285,6 +293,7 @@ async function ensureInitialWebReference(
     spaceId: definition.spaceId,
     title: definition.title,
     reference: { kind: "web_page", url: definition.url },
+    ...(definition.annotation === undefined ? {} : { annotation: definition.annotation, actor: { kind: "agent" as const } }),
   });
 }
 

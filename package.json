@@ -90,5 +90,7 @@
     "unpdf": "1.6.2",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
-  }
+  },
+  "main": "dist/app/panel-desktop.js",
+  "productName": "AgentArbor"
 }

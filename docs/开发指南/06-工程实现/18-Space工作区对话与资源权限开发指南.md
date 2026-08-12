@@ -169,7 +169,10 @@ path=Z:\AgentArbor
 
 ### 5.1 创建与添加引用
 
-创建 Space 只创建软件元数据，不自动创建外部 Workspace。添加 Workspace 必须经过系统文件夹选择器或等价的 Host 选择接口，不接受模型任意传入路径来扩张 Space 权限。
+创建 Space 只创建软件元数据，不自动创建外部 Workspace。添加 Workspace 必须经过系统文件夹选择器或等价的 Host 选择接口，不接受模型任意传入路径来扩张 Space 权限。"等价的 Host 选择接口"包括两种显式授权方式：
+
+1. 用户通过系统文件夹选择器选择路径（Workbench UI 的"添加文件夹/文件"操作）。
+2. 用户在本轮对话中明确给出绝对路径，Agent 调用 `SpaceMountLocalPath` 时由确认门展示真实路径，用户确认即授权落地。工具绝不猜测或编造路径；模型自编路径没有确认授权来源，必须拒绝。
 
 添加前必须完成：
 
@@ -181,6 +184,19 @@ path=Z:\AgentArbor
 - 发布 `space.reference_added`，但不修改现有 Conversation 的 owner。结构化添加工具默认执行，不额外弹确认；用户明确删除 Space 或软件资产时才进入删除确认。
 
 Workspace 引用没有“移动到另一个 Space”的操作。要让另一个 Space 使用同一文件夹，直接在目标 Space 新增一条独立引用；源 Space 的引用和权限不受影响。只有 Space 自己维护的软件资产允许移动，移动表示软件资产所有权改变。
+
+### 5.1.1 Agent 空间管理工具契约
+
+Agent 通过结构化空间工具代替用户执行空间管理操作，全部复用 Space feature command 与确认门，不建设第二套文件 API：
+
+| 工具 | 职责 | 确认 |
+| --- | --- | --- |
+| `SpaceMountLocalPath` | 把用户本轮明确给出、经确认的绝对路径挂载为 `local_file` / `workspace_folder` 引用。执行前校验：路径绝对、目标存在且类型匹配（文件/文件夹）、与现有引用无重复或父子冲突；登记时由 Space feature 捕获来源身份。挂载成功只影响后续 run 的冻结授权，本轮文件工具尚不能写入该路径，工具结果必须明确告知 | 必须（确认框展示真实路径） |
+| `SpaceCreateManagedFolder` | 在 Host 托管存储根（`runtime/space-folders/`）下创建软件自有目录并登记 `managed_folder` 引用；登记失败回滚目录 | 否 |
+| `SpaceCreateEntry` / `SpaceRenameEntry` / `SpaceDeleteEntry` | 在 `workspace_folder` / `managed_folder` 引用根内新建、重命名、删除文件或目录条目；根不可操作，条目路径不能越过引用根；引用源失效时在真实访问边界移除引用并明确失败 | 删除条目必须；创建/重命名否 |
+| `SpaceUpdateCaption` | 更新引用图片说明，自动读取当前 revision，不要求模型管理版本 | 否 |
+
+边界与既有规则一致：条目操作只作用于软件维护或用户授权的 folder 引用（`local_file` 引用不支持条目）；`generated_artifact` 不作为 Agent 可见引用类型暴露（面板注册能力保留），避免无内容源引用；空空间的 Space-owned run 仍暴露 `AttachmentList`，使模型能发现"本轮无附件"而不是工具族整体消失。工具结果遵循 ADR-0027 单向事实链，模型可见投影剥离来源身份与审计字段。
 
 ### 5.2 取消引用
 
@@ -454,6 +470,12 @@ Workbench Shell
 - 同一 Space 重复、父子和规范化后相同的 Workspace 均被拒绝。
 - 跨 Space 重叠引用不互相删除或转移。
 - 缺失路径直接移除外部引用并从资源树消失；不能自动改绑，重新添加才获得新身份。
+- `SpaceMountLocalPath` 只接受绝对路径，目标必须存在且类型匹配；相对路径、自编路径和模型猜测的路径明确失败；挂载结果明确告知"下一轮开始可读写"。
+- 挂载重复或父子路径被 `space_workspace_mount_conflict` 拒绝。
+- `SpaceCreateManagedFolder` 在 Host 托管根下创建目录并登记引用；登记失败必须回滚目录，无托管根的运行环境返回结构化不可用。
+- 条目工具只能操作 `workspace_folder` / `managed_folder` 引用；条目路径不能越过引用根；已存在名称冲突、条目缺失、删除引用根均明确失败。
+- 引用源失效时条目工具按真实访问边界移除引用并明确失败；`SpaceDeleteEntry` 需要确认。
+- 图片说明更新自动处理 revision，结果剥离审计字段。
 - Space 列表、树查询、启动和 Run 结束不扫描外部路径；打开、预览、正文操作和文件工具访问会按需发现缺失根。
 - 子文件缺失但引用根仍存在时只报告文件缺失，不移除 Workspace 引用。
 - 同路径重新添加产生新 `referenceId`，旧 Conversation 不能读取新引用。

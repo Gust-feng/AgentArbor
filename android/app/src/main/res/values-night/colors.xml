@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The mobile WebView uses #181916 for its dark workbench surface. -->
+    <color name="agentarbor_launcher_background">#181916</color>
+    <color name="agentarbor_splash_mark">#E5E4DF</color>
+</resources>

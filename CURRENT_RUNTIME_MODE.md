@@ -36,7 +36,7 @@ Ordinary 的生产执行链已经切换为 `request-handler -> ordinary-routes -
 
 当前 AgentArbor 以桌面普通 `agent` 作为唯一默认运行方式。
 
-- 用户入口：`Desktop Shell / Panel`；Workbench 首页是唯一的空白新对话入口，侧栏“首页”只负责返回这一完整空态，不提前重置已有会话或输入。用户在首页提交内容时才创建新 conversation；对话页只展示正在执行或从历史打开的 conversation，并在提交时继续当前 conversation
+- 用户入口：`Desktop Shell / Panel`；Workbench 首页是唯一的空白新对话入口，侧栏“首页”只负责返回这一完整空态，不提前重置已有会话或输入。用户在首页提交内容时才创建新 conversation。全屏对话视图已退役（2026-08）：所有会话（首页创建、侧栏/搜索/空间打开、启动恢复运行中或待确认会话）统一进入「空间右侧对话面板」承载——首页提交后导航到会话所属空间（owner 为工作区或旧对话时落在当前/首个空间），面板展示会话且不要求会话已出现在该空间 read-model；用户在空间内显式选择笔记或材料时面板让位给内容浏览。对话只在承载面板内继续当前 conversation
 - 默认运行模式：`agent`
 - 默认执行主线：`用户消息 -> OrdinaryAgentFeature -> Pi AgentHarness/Session -> ToolCenter/命令确认 -> ordinary-run/v7 -> 事实 read-model`
 - 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断

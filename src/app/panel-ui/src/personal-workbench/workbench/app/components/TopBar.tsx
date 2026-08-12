@@ -24,7 +24,8 @@ interface TopBarProps {
   onBrainRoot: () => void
 }
 
-// 有自己完整 header 的视图 → TopBar 只保留返回 + 标题
+// 有自己完整 header 的视图 → TopBar 只保留返回 + 标题。
+// 全屏对话视图已退役：conv-active / conv-done 保留为死代码成员，实际不再是导航目标。
 const MINIMAL_VIEWS: View[] = ['conv-active', 'conv-done', 'space']
 
 export function TopBar({

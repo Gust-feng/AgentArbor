@@ -37,6 +37,13 @@ export type WorkbenchNavigation = {
  * Search, Space) is never hijacked by a running run or a pending confirmation.
  * Those states surface as global status hints instead of forced redirects.
  */
+/**
+ * 导航 hook 退役说明（2026-08）：
+ * 本 hook 已不被任何组件装配，实际导航逻辑内联在 agentarbor-workbench.tsx。
+ * 此处保留为导航语义的事实参考，并随当前口径更新：
+ * 全屏对话视图（conv-active / conv-done）已退役，所有会话统一进入空间右侧对话面板，
+ * 因此 initialView 不再直入 conv-active，运行中/待确认会话的恢复由组合根路由到所属空间。
+ */
 export function useWorkbenchNavigation(input: WorkbenchNavigationInput): WorkbenchNavigation {
   const [view, setView] = useState<View>(() => initialView(input));
   const [previousView, setPreviousView] = useState<View>("home");
@@ -79,8 +86,9 @@ export function useWorkbenchNavigation(input: WorkbenchNavigationInput): Workben
       void input.onStartNewConversation().then((started) => {
         if (navigationIntentRef.current !== "home") return;
         if (started) {
-          navigationIntentRef.current = "conv-active";
-          setView("conv-active");
+          // 全屏对话视图已退役（死代码保留）：真实实现由组合根 surfaceConversation
+          // 把新会话路由到空间右侧对话面板，这里不再进入 conv-active。
+          navigationIntentRef.current = "home";
         } else {
           setHomeFocusRequest((current) => current + 1);
         }
@@ -116,14 +124,17 @@ export function useWorkbenchNavigation(input: WorkbenchNavigationInput): Workben
 /** Only the run status decides the *initial* view (startup restore with no user
  * intent yet). It is deliberately not used to hijack later explicit
  * navigation: a running run or pending confirmation never forces the user
- * away from Home / Brain / Search / Space views. */
+ * away from Home / Brain / Search / Space views.
+ *
+ * 全屏对话视图已退役（2026-08）：初始视图不再进入 conv-active / conv-done；
+ * 运行中/待确认会话的恢复由组合根路由到所属空间的右侧对话面板。 */
 export type WorkbenchInitialViewInput = {
   readonly currentRun: { readonly run?: { readonly status: TaskStatus } };
   readonly pendingConfirmation?: WorkbenchNavigationInput["pendingConfirmation"];
 };
 
 export function initialView(input: WorkbenchInitialViewInput): View {
-  return requiresImmediateConversationView(input) ? "conv-active" : "home";
+  return "home";
 }
 
 export function requiresImmediateConversationView(

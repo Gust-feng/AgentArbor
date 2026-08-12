@@ -18,6 +18,113 @@ import { resolvePage } from "./workbench/app/components/brainStore";
 
 beforeEach(() => resetPersonalKnowledgeForTesting());
 
+test("surfaces a home-started conversation when it lands after the submit resolves", async () => {
+  const user = userEvent.setup();
+  let landConversation!: (conversation: Conversation) => void;
+  const conversation: Conversation = {
+    conversationId: "conversation-late",
+    title: "晚到的会话",
+    owner: { kind: "space", id: "space-study" },
+    turns: [{ turnId: "turn-late", role: "assistant", title: "晚到的会话", content: "晚到正文", status: "completed" }],
+  };
+  function LateLandingWorkbench() {
+    const [current, setCurrent] = useState<Conversation | undefined>(undefined);
+    const [value, setValue] = useState("");
+    landConversation = setCurrent;
+    return <PersonalWorkbench {...baseProps({
+      conversation: current,
+      inputProps: inputProps({ value, onChange: setValue }),
+      onStartNewConversation: async () => true,
+    })} />;
+  }
+  render(<LateLandingWorkbench />);
+
+  const composer = await screen.findByRole("textbox", undefined, { timeout: 5_000 });
+  await user.type(composer, "开始整理");
+  await user.keyboard("{Enter}");
+
+  // 提交先返回成功但会话尚未落地：已导航到空间视图，面板暂不展示会话。
+  expect(await screen.findByRole("main", { name: "空间" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
+
+  // 会话随后落地：landing effect 补写承载请求，右侧面板展示会话。
+  landConversation(conversation);
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+  expect(screen.getByText("晚到正文")).toBeTruthy();
+}, 10_000);
+
+test("shows a home-started conversation in the Space right pane once it lands", async () => {
+  const user = userEvent.setup();
+  const conversation: Conversation = {
+    conversationId: "conversation-home",
+    title: "首页新对话",
+    owner: { kind: "space", id: "space-study" },
+    turns: [{ turnId: "turn-home", role: "assistant", title: "首页新对话", content: "首页新对话正文", status: "completed" }],
+  };
+  function LandingWorkbench() {
+    const [current, setCurrent] = useState<Conversation | undefined>(undefined);
+    const [value, setValue] = useState("");
+    return <PersonalWorkbench {...baseProps({
+      conversation: current,
+      inputProps: inputProps({ value, onChange: setValue }),
+      onStartNewConversation: async () => {
+        setCurrent(conversation);
+        return true;
+      },
+    })} />;
+  }
+  render(<LandingWorkbench />);
+
+  const composer = await screen.findByRole("textbox", undefined, { timeout: 5_000 });
+  await user.type(composer, "开始整理");
+  await user.keyboard("{Enter}");
+
+  // 全屏对话视图已退役：首页创建的会话由空间右侧对话面板承载。
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+  expect(screen.getByText("首页新对话正文")).toBeTruthy();
+  expect(screen.getByRole("main", { name: "空间" })).toBeTruthy();
+}, 10_000);
+
+test("lets a Space note take over the right pane after a home-started conversation", async () => {
+  const user = userEvent.setup();
+  resetPersonalKnowledgeForTesting({ notes: [{
+    id: "note-home",
+    spaceId: "space-study",
+    title: "手写笔记",
+    bodyMarkdown: "笔记正文",
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  }] });
+  const conversation: Conversation = {
+    conversationId: "conversation-home",
+    title: "首页新对话",
+    owner: { kind: "space", id: "space-study" },
+    turns: [{ turnId: "turn-home", role: "assistant", title: "首页新对话", content: "首页新对话正文", status: "completed" }],
+  };
+  function LandingWorkbench() {
+    const [current, setCurrent] = useState<Conversation | undefined>(conversation);
+    return <PersonalWorkbench {...baseProps({
+      conversation: current,
+      spaces: [{
+        spaceId: "space-study",
+        title: "学习空间",
+        items: [],
+        conversations: [{ conversationId: "conversation-home", title: "首页新对话" }],
+      }],
+    })} />;
+  }
+  render(<LandingWorkbench />);
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+
+  // 用户在空间里显式选择笔记后，右侧面板让位给笔记内容浏览。
+  await user.click(screen.getByText("手写笔记"));
+  expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
+  expect(screen.getByText("笔记正文")).toBeTruthy();
+}, 10_000);
+
 test("submits a real Ordinary task from the workbench home", async () => {
   const user = userEvent.setup();
   const onStartNewConversation = vi.fn(async () => true);
@@ -33,7 +140,9 @@ test("submits a real Ordinary task from the workbench home", async () => {
 
   expect(onStartNewConversation).toHaveBeenCalledTimes(1);
   expect(onContinueConversation).not.toHaveBeenCalled();
-  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+  // 全屏对话视图已退役：首页提交成功后进入空间视图，会话由右侧对话面板承载。
+  expect(await screen.findByRole("main", { name: "空间" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
 }, 10_000);
 
 test("keeps the home entry visible when a new conversation cannot start", async () => {
@@ -843,6 +952,12 @@ test("opens a real conversation directly from Search", async () => {
   const user = userEvent.setup();
   const onOpenConversation = vi.fn();
   renderWorkbench({
+    conversation: {
+      conversationId: "conversation-search",
+      title: "搜索中的真实对话",
+      owner: { kind: "space", id: "space-study" },
+      turns: [{ turnId: "turn-search", role: "assistant", title: "搜索中的真实对话", content: "搜索结果正文", status: "completed" }],
+    },
     conversations: [{ conversationId: "conversation-search", title: "搜索中的真实对话", preview: "真实预览" }],
     onOpenConversation,
   });
@@ -850,7 +965,9 @@ test("opens a real conversation directly from Search", async () => {
   await user.keyboard("{Control>}k{/Control}");
   await user.click((await screen.findByText("真实预览")).closest("button")!);
   expect(onOpenConversation).toHaveBeenCalledWith("conversation-search");
+  // 全屏对话视图已退役：搜索结果会话统一在空间右侧对话面板展示。
   expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+  expect(screen.getByText("搜索结果正文")).toBeTruthy();
 });
 
 test("resolves a managed Brain asset without consulting the current Space projection", () => {
@@ -872,7 +989,7 @@ test("resolves a managed Brain asset without consulting the current Space projec
     refId: "reference-brain",
     kind: "space_reference",
     title: "研究资料.pdf",
-    materialKind: "file",
+    materialKind: "pdf",
     detail: "C:/资料/研究资料.pdf",
     exists: true,
   });

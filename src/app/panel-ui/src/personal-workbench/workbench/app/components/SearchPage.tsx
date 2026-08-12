@@ -223,7 +223,8 @@ export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spac
   async function handleResultClick(result: SearchResult) {
     if (result.conversationId !== undefined) {
       const opened = await onOpenConversation(result.conversationId)
-      if (opened !== false) onNavigate('conv-done')
+      // 全屏对话视图已退役：会话打开后统一进入空间视图，由宿主在右侧对话面板承载。
+      if (opened !== false) onNavigate('space')
     } else if (result.spaceId !== undefined) {
       onOpenInSpace(result.spaceId, result.id)
     }

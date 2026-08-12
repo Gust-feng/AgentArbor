@@ -29,6 +29,11 @@ import type { ConversationSummary } from '../../../../contracts/conversation'
 import type { PersonalSpaceProjection } from '../../../space'
 import type { PersonalWorkspaceProjection } from '../../../workspace'
 
+/**
+ * conv-active / conv-done 已退役（2026-08 起）：全屏对话视图不再是导航目标，
+ * 所有会话统一进入空间右侧对话面板（View 类型保留这两个成员以维持死代码可编译，
+ * 详见 agentarbor-workbench 的退役说明）。
+ */
 export type View = 'home' | 'conv-active' | 'conv-done' | 'space' | 'search' | 'brain' | 'memory'
 
 interface SidebarProps {
@@ -129,7 +134,8 @@ export function Sidebar({
     try {
       const opened = await onOpenConversation(conversationId)
       if (conversationOpenRequestRef.current !== requestId) return
-      if (opened !== false) onNavigate('conv-active')
+      // 全屏对话视图已退役：会话打开后统一进入空间视图，由宿主在右侧对话面板承载。
+      if (opened !== false) onNavigate('space')
     } catch {
       // The runtime owns the visible load error; the sidebar only prevents a false navigation.
     } finally {
@@ -142,9 +148,10 @@ export function Sidebar({
   // Conversation metadata becomes active before historical runs finish
   // loading. Navigate on that authoritative state change instead of keeping
   // the previous surface mounted until the full load promise settles.
+  // 全屏对话视图已退役：同样统一进入空间视图（宿主负责目标空间与右侧面板承载）。
   useEffect(() => {
     if (openingConversationId === null || activeConversationId !== openingConversationId) return
-    onNavigate('conv-active')
+    onNavigate('space')
     setOpeningConversationId(null)
   }, [activeConversationId, onNavigate, openingConversationId])
 
@@ -496,6 +503,8 @@ function WorkspaceRow(props: {
               <Fragment key={conversation.conversationId}>
                 <SidebarListRow
                 key={conversation.conversationId}
+                // 全屏对话视图已退役：conv-active / conv-done 分支保留为死代码，
+                // 实际恒为 false；会话一律在空间右侧面板展示。
                 active={(props.view === 'conv-active' || props.view === 'conv-done') && props.activeConversationId === conversation.conversationId}
                 onClick={() => props.openConversation(conversation.conversationId)}
                 dot={CONVERSATION_DOT_PALETTE[index % CONVERSATION_DOT_PALETTE.length] ?? CONVERSATION_DOT_PALETTE[0]}

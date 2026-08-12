@@ -1,5 +1,5 @@
 import { AlertCircle, RotateCcw } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import type { CurrentRunProjection } from "../../app-run-projection";
 import { projectChatActiveView } from "../../chat-active-view";
@@ -26,7 +26,7 @@ import type { LiveConversationState } from "./app/components/conversation-surfac
 import { runFocusModeTransition, type FocusModeTransitionHandle } from "./app/components/focus-mode-transition";
 import { resolveById } from "./app/components/brainStore";
 import { warmStartupReferencePreviews } from "./app/components/space-reference-preview-warmup";
-import { applyPrefs, loadPrefs } from "../../reading-preferences";
+import { applyPrefs, handleReadingSizeWheel, loadPrefs } from "../../reading-preferences";
 import {
   initializePersonalKnowledge,
   getPersonalKnowledgeError,
@@ -81,10 +81,18 @@ export type PersonalWorkbenchProps = {
 
 type ConversationMode = "normal" | "focus";
 
+/** 宿主统一会话承载请求：指定某个会话在哪个空间右侧对话面板展示（ADR-0035 口径）。 */
+type ConversationSurfaceRequest = { readonly conversationId: string; readonly spaceId: string };
+
 /**
- * The visual composition root for the redesign. It deliberately holds only
- * navigation and selection: conversations, runs, confirmations, and Spaces
- * remain owned by their existing feature facades.
+ * 全屏对话视图退役说明（2026-08 起）：
+ *
+ * 此前首页开始对话进入全屏对话视图（conv-active），从空间进入则是空间右侧对话面板，
+ * 两套承载形态并存。现统一为：所有会话（首页创建、侧栏/搜索/空间打开、启动恢复）
+ * 一律进入「空间右侧对话面板」；`conv-active` / `conv-done` 不再作为任何导航目标，
+ * 其渲染路径（renderView 的 ConversationSurface 主视图分支、initialView 直入、
+ * Sidebar / SearchPage 的导航目标等）保留为死代码并逐处注明，便于未来若重新引入
+ * 全屏对话形态时恢复。当前默认运行口径见 CURRENT_RUNTIME_MODE.md。
  */
 export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -96,9 +104,22 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [homeOwnerSelection, setHomeOwnerSelection] = useState<{ readonly kind: "space" | "workspace"; readonly id: string } | null>(null);
   const [homeFocusRequest, setHomeFocusRequest] = useState(0);
+  // 统一会话承载请求：由 surfaceConversation 设置，SpacePage 据此在右侧面板展示会话。
+  const [conversationSurfaceRequest, setConversationSurfaceRequest] = useState<ConversationSurfaceRequest | null>(null);
   const observedViewRef = useRef(view);
   const navigationIntentRef = useRef(view);
   const focusTransitionRef = useRef<FocusModeTransitionHandle | null>(null);
+  // 异步提交/打开会话的 .then 可能晚于本次 render 执行，这里始终镜像最新事实，
+  // 避免闭包读到旧的 conversation / spaces / activeSpaceId。
+  const conversationRef = useRef(props.conversation);
+  conversationRef.current = props.conversation;
+  const spacesRef = useRef(props.spaces);
+  spacesRef.current = props.spaces;
+  const activeSpaceIdRef = useRef(activeSpaceId);
+  activeSpaceIdRef.current = activeSpaceId;
+  // 会话 id 尚未确定（如首页提交后响应未落地）时，先记录承载空间，等真实会话
+  // 落地（带 owner）后再由 landing effect 补写 conversationSurfaceRequest。
+  const pendingSurfaceSpaceRef = useRef<string | null>(null);
   const knowledgeLoadState = useSyncExternalStore(
     subscribePersonalKnowledge,
     getPersonalKnowledgeLoadState,
@@ -116,9 +137,11 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
   const workspaceProjection = useWorkspaceProjection(true);
   const surfaceTitle = view === "space"
     ? props.spaces?.find((space) => space.spaceId === activeSpaceId)?.title ?? "空间"
+    // 全屏对话视图已退役：此分支只服务于保留的死代码路径（conv-active / conv-done）。
     : isConversationView(view)
       ? activeConversation?.title ?? "新的对话"
       : undefined;
+  // 全屏对话视图已退役：surfaceOwner 只服务于保留的死代码路径（conv-active / conv-done）。
   const surfaceOwner = isConversationView(view) && activeConversation?.owner !== undefined
     ? (activeConversation.owner.kind === "space"
         ? `空间 · ${props.spaces?.find((space) => space.spaceId === activeConversation.owner?.id)?.title ?? "空间"}`
@@ -177,6 +200,16 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
     applyPrefs(loadPrefs());
   }, []);
 
+  useEffect(() => {
+    const root = rootRef.current;
+    if (root === null) return undefined;
+    const onWheel = (event: WheelEvent): void => {
+      handleReadingSizeWheel(event);
+    };
+    root.addEventListener("wheel", onWheel, { passive: false });
+    return () => root.removeEventListener("wheel", onWheel);
+  }, []);
+
   const setConversationMode = (next: ConversationMode, after?: () => void): void => {
     if (next === conversationMode) {
       after?.();
@@ -192,6 +225,64 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
       }),
     });
   };
+
+  /**
+   * 统一会话承载（全屏对话视图已退役）：
+   * 把活动会话展示到「空间右侧对话面板」。owner 为空间时落在所属空间；
+   * owner 为工作区、未知或旧对话时落在当前/首个空间，由 conversationSurfaceRequest
+   * 显式指定承载空间（SpacePage 的 request 分支不要求会话属于该空间投影）。
+   */
+  const surfaceConversation = (
+    conversationId: string | undefined,
+    owner?: { readonly kind: "space" | "workspace"; readonly id: string },
+  ): void => {
+    const effectiveOwner = owner ?? conversationRef.current?.owner;
+    const targetSpaceId = effectiveOwner?.kind === "space"
+      ? effectiveOwner.id
+      : (activeSpaceIdRef.current ?? spacesRef.current?.[0]?.spaceId);
+    if (targetSpaceId === undefined) return;
+    setActiveSpaceId(targetSpaceId);
+    if (conversationId !== undefined) {
+      setConversationSurfaceRequest({ conversationId, spaceId: targetSpaceId });
+    } else {
+      // 会话 id 尚未确定：记录承载空间，等待真实会话落地后由 effect 补写请求。
+      pendingSurfaceSpaceRef.current = targetSpaceId;
+    }
+    navigate("space");
+  };
+
+  // 首页/侧栏/搜索打开会话后，提交响应或加载响应把真实会话写入 props.conversation。
+  // 若当时会话 id 未知（pendingSurfaceSpaceRef 有值），在这里补写承载请求。
+  // 乐观占位会话（无 owner 的 optimistic-*）期间不消费，等真实会话（固定 owner）落地。
+  useEffect(() => {
+    const pendingSpaceId = pendingSurfaceSpaceRef.current;
+    if (pendingSpaceId === null) return;
+    const conversation = props.conversation;
+    if (conversation === undefined || conversation.owner === undefined) return;
+    pendingSurfaceSpaceRef.current = null;
+    const targetSpaceId = conversation.owner.kind === "space"
+      ? conversation.owner.id
+      : pendingSpaceId;
+    setConversationSurfaceRequest({ conversationId: conversation.conversationId, spaceId: targetSpaceId });
+    // 只有用户仍停留在空间视图（提交后已导航过去）时才补导航；
+    // 用户已主动离开则不劫持，request 仍保留，再次回到该空间时面板照常展示。
+    if (navigationIntentRef.current === "space") {
+      setActiveSpaceId(targetSpaceId);
+      navigate("space");
+    }
+  }, [props.conversation]);
+
+  // 启动恢复：全屏对话视图已退役，运行中 / 待确认会话统一进入所属空间右侧面板
+  // （原行为是 initialView 直接返回 conv-active，见 workbench-navigation 注释）。
+  // 仅挂载时执行一次；无可用空间时留在首页，运行状态仍由 TopBar 全局徽标提醒。
+  const startupRecoveryAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (startupRecoveryAttemptedRef.current) return;
+    startupRecoveryAttemptedRef.current = true;
+    if (!requiresImmediateConversationView(props)) return;
+    surfaceConversation(props.conversation?.conversationId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 启动恢复只执行一次，闭包读取挂载时事实
+  }, []);
 
   const navigate = (target: View): void => {
     // Record explicit intent synchronously so an already-resolving home
@@ -233,14 +324,27 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
       void props.onStartNewConversation(homeOwnerSelection ?? undefined).then((started) => {
         if (navigationIntentRef.current !== "home") return;
         if (started) {
-          navigationIntentRef.current = "conv-active";
-          setView("conv-active");
+          // 全屏对话视图已退役：首页创建会话后统一进入空间右侧对话面板。
+          // 会话 id 由提交响应确定（conversationRef 已镜像最新活动会话）；
+          // owner 优先取首页选择器已确定的归属，响应未落地时由 landing effect 补写请求。
+          surfaceConversation(conversationRef.current?.conversationId, homeOwnerSelection ?? undefined);
         } else {
           setHomeFocusRequest((current) => current + 1);
         }
       });
     },
   }), [homeOwnerSelection, props.inputProps, props.onStartNewConversation]);
+
+  /**
+   * 侧栏工作区会话 / 搜索结果打开会话的统一入口（全屏对话视图已退役）：
+   * 加载成功后把会话承载到空间右侧面板（surfaceConversation 负责解析承载空间）。
+   */
+  const openConversationInSurface = useCallback(async (conversationId: string): Promise<boolean> => {
+    const opened = await props.onOpenConversation(conversationId);
+    if (opened === false) return false;
+    surfaceConversation(conversationId);
+    return true;
+  }, [props.onOpenConversation]);
 
   const conversationInput = useMemo<ChatInputProps>(() => ({
     ...props.inputProps,
@@ -287,7 +391,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
         activeSpaceId={activeSpaceId}
         activeConversationId={props.conversation?.conversationId}
         onNavigate={navigate}
-        onOpenConversation={props.onOpenConversation}
+        onOpenConversation={openConversationInSurface}
         pendingConversationIds={props.pendingConversationIds ?? EMPTY_ID_SET}
         onRenameConversation={props.onRenameConversation}
         onToggleConversationPinned={props.onToggleConversationPinned}
@@ -313,6 +417,8 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
           surfaceOwner={surfaceOwner}
           conversationState={conversationState}
           onEnterFocus={isConversationView(view) && conversationMode === "normal"
+            // 全屏对话视图已退役：此分支只服务于保留的死代码路径（conv-active / conv-done），
+            // 实际永不触发；空间右侧面板的专注模式由 SpacePage 的 onEnterFocus 提供。
             ? () => setConversationMode("focus")
             : undefined}
           brainFileTitle={brainSelectedId === null ? null : resolveById(brainSelectedId)?.title ?? null}
@@ -323,6 +429,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
           aria-label={viewLabel(view)}
           className="aa-workbench-main flex min-h-0 flex-1 flex-col overflow-hidden"
         >
+          {/* 全屏对话视图已退役：key 分支只服务于保留的死代码路径（conv-active / conv-done）。 */}
           <div
             className={`${view === "space" ? "" : "view-enter "}flex min-h-0 flex-1 flex-col overflow-hidden`}
             key={isConversationView(view) ? "conversation" : view}
@@ -346,10 +453,12 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
                     activeSpaceId,
                     onActiveSpaceChange: setActiveSpaceId,
                     conversationMode,
+                    conversationSurfaceRequest,
                     onBrainSelect: setBrainSelectedId,
                     navigate,
                     onEnterFocus: () => setConversationMode("focus"),
                     onExitFocus: () => setConversationMode("normal"),
+                    onOpenConversationInSurface: openConversationInSurface,
                     onOpenInSpace: (spaceId, id) => {
                       setActiveSpaceId(spaceId);
                       setSpaceTargetId(id);
@@ -388,6 +497,8 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
         />
       )}
 
+      {/* 全屏对话视图已退役：isConversationView 恒为 false，普通 run 错误
+          以全局提示展示；会话面板内的失败态由 ConversationSurface 自身投影。 */}
       {props.error !== undefined && !isConversationView(view) && props.bootstrapState.status === "ready" && knowledgeError === undefined && (
         <WorkbenchStatusNotice message={props.error} />
       )}
@@ -404,6 +515,7 @@ function viewLabel(view: View): string {
     case "brain": return "知识库";
     case "memory": return "记忆";
     case "search": return "搜索";
+    // 全屏对话视图已退役（死代码保留）：conv-active / conv-done 不再是导航目标。
     case "conv-active":
     case "conv-done": return "对话工作台";
   }
@@ -426,10 +538,12 @@ function renderView(input: {
   readonly activeSpaceId: string | null;
   readonly onActiveSpaceChange: (spaceId: string | null) => void;
   readonly conversationMode: ConversationMode;
+  readonly conversationSurfaceRequest: ConversationSurfaceRequest | null;
   readonly onBrainSelect: (id: string | null) => void;
   readonly navigate: (view: View) => void;
   readonly onEnterFocus: () => void;
   readonly onExitFocus: () => void;
+  readonly onOpenConversationInSurface: (conversationId: string) => boolean | Promise<boolean>;
   readonly onOpenInSpace: (spaceId: string, id: string) => void;
 }) {
   if (input.view === "home") {
@@ -452,6 +566,9 @@ function renderView(input: {
       onOpenItem={input.props.onOpenSpaceItem}
       onOpenConversation={input.props.onOpenConversation}
       activeConversationId={input.activeConversation?.conversationId}
+      activeConversationOwner={input.activeConversation?.owner}
+      activeConversationTitle={input.activeConversation?.title}
+      conversationSurfaceRequest={input.conversationSurfaceRequest}
       conversationContent={
         <ConversationSurface
           props={input.props}
@@ -482,11 +599,14 @@ function renderView(input: {
     return <SearchPage
       onNavigate={input.navigate}
       onOpenInSpace={input.onOpenInSpace}
-      onOpenConversation={input.props.onOpenConversation}
+      // 搜索结果打开会话统一走「空间右侧面板」承载（全屏对话视图已退役）。
+      onOpenConversation={input.onOpenConversationInSurface}
       spaces={input.props.spaces ?? []}
       conversations={input.props.conversations}
     />;
   }
+  // 全屏对话视图已退役（死代码保留）：conv-active / conv-done 不再作为导航目标，
+  // 此分支不可达；会话一律由 SpacePage 右侧面板承载。
   return <ConversationSurface
     props={input.props}
     conversation={input.activeConversation}
@@ -589,6 +709,8 @@ function projectLiveConversationState(
   return active.hasVisibleContent ? "completed" : "initial";
 }
 
+/** 全屏对话视图已退役（死代码保留）：conv-active / conv-done 不再是任何导航目标，
+ *  此判定只被保留的退役路径使用，恒为 false；会话一律由空间右侧面板承载。 */
 function isConversationView(view: View): boolean {
   return view === "conv-active" || view === "conv-done";
 }
@@ -647,12 +769,13 @@ function confirmationGuidanceInput(
 
 /**
  * 初始视图选择（仅启动挂载，此时尚无用户导航意图）：
- * 有运行中的 run 或待确认时直接恢复对话视图；否则进入首页空态。
+ * 全屏对话视图已退役（2026-08 起），这里不再直接进入 conv-active / conv-done；
+ * 运行中的 run 或待确认会话由启动恢复 effect 路由到所属空间的右侧对话面板。
  * 用户显式导航（首页/知识库/搜索/空间）后不再强制跳回对话页——
  * 运行与待确认状态由 TopBar 全局徽标提醒，不劫持用户选择。
  */
 function initialView(props: Pick<PersonalWorkbenchProps, "currentRun" | "pendingConfirmation">): View {
-  return requiresImmediateConversationView(props) ? "conv-active" : "home";
+  return "home";
 }
 
 function requiresImmediateConversationView(props: Pick<PersonalWorkbenchProps, "currentRun" | "pendingConfirmation">): boolean {

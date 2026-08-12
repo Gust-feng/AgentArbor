@@ -301,6 +301,16 @@ interface SpacePageProps {
   /** 从空间右侧对话进入已有的全屏专注模式。 */
   onEnterFocus?: () => void
   activeConversationId?: string
+  /** 宿主当前活动会话的固定 owner（ADR-0035）；用于「本空间自己的会话在右侧面板展示」。 */
+  activeConversationOwner?: { readonly kind: "space" | "workspace"; readonly id: string } | undefined
+  /** 宿主当前活动会话标题；空间 read-model 尚未刷新时作为面板头回退。 */
+  activeConversationTitle?: string | undefined
+  /**
+   * 宿主统一会话承载请求（全屏对话视图退役后唯一会话承载形态）：
+   * 首页创建、侧栏/搜索打开、启动恢复的会话由 Workbench 指定在哪个空间右侧面板展示；
+   * 不要求会话已出现在本空间的 conversations 投影（刷新竞态期间仍可展示）。
+   */
+  conversationSurfaceRequest?: { readonly conversationId: string; readonly spaceId: string } | null
   onRenameConversation?: (conversationId: string, title: string) => void | Promise<void>
   onToggleConversationPinned?: (conversationId: string, pinned: boolean) => void | Promise<void>
   onDeleteConversation?: (conversationId: string) => void | Promise<void>
@@ -333,6 +343,9 @@ export function SpacePage({
   conversationContent,
   onEnterFocus,
   activeConversationId,
+  activeConversationOwner,
+  activeConversationTitle,
+  conversationSurfaceRequest,
   onRenameConversation,
   onToggleConversationPinned,
   onDeleteConversation,
@@ -431,12 +444,17 @@ export function SpacePage({
     && (notes.some((note) => note.id === selectedId) || getItem(tree, selectedId) !== undefined)
   const previousMemoryKeyRef = useRef(memoryKey)
 
+  // 用户在本空间停留期间显式选择了笔记/材料 → 右侧面板让位给内容浏览；
+  // 切换空间（memoryKey 变化）或重新进入空间（组件重挂载）时重置，
+  // 宿主活动会话重新接管面板 —— 与「从空间行打开会话后会话优先」口径一致。
+  const explicitMaterialSelectionRef = useRef(false)
   // SpacePage stays mounted while the selected Space changes. Reset only the
   // space-bound transient UI before paint so the workbench does not flash an
   // empty page or rebuild the whole surface between two already-known Spaces.
   useLayoutEffect(() => {
     if (previousMemoryKeyRef.current === memoryKey) return
     previousMemoryKeyRef.current = memoryKey
+    explicitMaterialSelectionRef.current = false
     dragOrderRef.current = null
     conversationSwitchRequestRef.current += 1
     referenceCreationRequestRef.current += 1
@@ -457,6 +475,7 @@ export function SpacePage({
   }, [activeConversationId, memoryKey, notes, projectedTree, rememberedSelectedId, space?.conversations, targetId])
 
   function selectItem(id: string) {
+    explicitMaterialSelectionRef.current = true
     setActionError(null)
     conversationSwitchRequestRef.current += 1
     setPendingConversationId(null)
@@ -545,18 +564,35 @@ export function SpacePage({
   const selectedItem = selectedId ? getItem(tree, selectedId) : null
   const selectedReferenceRoot = selectedItem?.referenceId === undefined ? undefined : getItem(tree, selectedItem.referenceId)
   const itemCount = notes.length + (space?.itemCount ?? countItems(projectedTree))
+  /**
+   * 右侧面板展示会话的条件（全屏对话视图退役后，空间右侧面板是唯一会话承载形态）：
+   * 1) 本空间行打开并提交的会话（openConversationId 匹配宿主活动会话）；
+   * 2) 打开中的会话（pending 等待宿主确认）；
+   * 3) 宿主活动会话为「本空间自己的会话」或「宿主显式请求在此空间承载的会话」
+   *    （首页创建 / 侧栏与搜索打开 / 启动恢复），且用户未在本停留期间显式选择笔记/材料。
+   * 分支 3 不要求会话已出现在空间 conversations 投影，避免 read-model 刷新竞态期间闪回内容页。
+   */
   const conversationSurfaceVisible = conversationContent !== undefined && (
     (openConversationId !== null && openConversationId === activeConversationId)
     || (pendingConversationId !== null && (
       openConversationId !== null || activeConversationId === pendingConversationId
     ))
+    || (activeConversationId !== undefined
+      && !explicitMaterialSelectionRef.current
+      && (
+        (activeConversationOwner?.kind === "space" && activeConversationOwner.id === spaceId)
+        || (conversationSurfaceRequest !== null && conversationSurfaceRequest !== undefined
+          && conversationSurfaceRequest.conversationId === activeConversationId
+          && conversationSurfaceRequest.spaceId === spaceId)
+      ))
   )
   const visibleConversationId = openConversationId ?? activeConversationId
   const visibleConversationTitle = space?.conversations?.find(
     (conversation) => conversation.conversationId === visibleConversationId,
-  )?.title ?? '对话'
+  )?.title ?? (visibleConversationId === activeConversationId ? activeConversationTitle : undefined) ?? '对话'
 
   function handleCreateNote() {
+    explicitMaterialSelectionRef.current = true
     if (notes.length === 0) {
       const note = create({ spaceId, title: '写下第一篇笔记' })
       setSelectedId(note.id)
@@ -568,6 +604,7 @@ export function SpacePage({
   }
 
   function openNameDraft(id: string) {
+    explicitMaterialSelectionRef.current = true
     // The note is already inserted by the store before this selection update.
     // Normal rendering reads that same store order, so the selection never
     // renders against a stale list position.
@@ -750,6 +787,7 @@ export function SpacePage({
   }
 
   function handleNoteFromMaterial(material: { id: string; title: string }) {
+    explicitMaterialSelectionRef.current = true
     const firstNote = notes.length === 0
     const note = create({
       spaceId,
@@ -1010,7 +1048,7 @@ export function SpacePage({
         </div>
       </div>
 
-      {/* 右侧资料 / 笔记 / 正式对话主区 */}
+      {/* 右侧资料 / 笔记 / 正式对话主区 —— 全屏对话视图退役后，这里是唯一会话承载形态 */}
       {conversationSurfaceVisible ? (
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" data-space-conversation>
           <header

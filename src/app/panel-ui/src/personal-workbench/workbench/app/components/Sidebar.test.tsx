@@ -239,7 +239,7 @@ test('navigates as soon as the requested conversation becomes active', () => {
     />,
   )
 
-  expect(onNavigate).toHaveBeenCalledWith('conv-active')
+  expect(onNavigate).toHaveBeenCalledWith('space')
   finishOpen(true)
 })
 
@@ -281,7 +281,7 @@ test('ignores a stale sidebar conversation open after a newer click', async () =
   await act(async () => { finishFirst(true) })
   expect(onNavigate).not.toHaveBeenCalled()
   await act(async () => { finishSecond(true) })
-  expect(onNavigate).toHaveBeenCalledWith('conv-active')
+  expect(onNavigate).toHaveBeenCalledWith('space')
 })
 
 test('shows run status markers on owned conversations: spinning, waiting, failed, done', () => {

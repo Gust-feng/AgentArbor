@@ -4,8 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { BrainPage } from './BrainPage'
 import { mutatePersonalKnowledge, resetPersonalKnowledgeForTesting } from './personalKnowledgeClient'
+import { clearReferencePreviewCacheForTesting, primeReferencePreviewCache } from './referencePreviewClient'
 
 beforeEach(() => {
+  clearReferencePreviewCacheForTesting()
   window.localStorage.removeItem('agentarbor:knowledge-view')
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
     configurable: true,
@@ -402,4 +404,39 @@ test('orders Recent by the most recent activity, including reopened old collecti
   const cardTitles = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
   expect(cardTitles[0]).toBe('第一篇笔记')
   expect(cardTitles).toEqual(['第一篇笔记', '第四篇笔记', '第三篇笔记', '第二篇笔记'])
+})
+
+test('keeps managed PDF cards typed before and after preview warmup', async () => {
+  resetPersonalKnowledgeForTesting({
+    pages: [{
+      refId: 'managed-pdf-card',
+      kind: 'space_reference',
+      collectedAt: Date.now(),
+      asset: {
+        status: 'managed',
+        title: 'PyTorch 入门笔记.pdf',
+        sourceLabel: 'C:/资料/PyTorch 入门笔记.pdf',
+        contentKind: 'file',
+      },
+    }],
+  })
+
+  render(<BrainPage selectedId={null} onSelect={() => undefined} />)
+
+  expect(screen.getByText('PDF')).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'PyTorch 入门笔记.pdf' })).toBeTruthy()
+
+  primeReferencePreviewCache([{
+    itemId: 'managed-pdf-card',
+    title: 'PyTorch 入门笔记.pdf',
+    sourceKind: 'local_file',
+    source: 'managed/managed-pdf-card/content',
+    status: 'ready',
+    fingerprint: 'managed-pdf-card-v1',
+    presentation: { kind: 'pdf', editable: false, sourceMode: false },
+    content: { kind: 'pages', pages: ['PDF 正文不应成为卡片封面。'] },
+  }], '/api/personal-knowledge/assets')
+
+  await waitFor(() => expect(screen.getByText('PDF')).toBeTruthy())
+  expect(screen.queryByText('PDF 正文不应成为卡片封面。')).toBeNull()
 })

@@ -111,7 +111,7 @@ export function resolvePage(page: BrainPage): ResolvedPage {
   const apiBase = managed ? MANAGED_ASSET_PREVIEW_BASE : WORKBENCH_ASSET_PREVIEW_BASE
   const preview = getCachedReferencePreview(page.refId, '', apiBase)
   const previewError = getReferencePreviewError(page.refId, '', apiBase)
-  const fields = documentCardFields(preview)
+  const fields = documentCardFields(preview, managed ? (page.asset?.sourceLabel || page.asset?.title) : undefined)
   return {
     refId: page.refId,
     kind: managed ? 'space_reference' : 'material',
@@ -126,13 +126,31 @@ export function resolvePage(page: BrainPage): ResolvedPage {
   }
 }
 
-function documentCardFields(preview: ReturnType<typeof getCachedReferencePreview>): Pick<ResolvedPage, 'materialKind' | 'previewText' | 'thumbnail' | 'language'> {
+function documentCardFields(
+  preview: ReturnType<typeof getCachedReferencePreview>,
+  sourceLabel?: string,
+): Pick<ResolvedPage, 'materialKind' | 'previewText' | 'thumbnail' | 'language'> {
+  const previewKind = classifyReferencePreview(preview)
   return {
-    materialKind: classifyReferencePreview(preview),
+    materialKind: previewKind === 'file' ? materialKindFromSourceLabel(sourceLabel) : previewKind,
     previewText: previewTextOf(preview),
     thumbnail: preview?.content.kind === 'media' && preview.content.mediaKind === 'image' ? preview.content.url : undefined,
     language: preview?.content.kind === 'text' ? preview.content.language : undefined,
   }
+}
+
+function materialKindFromSourceLabel(sourceLabel: string | undefined): DocumentMaterialKind {
+  const source = sourceLabel?.toLowerCase() ?? ''
+  if (/\.(?:md|markdown)$/u.test(source)) return 'markdown'
+  if (/\.pdf$/u.test(source)) return 'pdf'
+  if (/\.(?:doc|docx)$/u.test(source)) return 'docx'
+  if (/\.(?:xls|xlsx)$/u.test(source)) return 'xlsx'
+  if (/\.(?:png|jpe?g|gif|webp|svg|avif|heic)$/u.test(source)) return 'image'
+  if (/\.(?:mp4|webm|mov|mkv|m4v)$/u.test(source)) return 'video'
+  if (/\.(?:mp3|wav|ogg|m4a|flac)$/u.test(source)) return 'audio'
+  if (/\.(?:jsonc?|jsonl|ya?ml|toml|ini|xml|csv|ts|tsx|js|mjs|cjs|jsx|py|java|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|ps1|sql|graphql|vue|svelte|css|html)$/u.test(source)
+    || /(?:^|[\\/])(?:\.gitignore|\.gitattributes|\.gitmodules|\.editorconfig|\.npmrc|\.nvmrc|\.env|dockerfile|makefile|license)$/u.test(source)) return 'code'
+  return 'file'
 }
 
 function previewTextOf(preview: ReturnType<typeof getCachedReferencePreview>): string | undefined {

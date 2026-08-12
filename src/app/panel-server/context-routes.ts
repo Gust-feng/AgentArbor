@@ -1,7 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { ContextAttachment } from "../../domain/basic-agent/index.js";
 import type { ConfigCenter } from "../config-center/index.js";
@@ -14,6 +12,7 @@ import {
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import { parseContextAttachmentPreviewRequest } from "./request-parsers.js";
 import type { PanelContextAttachmentMediaEntry, PanelContextAttachmentSelection } from "./types.js";
+import type { OrdinaryAgentFeature } from "../ordinary-agent/index.js";
 
 export type PanelContextRouteRuntime = {
   readonly configCenter: ConfigCenter;
@@ -21,6 +20,8 @@ export type PanelContextRouteRuntime = {
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly contextAttachmentMedia: Map<string, PanelContextAttachmentMediaEntry>;
+  readonly ordinaryAgentFeature: Pick<OrdinaryAgentFeature, "commands" | "queries">;
+  readonly resolveManagedAttachmentPath: (attachmentId: string) => Promise<string | undefined>;
 };
 
 const MAX_ATTACHMENT_UPLOAD_BYTES = 64 * 1024 * 1024;
@@ -35,6 +36,15 @@ export async function handlePanelContextRoute(
   const mediaMatch = /^\/api\/context\/attachments\/media\/([^/]+)$/u.exec(url.pathname);
   if (request.method === "GET" && mediaMatch !== null) {
     await writeContextAttachmentMedia(runtime, decodeMediaAttachmentId(mediaMatch[1] ?? ""), response);
+    return true;
+  }
+
+  const discardMatch = /^\/api\/context\/attachments\/([^/]+)$/u.exec(url.pathname);
+  if (request.method === "DELETE" && discardMatch !== null) {
+    const attachmentId = decodeMediaAttachmentId(discardMatch[1] ?? "");
+    await runtime.ordinaryAgentFeature.commands.discardManagedAttachmentDraft(attachmentId);
+    runtime.contextAttachmentMedia.delete(attachmentId);
+    writeJson(response, 200, { ok: true, discardedAttachmentId: attachmentId });
     return true;
   }
 
@@ -58,6 +68,7 @@ export async function handlePanelContextRoute(
   }
 
   if (request.method === "POST" && url.pathname === "/api/context/attachments/upload") {
+    const uploadRequestId = requireAttachmentUploadIdempotencyKey(request);
     const files = await readMultipartAttachmentUpload(request);
     if (files.length === 0) {
       throw new PanelHttpError(400, "missing_attachment_files", "上传请求没有包含文件。");
@@ -65,23 +76,40 @@ export async function handlePanelContextRoute(
     if (files.length > MAX_ATTACHMENT_UPLOAD_FILES) {
       throw new PanelHttpError(413, "too_many_attachment_files", `一次最多上传 ${MAX_ATTACHMENT_UPLOAD_FILES} 个附件。`);
     }
-    const uploadDirectory = path.join(resolveAttachmentUploadRoot(runtime.configDirectory), randomUUID());
-    await fs.mkdir(uploadDirectory, { recursive: true });
     const attachments: ContextAttachment[] = [];
-    for (const [index, file] of files.entries()) {
-      const savedPath = path.join(uploadDirectory, storedUploadFilename(file.filename, index));
-      await fs.writeFile(savedPath, file.body);
-      const attachment = await createUploadedContextAttachment({
-        path: savedPath,
-        originalName: file.filename,
-        mimeType: file.contentType,
-      }).catch((error: unknown) => {
-        if (error instanceof ContextAttachmentPreviewError) {
-          throw new PanelHttpError(400, error.code, error.message);
+    const createdAttachmentIds: string[] = [];
+    try {
+      for (const [uploadFileIndex, file] of files.entries()) {
+        const draft = await runtime.ordinaryAgentFeature.commands.createManagedAttachmentDraft({
+          originalName: file.filename,
+          ...(file.contentType === undefined ? {} : { mimeType: file.contentType }),
+          content: file.body,
+          uploadRequestId,
+          uploadFileIndex,
+        });
+        const record = draft.record;
+        if (draft.created) createdAttachmentIds.push(record.attachmentId);
+        const savedPath = await runtime.resolveManagedAttachmentPath(record.attachmentId);
+        if (savedPath === undefined) {
+          throw new PanelHttpError(500, "uploaded_attachment_missing", "上传附件保存失败。");
         }
-        throw error;
-      });
-      attachments.push(await attachMediaPreview(runtime, attachment));
+        const attachment = await createUploadedContextAttachment({
+          attachmentId: record.attachmentId,
+          path: savedPath,
+          originalName: record.originalName,
+          mimeType: record.mimeType,
+        }).catch((error: unknown) => {
+          if (error instanceof ContextAttachmentPreviewError) {
+            throw new PanelHttpError(400, error.code, error.message);
+          }
+          throw error;
+        });
+        attachments.push(await attachMediaPreview(runtime, attachment));
+      }
+    } catch (error) {
+      await Promise.allSettled(createdAttachmentIds.map((attachmentId) =>
+        runtime.ordinaryAgentFeature.commands.discardManagedAttachmentDraft(attachmentId)));
+      throw error;
     }
     writeJson(response, 200, {
       ok: true,
@@ -138,6 +166,19 @@ export async function handlePanelContextRoute(
     return true;
   }
   return false;
+}
+
+function requireAttachmentUploadIdempotencyKey(request: IncomingMessage): string {
+  const raw = request.headers["idempotency-key"];
+  const value = Array.isArray(raw) ? (raw.length === 1 ? raw[0] : undefined) : raw;
+  if (value === undefined || value.trim().length === 0 || value.length > 200 || value.includes("\0")) {
+    throw new PanelHttpError(
+      400,
+      "invalid_attachment_upload_idempotency_key",
+      "附件上传需要有效的 Idempotency-Key。",
+    );
+  }
+  return value;
 }
 
 type UploadedMultipartFile = {
@@ -278,22 +319,12 @@ function decodeHeaderParameter(value: string, encoded: boolean): string {
   }
 }
 
-function resolveAttachmentUploadRoot(configDirectory: string | undefined): string {
-  return path.join(configDirectory ?? path.join(os.tmpdir(), "agentarbor"), "attachments");
-}
-
-function storedUploadFilename(filename: string, index: number): string {
-  const basename = path.basename(filename).replace(/[<>:"/\\|?*\u0000-\u001f]+/gu, "_").trim();
-  const safe = basename.length === 0 ? `attachment-${index + 1}` : basename.slice(0, 160);
-  return `${String(index + 1).padStart(2, "0")}-${randomUUID()}-${safe}`;
-}
-
 async function attachMediaPreview(
   runtime: PanelContextRouteRuntime,
   attachment: ContextAttachment,
   workspaceRoot?: string
 ): Promise<ContextAttachment> {
-  const entry = await mediaEntryForAttachment(attachment, workspaceRoot);
+  const entry = await mediaEntryForAttachment(runtime, attachment, workspaceRoot);
   if (entry === undefined) {
     return attachment;
   }
@@ -310,6 +341,7 @@ async function attachMediaPreview(
 }
 
 async function mediaEntryForAttachment(
+  runtime: PanelContextRouteRuntime,
   attachment: ContextAttachment,
   workspaceRoot?: string
 ): Promise<PanelContextAttachmentMediaEntry | undefined> {
@@ -322,7 +354,7 @@ async function mediaEntryForAttachment(
   ) {
     return undefined;
   }
-  const absolutePath = resolveAttachmentFilePath(attachment.ref, workspaceRoot);
+  const absolutePath = await resolveAttachmentFilePath(runtime, attachment.ref, workspaceRoot);
   if (absolutePath === undefined) {
     return undefined;
   }
@@ -348,7 +380,24 @@ async function writeContextAttachmentMedia(
   if (attachmentId.length === 0) {
     throw new PanelHttpError(400, "invalid_attachment_media_id", "附件媒体 ID 无效。");
   }
-  const entry = runtime.contextAttachmentMedia.get(attachmentId);
+  let entry = runtime.contextAttachmentMedia.get(attachmentId);
+  if (entry === undefined) {
+    const record = await runtime.ordinaryAgentFeature.queries.getManagedAttachment(attachmentId);
+    const absolutePath = record === undefined
+      ? undefined
+      : await runtime.resolveManagedAttachmentPath(attachmentId);
+    if (record !== undefined && absolutePath !== undefined && isImageMimeType(record.mimeType ?? "")) {
+      entry = {
+        attachmentId,
+        kind: "image",
+        absolutePath,
+        mimeType: record.mimeType!,
+        byteLength: record.byteLength,
+        title: record.originalName,
+      };
+      runtime.contextAttachmentMedia.set(attachmentId, entry);
+    }
+  }
   if (entry === undefined) {
     throw new PanelHttpError(404, "attachment_media_not_found", "没有找到这个附件预览。");
   }
@@ -373,7 +422,15 @@ async function writeContextAttachmentMedia(
   response.end(body);
 }
 
-function resolveAttachmentFilePath(ref: string, workspaceRoot: string | undefined): string | undefined {
+async function resolveAttachmentFilePath(
+  runtime: PanelContextRouteRuntime,
+  ref: string,
+  workspaceRoot: string | undefined,
+): Promise<string | undefined> {
+  if (ref.startsWith("uploaded-attachment:")) {
+    const attachmentId = ref.slice("uploaded-attachment:".length);
+    return attachmentId.length === 0 ? undefined : await runtime.resolveManagedAttachmentPath(attachmentId);
+  }
   if (ref.startsWith("local-file:")) {
     const absolutePath = ref.slice("local-file:".length);
     return path.isAbsolute(absolutePath) ? path.resolve(absolutePath) : undefined;

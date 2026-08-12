@@ -37,6 +37,8 @@ import {
 import type { AgentLoopTokenCounter } from "../context-maintenance/index.js";
 import type { ToolExecutionMetricsSink } from "../../domain/tools/index.js";
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
+import type { ContextAttachmentReadAuthorization } from "../tool-center/adapters/context-attachment-access.js";
+import type { LocalWorkspacePathAuthorization } from "../tool-center/adapters/local-workspace-common.js";
 
 export type AgentRunResourceHost = {
   readonly configCenter: ConfigCenter;
@@ -47,6 +49,7 @@ export type AgentRunResourceHost = {
   readonly toolOutputStore?: ToolOutputStore;
   readonly testOnlyAllowFakeModel?: boolean;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 };
 
 export type AgentHostRunResources<
@@ -68,6 +71,7 @@ export type AgentHostRunResources<
   readonly processTerminator?: ProcessTerminator;
   readonly toolOutputStore?: ToolOutputStore;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
 };
 
 export type AgentRunResources<
@@ -215,12 +219,13 @@ async function prepareAgentHostRunResourcesWithEnvironment<
       ? []
       : [createMcpToolRegistryContribution(mcpManager, { useDiscoveredTools: false })],
     release: async () => {
-      await mcpManager?.disconnectAll?.().catch(() => undefined);
+      await mcpManager?.disconnectAll?.();
     },
     processRegistry: runtime.processRegistry,
     processTerminator: runtime.processTerminator,
     toolOutputStore: runtime.toolOutputStore,
     fileMutationCoordinator: runtime.fileMutationCoordinator,
+    resolveManagedAttachmentPath: runtime.resolveManagedAttachmentPath,
   };
 }
 
@@ -287,6 +292,8 @@ export function createAgentToolCenterFactory(
     readonly taskSoil?: TaskSoil;
     readonly outputTokenCounter?: AgentLoopTokenCounter;
     readonly metricsSink?: ToolExecutionMetricsSink;
+    readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
+    readonly workspacePathAuthorization?: LocalWorkspacePathAuthorization;
   }) => createDefaultToolCenter({
     runtime: toolRuntime,
     env: resources.aiEnvironment,
@@ -308,5 +315,8 @@ export function createAgentToolCenterFactory(
     outputTokenCounter: context?.outputTokenCounter,
     metricsSink: context?.metricsSink,
     fileMutationCoordinator: resources.fileMutationCoordinator,
+    resolveManagedAttachmentPath: resources.resolveManagedAttachmentPath,
+    contextAttachmentReadAuthorization: context?.contextAttachmentReadAuthorization,
+    workspacePathAuthorization: context?.workspacePathAuthorization,
   });
 }

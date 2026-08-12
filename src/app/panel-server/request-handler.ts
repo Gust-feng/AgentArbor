@@ -1,10 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
-  PANEL_BRAND_LEGACY_ICON_PATHNAME,
   PANEL_BRAND_LOGO_PATHNAME,
   createPanelHtml,
-  readPanelBrandIconAsset,
   readPanelBrandLogoAsset,
   readPanelStaticAsset,
 } from "./panel-assets.js";
@@ -23,6 +21,7 @@ import {
   cleanupPanelRuntimeOwnedProcesses,
   createPanelRuntime,
   isPanelRuntime,
+  preparePanelRuntimeStorageForStartup,
   type PanelRuntime,
 } from "./runtime.js";
 import { listPanelSkillSettings, refreshPanelSkillSettings, setPanelSkillEnabled } from "./skill-service.js";
@@ -34,11 +33,12 @@ import { handlePanelOrdinaryRoute } from "./ordinary-routes.js";
 import { handlePanelPathMemoryRoute, pathMemoryFeatureHttpError } from "./path-memory-routes.js";
 import { ExperienceCandidateFeatureError } from "../experience-candidate/contracts.js";
 import { SpaceFeatureError } from "../spaces/index.js";
+import { ManagedContentError } from "../managed-content/index.js";
 import {
   experienceCandidateFeatureHttpError,
   handlePanelExperienceCandidateRoute,
 } from "./experience-candidate-routes.js";
-import { handlePanelSpaceRoute, spaceFeatureHttpError } from "./space-routes.js";
+import { handlePanelSpaceRoute, managedContentHttpError, spaceFeatureHttpError } from "./space-routes.js";
 import { PersonalKnowledgeError } from "../personal-knowledge/index.js";
 import { handlePanelPersonalKnowledgeRoute, personalKnowledgeHttpError } from "./personal-knowledge-routes.js";
 import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
@@ -76,8 +76,12 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
     : await acquirePanelRuntimeDirectoryLease(runtimeDirectory);
   let runtime: PanelRuntime | undefined;
   try {
+    if (runtimeDirectory !== undefined) {
+      await preparePanelRuntimeStorageForStartup(runtimeDirectory);
+    }
     const createdRuntime = createPanelRuntime(options);
     runtime = createdRuntime;
+    await createdRuntime.spaceFeature.ready();
     const server = createServer(createPanelRequestHandler(createdRuntime));
     const host = options.host ?? "127.0.0.1";
     const port = options.port ?? 9090;
@@ -162,6 +166,10 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         writePanelError(response, spaceFeatureHttpError(error));
         return;
       }
+      if (error instanceof ManagedContentError) {
+        writePanelError(response, managedContentHttpError(error));
+        return;
+      }
       if (error instanceof PersonalKnowledgeError) {
         writePanelError(response, personalKnowledgeHttpError(error));
         return;
@@ -193,16 +201,6 @@ async function handlePanelRequest(
 
   if (request.method === "GET" && url.pathname === PANEL_BRAND_LOGO_PATHNAME) {
     const asset = readPanelBrandLogoAsset();
-    response.writeHead(200, {
-      "content-type": asset.contentType,
-      "cache-control": "no-store",
-    });
-    response.end(asset.body);
-    return;
-  }
-
-  if (request.method === "GET" && url.pathname === PANEL_BRAND_LEGACY_ICON_PATHNAME) {
-    const asset = readPanelBrandIconAsset();
     response.writeHead(200, {
       "content-type": asset.contentType,
       "cache-control": "no-store",
@@ -291,7 +289,7 @@ async function handlePanelRequest(
     return;
   }
 
-  if (await handlePanelWorkbenchAssetRoute(runtime, request, response, url)) {
+  if (await handlePanelWorkbenchAssetRoute({ ...runtime, workbenchAssets: { get: runtime.workbenchAssetFeature.queries.get, updateText: runtime.workbenchAssetFeature.commands.updateText } }, request, response, url)) {
     return;
   }
 
@@ -383,6 +381,8 @@ export async function closePanelServer(
   runtime.isQuiescing = true;
   const remoteDisposal = runtime.remoteCollaborationFeature.release();
   void remoteDisposal.catch(() => undefined);
+  const contentVaultSyncDisposal = runtime.contentVaultSyncFeature.release();
+  void contentVaultSyncDisposal.catch(() => undefined);
   const ordinaryDisposal = runtime.ordinaryAgentFeature.release();
   void ordinaryDisposal.catch(() => undefined);
   let serverCloseError: unknown;
@@ -393,7 +393,7 @@ export async function closePanelServer(
   const runtimeCleanup = (async () => {
     await cleanupPanelRuntimeOwnedProcesses(runtime);
     await waitForPanelRequestIdle(server, runtime);
-    await releasePanelRuntimeResources(runtime, ordinaryDisposal, remoteDisposal);
+    await releasePanelRuntimeResources(runtime, ordinaryDisposal, remoteDisposal, contentVaultSyncDisposal);
   })();
   // A forced timeout may return while a broken provider promise is still
   // pending. Own its eventual rejection so shutdown never creates an unhandled
@@ -442,10 +442,12 @@ export async function releasePanelRuntimeResources(
   runtime: PanelRuntime,
   ordinaryDisposal?: Promise<void>,
   remoteDisposal?: Promise<void>,
+  contentVaultSyncDisposal?: Promise<void>,
 ): Promise<void> {
   runtime.isQuiescing = true;
   const errors: unknown[] = [];
   await captureCleanupError(errors, () => remoteDisposal ?? runtime.remoteCollaborationFeature.release());
+  await captureCleanupError(errors, () => contentVaultSyncDisposal ?? runtime.contentVaultSyncFeature.release());
   await captureCleanupError(errors, () => ordinaryDisposal ?? runtime.ordinaryAgentFeature.release());
   await captureCleanupError(errors, () => runtime.flushSpaceFileReconciliation());
   // Keep the connector subscribed until Ordinary has produced its final stable facts.
@@ -474,6 +476,8 @@ async function releaseWorkbenchStorage(runtime: PanelRuntime): Promise<void> {
   } catch (error) {
     errors.push(error);
   }
+  await captureCleanupError(errors, () => runtime.managedContentFeature.release());
+  await captureCleanupError(errors, () => runtime.workbenchAssetFeature.release());
   const results = await Promise.allSettled([
     runtime.personalKnowledgeFeature.release(),
     runtime.spaceFeature.release(),
@@ -505,6 +509,10 @@ function ordinaryFeatureHttpError(error: OrdinaryFeatureError): PanelHttpError {
     case "ordinary_conversation_busy":
     case "ordinary_confirmation_in_progress":
     case "ordinary_tool_result_conflict":
+    case "ordinary_submission_conflict":
+    case "ordinary_conversation_cleanup_pending":
+    case "ordinary_managed_attachment_unavailable":
+    case "ordinary_completion_commit_failed":
       return new PanelHttpError(409, error.code, error.message);
   }
 }

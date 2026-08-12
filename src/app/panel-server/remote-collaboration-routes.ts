@@ -28,7 +28,7 @@ export async function handlePanelRemoteCollaborationRoute(
       relayUrl: z.url().refine((value) => {
         const protocol = new URL(value).protocol;
         return protocol === "http:" || protocol === "https:";
-      }, "Relay 地址必须使用 http 或 https"),
+      }, "官方协同服务配置无效"),
       deviceName: z.string().trim().min(1).max(160),
       invitationCode: z.string().trim().min(8).max(128).optional(),
     }).strict(), await readJsonBody(request));

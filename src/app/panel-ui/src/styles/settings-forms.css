@@ -73,6 +73,11 @@
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.remote-activation {
+  display: grid;
+  gap: 10px;
+}
+
 .remote-pairing-form label {
   display: grid;
   gap: 6px;
@@ -81,6 +86,35 @@
 }
 
 .remote-pairing-form input {
+  width: 100%;
+}
+
+.remote-device-options {
+  justify-self: start;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.remote-device-options summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.remote-device-options summary::-webkit-details-marker {
+  display: none;
+}
+
+.remote-device-options label {
+  display: grid;
+  min-width: min(320px, 100%);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.remote-device-options input {
   width: 100%;
 }
 
@@ -206,6 +240,7 @@
 
 @media (max-width: 760px) {
   .remote-pairing-form { grid-template-columns: 1fr; }
+  .remote-device-options { width: 100%; }
   .remote-device-row { align-items: flex-start; flex-direction: column; }
 }
 

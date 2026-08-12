@@ -18,14 +18,13 @@ const INITIAL_MATERIAL_IDS = [
   "m-attn-pdf",
   "m-transformer-md",
   "m-loss-img",
-  "m-stanford-video",
-  "m-podcast-audio",
   "m-train-code",
   "m-distill-web",
   "m-inspo-img",
 ].sort();
+const INITIAL_ASSET_IDS = ["f1-2", "f1-5", ...INITIAL_MATERIAL_IDS].sort();
 
-test("Panel initializes the original built-in Workbench dataset exactly once", async () => {
+test("Panel initializes the built-in Workbench dataset exactly once", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-initial-workbench-assets-"));
   try {
     const firstRuntime = createPanelRuntime({ configDirectory: directory });
@@ -35,20 +34,39 @@ test("Panel initializes the original built-in Workbench dataset exactly once", a
 
       const space = await firstRuntime.spaceFeature.queries.getTree(INITIAL_SPACE_ID);
       assert.equal(space?.space.title, "学习空间");
-      assert.equal(space?.entries.length, 10);
+      assert.equal(space?.entries.length, 9);
       assert.equal(space?.entries.find((entry) => entry.item.id === "f1-1")?.item.parentId, "f1");
       assert.deepEqual(space?.entries.find((entry) => entry.item.id === "f1-1")?.item.reference, { kind: "workbench_asset", assetId: "f1-1" });
-      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === undefined).map((entry) => entry.item.id), ["f1", "f2", "f4"]);
-      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === "f1").map((entry) => entry.item.id), ["f1-1", "f1-2", "f1-3", "f1-5", "f1-6"]);
+      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === undefined).map((entry) => entry.item.id), ["f1-3", "f1", "f2-3", "f2", "f4"]);
+      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === "f1").map((entry) => entry.item.id), ["f1-1", "f1-2", "f1-5"]);
+      assert.deepEqual(space?.entries.filter((entry) => entry.item.parentId === "f2").map((entry) => entry.item.id), ["f2-2"]);
 
-      const assets = await firstRuntime.workbenchAssets.list();
-      assert.deepEqual(assets.map((asset) => asset.id).sort(), ["f1-1", "f1-2", "f1-5", "f1-6", ...INITIAL_MATERIAL_IDS.filter((id) => !["f1-1", "f1-2"].includes(id))].sort());
+      const assets = await firstRuntime.workbenchAssetFeature.queries.list();
+      assert.deepEqual(assets.map((asset) => asset.id).sort(), INITIAL_ASSET_IDS);
       assert.match(assets.find((asset) => asset.id === "m-train-code")?.code?.source ?? "", /import torch/u);
 
       const knowledge = await firstRuntime.personalKnowledgeFeature.queries.snapshot();
       assert.deepEqual(knowledge.pages.map((page) => page.refId).sort(), INITIAL_MATERIAL_IDS);
       assert.deepEqual(knowledge.pages.map((page) => page.kind), Array(INITIAL_MATERIAL_IDS.length).fill("material"));
       assert.deepEqual(knowledge.notes, []);
+      assert.deepEqual(knowledge.themes.map(({ id, name, origin }) => ({ id, name, origin })), [
+        { id: "t-inspo", name: "灵感与杂谈", origin: "agent" },
+        { id: "t-method", name: "读书与方法", origin: "agent" },
+        { id: "t-training", name: "训练与实践", origin: "agent" },
+        { id: "t-transformer", name: "Transformer", origin: "agent" },
+      ]);
+      assert.equal(knowledge.assignments.length, 10);
+      assert.deepEqual(
+        INITIAL_MATERIAL_IDS.filter((refId) => !knowledge.assignments.some((assignment) => assignment.refId === refId)),
+        [],
+      );
+      assert.equal(knowledge.assignments.every((assignment) => assignment.by === "agent" && !assignment.locked), true);
+      assert.deepEqual(knowledge.links.map(({ from, to }) => ({ from, to })), [
+        { from: "m-loss-img", to: "f1-1" },
+        { from: "m-train-code", to: "m-attn-pdf" },
+        { from: "m-transformer-md", to: "f2-2" },
+        { from: "m-transformer-md", to: "m-attn-pdf" },
+      ]);
 
       await assert.rejects(fs.access(path.join(directory, "runtime", "space-folders", INITIAL_SPACE_ID, "README.md")));
       await assert.rejects(fs.access(path.join(directory, "runtime", "space-folders", INITIAL_SPACE_ID, "学习路线.md")));
@@ -61,9 +79,12 @@ test("Panel initializes the original built-in Workbench dataset exactly once", a
       await restartedRuntime.ensureInitialWorkbenchData();
       const knowledge = await restartedRuntime.personalKnowledgeFeature.queries.snapshot();
       assert.deepEqual(knowledge.pages.map((page) => page.refId).sort(), INITIAL_MATERIAL_IDS);
+      assert.equal(knowledge.themes.length, 4);
+      assert.equal(knowledge.assignments.length, 10);
+      assert.equal(knowledge.links.length, 4);
       assert.equal((await restartedRuntime.spaceFeature.queries.list()).filter((space) => space.id === INITIAL_SPACE_ID).length, 1);
-      assert.equal((await restartedRuntime.spaceFeature.queries.getTree(INITIAL_SPACE_ID))?.entries.length, 10);
-      assert.equal((await restartedRuntime.workbenchAssets.list()).length, 13);
+      assert.equal((await restartedRuntime.spaceFeature.queries.getTree(INITIAL_SPACE_ID))?.entries.length, 9);
+      assert.equal((await restartedRuntime.workbenchAssetFeature.queries.list()).length, 10);
     } finally {
       await releasePanelRuntimeResources(restartedRuntime);
     }

@@ -95,7 +95,8 @@ export type PersonalKnowledgeCommand =
   | { readonly type: "theme.merge"; readonly fromId: string; readonly toId: string }
   | { readonly type: "theme.assign"; readonly assignment: KnowledgeThemeAssignment }
   | { readonly type: "theme.unassign"; readonly refId: string; readonly themeId: string }
-  | { readonly type: "theme.toggle_lock"; readonly refId: string; readonly themeId: string };
+  | { readonly type: "theme.toggle_lock"; readonly refId: string; readonly themeId: string }
+  | { readonly type: "theme.replace"; readonly theme: KnowledgeTheme };
 
 export interface PersonalKnowledgeRepository {
   readSnapshot(): Promise<PersonalKnowledgeSnapshot>;
@@ -105,13 +106,24 @@ export interface PersonalKnowledgeRepository {
   execute(command: PersonalKnowledgeCommand): Promise<void>;
 }
 
-export type PersonalKnowledgeFeature = {
+export type PersonalKnowledgeManagedAssetTextUpdate<TWriteResult = unknown> = {
+  readonly page: KnowledgePage;
+  readonly writeResult: TWriteResult;
+};
+
+export type PersonalKnowledgeFeature<TManagedAssetTextWriteResult = unknown> = {
   readonly commands: {
     createNote(input: { readonly id?: string; readonly spaceId: string; readonly title?: string; readonly bodyMarkdown?: string; readonly materialRefs?: readonly string[]; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<PersonalNote>;
     updateNote(input: { readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
     deleteNote(input: { readonly id: string; readonly expectedRevision: number; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
     reorderNotes(orderedIds: readonly string[]): Promise<void>;
     collectSpaceReference(input: { readonly referenceId: string; readonly relativePath?: string }): Promise<KnowledgePage>;
+    updateManagedAssetText(input: {
+      readonly refId: string;
+      readonly relativePath: string;
+      readonly expectedFingerprint: string;
+      readonly text: string;
+    }): Promise<PersonalKnowledgeManagedAssetTextUpdate<TManagedAssetTextWriteResult>>;
     uncollect(refId: string): Promise<void>;
     execute(command: Exclude<PersonalKnowledgeCommand, {
       readonly type: "note.create" | "note.update" | "note.delete" | "note.reorder" | "knowledge.uncollect";
@@ -132,6 +144,11 @@ export type PersonalKnowledgeErrorCode =
   | "personal_knowledge_invalid_input"
   | "personal_note_not_found"
   | "personal_note_revision_conflict"
+  | "knowledge_asset_not_found"
+  | "knowledge_asset_revision_conflict"
+  | "knowledge_asset_source_missing"
+  | "knowledge_asset_not_editable"
+  | "knowledge_asset_write_failed"
   | "knowledge_theme_not_found"
   | "personal_knowledge_repository_failure";
 

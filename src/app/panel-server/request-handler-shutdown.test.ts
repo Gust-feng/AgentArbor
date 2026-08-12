@@ -30,6 +30,9 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     remoteCollaborationFeature: {
       async release() { disposalOrder.push("remote-collaboration"); },
     },
+    contentVaultSyncFeature: {
+      async release() { disposalOrder.push("content-vault-sync"); },
+    },
     ordinaryAgentFeature: {
       async release() { disposalOrder.push("ordinary"); },
     },
@@ -51,6 +54,12 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     },
     async flushSpaceKnowledgeSync() {
       disposalOrder.push("space-knowledge-sync");
+    },
+    managedContentFeature: {
+      async release() { disposalOrder.push("managed-content"); },
+    },
+    workbenchAssetFeature: {
+      async release() { disposalOrder.push("workbench-assets"); },
     },
     personalKnowledgeFeature: {
       async release() { disposalOrder.push("personal-knowledge"); },
@@ -80,6 +89,7 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
   // Memory drains only after Ordinary produced its final stable terminal facts.
   assert.deepEqual(disposalOrder, [
     "remote-collaboration",
+    "content-vault-sync",
     "ordinary",
     "space-file-reconciliation",
     "path-memory-connector",
@@ -87,6 +97,8 @@ test("Panel shutdown clears Host-owned retained tool output after feature dispos
     "experience-candidate",
     "projection-changes",
     "space-knowledge-sync",
+    "managed-content",
+    "workbench-assets",
     "personal-knowledge",
     "space",
     "workbench-database",

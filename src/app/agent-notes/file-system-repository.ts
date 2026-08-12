@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 
-import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
-import { isFileNotFound } from "../../kernel/values/index.js";
+import { isFileNotFound, isTransientRenameError } from "../../kernel/values/index.js";
 import { AgentNotesError, type AgentNoteRepository, type AgentNoteScope, type AgentNotebook } from "./contracts.js";
+import { agentNoteContentVersion } from "./note-version.js";
+import { agentNoteWorkspaceIdentity } from "./scope-identity.js";
 
 /**
  * 笔记的文件系统存储。
@@ -20,22 +21,51 @@ import { AgentNotesError, type AgentNoteRepository, type AgentNoteScope, type Ag
  * 笔记正文就是用户可直接打开编辑的 Markdown；这是 ADR-0033 的治理手段
  * （透明可编辑），所以正文旁不放任何会让手工编辑失效的校验和或索引。
  */
-export function createFileSystemAgentNoteRepository(rootDir: string): AgentNoteRepository {
+export function createFileSystemAgentNoteRepository(
+  rootDir: string,
+  options: {
+    readonly rename?: (source: string, target: string) => Promise<void>;
+    readonly waitBeforeRenameRetry?: (attempt: number) => Promise<void>;
+  } = {},
+): AgentNoteRepository {
+  const rename = options.rename ?? fs.rename;
+  const waitBeforeRenameRetry = options.waitBeforeRenameRetry ??
+    ((attempt: number) => new Promise<void>((resolve) => setTimeout(resolve, 25 * attempt)));
+  const read = async (scope: AgentNoteScope): Promise<AgentNotebook> => {
+    return readNotebook(notePath(rootDir, scope), scope);
+  };
+
   return {
-    async read(scope: AgentNoteScope): Promise<AgentNotebook> {
-      const file = notePath(rootDir, scope);
+    read,
+
+    async list(): Promise<readonly AgentNotebook[]> {
+      const notebooks: AgentNotebook[] = [await read({ kind: "global" })];
+      const workspacesRoot = path.join(rootDir, "workspaces");
+      let entries: Dirent[];
       try {
-        const [content, stat] = await Promise.all([fs.readFile(file, "utf8"), fs.stat(file)]);
-        return { scope, content, updatedAt: stat.mtime.toISOString() };
+        entries = await fs.readdir(workspacesRoot, { withFileTypes: true });
       } catch (error) {
-        if (isFileNotFound(error)) {
-          return { scope, content: "", updatedAt: undefined };
-        }
-        throw new AgentNotesError("note_io_failure", `Agent note read failed: ${file}`, { cause: error });
+        if (isFileNotFound(error)) return notebooks;
+        throw new AgentNotesError("note_io_failure", "Agent note list failed", { cause: error });
       }
+      try {
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const markerPath = path.join(workspacesRoot, entry.name, "workspace.json");
+          const marker = JSON.parse(await fs.readFile(markerPath, "utf8")) as { readonly workspaceRoot?: unknown };
+          if (typeof marker.workspaceRoot !== "string" || marker.workspaceRoot.length === 0) {
+            throw new Error(`Agent note workspace marker is invalid: ${markerPath}`);
+          }
+          notebooks.push(await read({ kind: "workspace", workspaceRoot: marker.workspaceRoot }));
+        }
+      } catch (error) {
+        throw new AgentNotesError("note_io_failure", "Agent note list failed", { cause: error });
+      }
+      return notebooks;
     },
 
-    async write(scope: AgentNoteScope, content: string, updatedAt: string): Promise<AgentNotebook> {
+    async write(input) {
+      const { scope, content, expectedVersion, updatedAt } = input;
       const file = notePath(rootDir, scope);
       const directory = path.dirname(file);
       const tempDirectory = path.join(directory, ".tmp");
@@ -43,25 +73,86 @@ export function createFileSystemAgentNoteRepository(rootDir: string): AgentNoteR
         tempDirectory,
         `NOTES.md.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
       );
+      let tempExists = false;
       try {
         await fs.mkdir(tempDirectory, { recursive: true });
         if (scope.kind === "workspace") {
           await writeWorkspaceMarker(directory, scope.workspaceRoot);
         }
         await fs.writeFile(tempPath, content, { encoding: "utf8", mode: 0o600 });
-        try {
-          await renameWithRetry(tempPath, file);
-        } catch (error) {
+        tempExists = true;
+        const conflict = await replaceNoteIfCurrent({
+          source: tempPath,
+          target: file,
+          scope,
+          expectedVersion,
+          rename,
+          waitBeforeRenameRetry,
+        });
+        if (conflict !== undefined) {
           await fs.rm(tempPath, { force: true }).catch(() => undefined);
-          throw error;
+          tempExists = false;
+          return { status: "conflict", current: conflict };
         }
+        tempExists = false;
       } catch (error) {
+        if (tempExists) await fs.rm(tempPath, { force: true }).catch(() => undefined);
         if (error instanceof AgentNotesError) throw error;
         throw new AgentNotesError("note_io_failure", `Agent note write failed: ${file}`, { cause: error });
       }
-      return { scope, content, updatedAt };
+      return {
+        status: "saved",
+        notebook: { scope, content, version: agentNoteContentVersion(content), updatedAt },
+      };
     },
   };
+}
+
+async function replaceNoteIfCurrent(input: {
+  readonly source: string;
+  readonly target: string;
+  readonly scope: AgentNoteScope;
+  readonly expectedVersion: AgentNotebook["version"];
+  readonly rename: (source: string, target: string) => Promise<void>;
+  readonly waitBeforeRenameRetry: (attempt: number) => Promise<void>;
+}): Promise<AgentNotebook | undefined> {
+  // Panel's runtime-directory lease excludes another AgentArbor writer. Direct
+  // editors do not share that lease, so every Windows rename retry revalidates
+  // the Markdown body and leaves only the irreducible compare-to-syscall window.
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const current = await readNotebook(input.target, input.scope);
+    if (current.version !== input.expectedVersion) return current;
+    try {
+      await input.rename(input.source, input.target);
+      return undefined;
+    } catch (error) {
+      if (attempt >= 6 || !isTransientRenameError(error)) throw error;
+      await input.waitBeforeRenameRetry(attempt);
+    }
+  }
+  throw new Error("Agent note rename retry exhausted without an outcome.");
+}
+
+async function readNotebook(file: string, scope: AgentNoteScope): Promise<AgentNotebook> {
+  try {
+    const [content, stat] = await Promise.all([fs.readFile(file, "utf8"), fs.stat(file)]);
+    return {
+      scope,
+      content,
+      version: agentNoteContentVersion(content),
+      updatedAt: stat.mtime.toISOString(),
+    };
+  } catch (error) {
+    if (isFileNotFound(error)) {
+      return {
+        scope,
+        content: "",
+        version: agentNoteContentVersion(""),
+        updatedAt: undefined,
+      };
+    }
+    throw new AgentNotesError("note_io_failure", `Agent note read failed: ${file}`, { cause: error });
+  }
 }
 
 function notePath(rootDir: string, scope: AgentNoteScope): string {
@@ -77,8 +168,10 @@ function notePath(rootDir: string, scope: AgentNoteScope): string {
  * workspace.json 供人对照，不参与任何运行时判定。
  */
 function workspaceDirectoryName(workspaceRoot: string): string {
-  const normalized = path.resolve(workspaceRoot).toLowerCase();
-  return createHash("sha256").update(normalized, "utf8").digest("hex").slice(0, 16);
+  return createHash("sha256")
+    .update(agentNoteWorkspaceIdentity(workspaceRoot), "utf8")
+    .digest("hex")
+    .slice(0, 16);
 }
 
 async function writeWorkspaceMarker(directory: string, workspaceRoot: string): Promise<void> {

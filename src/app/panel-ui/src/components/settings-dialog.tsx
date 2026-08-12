@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Bot,
   CheckCircle2,
   ChartColumn,
+  CircleAlert,
   CloudCog,
   Code2,
   Cpu,
@@ -17,7 +18,6 @@ import {
   Monitor,
   Palette,
   RefreshCw,
-  Route,
   Server,
   SlidersHorizontal,
   Smartphone,
@@ -29,22 +29,23 @@ import type {
   ModelProviderModelCatalog,
   SkillTriggerMode,
 } from "../contracts/config";
+import type { ConversationFollowUpMode } from "../contracts/composer";
 import type { AppUpdateInfo, AppUpdateStatus } from "../contracts/app-update";
 import { MULTI_AGENT_ENTRY_AVAILABLE } from "../app-multi-agent-availability";
 import type { SkillDefinition } from "../contracts/skills";
 import type { SubAgentDefinition } from "../contracts/sub-agents";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { AppearanceSettings } from "./appearance-settings";
-import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-settings";
+import { RemoteCollaborationSettings } from "./remote-collaboration-settings";
+import { BasicCapabilitiesSettings, DesktopAgentPromptSettings, McpServiceSettings } from "./capability-settings";
 import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { SkillSettings } from "./skill-settings";
 import { SubAgentSettings } from "./sub-agent-settings";
 import { DeveloperToolStatistics, UsageStatisticsSettings, preloadUsageStatistics } from "./usage-statistics-settings";
 import { ResponsivenessDiagnostics } from "./responsiveness-diagnostics";
-import { PathMemorySettings } from "./path-memory-settings";
-import { WorkspaceSettings } from "./workspace-settings";
-import { RemoteCollaborationSettings } from "./remote-collaboration-settings";
+import { RuntimeSettings } from "./runtime-settings";
+import { ReleaseNotes } from "./release-notes";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 
@@ -56,12 +57,12 @@ export function SettingsDialog(props: {
   readonly appUpdate?: AppUpdateInfo;
   readonly modelForm: ModelForm;
   readonly setModelForm: (form: ModelForm) => void;
-  readonly workspaceDirectory: string;
-  readonly setWorkspaceDirectory: (value: string) => void;
   readonly desktopAgentSystemPrompt: string;
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly modelUsageDisplayEnabled: boolean;
   readonly onModelUsageDisplayChange: (enabled: boolean) => void;
+  readonly conversationFollowUpMode?: ConversationFollowUpMode;
+  readonly onConversationFollowUpModeChange?: (mode: ConversationFollowUpMode) => void;
   readonly agentClusterEnabled: boolean;
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
   readonly developerModeEnabled: boolean;
@@ -86,8 +87,6 @@ export function SettingsDialog(props: {
   readonly modelCatalogs?: Readonly<Record<string, ModelProviderModelCatalog>>;
   readonly skills: readonly SkillDefinition[];
   readonly subAgents: readonly SubAgentDefinition[];
-  readonly onSaveWorkspace: (workspaceDirectory?: string) => void;
-  readonly onSelectWorkspaceDirectory: () => void;
   readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
   readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
   readonly tools?: ToolsResponse;
@@ -150,7 +149,10 @@ export function SettingsDialog(props: {
   if (!props.open) return null;
 
   const visibleGroups = settingsGroupsForDeveloperMode(props.developerModeEnabled);
-  const activeInfo = visibleGroups.find((group) => group.id === activeGroup) ?? visibleGroups[0]!;
+  const visibleActiveGroup = visibleGroups.some((group) => group.id === activeGroup)
+    ? activeGroup
+    : visibleGroups[0]?.id ?? "models";
+  const activeInfo = visibleGroups.find((group) => group.id === visibleActiveGroup) ?? visibleGroups[0]!;
   return (
     <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="设置">
       <button type="button" className="settings-backdrop" aria-label="关闭设置" onClick={props.onClose} />
@@ -164,7 +166,7 @@ export function SettingsDialog(props: {
               <button
                 type="button"
                 key={group.id}
-                className={group.id === activeGroup ? "active" : ""}
+                className={group.id === visibleActiveGroup ? "active" : ""}
                 onClick={() => setActiveGroup(group.id)}
                 onFocus={() => {
                   if (group.id === "statistics" || group.id === "developer") preloadUsageStatistics();
@@ -183,9 +185,14 @@ export function SettingsDialog(props: {
           <header>
             <h2>{activeInfo.label}</h2>
           </header>
-          <div className={`settings-content ${activeGroup === "models" ? "model-settings-content" : ""}`}>
-            {activeGroup === "models" && (
+          <div className={`settings-content ${visibleActiveGroup === "models" ? "model-settings-content" : ""}`}>
+            <div
+              className="settings-panel-slot model-settings-slot"
+              hidden={visibleActiveGroup !== "models"}
+              aria-hidden={visibleActiveGroup !== "models"}
+            >
               <ModelSettings
+                active={visibleActiveGroup === "models"}
                 config={props.config}
                 modelForm={props.modelForm}
                 setModelForm={props.setModelForm}
@@ -199,20 +206,17 @@ export function SettingsDialog(props: {
                 onRevealModelApiKey={props.onRevealModelApiKey}
                 modelCatalogs={props.modelCatalogs}
               />
-            )}
-            {activeGroup === "basicCapabilities" && (
+            </div>
+            {visibleActiveGroup === "basicCapabilities" && (
               <BasicCapabilitiesSettings
                 config={props.config}
                 modelCatalogs={props.modelCatalogs}
                 savingModel={props.savingModel}
                 onSaveModelCapabilities={props.onSaveModelCapabilities}
-                desktopAgentSystemPrompt={props.desktopAgentSystemPrompt}
-                setDesktopAgentSystemPrompt={props.setDesktopAgentSystemPrompt}
                 modelUsageDisplayEnabled={props.modelUsageDisplayEnabled}
                 onModelUsageDisplayChange={props.onModelUsageDisplayChange}
-                savingDesktopAgent={props.savingDesktopAgent}
-                onSaveDesktopAgentSystemPrompt={props.onSaveDesktopAgentSystemPrompt}
-                onResetDesktopAgentSystemPrompt={props.onResetDesktopAgentSystemPrompt}
+                conversationFollowUpMode={props.conversationFollowUpMode ?? "queue"}
+                onConversationFollowUpModeChange={props.onConversationFollowUpModeChange ?? (() => undefined)}
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}
@@ -221,7 +225,7 @@ export function SettingsDialog(props: {
                 onSaveSkillTriggerMode={props.onSaveSkillTriggerMode}
               />
             )}
-            {activeGroup === "mcp" && (
+            {visibleActiveGroup === "mcp" && (
               <McpServiceSettings
                 tools={props.tools}
                 mcpServerForm={props.mcpServerForm}
@@ -237,7 +241,7 @@ export function SettingsDialog(props: {
                 onUpdateMcpTool={props.onUpdateMcpTool}
               />
             )}
-            {activeGroup === "skills" && (
+            {visibleActiveGroup === "skills" && (
               <SkillSettings
                 skills={props.skills}
                 saving={props.savingTools}
@@ -245,35 +249,40 @@ export function SettingsDialog(props: {
                 onUpdateSkill={props.onUpdateSkill}
               />
             )}
-            {activeGroup === "subAgents" && (
+            {visibleActiveGroup === "subAgents" && (
               <SubAgentSettings
                 subAgents={props.subAgents}
                 refreshing={props.savingTools}
                 onRefresh={props.onRefreshSubAgents}
               />
             )}
-            {activeGroup === "workspace" && (
-              <WorkspaceSettings
+            {visibleActiveGroup === "workspace" && (
+              <RuntimeSettings
                 commandShell={props.config?.commandShell}
-                workspaceDirectory={props.workspaceDirectory}
-                setWorkspaceDirectory={props.setWorkspaceDirectory}
-                onSave={props.onSaveWorkspace}
-                onSelectDirectory={props.onSelectWorkspaceDirectory}
                 savingCommandShell={props.savingWorkspace}
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
-            {activeGroup === "remoteCollaboration" && <RemoteCollaborationSettings />}
-            {activeGroup === "appearance" && <AppearanceSettings />}
-            {activeGroup === "statistics" && <UsageStatisticsSettings />}
-            {activeGroup === "pathMemory" && <PathMemorySettings />}
-            {activeGroup === "developer" && (
+            {visibleActiveGroup === "remoteCollaboration" && <RemoteCollaborationSettings />}
+            {visibleActiveGroup === "appearance" && <AppearanceSettings />}
+            {visibleActiveGroup === "statistics" && <UsageStatisticsSettings />}
+            {visibleActiveGroup === "developer" && (
               <>
+                <div className="basic-capabilities-settings developer-prompt-settings">
+                  <DesktopAgentPromptSettings
+                    config={props.config}
+                    systemPrompt={props.desktopAgentSystemPrompt}
+                    setSystemPrompt={props.setDesktopAgentSystemPrompt}
+                    saving={props.savingDesktopAgent}
+                    onSave={props.onSaveDesktopAgentSystemPrompt}
+                    onReset={props.onResetDesktopAgentSystemPrompt}
+                  />
+                </div>
                 <ResponsivenessDiagnostics />
                 <DeveloperToolStatistics />
               </>
             )}
-            {activeGroup === "about" && (
+            {visibleActiveGroup === "about" && (
               <AboutSettings
                 config={props.config}
                 appUpdate={props.appUpdate}
@@ -298,22 +307,29 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "subAgents", label: "Sub Agent", icon: <Bot size={15} /> },
-  { id: "workspace", label: "工作区", icon: <Database size={15} /> },
+  { id: "workspace", label: "运行环境", icon: <Database size={15} /> },
   { id: "remoteCollaboration", label: "移动协同", icon: <Smartphone size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
-  { id: "pathMemory", label: "路径记忆", icon: <Route size={15} /> },
   { id: "developer", label: "开发者选项", icon: <Code2 size={15} /> },
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 
-const DEVELOPER_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["pathMemory", "developer"]);
+const DEVELOPER_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["developer"]);
+// The migrated PersonalWorkbench does not consume the legacy theme layer yet.
+// Keep the implementation available for the later adaptation, but do not expose
+// a setting that currently cannot affect the production surface.
+const TEMPORARILY_HIDDEN_SETTINGS_GROUPS: ReadonlySet<SettingsGroup> = new Set(["appearance"]);
 
 export function settingsGroupsForDeveloperMode(enabled: boolean): typeof SETTINGS_GROUPS {
-  return enabled ? SETTINGS_GROUPS : SETTINGS_GROUPS.filter((group) => !DEVELOPER_SETTINGS_GROUPS.has(group.id));
+  return SETTINGS_GROUPS.filter((group) =>
+    !TEMPORARILY_HIDDEN_SETTINGS_GROUPS.has(group.id)
+    && (enabled || !DEVELOPER_SETTINGS_GROUPS.has(group.id)));
 }
 
 const AGENTARBOR_GITHUB_REPOSITORY_URL = "https://github.com/Gust-feng/AgentArbor";
+const DEVELOPER_MODE_GESTURE_CLICKS = 7;
+const DEVELOPER_MODE_GESTURE_WINDOW_MS = 2_000;
 
 export function AboutSettings(props: {
   readonly config?: ConfigResponse;
@@ -336,9 +352,23 @@ export function AboutSettings(props: {
   const runtimeDirectory = product?.runtimeDirectory ?? "未提供";
   const updateStatus = checkingUpdate ? "checking" : props.appUpdate?.status ?? "idle";
   const updateLink = appUpdateActionUrl(props.appUpdate);
-  const releaseNotes = nonEmptyUpdateNotes(props.appUpdate?.latest?.notes);
+  const releaseNotes = appUpdateHasNewVersion(updateStatus)
+    ? nonEmptyUpdateNotes(props.appUpdate?.latest?.notes)
+    : undefined;
   const canCheckUpdate = props.appUpdate?.canCheck !== false && updateStatus !== "downloading" && updateStatus !== "installing";
   const canInstallUpdate = props.appUpdate?.canInstall === true && updateStatus === "downloaded";
+  const developerModeGesture = useRef({ count: 0, startedAt: 0 });
+
+  const handleDeveloperModeGesture = (): void => {
+    const now = Date.now();
+    const previous = developerModeGesture.current;
+    const continuesGesture = previous.count > 0 && now - previous.startedAt <= DEVELOPER_MODE_GESTURE_WINDOW_MS;
+    const count = continuesGesture ? previous.count + 1 : 1;
+    developerModeGesture.current = { count, startedAt: continuesGesture ? previous.startedAt : now };
+    if (count < DEVELOPER_MODE_GESTURE_CLICKS) return;
+    developerModeGesture.current = { count: 0, startedAt: 0 };
+    props.onDeveloperModeChange(!props.developerModeEnabled);
+  };
 
   const checkUpdate = async (): Promise<void> => {
     if (checkingUpdate) return;
@@ -363,29 +393,99 @@ export function AboutSettings(props: {
   return (
     <div className="about-settings">
       <section className="settings-card about-product-card">
-        <div className="about-product-main">
-          <span className="about-product-mark" aria-hidden="true">
-            <img src="/favicon.svg" alt="" />
-          </span>
-          <div>
-            <h3>{productName}</h3>
-            <div className="about-product-tags">
-              <span className="about-product-version">v{version}</span>
-              {props.developerModeEnabled && runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 && (
-                <span className="about-product-runtime">{runtimeModeLabel}</span>
-              )}
+        <div className="about-product-header">
+          <div className="about-product-main">
+            <span className="about-product-mark" aria-hidden="true">
+              <img src="/favicon.svg" alt="" />
+            </span>
+            <div>
+              <h3>{productName}</h3>
+              <div className="about-product-tags">
+                <button
+                  type="button"
+                  className="about-product-version"
+                  aria-label={`版本 ${version}`}
+                  onClick={handleDeveloperModeGesture}
+                >
+                  v{version}
+                </button>
+                {props.developerModeEnabled && runtimeModeLabel !== undefined && runtimeModeLabel.length > 0 && (
+                  <span className="about-product-runtime">{runtimeModeLabel}</span>
+                )}
+              </div>
             </div>
           </div>
+          <a
+            className="about-product-github-link"
+            href={AGENTARBOR_GITHUB_REPOSITORY_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="打开 GitHub 仓库：Gust-feng/AgentArbor"
+          >
+            <Github size={20} strokeWidth={2.1} />
+          </a>
         </div>
-        <a
-          className="about-product-github-link"
-          href={AGENTARBOR_GITHUB_REPOSITORY_URL}
-          target="_blank"
-          rel="noreferrer"
-          aria-label="打开 GitHub 仓库：Gust-feng/AgentArbor"
-        >
-          <Github size={20} strokeWidth={2.1} />
-        </a>
+        <div className="about-update-panel">
+          <div className="about-update-status-row">
+            <span className={`about-update-symbol ${appUpdateStatusTone(updateStatus)}`} aria-hidden="true">
+              {appUpdateStatusIcon(updateStatus)}
+            </span>
+            <div className="about-update-copy" aria-live="polite">
+              <strong>软件更新</strong>
+              <span>{appUpdateSummary(props.appUpdate, checkingUpdate)}</span>
+            </div>
+            <button
+              type="button"
+              className="about-update-check-button"
+              disabled={checkingUpdate || !canCheckUpdate}
+              onClick={() => void checkUpdate()}
+            >
+              <RefreshCw size={14} />
+              <span>{checkingUpdate ? "检查中" : "检查更新"}</span>
+            </button>
+          </div>
+          {releaseNotes !== undefined && (
+            <div className="about-update-notes" aria-label="更新说明">
+              <div className="about-update-notes-header">
+                <strong>更新说明</strong>
+                {props.appUpdate?.latest?.version !== undefined && (
+                  <span>v{props.appUpdate.latest.version}</span>
+                )}
+              </div>
+              <ReleaseNotes text={releaseNotes} />
+            </div>
+          )}
+          {props.appUpdate?.progress !== undefined && updateStatus === "downloading" && (
+            <div className="about-update-progress" aria-label="更新下载进度">
+              <span style={{ width: `${Math.min(100, Math.max(0, props.appUpdate.progress.percent))}%` }} />
+            </div>
+          )}
+          {(canInstallUpdate || updateLink !== undefined) && (
+            <div className="about-update-actions">
+              {canInstallUpdate && (
+                <button
+                  type="button"
+                  className="about-update-install-button"
+                  disabled={installingUpdate}
+                  onClick={() => void installUpdate()}
+                >
+                  <Download size={14} />
+                  <span>{installingUpdate ? "正在重启" : "重启安装"}</span>
+                </button>
+              )}
+              {updateLink !== undefined && (
+                <a className="about-update-download-link" href={updateLink} target="_blank" rel="noreferrer">
+                  <Download size={14} />
+                  <span>打开下载页</span>
+                  <ExternalLink size={13} />
+                </a>
+              )}
+            </div>
+          )}
+          {props.appUpdate?.checkedAt !== undefined && (
+            <p className="about-update-checked-at">上次检查：{formatCheckedAt(props.appUpdate.checkedAt)}</p>
+          )}
+        </div>
       </section>
 
       {props.developerModeEnabled && (
@@ -398,28 +498,6 @@ export function AboutSettings(props: {
           )}
         </section>
       )}
-
-      <section className="settings-card about-agent-cluster-card">
-        <div className="settings-card-title-row">
-          <h3>开发者模式</h3>
-        </div>
-        <div className="about-agent-cluster-row">
-          <div className="about-agent-cluster-copy">
-            <strong>显示开发者信息</strong>
-            <span>显示路径记忆、完整工具结果、运行信息和本机数据目录。</span>
-          </div>
-          <button
-            type="button"
-            className="appearance-toggle-switch about-agent-cluster-switch"
-            role="switch"
-            aria-checked={props.developerModeEnabled}
-            aria-label="显示开发者信息"
-            onClick={() => props.onDeveloperModeChange(!props.developerModeEnabled)}
-          >
-            <span />
-          </button>
-        </div>
-      </section>
 
       {MULTI_AGENT_ENTRY_AVAILABLE && (
         <section className="settings-card about-agent-cluster-card">
@@ -446,59 +524,6 @@ export function AboutSettings(props: {
         </section>
       )}
 
-      <section className="settings-card about-update-card">
-        <div className="settings-card-title-row">
-          <h3>更新</h3>
-          <button
-            type="button"
-            className="about-update-check-button"
-            disabled={checkingUpdate || !canCheckUpdate}
-            onClick={() => void checkUpdate()}
-          >
-            <RefreshCw size={14} />
-            <span>{checkingUpdate ? "检查中" : "检查更新"}</span>
-          </button>
-        </div>
-        <div className="about-update-status-row">
-          <span className={`about-update-pill ${appUpdateStatusTone(updateStatus)}`}>
-            {appUpdateStatusLabel(updateStatus)}
-          </span>
-          <span>{appUpdateSummary(props.appUpdate, checkingUpdate)}</span>
-        </div>
-        {releaseNotes !== undefined && (
-          <div className="about-update-notes" aria-label="更新说明">
-            <strong>更新说明</strong>
-            <p>{releaseNotes}</p>
-          </div>
-        )}
-        {props.appUpdate?.progress !== undefined && updateStatus === "downloading" && (
-          <div className="about-update-progress" aria-label="更新下载进度">
-            <span style={{ width: `${Math.min(100, Math.max(0, props.appUpdate.progress.percent))}%` }} />
-          </div>
-        )}
-        {canInstallUpdate && (
-          <button
-            type="button"
-            className="about-update-install-button"
-            disabled={installingUpdate}
-            onClick={() => void installUpdate()}
-          >
-            <Download size={14} />
-            <span>{installingUpdate ? "正在重启" : "重启安装"}</span>
-          </button>
-        )}
-        {updateLink !== undefined && (
-          <a className="about-update-download-link" href={updateLink} target="_blank" rel="noreferrer">
-            <Download size={14} />
-            <span>打开下载页</span>
-            <ExternalLink size={13} />
-          </a>
-        )}
-        {props.appUpdate?.checkedAt !== undefined && (
-          <p className="about-update-checked-at">上次检查：{formatCheckedAt(props.appUpdate.checkedAt)}</p>
-        )}
-      </section>
-
       {props.developerModeEnabled && <section className="settings-card about-path-card">
         <div className="settings-card-title-row">
           <h3>本机数据</h3>
@@ -513,39 +538,19 @@ export function AboutSettings(props: {
   );
 }
 
-function appUpdateStatusLabel(status: AppUpdateStatus): string {
-  switch (status) {
-    case "unsupported":
-      return "不支持自动更新";
-    case "available":
-      return "有新版本";
-    case "downloading":
-      return "正在下载";
-    case "downloaded":
-      return "已下载";
-    case "installing":
-      return "正在安装";
-    case "up_to_date":
-      return "已是最新";
-    case "no_release":
-      return "暂无发布";
-    case "checking":
-      return "正在检查";
-    case "failed":
-      return "检查失败";
-    case "unconfigured":
-      return "未配置发布源";
-    case "idle":
-      return "未检查";
-  }
-}
-
 function appUpdateStatusTone(status: AppUpdateStatus): "success" | "warning" | "danger" | "neutral" {
   if (status === "available") return "warning";
   if (status === "up_to_date" || status === "downloaded") return "success";
   if (status === "unconfigured" || status === "unsupported" || status === "no_release" || status === "idle" || status === "checking" || status === "downloading" || status === "installing") return "neutral";
   if (status === "failed") return "danger";
   return "neutral";
+}
+
+function appUpdateStatusIcon(status: AppUpdateStatus): React.ReactNode {
+  if (status === "up_to_date") return <CheckCircle2 size={17} />;
+  if (status === "available" || status === "downloading" || status === "downloaded") return <Download size={17} />;
+  if (status === "failed") return <CircleAlert size={17} />;
+  return <RefreshCw size={17} />;
 }
 
 function appUpdateSummary(update: AppUpdateInfo | undefined, checking: boolean): string {
@@ -582,6 +587,13 @@ function appUpdateSummary(update: AppUpdateInfo | undefined, checking: boolean):
 function appUpdateActionUrl(update: AppUpdateInfo | undefined): string | undefined {
   if (update?.status !== "available") return undefined;
   return update.latest?.releasePageUrl ?? update.latest?.downloadUrl;
+}
+
+function appUpdateHasNewVersion(status: AppUpdateStatus): boolean {
+  return status === "available"
+    || status === "downloading"
+    || status === "downloaded"
+    || status === "installing";
 }
 
 function nonEmptyUpdateNotes(value: string | undefined): string | undefined {

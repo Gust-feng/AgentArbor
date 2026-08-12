@@ -38,7 +38,7 @@ test("panel server serves Vite React frontend assets", async () => {
     assert.match(String(css.headers["content-type"]), /text\/css/);
     assert.match(String(js.headers["content-type"]), /text\/javascript/);
     assert.equal(html.text.includes("ordinary-screen-start"), true);
-    assert.equal(css.text.includes(".aa-redesign-root"), true);
+    assert.equal(css.text.includes(".aa-workbench-root"), true);
     assert.equal(js.text.includes("/api/basic-agent/runs/"), true);
     assert.equal((await requestText(server.url, "/assets/%2e%2e/index.html")).status, 404);
   } finally {
@@ -52,15 +52,11 @@ test("panel server serves real brand favicon assets", async () => {
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const svg = await requestBuffer(server.url, "/favicon.svg");
-    const ico = await requestBuffer(server.url, "/favicon.ico");
 
     assert.equal(svg.status, 200);
-    assert.equal(ico.status, 200);
     assert.match(String(svg.headers["content-type"]), /image\/svg\+xml/);
-    assert.match(String(ico.headers["content-type"]), /image\/x-icon/);
-    assert.equal(svg.body.toString("utf8").includes("<svg"), true);
-    assert.deepEqual([...ico.body.subarray(0, 4)], [0, 0, 1, 0]);
-    assert.equal(ico.body.readUInt16LE(4) > 0, true);
+    assert.equal(svg.body.toString("utf8").includes('viewBox="0 0 1024 1024"'), true);
+    assert.equal(svg.body.toString("utf8").includes('rx="208"'), true);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -204,10 +200,11 @@ test("panel Ordinary completes a real tool round through the configured model tr
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-session-tool-round-"));
   const workspace = path.join(directory, "workspace");
   await fs.mkdir(workspace, { recursive: true });
-  await fs.writeFile(path.join(workspace, "README.md"), "native session tool evidence", "utf8");
+  const readmePath = path.join(workspace, "README.md");
+  await fs.writeFile(readmePath, "native session tool evidence", "utf8");
   const modelProvider = await startPanelChatCompletionsProvider({
     name: "Read",
-    input: { path: "README.md" },
+    input: { path: readmePath },
   });
   try {
     const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
@@ -220,12 +217,22 @@ test("panel Ordinary completes a real tool round through the configured model tr
           apiKey: "sk-session-tool-test",
         },
       });
+      const space = await requestJson(server.url, "/api/spaces", {
+        method: "POST",
+        body: { title: "工具轮次" },
+      });
+      const spaceId = space.body.space.id as string;
+      await requestJson(server.url, `/api/spaces/${encodeURIComponent(spaceId)}/references`, {
+        method: "POST",
+        body: { title: "工作目录", reference: { kind: "workspace_folder", path: workspace } },
+      });
       const started = await requestJson(server.url, "/api/conversations", {
         method: "POST",
         body: {
           goal: "Read README.md and report what it contains.",
           aiMode: "openai-compatible",
           workspaceDirectory: workspace,
+          spaceId,
         },
       });
       const run = await waitForOrdinaryView(server.url, started.body.run.runId, "completed");

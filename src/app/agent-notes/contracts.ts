@@ -11,13 +11,42 @@ export type AgentNoteScope =
   | { readonly kind: "workspace"; readonly workspaceRoot: string }
   | { readonly kind: "global" };
 
+/** 正文内容派生的版本；用户直接编辑 Markdown 后也会立即形成新版本。 */
+export type AgentNoteVersion = `sha256:${string}`;
+
 /** 单本笔记的当前内容与元数据。 */
 export type AgentNotebook = {
   readonly scope: AgentNoteScope;
   /** 模型撰写的 Markdown 正文；空串表示还没有笔记。 */
   readonly content: string;
+  readonly version: AgentNoteVersion;
   readonly updatedAt: string | undefined;
 };
+
+/** 与一次 Ordinary run 启动时所见正文严格对应的两本笔记版本。 */
+export type AgentNoteVersions = {
+  readonly global: AgentNoteVersion;
+  readonly workspace: AgentNoteVersion;
+};
+
+export type AgentNotesStartupSnapshot = {
+  readonly injection: string | undefined;
+  readonly versions: AgentNoteVersions;
+};
+
+export type AgentNoteWriteInput = {
+  readonly scope: AgentNoteScope;
+  readonly content: string;
+  readonly expectedVersion: AgentNoteVersion;
+};
+
+export type AgentNoteRepositoryWriteInput = AgentNoteWriteInput & {
+  readonly updatedAt: string;
+};
+
+export type AgentNoteWriteResult =
+  | { readonly status: "saved"; readonly notebook: AgentNotebook }
+  | { readonly status: "conflict"; readonly current: AgentNotebook };
 
 /**
  * 单本笔记的大小上限（字符）。
@@ -31,26 +60,37 @@ export const AGENT_NOTE_MAX_CHARS = 20_000;
 /** 笔记存储端口：feature 拥有语义，存储实现只做机械读写。 */
 export interface AgentNoteRepository {
   read(scope: AgentNoteScope): Promise<AgentNotebook>;
-  write(scope: AgentNoteScope, content: string, updatedAt: string): Promise<AgentNotebook>;
+  list(): Promise<readonly AgentNotebook[]>;
+  write(input: AgentNoteRepositoryWriteInput): Promise<AgentNoteWriteResult>;
 }
+
+export type AgentNotesEvent = {
+  readonly type: "agent_note.changed";
+  readonly notebook: AgentNotebook;
+};
 
 /** 笔记功能的公开 facade。 */
 export type AgentNotesFeature = {
   readonly queries: {
     /** 读取一本笔记；从未写过时返回空内容。 */
     get(scope: AgentNoteScope): Promise<AgentNotebook>;
+    /** 枚举已建立本地身份的笔记；adapter 不得扫描 repository 私有布局。 */
+    list(): Promise<readonly AgentNotebook[]>;
     /**
-     * 组装启动注入文本：全局笔记 + 当前工作区笔记。
-     * 两本都为空时返回 undefined，调用方不注入任何段落。
+     * 同一次读取组装启动注入文本与对应版本，避免 run birth 冻结错位。
+     * 两本都为空时 injection 为 undefined，版本仍对应空正文。
      */
-    startupInjection(workspaceRoot: string): Promise<string | undefined>;
+    startupSnapshot(workspaceRoot: string): Promise<AgentNotesStartupSnapshot>;
   };
   readonly commands: {
     /**
      * 全量替换一本笔记。模型每次提交完整笔记正文——这让"整理、合并、删旧"
      * 成为模型的普通编辑动作，而不需要工程提供 append/merge 语义。
      */
-    write(scope: AgentNoteScope, content: string): Promise<AgentNotebook>;
+    write(input: AgentNoteWriteInput): Promise<AgentNoteWriteResult>;
+  };
+  readonly events: {
+    subscribe(listener: (event: AgentNotesEvent) => void): () => void;
   };
 };
 

@@ -5,8 +5,9 @@ import type { DocumentPreview } from "../panel-api-contracts.js";
 import {
   editableWorkbenchAssetText,
   MAX_WORKBENCH_ASSET_TEXT_BYTES,
+  type UpdateWorkbenchAssetTextInput,
+  type UpdateWorkbenchAssetTextResult,
   type WorkbenchAsset,
-  type WorkbenchAssetRepository,
   workbenchAssetTextFingerprint,
 } from "../workbench-assets/index.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
@@ -15,7 +16,10 @@ import { documentPresentation } from "./document-preview-presentation.js";
 
 type WorkbenchAssetRouteRuntime = {
   readonly ensureInitialWorkbenchData: () => Promise<void>;
-  readonly workbenchAssets: WorkbenchAssetRepository;
+  readonly workbenchAssets: {
+    get(id: string): Promise<WorkbenchAsset | undefined>;
+    updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult>;
+  };
 };
 
 const updateTextSchema = z.object({
@@ -58,7 +62,7 @@ export async function handlePanelWorkbenchAssetRoute(
 }
 
 export async function updateWorkbenchAssetTextPreview(
-  repository: WorkbenchAssetRepository,
+  repository: { updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult> },
   input: { readonly assetId: string; readonly expectedFingerprint: string; readonly text: string },
   itemId = input.assetId,
 ): Promise<DocumentPreview> {
@@ -80,7 +84,7 @@ export async function updateWorkbenchAssetTextPreview(
 }
 
 export async function getWorkbenchAssetPreview(
-  repository: WorkbenchAssetRepository,
+  repository: { get(id: string): Promise<WorkbenchAsset | undefined> },
   assetId: string,
   itemId = assetId,
 ): Promise<DocumentPreview> {

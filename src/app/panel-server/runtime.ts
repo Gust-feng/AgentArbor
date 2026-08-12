@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import { userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
@@ -30,10 +31,12 @@ import {
 import { CapabilityCenter } from "../capability/capability-center.js";
 import {
   captureKnowledgeAsset,
+  managedKnowledgeDocumentTarget,
   reconcileKnowledgeAssets,
   removeKnowledgeAsset,
   stageKnowledgeAssetRemoval,
 } from "./knowledge-asset-store.js";
+import { updateLocalDocumentText } from "./local-document-preview.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center/index.js";
 import { resolveModelCapabilities } from "../model-runtime/model-capability-registry.js";
 import {
@@ -45,6 +48,8 @@ import {
 } from "../ordinary-agent/agent-loop-execution.js";
 import {
   createOrdinaryAgentFeature,
+  createFileSystemOrdinaryManagedAttachmentRepository,
+  OrdinaryManagedAttachmentRepositoryError,
   type OrdinaryAgentFeature,
   type OrdinaryRunBirth,
 } from "../ordinary-agent/index.js";
@@ -68,23 +73,28 @@ import {
   type AgentNotesFeature,
 } from "../agent-notes/index.js";
 import {
+  createFileSystemSpaceReferenceDeletionJournal,
   createSqliteSpaceRepository,
   createSpaceFeature,
+  inspectFileSystemSpaceReferenceDeletionJournal,
   type SpaceEvent,
   type SpaceFeature,
 } from "../spaces/index.js";
 import {
   createPersonalKnowledgeFeature,
   createSqlitePersonalKnowledgeRepository,
+  PersonalKnowledgeError,
   type PersonalKnowledgeEvent,
   type PersonalKnowledgeFeature,
 } from "../personal-knowledge/index.js";
 import {
   applyPendingWorkbenchRestore,
   createWorkbenchDataMaintenance,
+  hasUnappliedPendingWorkbenchRestore,
+  WorkbenchDataMaintenanceError,
   type WorkbenchDataMaintenance,
 } from "./workbench-data-maintenance.js";
-import { runSpaceReferenceRemoval } from "./space-reference-deletion.js";
+import { createSpaceReferenceDeletionFilePort } from "./space-reference-deletion.js";
 import { reconcileMissingRunSpaceFiles } from "./space-file-reference-reconciliation.js";
 import {
   createPlatformProcessTerminator,
@@ -117,7 +127,13 @@ import type { PanelRunInput } from "./request-parsers.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import { createInitialWorkbenchDataInitializer, initializeInitialWorkbenchData } from "./initial-workbench-data.js";
-import { createSqliteWorkbenchAssetRepository, type WorkbenchAssetRepository } from "../workbench-assets/index.js";
+import {
+  createSqliteWorkbenchAssetRepository,
+  createWorkbenchAssetsFeature,
+  editableWorkbenchAssetText,
+  type WorkbenchAssetRepository,
+  type WorkbenchAssetsFeature,
+} from "../workbench-assets/index.js";
 import {
   createWorkbenchProjectionChangeFeed,
   type WorkbenchProjectionChangeFeed,
@@ -126,10 +142,30 @@ import {
   createRemoteCollaborationFeature,
   createRemoteCommandHandler,
   createRemoteDesktopStore,
+  REMOTE_DEVICE_TOKEN_REF,
   type RemoteCollaborationFeature,
   type RemoteDesktopStore,
 } from "../remote-collaboration/index.js";
 import { createPanelRemoteCollaborationPorts } from "./remote-collaboration-ports.js";
+import { bindRemoteAccountContentVaultSync } from "./remote-content-vault-lifecycle.js";
+import { projectRemoteModelOptions, resolveRemoteModelSelection } from "./remote-model-options.js";
+import {
+  createContentVaultSyncFeature,
+  createAgentNotebookContentVaultContributor,
+  createPersonalKnowledgeContentVaultContributors,
+  createPersonalNoteContentVaultContributor,
+  createSpaceContentVaultContributor,
+  createSpaceReferenceContentVaultContributor,
+  createSqliteContentVaultSyncStore,
+  createWorkbenchAssetContentVaultContributor,
+  selectSynchronizablePersonalKnowledge,
+  type ContentVaultSyncFeature,
+} from "../content-vault-sync/index.js";
+import {
+  createManagedContentFeature,
+  createManagedContentVaultContributors,
+  type ManagedContentFeature,
+} from "../managed-content/index.js";
 
 export type PanelRuntime = {
   /** True once server shutdown starts; terminal callbacks must not admit new work. */
@@ -155,19 +191,22 @@ export type PanelRuntime = {
   readonly skillStateStore?: SkillStateStore;
   readonly appUpdateService: AppUpdateServiceLike;
   readonly ordinaryAgentFeature: OrdinaryAgentFeature;
+  readonly resolveManagedAttachmentPath: (attachmentId: string) => Promise<string | undefined>;
   readonly agentNotesFeature: AgentNotesFeature;
   readonly spaceFeature: SpaceFeature;
-  readonly personalKnowledgeFeature: PersonalKnowledgeFeature;
+  readonly personalKnowledgeFeature: PersonalKnowledgeFeature<import("../panel-api-contracts.js").DocumentPreview>;
   readonly workbenchDataMaintenance: WorkbenchDataMaintenance;
   readonly pathMemoryFeature: PathMemoryFeature;
   readonly experienceCandidateFeature: ExperienceCandidateFeature;
   readonly ordinaryPathMemoryConnector: OrdinaryPathMemoryConnector;
   readonly remoteCollaborationFeature: RemoteCollaborationFeature;
   readonly remoteDesktopStore: RemoteDesktopStore;
+  readonly contentVaultSyncFeature: ContentVaultSyncFeature;
+  readonly managedContentFeature: ManagedContentFeature;
   readonly prepareOrdinaryRunBirth: (input: PanelRunInput) => Promise<OrdinaryRunBirth>;
   readonly toolOutputStore: ToolOutputStore;
   readonly workbenchDatabase: SqliteRuntimeDatabase;
-  readonly workbenchAssets: WorkbenchAssetRepository;
+  readonly workbenchAssetFeature: WorkbenchAssetsFeature;
   readonly fileMutationCoordinator: LocalWorkspaceMutationCoordinator;
   readonly workbenchProjectionChanges: WorkbenchProjectionChangeFeed;
   readonly releaseWorkbenchProjectionChanges: () => void;
@@ -248,6 +287,57 @@ export function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
   });
 }
 
+export async function preparePanelRuntimeStorageForStartup(runtimeHome: string): Promise<void> {
+  const journalRoot = path.join(runtimeHome, "space-reference-deletions");
+  if (!hasUnappliedPendingWorkbenchRestore(runtimeHome) ||
+    inspectFileSystemSpaceReferenceDeletionJournal(journalRoot) === "idle") return;
+
+  const databasePath = path.join(runtimeHome, "workbench.sqlite3");
+  try {
+    await fs.access(databasePath);
+  } catch (error) {
+    throw new WorkbenchDataMaintenanceError(
+      "data_maintenance_failed",
+      "Workbench 恢复前无法读取保存 Space 删除身份的当前数据库；恢复未修改任何数据。",
+      { cause: error },
+    );
+  }
+  const database = new SqliteRuntimeDatabase(databasePath);
+  let spaceFeature: SpaceFeature | undefined;
+  let startupError: unknown;
+  try {
+    spaceFeature = createSpaceFeature({
+      repository: createSqliteSpaceRepository(database),
+      referenceDeletion: {
+        journal: createFileSystemSpaceReferenceDeletionJournal(journalRoot),
+        files: createSpaceReferenceDeletionFilePort(path.join(runtimeHome, "space-folders")),
+        leases: new InMemoryLocalWorkspaceMutationCoordinator(),
+      },
+    });
+    await spaceFeature.ready();
+  } catch (error) {
+    startupError = error;
+  }
+
+  const cleanupErrors: unknown[] = [];
+  if (spaceFeature !== undefined) {
+    try { await spaceFeature.release(); } catch (error) { cleanupErrors.push(error); }
+  }
+  try { database.close(); } catch (error) { cleanupErrors.push(error); }
+  if (startupError !== undefined) {
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [startupError, ...cleanupErrors],
+        "Space deletion recovery before Workbench restore and cleanup both failed.",
+      );
+    }
+    throw startupError;
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Space deletion recovery cleanup before Workbench restore failed.");
+  }
+}
+
 export function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value is PanelRuntime {
   return (
     value.configCenter instanceof ConfigCenter &&
@@ -293,39 +383,118 @@ function assemblePanelRuntime(input: {
   const managedSpaceFolderRoot = path.join(runtimeHome, "space-folders");
   let knowledgeAssetsReady = Promise.resolve();
   let spaceFileReconciliation = Promise.resolve();
-  applyPendingWorkbenchRestore(runtimeHome);
-  const workbenchDatabase = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
-  const workbenchAssets = createSqliteWorkbenchAssetRepository(workbenchDatabase);
+  applyPendingWorkbenchRestore(runtimeHome, {
+    assertSpaceDeletionIdle: () => assertSpaceDeletionJournalIdle(runtimeHome),
+  });
+  const {
+    database: workbenchDatabase,
+    workbenchAssets,
+    spaceRepository,
+    personalKnowledgeRepository,
+  } = openPanelWorkbenchStorage(runtimeHome);
+  const workbenchAssetFeature = createWorkbenchAssetsFeature(workbenchAssets);
+  let beforeWorkbenchRestoreStage: (() => Promise<void>) | undefined;
   const workbenchDataMaintenance = createWorkbenchDataMaintenance({
     database: workbenchDatabase,
     runtimeHome,
     restorePicker: input.workbenchRestorePicker,
+    beforeRestoreStage: async () => {
+      if (beforeWorkbenchRestoreStage === undefined) {
+        throw new Error("Panel runtime restore preparation is not initialized.");
+      }
+      await beforeWorkbenchRestoreStage();
+    },
     runOwnedStorageSnapshot: async (operation) => {
       await knowledgeAssetsReady;
-      return await fileMutationCoordinator.runExclusive(runtimeHome, operation);
+      return await fileMutationCoordinator.runExclusive(runtimeHome, async () => {
+        if ((await spaceReferenceDeletionJournal.list()).length > 0) {
+          throw new Error("Workbench storage cannot be snapshotted while a Space deletion journal is pending.");
+        }
+        return await operation();
+      });
     },
   });
-  const spaceRepository = createSqliteSpaceRepository(workbenchDatabase);
+  const spaceReferenceDeletionJournal = createFileSystemSpaceReferenceDeletionJournal(
+    path.join(runtimeHome, "space-reference-deletions"),
+  );
   const ordinaryRuntimeRoot = resolveOrdinaryRuntimeRoot(input);
+  const managedAttachmentInstanceId = randomUUID();
+  const managedAttachmentRepository = createFileSystemOrdinaryManagedAttachmentRepository(
+    path.join(ordinaryRuntimeRoot, "managed-attachments"),
+  );
+  const resolveManagedAttachmentPath = async (attachmentId: string): Promise<string | undefined> => {
+    try {
+      return await managedAttachmentRepository.resolveContentPath(attachmentId);
+    } catch (error) {
+      if (error instanceof OrdinaryManagedAttachmentRepositoryError &&
+        error.code === "ordinary_managed_attachment_not_found") return undefined;
+      throw error;
+    }
+  };
   const agentNotesFeature = createAgentNotesFeature({
     repository: createFileSystemAgentNoteRepository(resolveAgentNotesRoot(input)),
   });
   const spaceFeature = createSpaceFeature({
     repository: spaceRepository,
     workspaceMountIdentity: canonicalWorkspaceMountIdentity,
-    runReferenceRemoval: async (items, removeMetadata) => await runSpaceReferenceRemoval(
-      items,
-      managedSpaceFolderRoot,
-      fileMutationCoordinator,
-      removeMetadata,
+    referenceDeletion: {
+      journal: spaceReferenceDeletionJournal,
+      files: createSpaceReferenceDeletionFilePort(managedSpaceFolderRoot),
+      leases: fileMutationCoordinator,
+      onDiagnostic: (diagnostic) => {
+        console.error(
+          `[panel-server] Committed Space deletion ${diagnostic.deletionId} cleanup reported a failure; any retained journal state will be reconciled on the next startup`,
+          diagnostic.error,
+        );
+      },
+    },
+  });
+  const managedContentFeature = createManagedContentFeature({
+    rootDirectory: managedSpaceFolderRoot,
+    runMutation: async (key, operation) => await fileMutationCoordinator.run(
+      path.join(managedSpaceFolderRoot, key),
+      operation,
     ),
+    spaces: {
+      listManagedRoots: async () => {
+        const spaces = await spaceFeature.queries.list();
+        const trees = await Promise.all(spaces.map(async (space) => await spaceFeature.queries.getTree(space.id)));
+        return trees.flatMap((tree) => tree?.entries.flatMap(({ item }) => item.reference.kind === "managed_folder"
+          ? [{ id: item.id, spaceId: item.spaceId, title: item.title, path: item.reference.path }]
+          : []) ?? []);
+      },
+      readManagedRoot: async (id) => {
+        const item = await spaceFeature.queries.getReference(id);
+        return item?.reference.kind === "managed_folder"
+          ? { id: item.id, spaceId: item.spaceId, title: item.title, path: item.reference.path }
+          : undefined;
+      },
+      createManagedRoot: async (root) => {
+        await spaceFeature.commands.addReference({
+          id: root.id,
+          spaceId: root.spaceId,
+          title: root.title,
+          reference: { kind: "managed_folder", path: root.path },
+        });
+      },
+      renameManagedRoot: async (id, title) => {
+        await spaceFeature.commands.rename({ target: { kind: "reference", id }, title });
+      },
+      moveManagedRoot: async (id, spaceId) => {
+        await spaceFeature.commands.move({ target: { kind: "reference", id }, destinationSpaceId: spaceId });
+      },
+      removeManagedRoot: async (id) => { await spaceFeature.commands.removeReference(id); },
+      subscribe: (listener) => spaceFeature.events.subscribe((event) => {
+        if (event.type !== "space.created") listener();
+      }),
+    },
   });
   const personalKnowledgeFeature = createPersonalKnowledgeFeature({
-    repository: createSqlitePersonalKnowledgeRepository(workbenchDatabase),
+    repository: personalKnowledgeRepository,
     spaceExists: async (spaceId) => await spaceFeature.queries.getTree(spaceId) !== undefined,
     runManagedAssetMutation: async (operation) => {
       await knowledgeAssetsReady;
-      return await fileMutationCoordinator.run(knowledgeAssetRoot, operation);
+      return await fileMutationCoordinator.runExclusive(knowledgeAssetRoot, operation);
     },
     captureSpaceReference: async ({ assetId, referenceId, relativePath }) => {
       const item = await spaceFeature.queries.getReference(referenceId);
@@ -334,6 +503,23 @@ function assemblePanelRuntime(input: {
     },
     removeManagedAsset: async (itemId) => await removeKnowledgeAsset(knowledgeAssetRoot, itemId),
     stageManagedAssetRemoval: async (itemId) => await stageKnowledgeAssetRemoval(knowledgeAssetRoot, itemId),
+    writeManagedAssetText: async ({ page, relativePath, expectedFingerprint, text }) => {
+      await knowledgeAssetsReady;
+      const target = managedKnowledgeDocumentTarget(knowledgeAssetRoot, page);
+      return await fileMutationCoordinator.runExclusive(target.mutationKey, async () =>
+        await updateLocalDocumentText(
+          target.rootDir,
+          relativePath,
+          { expectedFingerprint, text },
+          target.meta,
+          {
+            contentBaseUrl: `/api/personal-knowledge/assets/${encodeURIComponent(page.refId)}/content`,
+            contentTypeHintPath: target.contentTypeHintPath(relativePath),
+          },
+        ).catch((error: unknown) => {
+          throw managedKnowledgeAssetWriteError(error);
+        }));
+    },
   });
   const initialWorkbenchData = createInitialWorkbenchDataInitializer(
     input.testOnlySkipInitialWorkbenchData
@@ -346,7 +532,7 @@ function assemblePanelRuntime(input: {
       }),
   );
   knowledgeAssetsReady = personalKnowledgeFeature.queries.snapshot().then(async (snapshot) => {
-    await fileMutationCoordinator.run(knowledgeAssetRoot, async () => await reconcileKnowledgeAssets(
+    await fileMutationCoordinator.runExclusive(knowledgeAssetRoot, async () => await reconcileKnowledgeAssets(
       knowledgeAssetRoot,
       new Set(snapshot.pages.filter((page) => page.asset?.status === "managed").map((page) => page.refId)),
     ));
@@ -384,6 +570,7 @@ function assemblePanelRuntime(input: {
       processTerminator,
       toolOutputStore,
       fileMutationCoordinator,
+      resolveManagedAttachmentPath,
       testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
     },
     sessionRepository: agentSessionRepository,
@@ -417,13 +604,29 @@ function assemblePanelRuntime(input: {
     conversationRepository: createFileSystemOrdinaryConversationControlRepository(ordinaryRuntimeRoot),
     sessionRepository: agentSessionRepository,
     releaseToolEvidenceOwner: (ownerId) => toolOutputStore.releaseOwner(ownerId).then(() => undefined),
+    managedAttachmentRepository,
+    managedAttachmentInstanceId,
     onDiagnostic: (diagnostic) => {
       if (diagnostic.kind === "session_finalization_failed") {
         console.error(`[panel-server] Ordinary run ${diagnostic.runId} Session finalization failed; the conversation queue stays paused until a retry succeeds`, diagnostic.error);
       } else if (diagnostic.kind === "conversation_unavailable") {
         console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} is unavailable after startup recovery; its data remains on disk for diagnosis`, diagnostic.error);
       } else if (diagnostic.kind === "successor_activation_failed") {
-        console.error(`[panel-server] Ordinary successor activation failed after bounded retry for predecessor ${diagnostic.predecessorRunId}; the successor remains queued`, diagnostic.error);
+        const activationOwner = diagnostic.predecessorRunId ?? diagnostic.conversationId;
+        console.error(`[panel-server] Ordinary successor activation attempt ${diagnostic.consecutiveFailures} failed for ${activationOwner}; retrying in ${diagnostic.retryDelayMs}ms`, diagnostic.error);
+      } else if (diagnostic.kind === "cancellation_cleanup_failed") {
+        console.error(`[panel-server] Ordinary run ${diagnostic.runId} cancellation cleanup failed during ${diagnostic.phase}; its durable cancelled fact remains authoritative`, diagnostic.error);
+      } else if (diagnostic.kind === "conversation_cleanup_failed") {
+        const resourceOwner = diagnostic.runId ?? diagnostic.conversationId;
+        console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} cleanup failed during ${diagnostic.phase} for ${resourceOwner}; the durable state remains available for diagnosis or retry`, diagnostic.error);
+      } else if (diagnostic.kind === "managed_attachment_cleanup_failed") {
+        console.error(`[panel-server] Ordinary conversation ${diagnostic.conversationId} managed attachment cleanup failed; startup will retry`, diagnostic.error);
+      } else if (diagnostic.kind === "managed_attachment_recovery_issue") {
+        console.error(`[panel-server] Ordinary managed attachment ${diagnostic.identity ?? "storage"} recovery was isolated`, diagnostic.error);
+      } else if (diagnostic.kind === "managed_attachment_claim_rollback_failed") {
+        console.error(`[panel-server] Ordinary run ${diagnostic.runId} could not roll back managed attachment claims; the feature will retry and startup reconciliation remains the final fallback`, diagnostic.error);
+      } else if (diagnostic.kind === "completion_commit_failed") {
+        console.error(`[panel-server] Ordinary run ${diagnostic.runId} completed in Pi but its terminal snapshot could not be committed; the run remains blocked instead of being rewritten as failed`, diagnostic.error);
       } else {
         console.error(`[panel-server] Ordinary startup recovery could not enumerate ${diagnostic.source}; new live conversations remain available`, diagnostic.error);
       }
@@ -484,25 +687,193 @@ function assemblePanelRuntime(input: {
     ),
   });
   const remoteDesktopStore = createRemoteDesktopStore(workbenchDatabase);
+  const remoteCredentials = new FileSystemLocalDevSecretStore(resolveRemoteConfigDirectory(input));
   let runtime!: PanelRuntime;
+  const remoteModelOptions = async () => projectRemoteModelOptions({
+    profiles: await runtime.configCenter.listModelProviderProfiles(),
+    catalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+    active: await runtime.configCenter.getModelProviderConfig(),
+    capabilityOverrides: await runtime.configCenter.listModelCapabilityOverrides(),
+  });
+  let notifyContentVaultChanged = (_cursor: number): void => undefined;
+  let synchronizeContentVaultNow = async (): Promise<void> => undefined;
   const remoteCollaborationFeature = createRemoteCollaborationFeature({
     store: remoteDesktopStore,
-    credentials: new FileSystemLocalDevSecretStore(resolveRemoteConfigDirectory(input)),
+    credentials: remoteCredentials,
     commandHandler: createRemoteCommandHandler({
       ports: createPanelRemoteCollaborationPorts({
         ordinary: ordinaryAgentFeature,
         spaces: spaceFeature,
-        notes: agentNotesFeature,
-        assets: workbenchAssets,
-        store: remoteDesktopStore,
-        managedSpaceFolderRoot,
-        fileMutationCoordinator,
+        modelOptions: remoteModelOptions,
+        resolveModelSelection: async (selectionId) => resolveRemoteModelSelection(await remoteModelOptions(), selectionId),
+        synchronizeContentVault: () => synchronizeContentVaultNow(),
         prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
-        defaultWorkspaceRoot: async () => (await input.configCenter.getWorkspaceConfig()).workspaceDirectory,
       }),
     }),
-    defaultRelayUrl: process.env.AGENTARBOR_RELAY_PUBLIC_URL,
+    defaultDeviceName: userInfo().username,
+    onVaultChanged: (cursor) => notifyContentVaultChanged(cursor),
   });
+  const personalNoteContributor = createPersonalNoteContentVaultContributor({
+    list: async () => (await personalKnowledgeFeature.queries.snapshot()).notes,
+    read: (id) => personalKnowledgeFeature.queries.note(id),
+    create: async (note) => { await personalKnowledgeFeature.commands.createNote(note); },
+    update: async (note) => { await personalKnowledgeFeature.commands.updateNote(note); },
+    delete: async (note) => { await personalKnowledgeFeature.commands.deleteNote(note); },
+    subscribe: (listener) => personalKnowledgeFeature.events.subscribe((event) => {
+      if (event.type.startsWith("personal_knowledge.note_")) listener();
+    }),
+  });
+  const personalKnowledgeContributors = createPersonalKnowledgeContentVaultContributors({
+    snapshot: async () => {
+      const [snapshot, assets] = await Promise.all([
+        personalKnowledgeFeature.queries.snapshot(),
+        workbenchAssetFeature.queries.list(),
+      ]);
+      const synchronizedAssetIds = new Set(assets
+        .filter((asset) => editableWorkbenchAssetText(asset) !== undefined)
+        .map((asset) => asset.id));
+      return selectSynchronizablePersonalKnowledge(snapshot, synchronizedAssetIds);
+    },
+    upsertPage: async (page) => {
+      if (page.kind === "space_reference") {
+        throw new Error("Managed knowledge imports require their owned content before metadata can be synchronized");
+      }
+      await personalKnowledgeFeature.commands.execute({ type: "knowledge.collect", page });
+    },
+    deletePage: async (refId) => { await personalKnowledgeFeature.commands.uncollect(refId); },
+    upsertLink: async (link) => { await personalKnowledgeFeature.commands.execute({ type: "knowledge.link_add", link }); },
+    deleteLink: async (link) => { await personalKnowledgeFeature.commands.execute({ type: "knowledge.link_remove", link }); },
+    upsertTheme: async (theme) => { await personalKnowledgeFeature.commands.execute({ type: "theme.replace", theme }); },
+    deleteTheme: async (themeId) => { await personalKnowledgeFeature.commands.execute({ type: "theme.delete", themeId }); },
+    upsertAssignment: async (assignment) => {
+      await personalKnowledgeFeature.commands.execute({ type: "theme.assign", assignment });
+    },
+    deleteAssignment: async ({ refId, themeId }) => {
+      await personalKnowledgeFeature.commands.execute({ type: "theme.unassign", refId, themeId });
+    },
+    subscribe: (listener) => personalKnowledgeFeature.events.subscribe((event) => {
+      if (event.type === "personal_knowledge.changed") listener();
+    }),
+  });
+  const managedContentContributors = createManagedContentVaultContributors(managedContentFeature);
+  const workbenchAssetContributor = createWorkbenchAssetContentVaultContributor({
+    list: () => workbenchAssetFeature.queries.list(),
+    read: (id) => workbenchAssetFeature.queries.get(id),
+    replace: (asset) => workbenchAssetFeature.commands.replace(asset),
+    subscribe: (listener) => workbenchAssetFeature.events.subscribe(() => listener()),
+  });
+  const spaceContributor = createSpaceContentVaultContributor({
+    list: () => spaceFeature.queries.list(),
+    read: async (id) => (await spaceFeature.queries.getTree(id))?.space,
+    create: async ({ id, title }) => { await spaceFeature.commands.createSpace({ id, title }); },
+    rename: async ({ id, title }) => { await spaceFeature.commands.rename({ target: { kind: "space", id }, title }); },
+    subscribe: (listener) => spaceFeature.events.subscribe((event) => {
+      if (event.type === "space.created" || event.type === "space.renamed" && event.target.kind === "space") listener();
+    }),
+  });
+  const spaceReferenceContributor = createSpaceReferenceContentVaultContributor({
+    list: async () => {
+      const spaces = await spaceFeature.queries.list();
+      const trees = await Promise.all(spaces.map((space) => spaceFeature.queries.getTree(space.id)));
+      return trees.flatMap((tree) => tree?.entries.map((entry) => entry.item) ?? []);
+    },
+    read: (id) => spaceFeature.queries.getReference(id),
+    create: async (reference) => { await spaceFeature.commands.addReference(reference); },
+    rename: async ({ id, title }) => {
+      await spaceFeature.commands.rename({ target: { kind: "reference", id }, title });
+    },
+    move: async ({ id, spaceId }) => {
+      await spaceFeature.commands.move({ target: { kind: "reference", id }, destinationSpaceId: spaceId });
+    },
+    unlink: async (id) => { await spaceFeature.commands.unlinkReference(id); },
+    subscribe: (listener) => spaceFeature.events.subscribe((event) => {
+      if (event.type !== "space.created") listener();
+    }),
+  });
+  const agentNotebookContributor = createAgentNotebookContentVaultContributor({
+    list: () => agentNotesFeature.queries.list(),
+    read: (scope) => agentNotesFeature.queries.get(scope),
+    write: async (scope, content) => {
+      const current = await agentNotesFeature.queries.get(scope);
+      const result = await agentNotesFeature.commands.write({
+        scope,
+        content,
+        expectedVersion: current.version,
+      });
+      if (result.status === "saved") return result.notebook;
+      if (result.current.content === content) return result.current;
+      throw new Error("Agent notebook changed while Content Vault was applying a synchronized revision.");
+    },
+    subscribe: (listener) => agentNotesFeature.events.subscribe(() => listener()),
+  });
+  const contentVaultSyncFeature = createContentVaultSyncFeature({
+    store: createSqliteContentVaultSyncStore(workbenchDatabase),
+    credential: async () => {
+      const binding = remoteDesktopStore.getBinding();
+      if (binding === undefined) return undefined;
+      const token = await remoteCredentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
+      return token === undefined ? undefined : {
+        accountId: binding.accountId,
+        deviceId: binding.deviceId,
+        baseUrl: binding.relayUrl,
+        token,
+      };
+    },
+    contributors: [
+      spaceContributor,
+      agentNotebookContributor,
+      ...managedContentContributors,
+      workbenchAssetContributor,
+      spaceReferenceContributor,
+      personalNoteContributor,
+      ...personalKnowledgeContributors,
+    ],
+    requireAllResourceKinds: true,
+    pollIntervalMs: 10_000,
+    onDiagnostic: (error) => console.error("[panel-server] Content Vault synchronization failed", error),
+  });
+  synchronizeContentVaultNow = () => contentVaultSyncFeature.commands.synchronize();
+  let requestedVaultCursor = 0;
+  let vaultWakeScheduled = false;
+  notifyContentVaultChanged = (cursor) => {
+    requestedVaultCursor = Math.max(requestedVaultCursor, cursor);
+    if (vaultWakeScheduled || contentVaultSyncFeature.queries.status().cursor >= requestedVaultCursor) return;
+    vaultWakeScheduled = true;
+    queueMicrotask(() => {
+      void (async () => {
+        let synchronized = false;
+        try {
+          const target = requestedVaultCursor;
+          await contentVaultSyncFeature.commands.synchronize();
+          if (contentVaultSyncFeature.queries.status().cursor < target) {
+            await contentVaultSyncFeature.commands.synchronize();
+          }
+          synchronized = true;
+        } catch (error) {
+          console.error("[panel-server] Content Vault notification sync failed", error);
+        } finally {
+          vaultWakeScheduled = false;
+          if (synchronized && contentVaultSyncFeature.queries.status().cursor < requestedVaultCursor) {
+            notifyContentVaultChanged(requestedVaultCursor);
+          }
+        }
+      })();
+    });
+  };
+  projectionChangeUnsubscribers.push(bindRemoteAccountContentVaultSync({
+    initialStatus: remoteCollaborationFeature.queries.status(),
+    subscribe: (listener) => remoteCollaborationFeature.events.subscribe(listener),
+    sync: {
+      start: () => contentVaultSyncFeature.commands.start(),
+      stop: () => contentVaultSyncFeature.commands.stop(),
+      clearAccount: (accountId) => contentVaultSyncFeature.commands.clearAccount(accountId),
+    },
+    onError(operation, error) {
+      console.error(operation === "clear_account"
+        ? "[panel-server] Content Vault local sync state could not be cleared"
+        : "[panel-server] Content Vault synchronization could not stop", error);
+    },
+  }));
   runtime = {
     isQuiescing: false,
     configCenter: input.configCenter,
@@ -527,6 +898,7 @@ function assemblePanelRuntime(input: {
     skillStateStore: input.skillStateStore,
     appUpdateService: input.appUpdateService,
     ordinaryAgentFeature,
+    resolveManagedAttachmentPath,
     agentNotesFeature,
     spaceFeature,
     personalKnowledgeFeature,
@@ -536,10 +908,12 @@ function assemblePanelRuntime(input: {
     ordinaryPathMemoryConnector,
     remoteCollaborationFeature,
     remoteDesktopStore,
+    contentVaultSyncFeature,
+    managedContentFeature,
     prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
     toolOutputStore,
     workbenchDatabase,
-    workbenchAssets,
+    workbenchAssetFeature,
     fileMutationCoordinator,
     workbenchProjectionChanges,
     releaseWorkbenchProjectionChanges: () => {
@@ -554,16 +928,64 @@ function assemblePanelRuntime(input: {
     flushSpaceFileReconciliation: () => spaceFileReconciliation,
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
+  let restorePreparation: Promise<void> | undefined;
+  beforeWorkbenchRestoreStage = () => restorePreparation ??= (async () => {
+    runtime.isQuiescing = true;
+    await remoteCollaborationFeature.release();
+    await contentVaultSyncFeature.release();
+    await ordinaryAgentFeature.release();
+    await spaceFileReconciliation;
+    await initialWorkbenchData.ensure();
+    await managedContentFeature.release();
+    await workbenchAssetFeature.release();
+    await personalKnowledgeFeature.release();
+    await spaceFeature.release();
+  })();
   void remoteCollaborationFeature.start().catch((error) => {
     console.error("[panel-server] Remote Collaboration connector could not start", error);
   });
   return runtime;
 }
 
+function openPanelWorkbenchStorage(runtimeHome: string) {
+  const database = new SqliteRuntimeDatabase(path.join(runtimeHome, "workbench.sqlite3"));
+  try {
+    return {
+      database,
+      workbenchAssets: createSqliteWorkbenchAssetRepository(database),
+      spaceRepository: createSqliteSpaceRepository(database),
+      personalKnowledgeRepository: createSqlitePersonalKnowledgeRepository(database),
+    };
+  } catch (startupError) {
+    try {
+      database.close();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startupError, cleanupError],
+        "Workbench storage initialization and cleanup both failed.",
+      );
+    }
+    throw startupError;
+  }
+}
+
+function assertSpaceDeletionJournalIdle(runtimeHome: string): void {
+  const status = inspectFileSystemSpaceReferenceDeletionJournal(
+    path.join(runtimeHome, "space-reference-deletions"),
+  );
+  if (status !== "idle") throw new Error("Space deletion recovery is still pending.");
+}
+
 function projectionChangeFromSpace(event: SpaceEvent) {
   switch (event.type) {
     case "space.created":
       return { owners: ["spaces"] as const, spaceIds: [event.space.id] };
+    case "space.deleted":
+      return {
+        owners: ["spaces"] as const,
+        spaceIds: [event.spaceId],
+        referenceIds: event.removedReferenceIds,
+      };
     case "space.reference_added":
       return {
         owners: ["spaces"] as const,
@@ -610,6 +1032,20 @@ function projectionChangeFromPersonalKnowledge(event: PersonalKnowledgeEvent) {
         owners: ["personal_knowledge"] as const,
         ...(event.refIds === undefined ? {} : { referenceIds: event.refIds }),
       };
+  }
+}
+
+function managedKnowledgeAssetWriteError(error: unknown): unknown {
+  if (!(error instanceof PanelHttpError)) return error;
+  switch (error.code) {
+    case "space_reference_revision_conflict":
+      return new PersonalKnowledgeError("knowledge_asset_revision_conflict", error.message, { cause: error });
+    case "space_reference_source_missing":
+      return new PersonalKnowledgeError("knowledge_asset_source_missing", error.message, { cause: error });
+    case "space_reference_not_editable":
+      return new PersonalKnowledgeError("knowledge_asset_not_editable", error.message, { cause: error });
+    default:
+      return new PersonalKnowledgeError("knowledge_asset_write_failed", error.message, { cause: error });
   }
 }
 
@@ -728,12 +1164,12 @@ async function prepareOrdinaryRunBirth(
     input.reasoningEffort,
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
-  const workspaceRoot = input.workspaceDirectory ?? process.cwd();
-  const noteInjection = await runtime.agentNotesFeature.queries.startupInjection(workspaceRoot);
+  const workspaceRoot = capabilitySnapshot.workspace.workspaceDirectory;
+  const noteSnapshot = await runtime.agentNotesFeature.queries.startupSnapshot(workspaceRoot);
   // The injected note is frozen with this run's definition. This preserves the
   // existing definition/hash invariant: a restarted run uses exactly the notes
   // it saw at birth, while the next run sees any later model-written revision.
-  const definition = definitionWithAgentNotes(configuredDefinition, noteInjection);
+  const definition = definitionWithAgentNotes(configuredDefinition, noteSnapshot.injection);
   const agentDefinitionRef = runAgentDefinitionRef(definition);
   runtime.agentDefinitionOverrides.set(runAgentDefinitionRefCacheKey(agentDefinitionRef), definition);
   return {
@@ -743,6 +1179,7 @@ async function prepareOrdinaryRunBirth(
     reasoningEffort: input.reasoningEffort,
     agentDefinitionRef,
     capabilitySnapshot,
+    agentNoteVersions: noteSnapshot.versions,
     workspaceSelection: input.workspaceDirectory === undefined ? "default" : "explicit",
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,

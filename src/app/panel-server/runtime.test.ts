@@ -6,11 +6,91 @@ import test from "node:test";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { FileSystemAgentSessionRepository } from "../../adapters/intelligence/file-system-agent-session-repository.js";
+import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import type { OrdinaryExecutionOutcome, OrdinaryExecutionPort } from "../ordinary-agent/contracts.js";
 import { ordinaryAgentSessionRef, ordinaryRunBirth, ordinaryRunTurn } from "../ordinary-agent/test-support.js";
+import {
+  createFileSystemSpaceReferenceDeletionJournal,
+  type SpaceReferenceDeletionJournalRecord,
+} from "../spaces/file-system-reference-deletion-journal.js";
 import { releasePanelRuntimeResources } from "./request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "./runtime.js";
 import { spaceReferenceAttachmentId } from "../spaces/space-file-access.js";
+import {
+  type AgentNoteScope,
+  agentNoteContentVersion,
+} from "../agent-notes/index.js";
+
+test("Panel composition closes failed Workbench storage before Space recovery starts", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workbench-startup-failure-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  const sourcePath = path.join(directory, "source.md");
+  await fs.writeFile(sourcePath, "staged content", "utf8");
+
+  const first = createPanelRuntime({
+    configDirectory: directory,
+    testOnlySkipInitialWorkbenchData: true,
+  });
+  const space = await first.spaceFeature.commands.createSpace({ title: "Startup recovery" });
+  const reference = await first.spaceFeature.commands.addReference({
+    spaceId: space.id,
+    title: "source.md",
+    reference: { kind: "local_file", path: sourcePath },
+  });
+  await releasePanelRuntimeResources(first);
+
+  const runtimeHome = path.join(directory, "runtime");
+  const databasePath = path.join(runtimeHome, "workbench.sqlite3");
+  const setupDatabase = new SqliteRuntimeDatabase(databasePath);
+  setupDatabase.connection.prepare("DELETE FROM schema_migrations WHERE owner = ?").run("personal-knowledge");
+  setupDatabase.close();
+
+  const deletionId = "startup-migration-failure";
+  const stagedPath = path.join(
+    path.dirname(sourcePath),
+    `.${path.basename(sourcePath)}.agentarbor-delete-${deletionId}-0`,
+  );
+  await fs.rename(sourcePath, stagedPath);
+  const journal = createFileSystemSpaceReferenceDeletionJournal(
+    path.join(runtimeHome, "space-reference-deletions"),
+  );
+  const record: SpaceReferenceDeletionJournalRecord = {
+    schemaVersion: "space-reference-deletion/v1",
+    deletionId,
+    phase: "files_staged",
+    rootReferenceId: reference.id,
+    removedReferences: [reference],
+    ownedAssetIds: [],
+    targets: [{
+      referenceId: reference.id,
+      kind: "local_file",
+      sourcePath: path.resolve(sourcePath),
+      stagedPath,
+    }],
+    createdAt: reference.createdAt,
+  };
+  await journal.save(record);
+
+  const originalClose = SqliteRuntimeDatabase.prototype.close;
+  let closeCalls = 0;
+  t.mock.method(SqliteRuntimeDatabase.prototype, "close", function (this: SqliteRuntimeDatabase) {
+    closeCalls += 1;
+    return originalClose.call(this);
+  });
+
+  assert.throws(
+    () => createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true }),
+    (error: unknown) => error instanceof Error && /personal_notes/u.test(error.message),
+  );
+  for (let turn = 0; turn < 20; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(closeCalls, 1);
+  await assert.rejects(fs.access(sourcePath), { code: "ENOENT" });
+  assert.equal(await fs.readFile(stagedPath, "utf8"), "staged content");
+  assert.deepEqual(await journal.list(), [record]);
+});
 
 test("Panel composition exposes catalog-only Sub-Agent definitions to Ordinary capability discovery", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-deep-capability-root-"));
@@ -60,7 +140,7 @@ test("Panel capability snapshots freeze Space tools so an Ordinary Agent can org
   try {
     runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const snapshot = await runtime.capabilityCenter.snapshot();
-    for (const name of ["SpaceList", "SpaceCreate", "SpaceMove", "SpaceAddReference", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename", "SpaceWrite", "SpaceEdit"]) {
+    for (const name of ["SpaceList", "SpaceCreate", "SpaceDelete", "SpaceMove", "SpaceAddReference", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]) {
       assert.equal(snapshot.toolCatalog.allowedTools.includes(name), true, `${name} must be frozen for the run`);
     }
   } finally {
@@ -201,19 +281,29 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
   try {
     runtime = createPanelRuntime({ configDirectory: directory, testOnlySkipInitialWorkbenchData: true });
     const workspace = path.join(directory, "project");
-    await runtime.agentNotesFeature.commands.write({ kind: "global" }, "- Reply in Chinese.");
-    await runtime.agentNotesFeature.commands.write(
+    await fs.mkdir(workspace, { recursive: true });
+    await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
+    runtime.capabilityCenter.invalidate();
+    await replaceAgentNote(runtime, { kind: "global" }, "- Reply in Chinese.");
+    await replaceAgentNote(
+      runtime,
       { kind: "workspace", workspaceRoot: workspace },
       "- Build this project with pnpm build.",
     );
 
-    const birth = await runtime.prepareOrdinaryRunBirth({ goal: "check notes", workspaceDirectory: workspace });
+    const birth = await runtime.prepareOrdinaryRunBirth({ goal: "check notes" });
 
     assert.match(birth.instructions, /<agent_notes>/u);
     assert.match(birth.instructions, /Reply in Chinese/u);
     assert.match(birth.instructions, /Build this project with pnpm build/u);
     assert.match(birth.agentDefinitionRef.promptRef, /agent-notes/u);
     assert.match(birth.agentDefinitionRef.promptVersion, /notes-/u);
+    assert.equal(birth.workspaceSelection, "default");
+    assert.equal(birth.capabilitySnapshot.workspace.workspaceDirectory, path.resolve(workspace));
+    assert.deepEqual(birth.agentNoteVersions, {
+      global: agentNoteContentVersion("- Reply in Chinese."),
+      workspace: agentNoteContentVersion("- Build this project with pnpm build."),
+    });
 
     // Notes are scoped: a different workspace sees only the global notebook.
     const otherBirth = await runtime.prepareOrdinaryRunBirth({
@@ -226,6 +316,20 @@ test("Panel composition freezes agent-written notes into the next Ordinary run i
     await cleanupRuntime(runtime, directory);
   }
 });
+
+async function replaceAgentNote(
+  runtime: PanelRuntime,
+  scope: AgentNoteScope,
+  content: string,
+): Promise<void> {
+  const current = await runtime.agentNotesFeature.queries.get(scope);
+  const result = await runtime.agentNotesFeature.commands.write({
+    scope,
+    content,
+    expectedVersion: current.version,
+  });
+  assert.equal(result.status, "saved");
+}
 
 async function cleanupRuntime(runtime: PanelRuntime | undefined, directory: string): Promise<void> {
   if (runtime !== undefined) await releasePanelRuntimeResources(runtime);

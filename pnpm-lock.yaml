@@ -21,6 +21,9 @@ importers:
       '@capacitor/android':
         specifier: 8.5.0
         version: 8.5.0(@capacitor/core@8.5.0)
+      '@capacitor/app':
+        specifier: 8.0.0
+        version: 8.0.0(@capacitor/core@8.5.0)
       '@capacitor/barcode-scanner':
         specifier: 3.1.0
         version: 3.1.0(@capacitor/core@8.5.0)
@@ -338,6 +341,11 @@ packages:
     resolution: {integrity: sha512-Rb3prJeQiTp0pQhSSOReJuG9VgibOGMG4ECs+UhMwr6TCCHZ3NCZO811bDA0HxD0xrT/gCrJAsY5yfEATu84JQ==}
     peerDependencies:
       '@capacitor/core': ^8.5.0
+
+  '@capacitor/app@8.0.0':
+    resolution: {integrity: sha512-OwzIkUs4w433Bu9WWAEbEYngXEfJXZ9Wmdb8eoaqzYBgB0W9/3Ed/mh6sAYPNBAZlpyarmewgP7Nb+d3Vrh+xA==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@capacitor/app@8.1.1':
     resolution: {integrity: sha512-xM2ZTX5jK60tFtmjsmJv+Cdj1Qsb6NcavkqmdEnCPQBeya9oKhamZJxYOnQNj1ZvcJM7sWfG6BEtSLx42pisbA==}
@@ -3860,6 +3868,10 @@ snapshots:
       css-tree: 3.2.1
 
   '@capacitor/android@8.5.0(@capacitor/core@8.5.0)':
+    dependencies:
+      '@capacitor/core': 8.5.0
+
+  '@capacitor/app@8.0.0(@capacitor/core@8.5.0)':
     dependencies:
       '@capacitor/core': 8.5.0
 

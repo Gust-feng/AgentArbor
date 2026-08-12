@@ -373,6 +373,12 @@ function executeCommand(database: SqliteRuntimeDatabase, command: PersonalKnowle
       database.connection.prepare("INSERT INTO knowledge_themes(id, name, color, origin) VALUES (?, ?, ?, ?)")
         .run(command.theme.id, command.theme.name, command.theme.color, command.theme.origin);
       return;
+    case "theme.replace":
+      database.connection.prepare(`
+        INSERT INTO knowledge_themes(id, name, color, origin) VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color, origin = excluded.origin
+      `).run(command.theme.id, command.theme.name, command.theme.color, command.theme.origin);
+      return;
     case "theme.rename": {
       const result = database.connection.prepare("UPDATE knowledge_themes SET name = ? WHERE id = ?").run(command.name, command.themeId);
       if (Number(result.changes) === 0) throw new PersonalKnowledgeError("knowledge_theme_not_found", `Theme ${command.themeId} was not found.`);

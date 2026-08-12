@@ -2,14 +2,13 @@ import React from "react";
 import type { AppSettingsController } from "../app-settings-controller";
 import type { AppState } from "../app-state";
 import type { ModelProviderModelCatalog } from "../contracts/config";
+import type { ConversationFollowUpMode } from "../contracts/composer";
 import { SettingsDialog } from "./settings-dialog";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 
 type WorkbenchSettingsDialogFormState = {
   readonly modelForm: ModelForm;
   readonly setModelForm: (form: ModelForm) => void;
-  readonly workspaceDirectory: string;
-  readonly setWorkspaceDirectory: (value: string) => void;
   readonly desktopAgentSystemPrompt: string;
   readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly toolForm: ToolForm;
@@ -25,6 +24,8 @@ type WorkbenchSettingsDialogPreferences = {
   readonly onAgentClusterEnabledChange: (enabled: boolean) => void;
   readonly developerModeEnabled: boolean;
   readonly onDeveloperModeChange: (enabled: boolean) => void;
+  readonly conversationFollowUpMode: ConversationFollowUpMode;
+  readonly onConversationFollowUpModeChange: (mode: ConversationFollowUpMode) => void;
 };
 
 type WorkbenchSettingsDialogSavingState = {
@@ -56,8 +57,6 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       appUpdate={props.app.appUpdate}
       modelForm={props.forms.modelForm}
       setModelForm={props.forms.setModelForm}
-      workspaceDirectory={props.forms.workspaceDirectory}
-      setWorkspaceDirectory={props.forms.setWorkspaceDirectory}
       desktopAgentSystemPrompt={props.forms.desktopAgentSystemPrompt}
       setDesktopAgentSystemPrompt={props.forms.setDesktopAgentSystemPrompt}
       modelUsageDisplayEnabled={props.preferences.modelUsageDisplayEnabled}
@@ -66,6 +65,8 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       onAgentClusterEnabledChange={props.preferences.onAgentClusterEnabledChange}
       developerModeEnabled={props.preferences.developerModeEnabled}
       onDeveloperModeChange={props.preferences.onDeveloperModeChange}
+      conversationFollowUpMode={props.preferences.conversationFollowUpMode}
+      onConversationFollowUpModeChange={props.preferences.onConversationFollowUpModeChange}
       onSaveCommandShell={props.actions.saveCommandShell}
       savingModel={props.saving.model}
       savingWorkspace={props.saving.workspace}
@@ -81,8 +82,6 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       modelCatalogs={props.modelCatalogs}
       skills={props.app.skills}
       subAgents={props.app.subAgents}
-      onSaveWorkspace={(nextWorkspaceDirectory) => void props.actions.saveWorkspace(nextWorkspaceDirectory)}
-      onSelectWorkspaceDirectory={() => void props.actions.selectWorkspace()}
       onSaveDesktopAgentSystemPrompt={props.actions.saveDesktopAgentSystemPrompt}
       onResetDesktopAgentSystemPrompt={props.actions.resetDesktopAgentSystemPrompt}
       tools={props.app.tools}

@@ -4,8 +4,11 @@ import {
   AgentNotesError,
   type AgentNoteRepository,
   type AgentNoteScope,
+  type AgentNotebook,
+  type AgentNotesEvent,
   type AgentNotesFeature,
 } from "./contracts.js";
+import { agentNoteWorkspaceIdentity } from "./scope-identity.js";
 
 export type CreateAgentNotesFeatureInput = {
   readonly repository: AgentNoteRepository;
@@ -21,6 +24,32 @@ export type CreateAgentNotesFeatureInput = {
  */
 export function createAgentNotesFeature(input: CreateAgentNotesFeatureInput): AgentNotesFeature {
   const now = input.now ?? nowIso;
+  const writeTails = new Map<string, Promise<void>>();
+
+  const enqueueWrite = <T>(scope: AgentNoteScope, operation: () => Promise<T>): Promise<T> => {
+    const key = scope.kind === "global"
+      ? "global"
+      : `workspace:${agentNoteWorkspaceIdentity(scope.workspaceRoot)}`;
+    const previous = writeTails.get(key) ?? Promise.resolve();
+    const result = previous.then(operation, operation);
+    const tail = result.then(() => undefined, () => undefined);
+    writeTails.set(key, tail);
+    void tail.finally(() => {
+      if (writeTails.get(key) === tail) writeTails.delete(key);
+    });
+    return result;
+  };
+  const listeners = new Set<(event: AgentNotesEvent) => void>();
+
+  function publish(notebook: AgentNotebook): void {
+    for (const listener of [...listeners]) {
+      try {
+        listener({ type: "agent_note.changed", notebook });
+      } catch {
+        // Observers cannot alter a committed note write.
+      }
+    }
+  }
 
   return {
     queries: {
@@ -28,7 +57,11 @@ export function createAgentNotesFeature(input: CreateAgentNotesFeatureInput): Ag
         return input.repository.read(scope);
       },
 
-      async startupInjection(workspaceRoot: string): Promise<string | undefined> {
+      async list() {
+        return input.repository.list();
+      },
+
+      async startupSnapshot(workspaceRoot: string) {
         const [global, workspace] = await Promise.all([
           input.repository.read({ kind: "global" }),
           input.repository.read({ kind: "workspace", workspaceRoot }),
@@ -40,22 +73,38 @@ export function createAgentNotesFeature(input: CreateAgentNotesFeatureInput): Ag
         if (workspace.content.trim().length > 0) {
           sections.push(`## 当前工作区笔记\n\n${workspace.content.trim()}`);
         }
-        if (sections.length === 0) return undefined;
-        return sections.join("\n\n");
+        return {
+          injection: sections.length === 0 ? undefined : sections.join("\n\n"),
+          versions: {
+            global: global.version,
+            workspace: workspace.version,
+          },
+        };
       },
     },
 
     commands: {
-      async write(scope: AgentNoteScope, content: string) {
-        if (content.length > AGENT_NOTE_MAX_CHARS) {
+      async write(command) {
+        if (command.content.length > AGENT_NOTE_MAX_CHARS) {
           // 显式失败而不是静默截断：让模型自己收到边界并整理笔记（ADR-0033 §3）。
           throw new AgentNotesError(
             "note_too_large",
-            `Note is ${content.length} chars; the limit is ${AGENT_NOTE_MAX_CHARS}. ` +
+            `Note is ${command.content.length} chars; the limit is ${AGENT_NOTE_MAX_CHARS}. ` +
               "Condense the note (merge duplicates, drop stale entries) and write the full revised note again.",
           );
         }
-        return input.repository.write(scope, content, now());
+        const result = await enqueueWrite(command.scope, () => input.repository.write({
+          ...command,
+          updatedAt: now(),
+        }));
+        if (result.status === "saved") publish(result.notebook);
+        return result;
+      },
+    },
+    events: {
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
       },
     },
   };

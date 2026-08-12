@@ -159,7 +159,7 @@ export type OrdinaryRunBirth = {
   readonly memoryOwner: ConversationOwner;
   /** Frozen provenance prevents the configured fallback becoming a user selection after restore. */
   readonly workspaceSelection?: "default" | "explicit";
-  /** 模型可见的 owner 区块文本（ADR-0035 §6.2），随 birth 冻结；无 owner 时为 undefined。 */
+  /** 模型可见的宿主上下文（owner 区块 ADR-0035 §6.2 + 环境区块），随 birth 冻结；无 owner 时为 undefined。 */
   readonly ownerContext?: string;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly toolConfirmationPolicy: ToolConfirmationPolicy;

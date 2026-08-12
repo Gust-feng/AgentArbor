@@ -30,7 +30,8 @@ You can access the following external resources by their name or full path:
   Status: {Available|Disconnected}
 
 When the user mentions these names, use the corresponding full path to access files.
-The managed_root is your default working directory for this space.
+The managed_root above is this space's own managed storage and your default working directory. Create new files and deliverables there with the file tools unless the user names another destination.
+Referenced external workspaces in this conversation are the user's reference material. Read them as needed, but do not create general outputs or scratch files inside them; modify them only when the user explicitly asks for changes to that project.
 ```
 
 **关键要求**：
@@ -38,6 +39,7 @@ The managed_root is your default working directory for this space.
 2. 引用必须包含名称（可改名的 title）、完整路径、状态；不建设用户维护的别名或描述字段（ADR-0035 §6.2，避免增加用户心智负担）
 3. 明确告知模型 managedRoot 是默认工作目录
 4. 明确告知模型如何映射用户提到的名称到路径
+5. 明确引导模型：一般产出（新文件、交付物、草稿）默认创建在 managedRoot（软件自有存储），引用的外部 Workspace 是参考资料，只有用户明确要求修改该项目时才写入
 
 ### 2.2 Workspace Owner 上下文模板
 
@@ -46,11 +48,13 @@ The managed_root is your default working directory for this space.
 kind=workspace
 name={workspaceName}
 path={absolutePath}
+The path above is the user's own project folder and your root working directory. Create and edit files there as the task requires.
 ```
 
 **关键要求**：
 1. 提供 Workspace 名称和完整路径
 2. 不需要额外的引用信息（Workspace 不引用其他资源）
+3. 明确告知模型该路径就是本对话的根工作目录，按任务需要在其中创建和编辑文件
 
 ### 2.3 空 Space 的特殊处理
 
@@ -71,6 +75,22 @@ You can work with files in the managed_root directory.
 - 必须注入 owner 区块，不能因为没有引用就省略
 - 明确告知模型没有外部资源
 - 告知模型可以在 managedRoot 工作
+
+### 2.4 环境区块
+
+owner 区块之后必须注入环境区块，随 run birth 冻结、每次 run 重新生成：
+
+```
+[Environment]
+os={platform} {osRelease} ({arch})
+shell={shellKind} ({syntax} syntax)
+current_time={ISO 本地时间带 UTC 偏移，如 2026-08-13T05:20:00+08:00}
+```
+
+**要求**：
+- `os` 与 `current_time` 必须存在；`shell` 在命令 shell 配置可用时注入
+- 时间使用本地时区并带偏移，模型不得依赖训练截止日期推断"现在"
+- 环境区块与 owner 区块一起通过 birth 的宿主上下文字段（`ownerContext`）进入当前用户回合
 
 ## 3. 智能路径映射
 

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
@@ -1347,7 +1348,7 @@ async function prepareOrdinaryRunBirth(
     input.reasoningEffort,
   );
   const configuredDefinition = desktopAgentDefinitionFromConfig(runtime.desktopAgentDefinition, desktopAgentConfig);
-  const [ownerContext, noteSnapshot, pathDependencyDirectory] = await Promise.all([
+  const [ownerBlock, noteSnapshot, pathDependencyDirectory] = await Promise.all([
     formatOwnerContext(runtime, scope),
     runtime.agentNotesFeature.queries.startupSnapshot(scope.owner),
     runtime.pathDependencyFeature.queries.directory({
@@ -1377,7 +1378,7 @@ async function prepareOrdinaryRunBirth(
     agentNoteVersions: noteSnapshot.versions,
     memoryOwner: scope.owner,
     workspaceSelection: "explicit",
-    ownerContext,
+    ownerContext: [ownerBlock, formatEnvironmentContext(capabilitySnapshot.commandShell)].join("\n\n"),
     informationAccess,
     toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
   };
@@ -1395,6 +1396,7 @@ async function formatOwnerContext(
       "kind=workspace",
       `name=${workspace?.title ?? scope.owner.id}`,
       `path=${scope.cwd}`,
+      "The path above is the user's own project folder and your root working directory. Create and edit files there as the task requires.",
     ].join("\n");
   }
   const space = await runtime.spaceFeature.queries.getTree(scope.owner.id);
@@ -1404,7 +1406,34 @@ async function formatOwnerContext(
     "kind=space",
     `name=${space?.space.title ?? scope.owner.id}`,
     `managed_root=${managedRoot}`,
+    "The managed_root above is this space's own managed storage and your default working directory. Create new files and deliverables there with the file tools unless the user names another destination.",
+    "Referenced external workspaces in this conversation are the user's reference material. Read them as needed, but do not create general outputs or scratch files inside them; modify them only when the user explicitly asks for changes to that project.",
   ].join("\n");
+}
+
+/**
+ * 组装模型可见的环境区块：操作系统、shell 与当前本地时间。随 run birth 冻结，
+ * 每次 run 重新生成，与 owner 区块一起进入当前用户回合。
+ */
+function formatEnvironmentContext(
+  commandShell: { readonly kind: string; readonly syntax: string } | undefined,
+  now: Date = new Date(),
+): string {
+  return [
+    "[Environment]",
+    `os=${process.platform} ${os.release()} (${process.arch})`,
+    ...(commandShell === undefined ? [] : [`shell=${commandShell.kind} (${commandShell.syntax} syntax)`]),
+    `current_time=${formatLocalTimestampWithOffset(now)}`,
+  ].join("\n");
+}
+
+function formatLocalTimestampWithOffset(date: Date): string {
+  const pad = (value: number): string => String(Math.trunc(Math.abs(value))).padStart(2, "0");
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const offset = `${sign}${pad(offsetMinutes / 60)}:${pad(offsetMinutes % 60)}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${offset}`;
 }
 
 /**

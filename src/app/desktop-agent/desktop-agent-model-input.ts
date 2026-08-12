@@ -17,7 +17,7 @@ export type BuildDesktopAgentModelInputOptions = {
   readonly taskSoil: TaskSoil;
   readonly priorModelContext?: readonly ModelMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
-  /** 模型可见的 owner 区块（ADR-0035 §6.2）；随 birth 冻结，未提供时不注入。 */
+  /** 模型可见的宿主上下文（owner 区块 ADR-0035 §6.2 + 环境区块）；随 birth 冻结，未提供时不注入。 */
   readonly ownerContext?: string;
 };
 

@@ -494,6 +494,11 @@ test("Space owner run birth uses the Space managedRoot as cwd", async () => {
     assert.match(birth.ownerContext ?? "", /kind=space/u);
     assert.match(birth.ownerContext ?? "", /name=产品规划/u);
     assert.match(birth.ownerContext ?? "", /managed_root=/u);
+    assert.match(birth.ownerContext ?? "", /default working directory/u);
+    assert.match(birth.ownerContext ?? "", /do not create general outputs or scratch files inside them/u);
+    assert.match(birth.ownerContext ?? "", /\[Environment\]/u);
+    assert.match(birth.ownerContext ?? "", /os=/u);
+    assert.match(birth.ownerContext ?? "", /current_time=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/u);
   } finally {
     await cleanupRuntime(runtime, directory);
   }
@@ -550,6 +555,9 @@ test("Workspace owner run birth uses the current mount root as cwd", async () =>
     assert.match(birth.ownerContext ?? "", /kind=workspace/u);
     assert.match(birth.ownerContext ?? "", /name=project/u);
     assert.match(birth.ownerContext ?? "", /path=/u);
+    assert.match(birth.ownerContext ?? "", /root working directory/u);
+    assert.match(birth.ownerContext ?? "", /\[Environment\]/u);
+    assert.match(birth.ownerContext ?? "", /current_time=/u);
   } finally {
     await cleanupRuntime(runtime, directory);
   }

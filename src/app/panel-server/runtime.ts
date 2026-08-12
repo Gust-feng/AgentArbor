@@ -140,7 +140,43 @@ import type { PanelRunInput } from "./request-parsers.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import { createInitialWorkbenchDataInitializer, initializeInitialWorkbenchData } from "./initial-workbench-data.js";
-import { createSqliteWorkbenchAssetRepository, type WorkbenchAssetRepository } from "../workbench-assets/index.js";
+import { userInfo } from "node:os";
+import { FileSystemLocalDevSecretStore } from "../../adapters/config/index.js";
+import {
+  createRemoteCollaborationFeature,
+  createRemoteCommandHandler,
+  createRemoteDesktopStore,
+  REMOTE_DEVICE_TOKEN_REF,
+  type RemoteCollaborationFeature,
+  type RemoteDesktopStore,
+} from "../remote-collaboration/index.js";
+import { createPanelRemoteCollaborationPorts } from "./remote-collaboration-ports.js";
+import { bindRemoteAccountContentVaultSync } from "./remote-content-vault-lifecycle.js";
+import { projectRemoteModelOptions, resolveRemoteModelSelection } from "./remote-model-options.js";
+import {
+  createContentVaultSyncFeature,
+  createAgentNotebookContentVaultContributor,
+  createPersonalKnowledgeContentVaultContributors,
+  createPersonalNoteContentVaultContributor,
+  createSpaceContentVaultContributor,
+  createSpaceReferenceContentVaultContributor,
+  createSqliteContentVaultSyncStore,
+  createWorkbenchAssetContentVaultContributor,
+  selectSynchronizablePersonalKnowledge,
+  type ContentVaultSyncFeature,
+} from "../content-vault-sync/index.js";
+import {
+  createManagedContentFeature,
+  createManagedContentVaultContributors,
+  type ManagedContentFeature,
+} from "../managed-content/index.js";
+import {
+  createSqliteWorkbenchAssetRepository,
+  createWorkbenchAssetsFeature,
+  editableWorkbenchAssetText,
+  type WorkbenchAssetRepository,
+  type WorkbenchAssetsFeature,
+} from "../workbench-assets/index.js";
 import {
   createWorkbenchProjectionChangeFeed,
   type WorkbenchProjectionChangeFeed,
@@ -193,7 +229,12 @@ export type PanelRuntime = {
   readonly toolOutputStore: ToolOutputStore;
   readonly workbenchDatabase: SqliteRuntimeDatabase;
   readonly workbenchAssets: WorkbenchAssetRepository;
+  readonly workbenchAssetFeature: WorkbenchAssetsFeature;
   readonly fileMutationCoordinator: LocalWorkspaceMutationCoordinator;
+  readonly remoteCollaborationFeature: RemoteCollaborationFeature;
+  readonly remoteDesktopStore: RemoteDesktopStore;
+  readonly contentVaultSyncFeature: ContentVaultSyncFeature;
+  readonly managedContentFeature: ManagedContentFeature;
   readonly workbenchProjectionChanges: WorkbenchProjectionChangeFeed;
   readonly releaseWorkbenchProjectionChanges: () => void;
   readonly knowledgeAssetRoot?: string;
@@ -383,6 +424,7 @@ function assemblePanelRuntime(input: {
     spaceRepository,
     personalKnowledgeRepository,
   } = openPanelWorkbenchStorage(runtimeHome);
+  const workbenchAssetFeature = createWorkbenchAssetsFeature(workbenchAssets);
   const spaceConversationDeletionJournal = createSqliteSpaceConversationDeletionJournal(workbenchDatabase);
   const spaceConversationLinkJournal = createSqliteSpaceConversationLinkJournal(workbenchDatabase);
   let beforeWorkbenchRestoreStage: (() => Promise<void>) | undefined;
@@ -462,6 +504,47 @@ function assemblePanelRuntime(input: {
       deleteOwnedAssets: async (assetIds) => await workbenchAssets.removeMany(assetIds),
     },
   });
+  const managedContentFeature = createManagedContentFeature({
+    rootDirectory: managedSpaceFolderRoot,
+    runMutation: async (key, operation) => await fileMutationCoordinator.run(
+      path.join(managedSpaceFolderRoot, key),
+      operation,
+    ),
+    spaces: {
+      listManagedRoots: async () => {
+        const spaces = await spaceFeature.queries.list();
+        const trees = await Promise.all(spaces.map(async (space) => await spaceFeature.queries.getTree(space.id)));
+        return trees.flatMap((tree) => tree?.entries.flatMap(({ item }) => item.reference.kind === "managed_folder"
+          ? [{ id: item.id, spaceId: item.spaceId, title: item.title, path: item.reference.path }]
+          : []) ?? []);
+      },
+      readManagedRoot: async (id) => {
+        const item = await spaceFeature.queries.getReference(id);
+        return item?.reference.kind === "managed_folder"
+          ? { id: item.id, spaceId: item.spaceId, title: item.title, path: item.reference.path }
+          : undefined;
+      },
+      createManagedRoot: async (root) => {
+        await spaceFeature.commands.addReference({
+          id: root.id,
+          spaceId: root.spaceId,
+          title: root.title,
+          reference: { kind: "managed_folder", path: root.path },
+        });
+      },
+      renameManagedRoot: async (id, title) => {
+        await spaceFeature.commands.rename({ target: { kind: "reference", id }, title });
+      },
+      moveManagedRoot: async (id, spaceId) => {
+        await spaceFeature.commands.move({ target: { kind: "reference", id }, destinationSpaceId: spaceId });
+      },
+      removeManagedRoot: async (id) => { await spaceFeature.commands.removeReference(id); },
+      subscribe: (listener) => spaceFeature.events.subscribe((event) => {
+        if (event.type !== "space.created") listener();
+      }),
+    },
+  });
+
   const unlinkSpaceExternalReference = async (referenceId: string): Promise<void> => {
     try {
       await spaceFeature.commands.unlinkReference(referenceId);
@@ -768,8 +851,213 @@ function assemblePanelRuntime(input: {
       // reported by the actual preview/tool access and are never discovered by a background scan.
       workbenchProjectionChanges.publish({ owners: ["mounted_files"] });
     }),
-  ];
-  const runtime: PanelRuntime = {
+  ]
+const remoteDesktopStore = createRemoteDesktopStore(workbenchDatabase);
+  const remoteCredentials = new FileSystemLocalDevSecretStore(resolveRemoteConfigDirectory(input));
+  const remoteModelOptions = async () => projectRemoteModelOptions({
+    profiles: await runtime.configCenter.listModelProviderProfiles(),
+    catalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+    active: await runtime.configCenter.getModelProviderConfig(),
+    capabilityOverrides: await runtime.configCenter.listModelCapabilityOverrides(),
+  });
+  let notifyContentVaultChanged = (_cursor: number): void => undefined;
+  let synchronizeContentVaultNow = async (): Promise<void> => undefined;
+  const remoteCollaborationFeature = createRemoteCollaborationFeature({
+    store: remoteDesktopStore,
+    credentials: remoteCredentials,
+    commandHandler: createRemoteCommandHandler({
+      ports: createPanelRemoteCollaborationPorts({
+        ordinary: ordinaryAgentFeature,
+        spaces: spaceFeature,
+        modelOptions: remoteModelOptions,
+        resolveModelSelection: async (selectionId) => resolveRemoteModelSelection(await remoteModelOptions(), selectionId),
+        synchronizeContentVault: () => synchronizeContentVaultNow(),
+        prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
+      }),
+    }),
+    defaultDeviceName: userInfo().username,
+    onVaultChanged: (cursor) => notifyContentVaultChanged(cursor),
+  });
+  const personalNoteContributor = createPersonalNoteContentVaultContributor({
+    list: async () => (await personalKnowledgeFeature.queries.snapshot()).notes,
+    read: (id) => personalKnowledgeFeature.queries.note(id),
+    create: async (note) => { await personalKnowledgeFeature.commands.createNote(note); },
+    update: async (note) => { await personalKnowledgeFeature.commands.updateNote(note); },
+    delete: async (note) => { await personalKnowledgeFeature.commands.deleteNote(note); },
+    subscribe: (listener) => personalKnowledgeFeature.events.subscribe((event) => {
+      if (event.type.startsWith("personal_knowledge.note_")) listener();
+    }),
+  });
+  const personalKnowledgeContributors = createPersonalKnowledgeContentVaultContributors({
+    snapshot: async () => {
+      const [snapshot, assets] = await Promise.all([
+        personalKnowledgeFeature.queries.snapshot(),
+        workbenchAssetFeature.queries.list(),
+      ]);
+      const synchronizedAssetIds = new Set(assets
+        .filter((asset) => editableWorkbenchAssetText(asset) !== undefined)
+        .map((asset) => asset.id));
+      return selectSynchronizablePersonalKnowledge({
+        pages: snapshot.pages.map((page) => ({
+          refId: page.refId,
+          kind: page.kind,
+          collectedAt: page.collectedAt,
+          asset: page.asset === undefined ? undefined : {
+            ...page.asset,
+            sourceReferenceId: page.asset.sourceReferenceId ?? "",
+            sourceRelativePath: page.asset.sourceRelativePath ?? "",
+          },
+        })),
+        links: snapshot.links,
+        themes: snapshot.themes,
+        assignments: snapshot.assignments,
+      }, synchronizedAssetIds);
+    },
+    upsertPage: async (page) => {
+      if (page.kind === "space_reference") {
+        throw new Error("Managed knowledge imports require their owned content before metadata can be synchronized");
+      }
+      await personalKnowledgeFeature.commands.execute({ type: "knowledge.collect", page });
+    },
+    deletePage: async (refId) => { await personalKnowledgeFeature.commands.uncollect(refId); },
+    upsertLink: async (link) => { await personalKnowledgeFeature.commands.execute({ type: "knowledge.link_add", link }); },
+    deleteLink: async (link) => { await personalKnowledgeFeature.commands.execute({ type: "knowledge.link_remove", link }); },
+    upsertTheme: async (theme) => { await personalKnowledgeFeature.commands.execute({ type: "theme.replace", theme }); },
+    deleteTheme: async (themeId) => { await personalKnowledgeFeature.commands.execute({ type: "theme.delete", themeId }); },
+    upsertAssignment: async (assignment) => {
+      await personalKnowledgeFeature.commands.execute({ type: "theme.assign", assignment });
+    },
+    deleteAssignment: async ({ refId, themeId }) => {
+      await personalKnowledgeFeature.commands.execute({ type: "theme.unassign", refId, themeId });
+    },
+    subscribe: (listener) => personalKnowledgeFeature.events.subscribe((event) => {
+      if (event.type === "personal_knowledge.changed") listener();
+    }),
+  });
+  const managedContentContributors = createManagedContentVaultContributors(managedContentFeature);
+  const workbenchAssetContributor = createWorkbenchAssetContentVaultContributor({
+    list: () => workbenchAssetFeature.queries.list(),
+    read: (id) => workbenchAssetFeature.queries.get(id),
+    replace: (asset) => workbenchAssetFeature.commands.replace(asset),
+    subscribe: (listener) => workbenchAssetFeature.events.subscribe(() => listener()),
+  });
+  const spaceContributor = createSpaceContentVaultContributor({
+    list: () => spaceFeature.queries.list(),
+    read: async (id) => (await spaceFeature.queries.getTree(id))?.space,
+    create: async ({ id, title }) => { await spaceFeature.commands.createSpace({ id, title }); },
+    rename: async ({ id, title }) => { await spaceFeature.commands.rename({ target: { kind: "space", id }, title }); },
+    subscribe: (listener) => spaceFeature.events.subscribe((event) => {
+      if (event.type === "space.created" || event.type === "space.renamed" && event.target.kind === "space") listener();
+    }),
+  });
+  const spaceReferenceContributor = createSpaceReferenceContentVaultContributor({
+    list: async () => {
+      const spaces = await spaceFeature.queries.list();
+      const trees = await Promise.all(spaces.map((space) => spaceFeature.queries.getTree(space.id)));
+      return trees.flatMap((tree) => tree?.entries.map((entry) => entry.item) ?? []);
+    },
+    read: (id) => spaceFeature.queries.getReference(id),
+    create: async (reference) => { await spaceFeature.commands.addReference(reference); },
+    rename: async ({ id, title }) => {
+      await spaceFeature.commands.rename({ target: { kind: "reference", id }, title });
+    },
+    move: async ({ id, spaceId }) => {
+      await spaceFeature.commands.move({ target: { kind: "reference", id }, destinationSpaceId: spaceId });
+    },
+    unlink: async (id) => { await spaceFeature.commands.unlinkReference(id); },
+    subscribe: (listener) => spaceFeature.events.subscribe((event) => {
+      if (event.type !== "space.created") listener();
+    }),
+  });
+  const agentNotebookContributor = createAgentNotebookContentVaultContributor({
+    list: async () => [await agentNotesFeature.queries.get({ kind: "global" })],
+    read: (scope) => agentNotesFeature.queries.get(scope),
+    write: async (scope, content) => {
+      const current = await agentNotesFeature.queries.get(scope);
+      const result = await agentNotesFeature.commands.write({
+        scope,
+        content,
+        expectedVersion: current.version,
+      });
+      if (result.status === "saved") return result.notebook;
+      if (result.current.content === content) return result.current;
+      throw new Error("Agent notebook changed while Content Vault was applying a synchronized revision.");
+    },
+    // Agent Notes 暂无事件面；Content Vault 轮询间隔兜底收敛。
+    subscribe: () => () => undefined,
+  });
+  const contentVaultSyncFeature = createContentVaultSyncFeature({
+    store: createSqliteContentVaultSyncStore(workbenchDatabase),
+    credential: async () => {
+      const binding = remoteDesktopStore.getBinding();
+      if (binding === undefined) return undefined;
+      const token = await remoteCredentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
+      return token === undefined ? undefined : {
+        accountId: binding.accountId,
+        deviceId: binding.deviceId,
+        baseUrl: binding.relayUrl,
+        token,
+      };
+    },
+    contributors: [
+      spaceContributor,
+      agentNotebookContributor,
+      ...managedContentContributors,
+      workbenchAssetContributor,
+      spaceReferenceContributor,
+      personalNoteContributor,
+      ...personalKnowledgeContributors,
+    ],
+    requireAllResourceKinds: true,
+    pollIntervalMs: 10_000,
+    onDiagnostic: (error) => console.error("[panel-server] Content Vault synchronization failed", error),
+  });
+  synchronizeContentVaultNow = () => contentVaultSyncFeature.commands.synchronize();
+  let requestedVaultCursor = 0;
+  let vaultWakeScheduled = false;
+  notifyContentVaultChanged = (cursor) => {
+    requestedVaultCursor = Math.max(requestedVaultCursor, cursor);
+    if (vaultWakeScheduled || contentVaultSyncFeature.queries.status().cursor >= requestedVaultCursor) return;
+    vaultWakeScheduled = true;
+    queueMicrotask(() => {
+      void (async () => {
+        let synchronized = false;
+        try {
+          const target = requestedVaultCursor;
+          await contentVaultSyncFeature.commands.synchronize();
+          if (contentVaultSyncFeature.queries.status().cursor < target) {
+            await contentVaultSyncFeature.commands.synchronize();
+          }
+          synchronized = true;
+        } catch (error) {
+          console.error("[panel-server] Content Vault notification sync failed", error);
+        } finally {
+          vaultWakeScheduled = false;
+          if (synchronized && contentVaultSyncFeature.queries.status().cursor < requestedVaultCursor) {
+            notifyContentVaultChanged(requestedVaultCursor);
+          }
+        }
+      })();
+    });
+  };
+  projectionChangeUnsubscribers.push(bindRemoteAccountContentVaultSync({
+    initialStatus: remoteCollaborationFeature.queries.status(),
+    subscribe: (listener) => remoteCollaborationFeature.events.subscribe(listener),
+    sync: {
+      start: () => contentVaultSyncFeature.commands.start(),
+      stop: () => contentVaultSyncFeature.commands.stop(),
+      clearAccount: (accountId) => contentVaultSyncFeature.commands.clearAccount(accountId),
+    },
+    onError(operation, error) {
+      console.error(operation === "clear_account"
+        ? "[panel-server] Content Vault local sync state could not be cleared"
+        : "[panel-server] Content Vault synchronization could not stop", error);
+    },
+  }));
+
+;
+  let runtime!: PanelRuntime;
+  runtime = {
     isQuiescing: false,
     configCenter: input.configCenter,
     capabilityCenter,
@@ -807,7 +1095,12 @@ function assemblePanelRuntime(input: {
     toolOutputStore,
     workbenchDatabase,
     workbenchAssets,
+    workbenchAssetFeature,
     fileMutationCoordinator,
+    remoteCollaborationFeature,
+    remoteDesktopStore,
+    contentVaultSyncFeature,
+    managedContentFeature,
     workbenchProjectionChanges,
     releaseWorkbenchProjectionChanges: () => {
       for (const unsubscribe of projectionChangeUnsubscribers.splice(0)) unsubscribe();
@@ -827,6 +1120,10 @@ function assemblePanelRuntime(input: {
     },
     releaseAgentSessionStorage: () => agentSessionEnvironment.cleanup(),
   };
+
+  void remoteCollaborationFeature.start().catch((error) => {
+    console.error("[panel-server] Remote Collaboration connector could not start", error);
+  });
   let restorePreparation: Promise<void> | undefined;
   beforeWorkbenchRestoreStage = () => restorePreparation ??= (async () => {
     runtime.isQuiescing = true;
@@ -954,6 +1251,13 @@ function managedKnowledgeAssetWriteError(error: unknown): unknown {
  */
 async function canonicalWorkspaceMountIdentity(value: string): Promise<string> {
   return await canonicalSpacePathIdentity(value, (target) => fs.realpath(target));
+}
+
+function resolveRemoteConfigDirectory(input: {
+  readonly runtimePaths?: AgentArborRuntimePaths;
+  readonly configDirectory?: string;
+}): string {
+  return input.configDirectory ?? path.join(input.runtimePaths?.appHome ?? resolveRuntimeHome(input), "config");
 }
 
 function resolveRuntimeHome(input: {

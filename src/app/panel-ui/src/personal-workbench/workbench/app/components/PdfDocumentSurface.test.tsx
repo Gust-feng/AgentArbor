@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { clearPdfPreviewRuntimeForTesting, PdfDocumentSurface, prefetchPdfPreview } from './PdfDocumentSurface'
+import { clearPdfPreviewRuntimeForTesting, PdfDocumentSurface, PdfDocumentThumbnail, prefetchPdfPreview } from './PdfDocumentSurface'
 import type { DocumentPreview } from './referencePreviewClient'
 
 const getPdfDocumentMock = vi.hoisted(() => vi.fn())
@@ -120,8 +120,10 @@ test('uses a pre-rendered first page on the first commit without a loading state
   await waitFor(() => expect(renderPage).toHaveBeenCalledOnce())
   await Promise.resolve()
   const rendered = render(<PdfDocumentSurface source={{ kind: 'url', url: '/ready.pdf', byteLength: 1024, sourceVersion: 'v1' }} />)
+  const thumbnail = render(<PdfDocumentThumbnail source={{ url: '/ready.pdf', byteLength: 1024, sourceVersion: 'v1' }} title="ready.pdf" />)
 
   expect(screen.queryByText('正在读取 PDF...')).toBeNull()
   expect(rendered.container.querySelector('.aa-pdf-document__page')).not.toBeNull()
+  expect(thumbnail.container.querySelector('.aa-pdf-document__thumbnail canvas')).not.toBeNull()
   expect(drawImage).toHaveBeenCalled()
 })

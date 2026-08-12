@@ -2,6 +2,248 @@
   margin-top: var(--space-6);
 }
 
+.remote-settings {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.remote-settings-card {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.remote-settings-title {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.remote-settings-title.compact {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.remote-settings-title h3 {
+  font-size: 15px;
+  font-weight: var(--weight-heading);
+}
+
+.remote-settings-title p,
+.remote-security-note,
+.remote-conversation-list > p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remote-settings-icon {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-lg);
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+.remote-connection-badge {
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  color: var(--muted);
+  background: var(--row-bg);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.remote-connection-badge.connected {
+  color: color-mix(in oklch, #278652 72%, var(--fg));
+  background: color-mix(in oklch, #4fad72 13%, transparent);
+}
+
+.remote-pairing-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.remote-pairing-form.compact {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.remote-activation {
+  display: grid;
+  gap: 10px;
+}
+
+.remote-pairing-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.remote-pairing-form input {
+  width: 100%;
+}
+
+.remote-device-options {
+  justify-self: start;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.remote-device-options summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.remote-device-options summary::-webkit-details-marker {
+  display: none;
+}
+
+.remote-device-options label {
+  display: grid;
+  min-width: min(320px, 100%);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.remote-device-options input {
+  width: 100%;
+}
+
+.settings-primary-action,
+.remote-code-panel button,
+.remote-device-row button,
+.remote-conversation-list button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-md);
+  padding: 0 11px;
+  background: var(--field-bg);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.settings-primary-action,
+.remote-code-panel button.confirm {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.remote-code-panel {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  border: 1px solid var(--row-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  background: var(--row-bg);
+}
+
+.remote-code-panel > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.remote-code-panel > strong {
+  font-size: 32px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.remote-code-panel > div,
+.remote-device-row > div:last-child {
+  display: flex;
+  gap: 8px;
+}
+
+.remote-code-panel > .remote-pairing-qr {
+  display: grid;
+  width: 164px;
+  height: 164px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+.remote-device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-top: 1px solid var(--row-border);
+  padding-top: var(--space-4);
+}
+
+.remote-device-row > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.remote-device-row span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-device-row button.danger {
+  color: var(--danger);
+}
+
+.remote-settings-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.remote-conversation-list {
+  display: grid;
+}
+
+.remote-conversation-list > div {
+  display: flex;
+  min-height: 45px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--row-border);
+}
+
+.remote-conversation-list span {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-settings-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .remote-pairing-form { grid-template-columns: 1fr; }
+  .remote-device-options { width: 100%; }
+  .remote-device-row { align-items: flex-start; flex-direction: column; }
+}
+
 .settings-model-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);

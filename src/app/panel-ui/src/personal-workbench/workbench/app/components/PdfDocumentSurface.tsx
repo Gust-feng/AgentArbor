@@ -64,6 +64,67 @@ export function PdfDocumentSurface({ source }: PdfDocumentSurfaceProps) {
   return <RenderedPdfDocument url={source.url} byteLength={source.byteLength} sourceVersion={source.sourceVersion} />
 }
 
+export function PdfDocumentThumbnail({
+  source,
+  title,
+  fallbackText,
+}: {
+  readonly source?: { readonly url: string; readonly byteLength?: number; readonly sourceVersion?: string }
+  readonly title: string
+  readonly fallbackText?: string
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [firstPage, setFirstPage] = useState(() => source === undefined
+    ? undefined
+    : getCachedPdfFirstPage(source.url, source.byteLength, source.sourceVersion))
+
+  useEffect(() => {
+    let disposed = false
+    if (source === undefined || source.byteLength === undefined || source.byteLength > MAX_CACHED_PDF_BYTES) {
+      setFirstPage(undefined)
+      return () => { disposed = true }
+    }
+    const cached = getOrCreateCachedPdfDocument(source.url, source.byteLength, source.sourceVersion)
+    setFirstPage(getCachedPdfFirstPage(source.url, source.byteLength, source.sourceVersion))
+    void cached.displayReadyPromise.then(() => {
+      if (!disposed) setFirstPage(getCachedPdfFirstPage(source.url, source.byteLength, source.sourceVersion))
+    }).catch(() => {
+      if (!disposed) setFirstPage(undefined)
+    })
+    return () => { disposed = true }
+  }, [source?.byteLength, source?.sourceVersion, source?.url])
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+    if (canvas === null || firstPage === undefined) return
+    canvas.width = firstPage.canvas.width
+    canvas.height = firstPage.canvas.height
+    canvas.getContext('2d', { alpha: false })?.drawImage(firstPage.canvas, 0, 0)
+  }, [firstPage])
+
+  return (
+    <div className="aa-pdf-document__thumbnail" aria-label={`${title} PDF 首页`}>
+      <div className="aa-pdf-document__thumbnail-paper">
+        {firstPage !== undefined ? (
+          <canvas ref={canvasRef} />
+        ) : fallbackText !== undefined ? (
+          <p>{fallbackText}</p>
+        ) : (
+          <PdfThumbnailPlaceholder />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PdfThumbnailPlaceholder() {
+  return (
+    <div className="aa-pdf-document__thumbnail-placeholder" aria-hidden="true">
+      {[72, 92, 84, 58, 88, 66].map((width, index) => <span key={index} style={{ width: `${width}%` }} />)}
+    </div>
+  )
+}
+
 export function prefetchPdfPreview(preview: DocumentPreview): void {
   if (preview.content.kind !== 'media' || preview.content.mediaKind !== 'pdf') return
   if (preview.byteLength === undefined || preview.byteLength > MAX_CACHED_PDF_BYTES) return

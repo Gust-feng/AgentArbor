@@ -63,3 +63,5 @@ AgentArbor_logo_assets/
 
 docs/研究资料/参考资料/模型信息
 docs/研究资料/参考资料/外部项目分析
+# Cursor Agent one-click launcher (contains a local API key, never commit)
+/cursor-agent.ps1

@@ -6,6 +6,8 @@ export type {
   WorkbenchAsset,
   WorkbenchAssetKind,
   WorkbenchAssetRepository,
+  WorkbenchAssetEvent,
+  WorkbenchAssetsFeature,
 } from "./contracts.js";
 export {
   editableWorkbenchAssetText,
@@ -19,3 +21,5 @@ export {
   workbenchAssetCaptionFingerprint,
 } from "./asset-caption.js";
 export { createSqliteWorkbenchAssetRepository } from "./sqlite-repository.js";
+
+export { createWorkbenchAssetsFeature } from "./workbench-assets-feature.js";

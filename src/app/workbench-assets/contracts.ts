@@ -51,3 +51,25 @@ export interface WorkbenchAssetRepository {
   updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult>;
   updateCaption(input: UpdateWorkbenchAssetCaptionInput): Promise<UpdateWorkbenchAssetCaptionResult>;
 }
+
+/** 资产变更事件：资产编辑与删除的单一观察事实。 */
+export type WorkbenchAssetEvent = {
+  readonly type: "workbench_asset.changed";
+  readonly assetId: string;
+};
+
+/** 资产 feature 的公开 command/query/event facade（远程协同内容同步使用）。 */
+export type WorkbenchAssetsFeature = {
+  readonly commands: {
+    replace(asset: WorkbenchAsset): Promise<void>;
+    updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult>;
+  };
+  readonly queries: {
+    get(id: string): Promise<WorkbenchAsset | undefined>;
+    list(): Promise<readonly WorkbenchAsset[]>;
+  };
+  readonly events: {
+    subscribe(listener: (event: WorkbenchAssetEvent) => void): () => void;
+  };
+  release(): Promise<void>;
+};

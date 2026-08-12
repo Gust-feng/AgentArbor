@@ -425,6 +425,7 @@ test('keeps managed PDF cards typed before and after preview warmup', async () =
 
   expect(screen.getByText('PDF')).toBeTruthy()
   expect(screen.getByRole('heading', { name: 'PyTorch 入门笔记.pdf' })).toBeTruthy()
+  expect(document.querySelector('.aa-pdf-document__thumbnail')).not.toBeNull()
 
   primeReferencePreviewCache([{
     itemId: 'managed-pdf-card',
@@ -437,6 +438,5 @@ test('keeps managed PDF cards typed before and after preview warmup', async () =
     content: { kind: 'pages', pages: ['PDF 正文不应成为卡片封面。'] },
   }], '/api/personal-knowledge/assets')
 
-  await waitFor(() => expect(screen.getByText('PDF')).toBeTruthy())
-  expect(screen.queryByText('PDF 正文不应成为卡片封面。')).toBeNull()
+  expect(await screen.findByText('PDF 正文不应成为卡片封面。')).toBeTruthy()
 })

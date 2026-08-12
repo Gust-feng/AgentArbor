@@ -3,6 +3,14 @@ declare module "*.svg" {
   export default src;
 }
 
+interface ImportMetaEnv {
+  readonly VITE_AGENTARBOR_RELAY_URL?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 declare module "*.svg?raw" {
   const src: string;
   export default src;

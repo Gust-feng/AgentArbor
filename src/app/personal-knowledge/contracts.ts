@@ -155,7 +155,8 @@ export type PersonalKnowledgeCommand =
   | { readonly type: "theme.merge"; readonly fromId: string; readonly toId: string }
   | { readonly type: "theme.assign"; readonly assignment: KnowledgeThemeAssignment }
   | { readonly type: "theme.unassign"; readonly refId: string; readonly themeId: string }
-  | { readonly type: "theme.toggle_lock"; readonly refId: string; readonly themeId: string };
+  | { readonly type: "theme.toggle_lock"; readonly refId: string; readonly themeId: string }
+  | { readonly type: "theme.replace"; readonly theme: KnowledgeTheme };
 
 export interface PersonalKnowledgeRepository {
   readSnapshot(): Promise<PersonalKnowledgeSnapshot>;

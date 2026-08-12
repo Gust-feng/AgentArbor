@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { CodeDocumentSurface } from './CodeDocumentSurface'
 import { MarkdownDocumentSurface } from './MarkdownDocumentSurface'
+import { PdfDocumentThumbnail } from './PdfDocumentSurface'
 import { getNote } from './notesStore'
 import { useBrain, type ResolvedPage } from './brainStore'
 import {
@@ -1601,7 +1602,7 @@ function PageContent({
 /** 哪些格式有封面(图/视频/音频/PDF/代码);文字类(笔记/Markdown/网页)无封面。 */
 function pageHasCover(p: ResolvedPage): boolean {
   if (p.materialKind === 'code') return Boolean(p.previewText)
-  if (p.materialKind === 'pdf') return p.kind === 'material' && Boolean(p.previewText)
+  if (p.materialKind === 'pdf') return true
   return p.materialKind === 'image'
     || p.materialKind === 'video'
     || p.materialKind === 'audio'
@@ -1753,13 +1754,18 @@ function CardCover({ page, hovered }: { page: ResolvedPage; hovered: boolean }) 
       {WAVE.map((height, index) => <span key={index} style={{ width: 4, height: `${height}%`, borderRadius: 2, background: '#b0885a', opacity: 0.75 }} />)}
     </div>
   }
-  // 托管 PDF 保持安静的文档卡片；已有稳定正文投影的内置材料才展示纸页封面。
-  if (kind === 'pdf' && page.previewText) {
-    return <div className="w-full overflow-hidden px-4 pt-4" style={{ height: 132, background: 'var(--aa-surface-hover, #eeebe6)' }}>
-      <div className="w-full h-full rounded-t-md overflow-hidden" style={{ background: 'var(--aa-paper, #ffffff)', border: '1px solid var(--aa-border, rgba(45,40,34,0.08))', padding: '14px 16px' }}>
-        <p className="m-0 whitespace-pre-wrap" style={{ color: 'var(--aa-text-2, #6b655e)', fontSize: 8.5, lineHeight: 1.5, fontFamily: 'var(--reading-font)' }}>{cleanKnowledgeText(page.previewText).slice(0, 240)}</p>
-      </div>
-    </div>
+  if (kind === 'pdf') {
+    const preview = page.documentTarget === undefined
+      ? undefined
+      : getCachedReferencePreview(page.documentTarget.itemId, '', page.documentTarget.apiBase)
+    const source = preview?.content.kind === 'media' && preview.content.mediaKind === 'pdf'
+      ? { url: preview.content.url, byteLength: preview.byteLength, sourceVersion: preview.fingerprint }
+      : undefined
+    return <PdfDocumentThumbnail
+      source={source}
+      title={page.title}
+      fallbackText={page.previewText === undefined ? undefined : cleanKnowledgeText(page.previewText).slice(0, 240)}
+    />
   }
   if (kind === 'code' && page.previewText) {
     return <CodeDocumentSurface source={page.previewText} language={page.language} variant="cover" />

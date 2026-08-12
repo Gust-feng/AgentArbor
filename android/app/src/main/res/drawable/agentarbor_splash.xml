@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The Android splash expects a foreground mark, not a complete launcher tile.
+    These paths are the mark from the canonical AgentArbor favicon.svg; the
+    white rounded tile remains owned by the launcher icon resource. Keeping the
+    two layers separate prevents Android 12 from masking a tile a second time.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:scaleX="0.78"
+        android:scaleY="0.78"
+        android:translateX="112.64"
+        android:translateY="112.64">
+        <path
+            android:fillColor="@color/agentarbor_splash_mark"
+            android:pathData="M383,258h44l243,487h-42L405,303 181,745h-45z" />
+        <path
+            android:fillColor="@color/agentarbor_splash_mark"
+            android:pathData="M602,258h48l245,487h-43L626,303l-70,133 -23,-46z" />
+        <path
+            android:fillColor="@color/agentarbor_splash_mark"
+            android:pathData="m413,437 78,157H323l18,-34h94l-43,-84z" />
+        <path
+            android:fillColor="@color/agentarbor_splash_mark"
+            android:pathData="M402,625h44l-62,120h-45z" />
+        <path
+            android:fillColor="@color/agentarbor_splash_mark"
+            android:pathData="m636,457 146,288h-41L613,487z" />
+    </group>
+</vector>

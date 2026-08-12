@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Server,
   SlidersHorizontal,
+  Smartphone,
   X,
 } from "lucide-react";
 import type {
@@ -35,6 +36,7 @@ import type { SkillDefinition } from "../contracts/skills";
 import type { SubAgentDefinition } from "../contracts/sub-agents";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { AppearanceSettings } from "./appearance-settings";
+import { RemoteCollaborationSettings } from "./remote-collaboration-settings";
 import { BasicCapabilitiesSettings, DesktopAgentPromptSettings, McpServiceSettings } from "./capability-settings";
 import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
@@ -264,6 +266,7 @@ export function SettingsDialog(props: {
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
+            {visibleActiveGroup === "remoteCollaboration" && <RemoteCollaborationSettings />}
             {visibleActiveGroup === "appearance" && <AppearanceSettings />}
             {visibleActiveGroup === "statistics" && <UsageStatisticsSettings />}
             {visibleActiveGroup === "developer" && (
@@ -308,6 +311,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "subAgents", label: "Sub Agent", icon: <Bot size={15} /> },
   { id: "workspace", label: "运行环境", icon: <Database size={15} /> },
+  { id: "remoteCollaboration", label: "移动协同", icon: <Smartphone size={15} /> },
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "statistics", label: "使用统计", icon: <ChartColumn size={15} /> },
   { id: "developer", label: "开发者选项", icon: <Code2 size={15} /> },

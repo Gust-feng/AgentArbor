@@ -25,7 +25,13 @@
     "test": "pnpm build && node scripts/run-node-tests.mjs && pnpm test:panel && pnpm test:release-gate && pnpm test:dev-scripts",
     "smoke:real-ai": "pnpm build && node dist/app/real-ai-smoke.js",
     "panel": "pnpm build && node dist/app/panel.js",
-    "panel:dev": "node scripts/panel-dev.mjs",
+    "typecheck:mobile": "tsc -p tsconfig.mobile.json --noEmit",
+    "build:mobile": "vite build --config vite.mobile.config.ts",
+    "mobile:sync": "pnpm build:mobile && capacitor sync android",
+    "mobile:android:debug": "pnpm mobile:sync && cd android && gradlew.bat assembleDebug",
+    "mobile:dev": "vite --config vite.mobile.config.ts",
+    "test:mobile": "vitest run --config vitest.mobile.config.ts",
+    "remote:service": "pnpm build:node && node dist/app/remote-service.js",    "panel:dev": "node scripts/panel-dev.mjs",
     "panel:desktop:dev": "node scripts/panel-dev.mjs --desktop",
     "panel:desktop:dev:no-restart": "node scripts/panel-dev.mjs --desktop --no-restart",
     "panel:smoke": "pnpm build && node dist/app/panel.js --port 0 --smoke",
@@ -52,7 +58,9 @@
     "tailwindcss": "4.3.0",
     "typescript": "^5.9.0",
     "vite": "^8.0.12",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "@capacitor/cli": "8.5.0",
+    "@types/ws": "^8.18.1"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.80.10",
@@ -89,7 +97,14 @@
     "tw-animate-css": "1.3.8",
     "unpdf": "1.6.2",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@aparajita/capacitor-secure-storage": "8.0.0",
+    "@capacitor/android": "8.5.0",
+    "@capacitor/app": "8.0.0",
+    "@capacitor/barcode-scanner": "3.1.0",
+    "@capacitor/core": "8.5.0",
+    "qrcode.react": "4.2.0",
+    "ws": "^8.21.0"
   },
   "main": "dist/app/panel-desktop.js",
   "productName": "AgentArbor"

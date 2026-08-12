@@ -15,6 +15,10 @@ beforeEach(() => {
   window.localStorage.clear()
 })
 
+beforeEach(() => {
+  window.localStorage.clear()
+})
+
 afterEach(() => {
   vi.useRealTimers()
 })

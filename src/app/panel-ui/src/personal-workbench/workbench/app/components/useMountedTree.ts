@@ -13,6 +13,7 @@ import {
 } from './referencePreviewClient'
 import { subscribeWorkbenchProjectionChanges } from '../../../../app-workbench-projection-changes'
 import { warmReferenceDirectoryPreviews } from './space-reference-preview-warmup'
+import { ApiError } from '../../../../api'
 
 /**
  * 挂载树状态收口 —— 把「引用目录的加载 / 缓存 / 展开」从 SpacePage 的分散状态
@@ -189,6 +190,14 @@ export function actionErrorMessage(error: unknown): string {
     : '空间操作没有完成，请重试。'
 }
 
+/**
+ * 引用已经不存在（多为用户刚取消引用、树投影尚未刷新完成的窗口）。
+ * 这是投影收敛过程中的正常事实，不是加载失败，不应作为操作错误呈现。
+ */
+export function isReferenceRemovedError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'space_reference_not_found'
+}
+
 // ---------------------------------------------------------------------------
 // 缓存状态
 // ---------------------------------------------------------------------------
@@ -351,6 +360,11 @@ export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeRe
         const current = prev.get(key)
         if (current === undefined || current.revision !== revision) return prev
         const next = new Map(prev)
+        if (isReferenceRemovedError(error)) {
+          // 引用已被移除：清掉目录缓存，节点随后由投影刷新摘除，不保留错误态。
+          next.delete(key)
+          return next
+        }
         next.set(key, {
           spaceId: requestSpaceId,
           status: 'error',
@@ -383,7 +397,7 @@ export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeRe
     if (existing !== undefined && existing.status === 'ready') return Promise.resolve()
     return fetchByReference(item.referenceId!, item.relativePath ?? '', 'load').catch(
       (error: unknown) => {
-        onErrorRef.current?.(actionErrorMessage(error))
+        if (!isReferenceRemovedError(error)) onErrorRef.current?.(actionErrorMessage(error))
       },
     )
   }
@@ -426,7 +440,9 @@ export function useMountedTree(options: UseMountedTreeOptions): UseMountedTreeRe
       for (const item of items) {
         if (expandedIds.has(item.id) && isLoadableFolder(item)) {
           void fetchByReference(item.referenceId!, item.relativePath ?? '', 'refresh').catch(
-            (error: unknown) => onErrorRef.current?.(actionErrorMessage(error)),
+            (error: unknown) => {
+              if (!isReferenceRemovedError(error)) onErrorRef.current?.(actionErrorMessage(error))
+            },
           )
         }
         if (item.children !== undefined) visit(item.children)

@@ -41,6 +41,7 @@ import {
   referenceChildId,
   isFileSystemFolderKind,
   actionErrorMessage,
+  isReferenceRemovedError,
   type SpaceItem,
 } from './useMountedTree'
 import { useNotes } from './notesStore'
@@ -501,7 +502,10 @@ export function SpacePage({
     }
     const referenceId = item.referenceId ?? item.id
     const relativePath = item.relativePath ?? ''
-    void prefetchReferencePreview(referenceId, relativePath).catch((error: unknown) => setActionError(actionErrorMessage(error)))
+    void prefetchReferencePreview(referenceId, relativePath).catch((error: unknown) => {
+      // 引用刚被移除、投影尚未刷新时的点击不算失败：节点马上会消失。
+      if (!isReferenceRemovedError(error)) setActionError(actionErrorMessage(error))
+    })
     selectItem(id)
   }
 

@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import type { PersonalSpaceProjection } from '../../../space'
+import { ApiError } from '../../../../api'
 import { refreshDocumentPreview } from './referencePreviewClient'
 import { projectSpaceItem, useMountedTree } from './useMountedTree'
 
@@ -101,6 +102,31 @@ describe('useMountedTree', () => {
     await waitFor(() => expect(result.current.tree[0]?.children?.[0]?.children?.[0]?.name).toBe('inside'))
 
     expect(result.current.tree[0]?.children?.[0]?.children?.[0]?.domainKind).toBe('managed_folder')
+  })
+
+  test('drops a removed reference silently instead of reporting a load error', async () => {
+    // 用户取消引用后、树投影刷新前的窗口：目录加载会命中 404
+    // space_reference_not_found。这是投影收敛中的正常事实，不是操作失败。
+    const onError = vi.fn()
+    const space = mountedSpace('space-a')
+    refreshPreview.mockRejectedValueOnce(new ApiError(404, 'space_reference_not_found', '未找到空间引用。'))
+
+    const { result } = renderHook(() => useMountedTree({ spaceId: 'space-a', space, onError }))
+    await waitFor(() => expect(refreshPreview).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(result.current.directories.size).toBe(0))
+
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  test('still reports other directory load failures through onError', async () => {
+    const onError = vi.fn()
+    const space = mountedSpace('space-a')
+    refreshPreview.mockRejectedValueOnce(new Error('磁盘读取失败。'))
+
+    const { result } = renderHook(() => useMountedTree({ spaceId: 'space-a', space, onError }))
+    await waitFor(() => expect(onError).toHaveBeenCalledWith('磁盘读取失败。'))
+
+    expect([...result.current.directories.values()][0]?.status).toBe('error')
   })
 
   test('uses the preview presentation to distinguish web assets from document assets', () => {

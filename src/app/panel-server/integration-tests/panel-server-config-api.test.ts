@@ -154,6 +154,10 @@ test("panel config API updates Desktop Agent system prompt", async () => {
       body: { systemPrompt: customPrompt },
     });
     const config = await requestJson(server.url, "/api/config");
+    const variant = await requestJson(server.url, "/api/config/desktop-agent", {
+      method: "POST",
+      body: { systemPromptVariant: "zh-v1" },
+    });
     const reset = await requestJson(server.url, "/api/config/desktop-agent", {
       method: "POST",
       body: { resetSystemPrompt: true },
@@ -162,10 +166,17 @@ test("panel config API updates Desktop Agent system prompt", async () => {
     assert.equal(initial.status, 200);
     assert.equal(typeof initial.body.desktopAgent.systemPrompt, "string");
     assert.equal(initial.body.desktopAgent.isDefault, true);
+    assert.equal(initial.body.desktopAgent.systemPromptVariant, "latest");
+    assert.equal(initial.body.desktopAgent.promptRef, "prompt:desktop-root-agent:v8");
     assert.equal(update.status, 200);
     assert.equal(update.body.desktopAgent.systemPrompt, customPrompt);
     assert.equal(update.body.desktopAgent.isDefault, false);
     assert.equal(config.body.desktopAgent.systemPrompt, customPrompt);
+    assert.equal(variant.status, 200);
+    assert.equal(variant.body.desktopAgent.systemPromptVariant, "zh-v1");
+    assert.equal(variant.body.desktopAgent.isDefault, true);
+    assert.equal(variant.body.desktopAgent.promptRef, "prompt:desktop-root-agent:zh-v1");
+    assert.equal(variant.body.desktopAgent.systemPrompt.includes("简体中文"), true);
     assert.equal(reset.status, 200);
     assert.equal(reset.body.desktopAgent.isDefault, true);
     assert.notEqual(reset.body.desktopAgent.systemPrompt, customPrompt);

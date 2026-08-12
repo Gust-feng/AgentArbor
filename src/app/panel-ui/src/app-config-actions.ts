@@ -227,6 +227,10 @@ export async function saveDesktopAgentSystemPrompt(systemPrompt: string): Promis
   return postJson<ConfigResponse>("/api/config/desktop-agent", { systemPrompt });
 }
 
+export async function saveDesktopAgentSystemPromptVariant(variant: string): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/desktop-agent", { systemPromptVariant: variant });
+}
+
 export async function resetDesktopAgentSystemPrompt(): Promise<ConfigResponse> {
   return postJson<ConfigResponse>("/api/config/desktop-agent", { resetSystemPrompt: true });
 }

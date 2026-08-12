@@ -3,6 +3,7 @@ import { DESKTOP_AGENT_ID } from "./desktop-agent-identity.js";
 import { DESKTOP_ROOT_AGENT_OUTPUT_CONTRACT } from "./desktop-root-agent-output-contract.js";
 import {
   DESKTOP_ROOT_AGENT_PROMPT,
+  DESKTOP_ROOT_AGENT_PROMPT_ZH,
   DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V7,
   DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_1,
   DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V6,
@@ -22,6 +23,12 @@ export const DESKTOP_ROOT_AGENT: AgentDefinition = {
   turnPolicy: DESKTOP_ROOT_AGENT_TURN_POLICY,
   outputContract: DESKTOP_ROOT_AGENT_OUTPUT_CONTRACT,
   toolVisibilityProfile: DESKTOP_ROOT_AGENT_TOOL_VISIBILITY,
+};
+
+// 简体中文提示词变体定义：供运行时目录解析 zh-v1 引用与恢复历史 run。
+export const DESKTOP_ROOT_AGENT_ZH: AgentDefinition = {
+  ...DESKTOP_ROOT_AGENT,
+  prompt: DESKTOP_ROOT_AGENT_PROMPT_ZH,
 };
 
 export const DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1: AgentDefinition = {

@@ -29,7 +29,7 @@ import {
 import type { CreateContextAttachmentPreviewInput } from "../task-soil/context-attachments.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { AgentArborRunMode as PanelRunMode } from "../run-runtime-core/run-mode-policy.js";
-import { DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS } from "../config-center/desktop-agent-settings.js";
+import { DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS, isKnownDesktopAgentBuiltInPromptVariant } from "../config-center/desktop-agent-settings.js";
 import { sanitizeAssistantVisibleText } from "../text-projection/visible-text-safety.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import { z } from "zod";
@@ -323,9 +323,16 @@ export function parseDesktopAgentConfigUpdate(raw: unknown): UpdateDesktopAgentC
   const request = z.preprocess(normalizeRequestObject, z.object({
     resetSystemPrompt: optionalBooleanSchema,
     systemPrompt: z.unknown().optional(),
+    systemPromptVariant: z.unknown().optional(),
   })).parse(raw);
   if (request.resetSystemPrompt === true) {
     return { resetSystemPrompt: true };
+  }
+  if (isKnownDesktopAgentBuiltInPromptVariant(request.systemPromptVariant)) {
+    return { systemPromptVariant: request.systemPromptVariant };
+  }
+  if (request.systemPromptVariant !== undefined) {
+    throw new PanelHttpError(400, "invalid_desktop_agent_system_prompt_variant", "提示词偏好无效。");
   }
   if (typeof request.systemPrompt !== "string") {
     throw new PanelHttpError(400, "missing_desktop_agent_system_prompt", "系统提示词不能为空。");

@@ -83,6 +83,7 @@ export function WorkbenchSettingsDialog(props: WorkbenchSettingsDialogProps): Re
       skills={props.app.skills}
       subAgents={props.app.subAgents}
       onSaveDesktopAgentSystemPrompt={props.actions.saveDesktopAgentSystemPrompt}
+      onSaveDesktopAgentSystemPromptVariant={props.actions.saveDesktopAgentSystemPromptVariant}
       onResetDesktopAgentSystemPrompt={props.actions.resetDesktopAgentSystemPrompt}
       tools={props.app.tools}
       toolForm={props.forms.toolForm}

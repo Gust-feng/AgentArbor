@@ -8,6 +8,7 @@ import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAg
 import { ConfigCenter, ConfigCenterValidationError } from "./index.js";
 import { toSanitizedCommandShellConfig } from "./command-shell-settings.js";
 import { DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT } from "./desktop-agent-settings.js";
+import { DESKTOP_ROOT_AGENT_PROMPT_ZH } from "../agent-prompts/desktop-root-agent-prompt.js";
 import { parseLocalSettingsFile } from "./settings-schema.js";
 
 test("config settings reject retired model providers and protocols instead of rewriting them", () => {
@@ -278,6 +279,10 @@ test("ConfigCenter persists Desktop Agent system prompt settings", async () => {
     const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
       readonly desktopAgent?: { readonly systemPromptMode?: string; readonly systemPrompt?: string };
     };
+    const zh = await configCenter.updateDesktopAgentConfig({ systemPromptVariant: "zh-v1" });
+    const zhSettingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
+      readonly desktopAgent?: { readonly systemPromptMode?: string; readonly systemPromptVariant?: string };
+    };
     const reset = await configCenter.updateDesktopAgentConfig({ resetSystemPrompt: true });
     const resetSettingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
       readonly desktopAgent?: { readonly systemPromptMode?: string; readonly systemPrompt?: string };
@@ -285,12 +290,18 @@ test("ConfigCenter persists Desktop Agent system prompt settings", async () => {
 
     assert.equal(initial.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
     assert.equal(initial.isDefault, true);
+    assert.equal(initial.systemPromptVariant, "latest");
     assert.equal(updated.systemPrompt, customPrompt);
     assert.equal(updated.isDefault, false);
     assert.equal(reloaded.systemPrompt, customPrompt);
     assert.equal(settingsRaw.desktopAgent?.systemPromptMode, "custom");
     assert.equal(settingsRaw.desktopAgent?.systemPrompt, customPrompt);
-    assert.equal(reset.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
+    assert.equal(zh.systemPromptVariant, "zh-v1");
+    assert.equal(zh.promptRef, "prompt:desktop-root-agent:zh-v1");
+    assert.equal(zhSettingsRaw.desktopAgent?.systemPromptMode, "built_in");
+    assert.equal(zhSettingsRaw.desktopAgent?.systemPromptVariant, "zh-v1");
+    // reset 保留用户选择的内置提示词偏好：zh-v1 下恢复默认回到中文提示词。
+    assert.equal(reset.systemPrompt, DESKTOP_ROOT_AGENT_PROMPT_ZH.systemPrompt);
     assert.equal(reset.isDefault, true);
     assert.equal(resetSettingsRaw.desktopAgent?.systemPromptMode, "built_in");
     assert.equal(resetSettingsRaw.desktopAgent?.systemPrompt, undefined);

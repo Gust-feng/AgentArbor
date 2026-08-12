@@ -86,6 +86,7 @@ export function SettingsDialog(props: {
   readonly skills: readonly SkillDefinition[];
   readonly subAgents: readonly SubAgentDefinition[];
   readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
+  readonly onSaveDesktopAgentSystemPromptVariant: (variant: string) => Promise<void>;
   readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
@@ -221,6 +222,8 @@ export function SettingsDialog(props: {
                 savingTools={props.savingTools}
                 onSaveTools={props.onSaveTools}
                 onSaveSkillTriggerMode={props.onSaveSkillTriggerMode}
+                savingDesktopAgent={props.savingDesktopAgent}
+                onSaveDesktopAgentSystemPromptVariant={props.onSaveDesktopAgentSystemPromptVariant}
               />
             )}
             {visibleActiveGroup === "mcp" && (

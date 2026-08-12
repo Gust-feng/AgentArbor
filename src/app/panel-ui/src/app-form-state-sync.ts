@@ -43,16 +43,21 @@ export function useAppFormStateSync(options: AppFormStateSyncOptions): void {
     if (activeProfileId !== undefined && activeProfileId !== lastActiveProfileIdRef.current) {
       lastActiveProfileIdRef.current = activeProfileId;
       options.setAiMode(normalizeVisibleAiMode(options.app.config!.config!.defaultAiMode));
-      options.setModelForm({
-        profileId: activeProfileId,
-        label: visibleConfigLabel(options.app.config!.config!),
-        logoDataUrl: options.app.config!.config!.logoDataUrl ?? "",
-        logoCleared: false,
-        baseUrl: visibleConfigBaseUrl(options.app.config!.config!),
-        protocolKind: options.app.config!.config!.protocolKind ?? "openai_compatible_chat_completions",
-        model: options.app.config!.config!.model ?? "",
-        apiKey: "",
-        apiKeyCleared: false,
+      options.setModelForm((previous) => {
+        // 保存厂商配置本身就会激活该厂商；当表单已经指向新激活的 profile 时，
+        // 用户正在编辑（例如刚输入的 API Key）不能被整体重置覆盖。
+        if (previous.profileId === activeProfileId) return previous;
+        return {
+          profileId: activeProfileId,
+          label: visibleConfigLabel(options.app.config!.config!),
+          logoDataUrl: options.app.config!.config!.logoDataUrl ?? "",
+          logoCleared: false,
+          baseUrl: visibleConfigBaseUrl(options.app.config!.config!),
+          protocolKind: options.app.config!.config!.protocolKind ?? "openai_compatible_chat_completions",
+          model: options.app.config!.config!.model ?? "",
+          apiKey: "",
+          apiKeyCleared: false,
+        };
       });
     }
     if (options.app.config?.desktopAgent?.systemPrompt !== undefined) {

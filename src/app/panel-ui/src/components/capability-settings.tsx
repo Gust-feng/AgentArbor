@@ -50,6 +50,8 @@ export function BasicCapabilitiesSettings(props: {
   readonly savingTools?: boolean;
   readonly onSaveTools: (form: ToolForm) => void;
   readonly onSaveSkillTriggerMode: (mode: SkillTriggerMode) => void;
+  readonly savingDesktopAgent?: boolean;
+  readonly onSaveDesktopAgentSystemPromptVariant: (variant: string) => Promise<void>;
 }): React.ReactElement {
   return (
     <div className="basic-capabilities-settings">
@@ -77,6 +79,11 @@ export function BasicCapabilitiesSettings(props: {
             config={props.config}
             saving={props.savingTools}
             onSave={props.onSaveSkillTriggerMode}
+          />
+          <SystemPromptVariantSettings
+            config={props.config}
+            saving={props.savingDesktopAgent}
+            onSave={props.onSaveDesktopAgentSystemPromptVariant}
           />
         </div>
       </CapabilityGroup>
@@ -199,6 +206,59 @@ function SkillTriggerSettings(props: {
     </div>
   );
 }
+
+function SystemPromptVariantSettings(props: {
+  readonly config?: ConfigResponse;
+  readonly saving?: boolean;
+  readonly onSave: (variant: string) => Promise<void>;
+}): React.ReactElement {
+  const desktopAgent = props.config?.desktopAgent;
+  const customPromptActive = desktopAgent?.isDefault === false;
+  const persistedVariant = desktopAgent?.systemPromptVariant ?? "latest";
+  const [draftVariant, setDraftVariant] = React.useState(persistedVariant);
+
+  React.useEffect(() => {
+    setDraftVariant(persistedVariant);
+  }, [persistedVariant]);
+
+  const options = (desktopAgent?.variants?.length ?? 0) > 0
+    ? desktopAgent!.variants!.map((variant) => ({
+        value: variant.id,
+        label: variant.label,
+      }))
+    : DEFAULT_SYSTEM_PROMPT_VARIANTS;
+
+  const updateVariant = (value: string): void => {
+    setDraftVariant(value);
+    void props.onSave(value);
+  };
+
+  return (
+    <div className="capability-preference-row" aria-busy={props.saving === true}>
+      <div className="capability-preference-copy">
+        <strong>提示词偏好</strong>
+        <span>
+          {customPromptActive
+            ? "自定义提示词生效中，恢复默认后本偏好生效"
+            : "选择默认系统提示词的版本与默认回答语言"}
+        </span>
+      </div>
+      <SettingsSelectControl
+        id="desktop-agent-system-prompt-variant"
+        ariaLabel="提示词偏好"
+        value={draftVariant}
+        options={options}
+        onChange={updateVariant}
+        disabled={customPromptActive || props.saving === true}
+      />
+    </div>
+  );
+}
+
+const DEFAULT_SYSTEM_PROMPT_VARIANTS: readonly { readonly value: string; readonly label: string }[] = [
+  { value: "latest", label: "跟随最新" },
+  { value: "zh-v1", label: "简体中文" },
+];
 
 export function DesktopAgentPromptSettings(props: {
   readonly config?: ConfigResponse;

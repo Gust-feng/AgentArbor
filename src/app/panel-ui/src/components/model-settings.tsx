@@ -109,7 +109,6 @@ export function ModelSettings(props: {
   const hasKey = selectedForm.apiKey.length > 0;
   const hasApiKeyAction = hasKey || selectedSecretConfigured;
   const isActive = props.active !== false;
-  const initializedItemKeyRef = useRef<string | undefined>(undefined);
   modelFormRef.current = selectedForm;
   selectedKeyRef.current = selectedKey;
 
@@ -130,14 +129,16 @@ export function ModelSettings(props: {
   }, [activeProfileId, items, selectedKey]);
 
   useEffect(() => {
-    if (!isActive || selectedItem === undefined || initializedItemKeyRef.current === selectedItem.key) return;
-    initializedItemKeyRef.current = selectedItem.key;
+    if (!isActive || selectedItem === undefined) return;
+    // 表单已经指向选中项时不重复初始化：保存厂商配置后激活关系会把预设项的 key
+    // 从 preset:X 翻转为 profile:X，若此时重置表单会清掉用户刚输入的 API Key。
+    if (props.modelForm.profileId === modelProviderFormId(selectedItem)) return;
     const nextForm = modelFormFromProviderItem(selectedItem);
     setRevealed(false);
     catalogState.setModelQuery("");
     catalogState.setSelectedModelRowId(nextForm.model.trim().length === 0 ? undefined : nextForm.model);
     props.setModelForm(nextForm);
-  }, [isActive, props.setModelForm, selectedItem]);
+  }, [isActive, props.setModelForm, selectedItem, props.modelForm.profileId]);
 
   useEffect(() => {
     return () => {

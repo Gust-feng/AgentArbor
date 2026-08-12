@@ -95,9 +95,17 @@ export type ToolConfirmationConfig = {
 
 export type DesktopAgentConfig = {
   readonly systemPrompt?: string;
+  readonly systemPromptVariant?: string;
+  readonly promptRef?: string;
+  readonly promptVersion?: string;
   readonly updatedAt?: string;
   readonly isDefault?: boolean;
   readonly maxSystemPromptChars?: number;
+  readonly variants?: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly description?: string;
+  }[];
 };
 
 export type SkillTriggerMode = "keyword" | "model";

@@ -14,6 +14,7 @@ import {
   resetDesktopAgentSystemPrompt as requestResetDesktopAgentSystemPrompt,
   saveCommandShellConfig,
   saveDesktopAgentSystemPrompt as requestSaveDesktopAgentSystemPrompt,
+  saveDesktopAgentSystemPromptVariant as requestSaveDesktopAgentSystemPromptVariant,
   saveMcpServerSettings,
   saveModelCapabilityConfig,
   saveModelProviderCatalog,
@@ -56,6 +57,7 @@ export type AppSettingsController = {
   readonly saveCommandShell: (kind: CommandShellKind | "auto") => Promise<void>;
   readonly saveToolConfirmationPolicy: (policy: ComposerToolConfirmationPolicy) => Promise<void>;
   readonly saveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
+  readonly saveDesktopAgentSystemPromptVariant: (variant: string) => Promise<void>;
   readonly resetDesktopAgentSystemPrompt: () => Promise<void>;
   readonly saveSkillTriggerMode: (mode: SkillTriggerMode) => Promise<void>;
   readonly saveTools: (nextToolForm?: ToolForm) => Promise<void>;
@@ -476,6 +478,31 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function saveDesktopAgentSystemPromptVariant(variant: string): Promise<void> {
+    options.setSavingDesktopAgent(true);
+    try {
+      const response = await requestSaveDesktopAgentSystemPromptVariant(variant);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+          error: undefined,
+        }));
+        options.setDesktopAgentSystemPrompt(response.desktopAgent?.systemPrompt ?? "");
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "提示词偏好保存失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingDesktopAgent(false);
+    }
+  }
+
   async function resetDesktopAgentSystemPrompt(): Promise<void> {
     options.setSavingDesktopAgent(true);
     try {
@@ -882,6 +909,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     saveCommandShell,
     saveToolConfirmationPolicy,
     saveDesktopAgentSystemPrompt,
+    saveDesktopAgentSystemPromptVariant,
     resetDesktopAgentSystemPrompt,
     saveSkillTriggerMode,
     saveTools,

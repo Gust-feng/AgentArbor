@@ -25,7 +25,6 @@ export function ModelProviderForm(props: {
             type={props.revealed ? "text" : "password"}
             className={props.revealed ? undefined : "api-key-input-masked"}
             value={props.modelForm.apiKey}
-            readOnly={props.selectedSecretConfigured}
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => {

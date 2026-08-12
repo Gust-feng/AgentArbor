@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import type { ConfigResponse, ModelProviderModelCatalog } from "../contracts/config";
@@ -51,6 +51,41 @@ describe("ModelSettings built-in provider presets", () => {
   });
 });
 
+describe("ModelSettings API key editing", () => {
+  test("keeps the API key field editable when the provider already has a configured secret", async () => {
+    const user = userEvent.setup();
+
+    render(<ConfigurableModelSettingsHarness config={SECRET_CONFIG} />);
+
+    const apiKeyInput = screen.getByLabelText("API Key") as HTMLInputElement;
+    expect(apiKeyInput.readOnly).toBe(false);
+    await user.type(apiKeyInput, "sk-replacement");
+    expect(apiKeyInput.value).toBe("sk-replacement");
+  });
+
+  test("preserves the typed API key when the first save activates the preset profile", async () => {
+    const user = userEvent.setup();
+
+    const { rerender } = render(<ConfigurableModelSettingsHarness config={FRESH_CONFIG} />);
+
+    const moonshotRow = document.querySelector('[data-provider-key="preset:moonshot"]') as HTMLElement | null;
+    expect(moonshotRow).not.toBeNull();
+    if (moonshotRow === null) {
+      throw new Error("Unconfigured moonshot preset row not found.");
+    }
+    fireEvent.click(within(moonshotRow).getByRole("button", { name: "月之暗面" }));
+
+    const apiKeyInput = screen.getByLabelText("API Key") as HTMLInputElement;
+    await user.type(apiKeyInput, "sk-moonshot");
+    expect(apiKeyInput.value).toBe("sk-moonshot");
+
+    rerender(<ConfigurableModelSettingsHarness config={MOONSHOT_ACTIVATED_CONFIG} />);
+
+    expect(apiKeyInput.value).toBe("sk-moonshot");
+    expect(apiKeyInput.readOnly).toBe(false);
+  });
+});
+
 function ModelSettingsHarness(props: {
   readonly onCreateCustomProfile: (form?: ModelForm) => Promise<void>;
 }): React.ReactElement {
@@ -84,23 +119,37 @@ function ModelSettingsHarness(props: {
 function FreshModelSettingsHarness(props: {
   readonly onSave: (form?: ModelForm) => Promise<void>;
 }): React.ReactElement {
-  const [modelForm, setModelForm] = useState<ModelForm>({
-    profileId: "default",
-    label: "OpenAI",
+  return (
+    <ConfigurableModelSettingsHarness
+      config={FRESH_CONFIG}
+      initialForm={DEFAULT_FORM}
+      onSave={props.onSave}
+    />
+  );
+}
+
+function ConfigurableModelSettingsHarness(props: {
+  readonly config: ConfigResponse;
+  readonly initialForm?: ModelForm;
+  readonly onSave?: (form?: ModelForm) => Promise<void>;
+}): React.ReactElement {
+  const [modelForm, setModelForm] = useState<ModelForm>(props.initialForm ?? {
+    profileId: "",
+    label: "",
     logoDataUrl: "",
     logoCleared: false,
-    baseUrl: "https://api.openai.com/v1",
-    protocolKind: "openai_responses",
+    baseUrl: "",
+    protocolKind: "openai_compatible_chat_completions",
     model: "",
     apiKey: "",
     apiKeyCleared: false,
   });
   return (
     <ModelSettings
-      config={FRESH_CONFIG}
+      config={props.config}
       modelForm={modelForm}
       setModelForm={setModelForm}
-      onSave={props.onSave}
+      onSave={props.onSave ?? (async () => undefined)}
       onCreateCustomProfile={async () => undefined}
       onReorderModelProviders={async () => undefined}
       onDeleteModelProvider={async () => undefined}
@@ -110,6 +159,18 @@ function FreshModelSettingsHarness(props: {
     />
   );
 }
+
+const DEFAULT_FORM: ModelForm = {
+  profileId: "default",
+  label: "OpenAI",
+  logoDataUrl: "",
+  logoCleared: false,
+  baseUrl: "https://api.openai.com/v1",
+  protocolKind: "openai_responses",
+  model: "",
+  apiKey: "",
+  apiKeyCleared: false,
+};
 
 const CONFIG: ConfigResponse = {
   config: {
@@ -184,4 +245,68 @@ const FRESH_CONFIG: ConfigResponse = {
       },
     ],
   },
+};
+
+const SECRET_CONFIG: ConfigResponse = {
+  config: {
+    profileId: "default",
+    label: "OpenAI",
+    providerKind: "openai_compatible",
+    protocolKind: "openai_responses",
+    baseUrl: "https://api.openai.com/v1",
+    defaultAiMode: "openai-responses",
+    enabled: true,
+    secretConfigured: true,
+  },
+  profiles: [
+    {
+      profileId: "default",
+      label: "OpenAI",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_responses",
+      baseUrl: "https://api.openai.com/v1",
+      defaultAiMode: "openai-responses",
+      enabled: true,
+      secretConfigured: true,
+    },
+  ],
+  modelProviderMarket: FRESH_CONFIG.modelProviderMarket,
+  modelProviderOrder: ["profile:default"],
+};
+
+const MOONSHOT_ACTIVATED_CONFIG: ConfigResponse = {
+  config: {
+    profileId: "moonshot",
+    label: "月之暗面",
+    providerKind: "openai_compatible",
+    protocolKind: "openai_compatible_chat_completions",
+    baseUrl: "https://api.moonshot.cn/v1",
+    defaultAiMode: "openai-compatible",
+    enabled: true,
+    secretConfigured: true,
+  },
+  profiles: [
+    {
+      profileId: "default",
+      label: "OpenAI",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_responses",
+      baseUrl: "https://api.openai.com/v1",
+      defaultAiMode: "openai-responses",
+      enabled: true,
+      secretConfigured: false,
+    },
+    {
+      profileId: "moonshot",
+      label: "月之暗面",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.moonshot.cn/v1",
+      defaultAiMode: "openai-compatible",
+      enabled: true,
+      secretConfigured: true,
+    },
+  ],
+  modelProviderMarket: FRESH_CONFIG.modelProviderMarket,
+  modelProviderOrder: ["profile:default", "profile:moonshot"],
 };

@@ -214,6 +214,7 @@ function settingsDialogProps(
     skills: [],
     subAgents: [],
     onSaveDesktopAgentSystemPrompt: async () => undefined,
+    onSaveDesktopAgentSystemPromptVariant: async () => undefined,
     onResetDesktopAgentSystemPrompt: async () => undefined,
     toolForm: {
       provider: "",

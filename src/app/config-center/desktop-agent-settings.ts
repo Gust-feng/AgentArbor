@@ -16,7 +16,7 @@ import { asRecord, optionalString } from "./settings-utils.js";
 
 export const DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT = DESKTOP_ROOT_AGENT_PROMPT.systemPrompt;
 export const DESKTOP_AGENT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
-export const DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT_VARIANT: DesktopAgentBuiltInPromptVariant = "latest";
+export const DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT_VARIANT: DesktopAgentBuiltInPromptVariant = "en";
 
 // 用户自定义提示词的稳定引用：正文与指纹只进入 sanitized 投影，不进入设置存储。
 export const USER_CONFIGURED_DESKTOP_PROMPT_REF = "prompt:desktop-root-agent:user-configured";
@@ -24,9 +24,9 @@ export const USER_CONFIGURED_DESKTOP_PROMPT_REF = "prompt:desktop-root-agent:use
 // 内置提示词偏好目录：id 是持久化事实，label/description 是只读展示字段。
 export const DESKTOP_AGENT_BUILT_IN_PROMPT_VARIANTS: readonly DesktopAgentBuiltInPromptVariantInfo[] = [
   {
-    id: "latest",
-    label: "跟随最新",
-    description: "使用随版本更新的最新内置提示词",
+    id: "en",
+    label: "English",
+    description: "英文提示词，回答跟随用户使用的语言",
   },
   {
     id: "zh-v1",
@@ -36,7 +36,7 @@ export const DESKTOP_AGENT_BUILT_IN_PROMPT_VARIANTS: readonly DesktopAgentBuiltI
 ];
 
 export function isKnownDesktopAgentBuiltInPromptVariant(value: unknown): value is DesktopAgentBuiltInPromptVariant {
-  return value === "latest" || value === "zh-v1";
+  return value === "en" || value === "zh-v1";
 }
 
 export function createDefaultDesktopAgentSettings(

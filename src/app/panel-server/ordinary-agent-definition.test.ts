@@ -12,7 +12,7 @@ import { reconstructFrozenOrdinaryDefinition } from "./runtime.js";
 test("frozen custom Ordinary definitions can be reconstructed after process restart", () => {
   const configured = desktopAgentDefinitionFromConfig(DESKTOP_ROOT_AGENT, {
     systemPrompt: "Use the persisted custom Ordinary instructions.",
-    systemPromptVariant: "latest",
+    systemPromptVariant: "en",
     promptRef: "prompt:desktop-root-agent:user-configured",
     promptVersion: "user-a1b2c3d4e5f6",
     updatedAt: "2026-07-15T00:00:00.000Z",
@@ -55,7 +55,7 @@ test("the zh built-in variant builds the frozen Chinese definition and matches t
 test("the current default built-in config keeps the base definition", () => {
   const configured = desktopAgentDefinitionFromConfig(DESKTOP_ROOT_AGENT, {
     systemPrompt: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
-    systemPromptVariant: "latest",
+    systemPromptVariant: "en",
     promptRef: DESKTOP_ROOT_AGENT.prompt.promptRef,
     promptVersion: DESKTOP_ROOT_AGENT.prompt.version,
     updatedAt: "2026-08-13T00:00:00.000Z",

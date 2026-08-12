@@ -290,7 +290,7 @@ test("ConfigCenter persists Desktop Agent system prompt settings", async () => {
 
     assert.equal(initial.systemPrompt, DEFAULT_DESKTOP_AGENT_SYSTEM_PROMPT);
     assert.equal(initial.isDefault, true);
-    assert.equal(initial.systemPromptVariant, "latest");
+    assert.equal(initial.systemPromptVariant, "en");
     assert.equal(updated.systemPrompt, customPrompt);
     assert.equal(updated.isDefault, false);
     assert.equal(reloaded.systemPrompt, customPrompt);

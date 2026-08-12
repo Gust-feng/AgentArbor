@@ -166,7 +166,7 @@ test("panel config API updates Desktop Agent system prompt", async () => {
     assert.equal(initial.status, 200);
     assert.equal(typeof initial.body.desktopAgent.systemPrompt, "string");
     assert.equal(initial.body.desktopAgent.isDefault, true);
-    assert.equal(initial.body.desktopAgent.systemPromptVariant, "latest");
+    assert.equal(initial.body.desktopAgent.systemPromptVariant, "en");
     assert.equal(initial.body.desktopAgent.promptRef, "prompt:desktop-root-agent:v8");
     assert.equal(update.status, 200);
     assert.equal(update.body.desktopAgent.systemPrompt, customPrompt);

@@ -214,7 +214,7 @@ function SystemPromptVariantSettings(props: {
 }): React.ReactElement {
   const desktopAgent = props.config?.desktopAgent;
   const customPromptActive = desktopAgent?.isDefault === false;
-  const persistedVariant = desktopAgent?.systemPromptVariant ?? "latest";
+  const persistedVariant = desktopAgent?.systemPromptVariant ?? "en";
   const [draftVariant, setDraftVariant] = React.useState(persistedVariant);
 
   React.useEffect(() => {
@@ -256,7 +256,7 @@ function SystemPromptVariantSettings(props: {
 }
 
 const DEFAULT_SYSTEM_PROMPT_VARIANTS: readonly { readonly value: string; readonly label: string }[] = [
-  { value: "latest", label: "跟随最新" },
+  { value: "en", label: "English" },
   { value: "zh-v1", label: "简体中文" },
 ];
 

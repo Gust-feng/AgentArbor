@@ -47,6 +47,52 @@ test("personal knowledge persists Markdown notes and rejects stale revisions", a
   assert.equal(database.connection.prepare("PRAGMA journal_mode").get()?.journal_mode, "wal");
 });
 
+test("restoreNote writes the full content of an earlier revision as a new revision", async (t) => {
+  const { feature } = await fixture(t);
+  const note = await feature.commands.createNote({ spaceId: "space-one", title: "回溯笔记", bodyMarkdown: "第一版正文", actor: { kind: "user" } });
+  await feature.commands.updateNote({ id: note.id, expectedRevision: 1, bodyMarkdown: "第二版正文", actor: { kind: "agent", actorId: "ordinary", traceId: "trace-1", goalId: "goal-1", toolCallId: "call-1" } });
+  await feature.commands.updateNote({ id: note.id, expectedRevision: 2, title: "回溯笔记v3", bodyMarkdown: "第三版正文", actor: { kind: "user" } });
+
+  await feature.commands.restoreNote({ id: note.id, expectedRevision: 3, targetRevision: 1, actor: { kind: "agent", actorId: "ordinary", traceId: "trace-2", goalId: "goal-2", toolCallId: "call-2" } });
+
+  const restored = (await feature.queries.snapshot()).notes[0];
+  assert.equal(restored?.title, "回溯笔记");
+  assert.equal(restored?.bodyMarkdown, "第一版正文");
+  assert.equal(restored?.revision, 4);
+  const revisions = await feature.queries.noteRevisions(note.id);
+  assert.equal(revisions[0]?.operation, "update");
+  assert.equal(revisions[0]?.baseRevision, 3);
+  assert.equal(revisions[0]?.title, "回溯笔记");
+  assert.equal(revisions[0]?.bodyMarkdown, "第一版正文");
+  assert.equal(revisions[0]?.changeSummary, "恢复到版本 1 的内容");
+  assert.deepEqual(revisions[0]?.actor, { kind: "agent", actorId: "ordinary", traceId: "trace-2", goalId: "goal-2", toolCallId: "call-2" });
+  assert.equal(revisions[1]?.revision, 3);
+  assert.equal(revisions[1]?.bodyMarkdown, "第三版正文");
+});
+
+test("restoreNote rejects stale revisions, missing targets and no-op restores", async (t) => {
+  const { feature } = await fixture(t);
+  const note = await feature.commands.createNote({ spaceId: "space-one", title: "标题", bodyMarkdown: "第一版" });
+  await feature.commands.updateNote({ id: note.id, expectedRevision: 1, bodyMarkdown: "第二版" });
+
+  await assert.rejects(
+    feature.commands.restoreNote({ id: note.id, expectedRevision: 1, targetRevision: 2 }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_note_revision_conflict",
+  );
+  await assert.rejects(
+    feature.commands.restoreNote({ id: note.id, expectedRevision: 2, targetRevision: 99 }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_note_not_found",
+  );
+  await assert.rejects(
+    feature.commands.restoreNote({ id: note.id, expectedRevision: 2, targetRevision: 2 }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_knowledge_invalid_input",
+  );
+  await assert.rejects(
+    feature.commands.restoreNote({ id: note.id, expectedRevision: 0, targetRevision: 1 }),
+    (error: unknown) => error instanceof PersonalKnowledgeError && error.code === "personal_knowledge_invalid_input",
+  );
+});
+
 test("personal knowledge search follows note create, update and delete", async (t) => {
   const { feature } = await fixture(t);
   const note = await feature.commands.createNote({

@@ -161,6 +161,8 @@ export interface PersonalKnowledgeRepository {
   readSnapshot(): Promise<PersonalKnowledgeSnapshot>;
   getNote(id: string): Promise<PersonalNote | undefined>;
   listNoteRevisions(id: string, limit: number): Promise<readonly PersonalNoteRevision[]>;
+  /** 读取指定 revision 的完整快照；不存在时返回 undefined。 */
+  getNoteRevision(id: string, revision: number): Promise<PersonalNoteRevision | undefined>;
   searchNotes(input: { readonly query: string; readonly spaceId?: string; readonly limit: number }): Promise<readonly PersonalKnowledgeSearchResult[]>;
   listPages(input: KnowledgeListQuery): Promise<{ readonly pages: readonly KnowledgePageSummary[]; readonly nextCursor?: string }>;
   recentChanges(input: { readonly refId?: string; readonly themeId?: string; readonly limit: number; readonly cursor?: string }): Promise<{ readonly records: readonly PersonalKnowledgeChangeRecord[]; readonly nextCursor?: string }>;
@@ -179,6 +181,8 @@ export type PersonalKnowledgeFeature<TManagedAssetTextWriteResult extends { read
   readonly commands: {
     createNote(input: { readonly id?: string; readonly spaceId: string; readonly title?: string; readonly bodyMarkdown?: string; readonly materialRefs?: readonly string[]; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<PersonalNote>;
     updateNote(input: { readonly id: string; readonly expectedRevision: number; readonly title?: string; readonly bodyMarkdown?: string; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
+    /** 把笔记完整内容恢复到历史 revision，写出新 revision；陈旧 expectedRevision 拒绝。 */
+    restoreNote(input: { readonly id: string; readonly expectedRevision: number; readonly targetRevision: number; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
     deleteNote(input: { readonly id: string; readonly expectedRevision: number; readonly actor?: PersonalKnowledgeActor; readonly changeSummary?: string }): Promise<void>;
     reorderNotes(orderedIds: readonly string[]): Promise<void>;
     collectSpaceReference(input: { readonly referenceId: string; readonly relativePath?: string }): Promise<KnowledgePage>;

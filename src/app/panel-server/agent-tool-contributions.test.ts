@@ -163,6 +163,8 @@ test("Host selects feature-owned Space and Personal Knowledge contributions", ()
     "KnowledgeCreateTheme",
     "KnowledgeAssignTheme",
     "KnowledgeUnassignTheme",
+    "KnowledgeNoteHistory",
+    "KnowledgeRestoreNote",
   ]);
 });
 

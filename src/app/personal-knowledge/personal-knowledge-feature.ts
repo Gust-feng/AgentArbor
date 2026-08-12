@@ -92,6 +92,37 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult exte
           publish({ type: "personal_knowledge.note_updated", noteId: id });
         });
       },
+      async restoreNote(input) {
+        await run(async () => {
+          const id = required(input.id, "id");
+          const expectedRevision = positiveRevision(input.expectedRevision, "expectedRevision");
+          const targetRevision = positiveRevision(input.targetRevision, "targetRevision");
+          if (targetRevision === expectedRevision) {
+            throw new PersonalKnowledgeError(
+              "personal_knowledge_invalid_input",
+              "targetRevision must differ from the current revision.",
+            );
+          }
+          const target = await repository.getNoteRevision(id, targetRevision);
+          if (target === undefined) {
+            throw new PersonalKnowledgeError(
+              "personal_note_not_found",
+              `Revision ${targetRevision} of note ${id} does not exist.`,
+            );
+          }
+          await repository.execute({
+            type: "note.update",
+            id,
+            expectedRevision,
+            title: target.title,
+            bodyMarkdown: target.bodyMarkdown,
+            updatedAt: Date.now(),
+            actor: input.actor ?? SYSTEM_ACTOR,
+            changeSummary: input.changeSummary ?? `恢复到版本 ${targetRevision} 的内容`,
+          });
+          publish({ type: "personal_knowledge.note_updated", noteId: id });
+        });
+      },
       async deleteNote(input) {
         await run(async () => {
           const id = required(input.id, "id");
@@ -520,6 +551,13 @@ function required(value: string, field: string): string {
     throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `${field} must not be empty.`);
   }
   return normalized;
+}
+
+function positiveRevision(value: number, field: string): number {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new PersonalKnowledgeError("personal_knowledge_invalid_input", `${field} must be a positive integer.`);
+  }
+  return value;
 }
 
 function validateCommand<T extends Exclude<PersonalKnowledgeCommand,

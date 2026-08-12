@@ -22,6 +22,8 @@ export function createPersonalKnowledgeTools(options: PersonalKnowledgeToolOptio
     createKnowledgeCreateThemeTool(options),
     createKnowledgeAssignThemeTool(options),
     createKnowledgeUnassignThemeTool(options),
+    createKnowledgeNoteHistoryTool(options),
+    createKnowledgeRestoreNoteTool(options),
   ];
 }
 
@@ -128,6 +130,61 @@ export function createKnowledgeUpdateNoteTool(options: PersonalKnowledgeToolOpti
       return resultFor(
         () => options.knowledge.commands.updateNote({ id: noteId, expectedRevision, title, bodyMarkdown, actor: agentActor(context) }),
         () => ({ status: "updated", noteId, revision: expectedRevision + 1 }),
+      );
+    },
+  });
+}
+
+export function createKnowledgeNoteHistoryTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeNoteHistory",
+    description: "List the revision history of a personal note, newest first. Each entry carries the revision number, base revision, operation (create/update/delete/snapshot), change summary, actor and timestamp, plus the title and a bounded body preview so you can choose a targetRevision for KnowledgeRestoreNote.",
+    metadata: readMetadata,
+    inputSchema: schema({
+      noteId: { type: "string" },
+      limit: { type: "number", description: "Optional revision limit from 1 to 200. Defaults to 20." },
+    }, ["noteId"]),
+    execute: async (input) => {
+      const record = asRecord(input);
+      const noteId = stringOrUndefined(record.noteId);
+      const limit = optionalInteger(record.limit);
+      if (noteId === undefined || limit === null) {
+        return invalid("noteId is required; limit must be omitted or an integer from 1 to 100.");
+      }
+      return resultFor(
+        () => options.knowledge.queries.noteRevisions(noteId, limit ?? 20),
+        (revisions) => ({ status: "found", noteId, count: revisions.length, revisions }),
+      );
+    },
+  });
+}
+
+export function createKnowledgeRestoreNoteTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
+  return tool({
+    name: "KnowledgeRestoreNote",
+    description: "Restore a personal note to the full title and body of an earlier revision from KnowledgeNoteHistory, writing a new revision instead of rewriting history. Requires the current revision; a stale expectedRevision or a missing targetRevision is rejected and never overwrites newer content.",
+    metadata: writeMetadata,
+    inputSchema: schema({
+      noteId: { type: "string" },
+      expectedRevision: { type: "number", description: "Current revision of the note." },
+      targetRevision: { type: "number", description: "Earlier revision whose title and body are restored." },
+    }, ["noteId", "expectedRevision", "targetRevision"]),
+    execute: async (input, context) => {
+      const record = asRecord(input);
+      const noteId = stringOrUndefined(record.noteId);
+      const expectedRevision = integer(record.expectedRevision);
+      const targetRevision = integer(record.targetRevision);
+      if (noteId === undefined || expectedRevision === undefined || targetRevision === undefined) {
+        return invalid("noteId, expectedRevision and targetRevision must be valid positive values.");
+      }
+      return resultFor(
+        () => options.knowledge.commands.restoreNote({
+          id: noteId,
+          expectedRevision,
+          targetRevision,
+          actor: agentActor(context),
+        }),
+        () => ({ status: "restored", noteId, revision: expectedRevision + 1, targetRevision }),
       );
     },
   });

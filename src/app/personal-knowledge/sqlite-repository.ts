@@ -256,6 +256,21 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
         throw repositoryError("Could not read personal note revisions from SQLite.", error);
       }
     },
+    async getNoteRevision(id: string, revision: number): Promise<PersonalNoteRevision | undefined> {
+      try {
+        const row = database.connection.prepare(`
+          SELECT note_id AS noteId, revision, base_revision AS baseRevision, operation,
+                 title, body_markdown AS bodyMarkdown, actor_kind AS actorKind,
+                 actor_id AS actorId, trace_id AS traceId, goal_id AS goalId,
+                 tool_call_id AS toolCallId, change_summary AS changeSummary,
+                 created_at AS createdAt
+          FROM personal_note_revisions WHERE note_id = ? AND revision = ?
+        `).get(id, revision);
+        return row === undefined ? undefined : personalNoteRevisionFromRow(row as Record<string, SQLInputValue>);
+      } catch (error) {
+        throw repositoryError("Could not read the personal note revision from SQLite.", error);
+      }
+    },
     async searchNotes(input): Promise<readonly PersonalKnowledgeSearchResult[]> {
       try {
         const ftsRows = database.connection.prepare(`

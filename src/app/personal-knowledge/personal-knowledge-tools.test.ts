@@ -214,6 +214,76 @@ test("KnowledgeList without kind enumerates uncollected notes and KnowledgeReadP
   assert.equal(missing.status, "missing");
 });
 
+test("KnowledgeNoteHistory lists revisions and KnowledgeRestoreNote restores an earlier revision", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-restore-tools-"));
+  const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
+  const feature = createPersonalKnowledgeFeature({
+    repository: createSqlitePersonalKnowledgeRepository(database),
+    spaceExists: async (spaceId) => spaceId === "space-one",
+  });
+  t.after(async () => {
+    await feature.release();
+    database.close();
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+  const tools = new Map(createPersonalKnowledgeTools({ knowledge: feature }).map((tool) => [tool.definition.name, tool]));
+
+  const created = await execute(tools.get("KnowledgeCreateNote")!, {
+    spaceId: "space-one",
+    title: "回溯测试",
+    bodyMarkdown: "第一版正文",
+  }) as { readonly status: string; readonly note: { readonly id: string; readonly revision: number } };
+  assert.equal(created.status, "created");
+  await execute(tools.get("KnowledgeUpdateNote")!, {
+    noteId: created.note.id,
+    expectedRevision: 1,
+    bodyMarkdown: "第二版正文",
+  });
+
+  const history = await execute(tools.get("KnowledgeNoteHistory")!, { noteId: created.note.id }) as {
+    readonly status: string;
+    readonly revisions: readonly { readonly revision: number; readonly operation: string; readonly title: string; readonly bodyMarkdown: string }[];
+  };
+  assert.equal(history.status, "found");
+  assert.deepEqual(history.revisions.map((revision) => revision.revision), [2, 1]);
+  assert.equal(history.revisions[1]?.bodyMarkdown, "第一版正文");
+
+  const restored = await execute(tools.get("KnowledgeRestoreNote")!, {
+    noteId: created.note.id,
+    expectedRevision: 2,
+    targetRevision: 1,
+  }) as { readonly status: string; readonly noteId: string; readonly revision: number; readonly targetRevision: number };
+  assert.deepEqual(restored, { status: "restored", noteId: created.note.id, revision: 3, targetRevision: 1 });
+
+  const read = await execute(tools.get("KnowledgeRead")!, { noteId: created.note.id }) as {
+    readonly status: string;
+    readonly note: { readonly bodyMarkdown: string; readonly revision: number };
+  };
+  assert.equal(read.note.bodyMarkdown, "第一版正文");
+  assert.equal(read.note.revision, 3);
+
+  const stale = await execute(tools.get("KnowledgeRestoreNote")!, {
+    noteId: created.note.id,
+    expectedRevision: 2,
+    targetRevision: 1,
+  }) as { readonly status: string };
+  assert.equal(stale.status, "personal_note_revision_conflict");
+
+  const missingTarget = await execute(tools.get("KnowledgeRestoreNote")!, {
+    noteId: created.note.id,
+    expectedRevision: 3,
+    targetRevision: 99,
+  }) as { readonly status: string };
+  assert.equal(missingTarget.status, "personal_note_not_found");
+
+  const invalid = await execute(tools.get("KnowledgeRestoreNote")!, {
+    noteId: created.note.id,
+    expectedRevision: 3,
+    targetRevision: 3,
+  }) as { readonly status: string };
+  assert.equal(invalid.status, "personal_knowledge_invalid_input");
+});
+
 test("Personal Knowledge agent tool schemas reject actor and visual facts", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-schema-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));

@@ -1,10 +1,14 @@
 import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import type { ChatInputProps } from '../../../../contracts/composer'
 import { HomePage } from './HomePage'
 import { selectHomeAmbientCopy } from './home-ambient-copy'
 import { HOME_AMBIENT_COPY_INPUT_DELAY_MS } from './HomeAmbientCopy'
+
+beforeEach(() => {
+  window.localStorage.clear()
+})
 
 afterEach(() => {
   vi.useRealTimers()
@@ -22,7 +26,7 @@ test('presents one stable ambient line with the quiet task entry', () => {
   )
 
   expect(screen.getByRole('region', { name: '开始任务' })).toBeTruthy()
-  const copy = selectHomeAmbientCopy(now)
+  const copy = selectHomeAmbientCopy(now).copy
   expect(screen.getByLabelText(`${copy.lead}${copy.idleTail}`)).toBeTruthy()
   expect(screen.getByPlaceholderText('想从哪里开始？')).toBeTruthy()
   expect(screen.queryByRole('button', { name: /工作区/u })).toBeNull()

@@ -3,9 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#f7f6f3" />
+    <meta name="theme-color" content="#f4f2ef" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#181916" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="AgentArbor 移动协同" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- This is deliberately inline: the WebView can paint it before the
+         application stylesheet and JavaScript are ready. Keeping it aligned
+         with the native launch surface removes the otherwise visible white
+         frame between Android's SplashScreen and the workbench. -->
+    <style>
+      html,
+      body,
+      #root {
+        width: 100%;
+        min-height: 100%;
+        margin: 0;
+        background: #f4f2ef;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        html,
+        body,
+        #root {
+          background: #181916;
+        }
+      }
+    </style>
     <title>AgentArbor 移动协同</title>
   </head>
   <body>

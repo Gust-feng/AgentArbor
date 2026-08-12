@@ -608,7 +608,7 @@ test("Ordinary conversation HTTP commands preserve queue ownership and attachmen
     assert.equal(executionCount, 2);
     const observedAttachment = (observedInputs[0] as {
       taskSoil?: { contextRefs?: { attachmentId?: string; ref: string; readonlyPreview?: { text: string } }[] };
-    }).taskSoil?.contextRefs?.[0];
+    }).taskSoil?.contextRefs?.find((ref) => ref.attachmentId === "attachment-1");
     assert.equal(observedAttachment?.attachmentId, "attachment-1");
     assert.equal(observedAttachment?.ref, "file:notes/context.md");
     assert.equal(observedAttachment?.readonlyPreview?.text, "attachment body");

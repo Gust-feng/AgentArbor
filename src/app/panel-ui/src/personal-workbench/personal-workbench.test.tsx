@@ -813,7 +813,7 @@ test("opens a Search result in the Space that owns the reference", async () => {
   expect(screen.queryByRole("tree", { name: "空间甲资料" })).toBeNull();
 });
 
-test("clears a Search target when the user switches to another Space", async () => {
+test("clears a Search target and keeps the next Space unselected", async () => {
   const user = userEvent.setup();
   vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ preview: {
     itemId: "ref-a",
@@ -835,8 +835,8 @@ test("clears a Search target when the user switches to another Space", async () 
   await user.click(await screen.findByRole("button", { name: /乙资料\.pdf/u }));
   await user.click(screen.getByRole("button", { name: "空间甲" }));
 
-  expect(await screen.findByText("甲正文")).toBeTruthy();
-  expect(screen.queryByText("从左侧选择一篇笔记或材料")).toBeNull();
+  expect(await screen.findByText(/从左侧选择一篇笔记或材料/u)).toBeTruthy();
+  expect(screen.queryByText("甲正文")).toBeNull();
 });
 
 test("opens a real conversation directly from Search", async () => {

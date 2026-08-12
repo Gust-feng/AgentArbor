@@ -88,6 +88,23 @@ test('offers the existing focus mode from the space conversation pane', async ()
   expect(onEnterFocus).toHaveBeenCalledOnce()
 })
 
+test('does not select the first folder before the user chooses an item', () => {
+  const space: PersonalSpaceProjection = {
+    spaceId: 'space-default-selection',
+    title: '学习空间',
+    items: [
+      { itemId: 'folder-2026', title: '2026年学习资料', kind: 'folder' },
+      { itemId: 'course-home', title: 'CS231n 课程主页', kind: 'web_reference', openUrl: 'https://example.test/cs231n' },
+    ],
+    conversations: [],
+  }
+
+  render(<SpacePage onNavigate={vi.fn()} space={space} />)
+
+  expect(screen.getByText('2026年学习资料').parentElement?.style.background).toBe('transparent')
+  expect(screen.getByText('CS231n 课程主页').parentElement?.style.background).toBe('transparent')
+})
+
 test('disables native spell checking while renaming a Space item', async () => {
   const user = userEvent.setup()
   const space: PersonalSpaceProjection = {

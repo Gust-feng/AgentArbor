@@ -280,6 +280,10 @@ function countItems(tree: SpaceItem[]): number {
   return tree.reduce((n, item) => n + 1 + (item.children ? countItems(item.children) : 0), 0)
 }
 
+function firstSelectableTreeItemId(items: readonly SpaceItem[]): string | null {
+  return items.find((item) => item.type !== 'folder')?.id ?? null
+}
+
 function deleteLabelFor(item: SpaceItem): string {
   if (item.externalChild) return item.type === 'folder' ? '删除文件夹' : '删除'
   if (item.domainKind === 'folder' || item.domainKind === 'managed_folder') return '删除文件夹'
@@ -306,6 +310,8 @@ interface SpacePageProps {
 
 interface SpaceViewMemory {
   selectedId: string | null
+  /** Old versions stored inferred default selections; do not restore them. */
+  selectionMemoryVersion?: 1
   expandedIds: ReadonlySet<string>
   scrollTop: number
 }
@@ -407,15 +413,19 @@ export function SpacePage({
     onError: setActionError,
   })
   const { tree, projectedTree, expandedIds } = mountedTree
-  const rememberedSelectedId = rememberedView?.selectedId !== null
-    && rememberedView?.selectedId !== undefined
-    && (notes.some((note) => note.id === rememberedView.selectedId)
-      || getItem(projectedTree, rememberedView.selectedId) !== undefined)
-    ? rememberedView.selectedId
+  const rememberedSelectionId = rememberedView?.selectedId
+  const rememberedItem = rememberedSelectionId === undefined || rememberedSelectionId === null
+    ? undefined
+    : getItem(projectedTree, rememberedSelectionId)
+  const rememberedSelectedId = rememberedView?.selectionMemoryVersion === 1
+    && rememberedSelectionId !== undefined
+    && (notes.some((note) => note.id === rememberedSelectionId)
+      || rememberedItem !== undefined && rememberedItem.type !== 'folder')
+    ? rememberedSelectionId
     : undefined
-  // 书写为中心:默认打开最近一篇笔记(有 targetId / 记忆选择则优先)，再回退到首个空间对象。
+  // 首次进入空间不推断用户选择；只有明确目标或已保存的选择才打开内容。
   const [selectedId, setSelectedId] = useState<string | null>(() => (
-    targetId ?? rememberedSelectedId ?? notes[0]?.id ?? projectedTree[0]?.id ?? null
+    targetId ?? rememberedSelectedId ?? null
   ))
   const selectedStillExists = selectedId !== null
     && (notes.some((note) => note.id === selectedId) || getItem(tree, selectedId) !== undefined)
@@ -443,7 +453,7 @@ export function SpacePage({
     setCreatingFolder(false)
     setCreatingReferenceFile(null)
     setPendingSpaceConfirmation(null)
-    setSelectedId(targetId ?? rememberedSelectedId ?? notes[0]?.id ?? projectedTree[0]?.id ?? null)
+    setSelectedId(targetId ?? rememberedSelectedId ?? null)
   }, [activeConversationId, memoryKey, notes, projectedTree, rememberedSelectedId, space?.conversations, targetId])
 
   function selectItem(id: string) {
@@ -486,6 +496,7 @@ export function SpacePage({
     const current = spaceViewMemory.get(memoryKey)
     spaceViewMemory.set(memoryKey, {
       selectedId,
+      selectionMemoryVersion: 1,
       expandedIds,
       scrollTop: current?.scrollTop ?? 0,
     })
@@ -493,10 +504,12 @@ export function SpacePage({
   useEffect(() => {
     if (targetId !== null && targetId !== undefined) return
     if (openConversationId !== null || pendingConversationId !== null) return
+    // A null selection is an intentional empty state, not a missing item.
+    if (selectedId === null) return
     if (selectedStillExists) return
-    const nextId = notes[0]?.id ?? tree[0]?.id ?? null
+    const nextId = notes[0]?.id ?? firstSelectableTreeItemId(tree)
     setSelectedId(nextId)
-  }, [openConversationId, pendingConversationId, selectedStillExists, targetId, notes, tree])
+  }, [openConversationId, pendingConversationId, selectedId, selectedStillExists, targetId, notes, tree])
   useLayoutEffect(() => {
     const explorer = explorerRef.current
     if (explorer !== null) explorer.scrollTop = spaceViewMemory.get(memoryKey)?.scrollTop ?? 0
@@ -828,6 +841,7 @@ export function SpacePage({
             const current = spaceViewMemory.get(memoryKey)
             spaceViewMemory.set(memoryKey, {
               selectedId: current?.selectedId ?? selectedId,
+              selectionMemoryVersion: 1,
               expandedIds: current?.expandedIds ?? expandedIds,
               scrollTop: event.currentTarget.scrollTop,
             })

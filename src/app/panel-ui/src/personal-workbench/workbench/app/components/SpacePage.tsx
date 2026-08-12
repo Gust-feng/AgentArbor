@@ -444,11 +444,11 @@ export function SpacePage({
     && (notes.some((note) => note.id === selectedId) || getItem(tree, selectedId) !== undefined)
   const previousMemoryKeyRef = useRef(memoryKey)
 
+  // SpacePage stays mounted while the selected Space changes. Reset only the
   // 用户在本空间停留期间显式选择了笔记/材料 → 右侧面板让位给内容浏览；
   // 切换空间（memoryKey 变化）或重新进入空间（组件重挂载）时重置，
   // 宿主活动会话重新接管面板 —— 与「从空间行打开会话后会话优先」口径一致。
   const explicitMaterialSelectionRef = useRef(false)
-  // SpacePage stays mounted while the selected Space changes. Reset only the
   // space-bound transient UI before paint so the workbench does not flash an
   // empty page or rebuild the whole surface between two already-known Spaces.
   useLayoutEffect(() => {

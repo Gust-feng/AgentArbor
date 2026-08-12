@@ -10,6 +10,7 @@ import {
 } from './home-ambient-copy'
 import { HomeBackdrop } from './HomeBackdrop'
 import { type HomeOwnerSelection, HomeOwnerPicker } from './HomeOwnerPicker'
+import { useHomeTypewriter } from './home-typewriter'
 import './home-page.css'
 
 const AMBIENT_COPY_MEMORY_KEY = 'agentarbor:home-ambient-copy-memory'
@@ -63,8 +64,18 @@ export function HomePage({
     ? input
     : { ...input, contextUsage: undefined }
 
+  const typewriter = useHomeTypewriter({
+    value: homeInput.value,
+    onChange: homeInput.onChange,
+    busy: homeInput.busy,
+  })
+
   const handleCompositionChange = (composing: boolean): void => {
     setCompositionBaseValue(composing ? input.value : null)
+  }
+
+  const handleFocusChange = (focused: boolean): void => {
+    if (!focused) typewriter.stop()
   }
 
   return (
@@ -79,6 +90,8 @@ export function HomePage({
               key={focusRequest}
               input={homeInput}
               onCompositionChange={handleCompositionChange}
+              onFocusChange={handleFocusChange}
+              onUserActivate={typewriter.startIfIdle}
             />
           </div>
 

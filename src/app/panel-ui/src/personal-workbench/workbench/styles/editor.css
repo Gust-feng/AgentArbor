@@ -8,7 +8,7 @@
 /* ── 基础排版 ── */
 .aa-editor-prose {
   font-family: var(--reading-font, "Noto Sans SC", Inter, system-ui, sans-serif);
-  font-size: 14px;
+  font-size: var(--reading-body-size, 16px);
   line-height: 1.85;
   color: var(--aa-text-1, #292722);
   caret-color: var(--aa-accent, #6865a7);

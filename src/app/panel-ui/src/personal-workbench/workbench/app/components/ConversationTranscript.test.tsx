@@ -260,6 +260,45 @@ test("conversation transcript uses the shared markdown renderer without hover la
   expect(answer?.querySelectorAll(".aa-answer-copy").length).toBe(before);
 });
 
+test("conversation transcript renders one copy action for multiple assistant body segments", () => {
+  const turns: readonly ConversationTurn[] = [{
+    turnId: "user-1",
+    role: "user",
+    content: "继续",
+    status: "completed",
+  }];
+  const projectedTurns: readonly WorklineProjectedTurn<ConversationTurn>[] = [{
+    turn: turns[0]!,
+    claimedCurrentRun: false,
+  }];
+  const nodes = [
+    bodyNode("body-1", 1, "第一段回答。"),
+    bodyNode("body-2", 2, "第二段回答。"),
+  ];
+
+  render(<ConversationTranscript
+    conversationId="conversation-copy"
+    projectedTurns={projectedTurns}
+    turns={turns}
+    currentRunId="run-copy"
+    currentRunNodes={nodes}
+    currentRunToolResults={[]}
+    showModelUsage={false}
+    developerModeEnabled={false}
+    standaloneRun={{
+      currentRunId: "run-copy",
+      runStatus: "completed",
+      runProjection: { nodes },
+    }}
+    models={[]}
+    selectedModelId=""
+    onDecision={() => undefined}
+    confirmationBusy={false}
+  />);
+
+  expect(screen.getAllByRole("button", { name: "复制回答" })).toHaveLength(1);
+});
+
 test("confirmation keeps approval and denial behavior without legacy transcript styling", () => {
   const onDecision = vi.fn();
   render(<ConfirmationCard
@@ -455,6 +494,21 @@ function toolNode(): TranscriptNode {
       stdoutPreview: "29 tests passed",
     },
     refs: [{ kind: "tool_call", id: "tool-fact-1" }],
+  };
+}
+
+function bodyNode(nodeId: string, sequence: number, text: string): TranscriptNode {
+  return {
+    nodeId,
+    runId: "run-copy",
+    sequence,
+    eventType: "model.output.completed",
+    kind: "body",
+    phase: "completed",
+    title: "回答",
+    text,
+    timestamp: "2026-07-31T00:00:00.000Z",
+    refs: [{ kind: "model_call", id: `model-${nodeId}` }],
   };
 }
 

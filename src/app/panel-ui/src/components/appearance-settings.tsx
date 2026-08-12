@@ -13,8 +13,10 @@ import {
 import { getInitialTheme } from "../app-theme";
 import {
   loadPrefs,
+  readingBodySizePx,
   savePrefs,
   SIZE_PX,
+  subscribeReadingPreferencesChanged,
   type ReadingSize,
 } from "../reading-preferences";
 import { ThemeSwitcher } from "./theme-switcher";
@@ -45,6 +47,10 @@ export function AppearanceSettings(): React.ReactElement {
     // re-reading it from storage here could roll back the UI if the write is delayed or fails.
   }), []);
 
+  React.useEffect(() => subscribeReadingPreferencesChanged(() => {
+    setReadingPrefs(loadPrefs());
+  }), []);
+
   function changeMotionPreference(nextPreference: MotionPreferenceId): void {
     if (nextPreference === motionPreference) return;
     saveMotionPreference(nextPreference);
@@ -61,13 +67,14 @@ export function AppearanceSettings(): React.ReactElement {
   }
 
   function changeReadingSize(size: ReadingSize): void {
-    if (size === readingPrefs.size) return;
-    const next = { ...readingPrefs, size };
+    if (readingBodySizePx(readingPrefs) === SIZE_PX[size]) return;
+    const next = { font: readingPrefs.font, width: readingPrefs.width, size };
     savePrefs(next);
     setReadingPrefs(next);
   }
 
   const effectiveMotionLabel = getEffectiveMotionPreference(motionPreference) === "reduced" ? "减少动效" : "标准";
+  const currentReadingSizePx = readingBodySizePx(readingPrefs);
 
   return (
     <div className="workspace-settings-stack">
@@ -80,17 +87,17 @@ export function AppearanceSettings(): React.ReactElement {
       <section className="settings-card appearance-preference-card">
         <div className="settings-card-title-row">
           <h3>阅读字号</h3>
-          <span>{SIZE_PX[readingPrefs.size]}px</span>
+          <span>{currentReadingSizePx}px</span>
         </div>
         <div className="appearance-preference-options" role="radiogroup" aria-label="阅读字号">
           {READING_SIZE_OPTIONS.map((option) => (
             <button
               key={option.id}
               type="button"
-              className={`appearance-preference-option${readingPrefs.size === option.id ? " active" : ""}`}
+              className={`appearance-preference-option${currentReadingSizePx === SIZE_PX[option.id] ? " active" : ""}`}
               role="radio"
               aria-label={`${option.label} ${SIZE_PX[option.id]}px`}
-              aria-checked={readingPrefs.size === option.id}
+              aria-checked={currentReadingSizePx === SIZE_PX[option.id]}
               onClick={() => changeReadingSize(option.id)}
             >
               <span>{option.label}</span>

@@ -11,9 +11,18 @@ import { QueuedMessageList } from './QueuedMessageList'
 interface ConversationComposerProps {
   readonly input: ChatInputProps
   readonly onCompositionChange?: (composing: boolean) => void
+  /** 输入框获得/失去焦点（含程序化聚焦）。 */
+  readonly onFocusChange?: (focused: boolean) => void
+  /** 用户用鼠标主键点击输入框触发（程序化聚焦不会触发）。 */
+  readonly onUserActivate?: () => void
 }
 
-export function ConversationComposer({ input, onCompositionChange }: ConversationComposerProps) {
+export function ConversationComposer({
+  input,
+  onCompositionChange,
+  onFocusChange,
+  onUserActivate,
+}: ConversationComposerProps) {
   const [focused, setFocused] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const canEdit = !input.busy || input.allowInputWhileBusy === true
@@ -70,8 +79,17 @@ export function ConversationComposer({ input, onCompositionChange }: Conversatio
         ref={ref}
         value={input.value}
         onChange={(event) => input.onChange(event.target.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onFocus={() => {
+          setFocused(true)
+          onFocusChange?.(true)
+        }}
+        onBlur={() => {
+          setFocused(false)
+          onFocusChange?.(false)
+        }}
+        onPointerDown={(event) => {
+          if (event.button === 0) onUserActivate?.()
+        }}
         onCompositionStart={() => onCompositionChange?.(true)}
         onCompositionEnd={() => onCompositionChange?.(false)}
         onKeyDown={(event) => {

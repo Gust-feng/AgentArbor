@@ -13,6 +13,8 @@ import { promises as fs, createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+import { getResolvedPDFJS } from "unpdf";
+
 import type { DocumentPreview, DocumentSourceKind } from "../panel-api-contracts.js";
 import { PanelHttpError } from "./http-utils.js";
 import { documentPresentation } from "./document-preview-presentation.js";
@@ -105,6 +107,15 @@ export async function buildLocalDocumentPreview(
   const contentUrl = options?.contentBaseUrl ?? `/api/spaces/references/${encodeURIComponent(meta.itemId)}/content`;
   const url = `${contentUrl}${normalizedRelative.length === 0 ? "" : `?path=${encodeURIComponent(normalizedRelative)}`}`;
   const mediaKind = mediaKindForMimeType(mimeType);
+  if (mediaKind === "pdf") {
+    const pages = await extractPdfTextPages(source, stat.size);
+    if (pages !== undefined) {
+      return {
+        ...basePreview(meta, source, "ready", { kind: "pages", pages }),
+        ...metadata,
+      };
+    }
+  }
   if (mediaKind !== undefined) {
     return {
       ...basePreview(meta, source, "ready", {
@@ -308,3 +319,33 @@ function parseByteRange(value: string | undefined, size: number): { readonly sta
   }
   return { start, end: Math.min(end, size - 1) };
 }
+
+/** PDF 文本分页提取；文件过大或解析失败时返回 undefined，让调用方降级为媒体预览。 */
+async function extractPdfTextPages(source: string, size: number): Promise<string[] | undefined> {
+  if (size <= 0 || size > MAX_PDF_PREVIEW_BYTES) return undefined;
+  try {
+    const buffer = await fs.readFile(source);
+    const pdfjs = await getResolvedPDFJS();
+    const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber);
+      try {
+        const content = await page.getTextContent();
+        const fragments: string[] = [];
+        for (const item of content.items) {
+          if (!("str" in item) || typeof item.str !== "string" || item.str.length === 0) continue;
+          fragments.push(item.str, item.hasEOL ? "\n" : " ");
+        }
+        pages.push(fragments.join(""));
+      } finally {
+        page.cleanup();
+      }
+    }
+    return pages;
+  } catch {
+    return undefined;
+  }
+}
+
+const MAX_PDF_PREVIEW_BYTES = 64 * 1_024 * 1_024;

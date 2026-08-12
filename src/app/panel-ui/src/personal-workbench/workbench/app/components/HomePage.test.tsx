@@ -5,6 +5,11 @@ import type { ChatInputProps } from '../../../../contracts/composer'
 import { HomePage } from './HomePage'
 import { selectHomeAmbientCopy } from './home-ambient-copy'
 import { HOME_AMBIENT_COPY_INPUT_DELAY_MS } from './HomeAmbientCopy'
+import {
+  HOME_TYPEWRITER_START_DELAY_MS,
+  homeTypewriterCharDelay,
+  selectHomeTypewriterCopy,
+} from './home-typewriter'
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -180,6 +185,95 @@ test('keeps committed draft state while composing additional Chinese input', () 
   rerender(<HomePage {...props} input={inputProps({ value: '整理 ren wu' })} />)
   expect(ambient?.getAttribute('data-state')).toBe('active')
 })
+
+test('clicks the task entry and types the demo copy character by character', () => {
+  const now = new Date(2026, 7, 3, 10, 0)
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
+  const copy = selectHomeTypewriterCopy(now)
+
+  render(<ControlledHomePage initialValue="" />)
+  const textarea = screen.getByPlaceholderText('想从哪里开始？')
+
+  fireEvent.pointerDown(textarea)
+  act(() => vi.advanceTimersByTime(HOME_TYPEWRITER_START_DELAY_MS))
+  expect((textarea as HTMLTextAreaElement).value).toBe(copy.slice(0, 1))
+  for (let index = 1; index < copy.length; index += 1) {
+    act(() => vi.advanceTimersByTime(homeTypewriterCharDelay(index, copy)))
+    expect((textarea as HTMLTextAreaElement).value).toBe(copy.slice(0, index + 1))
+  }
+
+  act(() => vi.advanceTimersByTime(5_000))
+  expect((textarea as HTMLTextAreaElement).value).toBe(copy)
+})
+
+test('does not type when the task entry is focused programmatically', () => {
+  vi.useFakeTimers()
+  render(<ControlledHomePage initialValue="" />)
+  const textarea = screen.getByPlaceholderText('想从哪里开始？')
+
+  fireEvent.focus(textarea)
+  act(() => vi.advanceTimersByTime(10_000))
+  expect((textarea as HTMLTextAreaElement).value).toBe('')
+})
+
+test('does not restart typing when the task entry already has content', () => {
+  vi.useFakeTimers()
+  render(<ControlledHomePage initialValue="已有的想法" />)
+  const textarea = screen.getByPlaceholderText('想从哪里开始？')
+
+  fireEvent.pointerDown(textarea)
+  act(() => vi.advanceTimersByTime(10_000))
+  expect((textarea as HTMLTextAreaElement).value).toBe('已有的想法')
+})
+
+test('stops typing when the user edits the draft manually', () => {
+  const now = new Date(2026, 7, 3, 10, 0)
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
+  const copy = selectHomeTypewriterCopy(now)
+
+  render(<ControlledHomePage initialValue="" />)
+  const textarea = screen.getByPlaceholderText('想从哪里开始？')
+
+  fireEvent.pointerDown(textarea)
+  act(() => vi.advanceTimersByTime(HOME_TYPEWRITER_START_DELAY_MS))
+  act(() => vi.advanceTimersByTime(homeTypewriterCharDelay(1, copy)))
+  expect((textarea as HTMLTextAreaElement).value).toBe(copy.slice(0, 2))
+
+  fireEvent.change(textarea, { target: { value: `${copy.slice(0, 2)}手动补充` } })
+  act(() => vi.advanceTimersByTime(10_000))
+  expect((textarea as HTMLTextAreaElement).value).toBe(`${copy.slice(0, 2)}手动补充`)
+})
+
+test('stops typing when the task entry loses focus, keeping partial text', () => {
+  const now = new Date(2026, 7, 3, 10, 0)
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
+  const copy = selectHomeTypewriterCopy(now)
+
+  render(<ControlledHomePage initialValue="" />)
+  const textarea = screen.getByPlaceholderText('想从哪里开始？')
+
+  fireEvent.pointerDown(textarea)
+  act(() => vi.advanceTimersByTime(HOME_TYPEWRITER_START_DELAY_MS))
+  act(() => vi.advanceTimersByTime(homeTypewriterCharDelay(1, copy)))
+  act(() => vi.advanceTimersByTime(homeTypewriterCharDelay(2, copy)))
+
+  fireEvent.blur(textarea)
+  act(() => vi.advanceTimersByTime(10_000))
+  expect((textarea as HTMLTextAreaElement).value).toBe(copy.slice(0, 3))
+})
+
+function ControlledHomePage({ initialValue }: { readonly initialValue: string }) {
+  const [value, setValue] = React.useState(initialValue)
+  return (
+    <HomePage
+      input={inputProps({ value, onChange: setValue })}
+      focusRequest={0}
+    />
+  )
+}
 
 function inputProps(overrides: Partial<ChatInputProps> = {}): ChatInputProps {
   return {

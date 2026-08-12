@@ -270,6 +270,7 @@ function ConversationAssistantMessage(props: {
           />
         );
       })}
+      <ConversationAnswerActions text={workflow.copyText} visible={workflow.showCopyActions} />
     </div>
   );
 }
@@ -296,6 +297,7 @@ function ConversationFailureMessage(props: {
         if (segment.kind === "awaiting") return <ConversationPendingDots key={`a-${index}`} />;
         return <ConversationAnswerBlock key={segment.segmentKey} text={segment.text} live={false} />;
       })}
+      <ConversationAnswerActions text={workflow?.copyText ?? ""} visible={workflow?.showCopyActions === true} />
       {/* 失败通知 */}
       <div
         className="flex items-start gap-2.5 rounded-lg px-4 py-3 text-sm"
@@ -358,14 +360,18 @@ const ConversationAnswerBlock = React.memo(function ConversationAnswerBlock(prop
       style={{ color: "var(--aa-text-1)", lineHeight: 1.85 }}
     >
       {props.live ? <StreamingRichText text={props.text} live /> : <RichText text={props.text} />}
-      {!props.live && (
-        <div className="aa-answer-actions">
-          <CopyActionButton value={props.text} label="复制回答" className="aa-answer-copy" />
-        </div>
-      )}
     </div>
   );
 });
+
+function ConversationAnswerActions(props: { readonly text: string; readonly visible: boolean }): React.ReactElement | null {
+  if (!props.visible || props.text.trim().length === 0) return null;
+  return (
+    <div className="aa-answer-actions">
+      <CopyActionButton value={props.text} label="复制回答" className="aa-answer-copy" />
+    </div>
+  );
+}
 
 /* ─── 等待指示器 ─── */
 

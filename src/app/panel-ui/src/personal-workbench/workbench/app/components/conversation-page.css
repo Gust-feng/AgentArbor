@@ -16,8 +16,9 @@
 
 .aa-focus-header[data-desktop-shell='true'] {
   padding-right: 8px;
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
+  /* 与 topbar 相同：整条标题栏 drag，交互元素与窗口控制显式 no-drag。 */
+  app-region: drag;
+  -webkit-app-region: drag;
 }
 
 .aa-focus-header[data-desktop-shell='true'] button,
@@ -25,15 +26,14 @@
 .aa-focus-header[data-desktop-shell='true'] input,
 .aa-focus-header[data-desktop-shell='true'] select,
 .aa-focus-header[data-desktop-shell='true'] textarea,
-.aa-focus-header[data-desktop-shell='true'] [role='button'] {
+.aa-focus-header[data-desktop-shell='true'] [role='button'],
+.aa-focus-header[data-desktop-shell='true'] .topbar-window-controls {
   app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
 .aa-focus-header[data-desktop-shell='true'] .aa-focus-drag-region {
   min-width: 24px;
-  app-region: drag;
-  -webkit-app-region: drag;
 }
 
 [data-focus-transition] :is(.topbar-focus-button, .aa-focus-header button) {
@@ -240,8 +240,8 @@
   transition: opacity 120ms ease;
 }
 
-.aa-answer-block:hover .aa-answer-actions,
-.aa-answer-block:focus-within .aa-answer-actions {
+.aa-conversation-turn--assistant:hover .aa-answer-actions,
+.aa-conversation-turn--assistant:focus-within .aa-answer-actions {
   opacity: 1;
   pointer-events: auto;
 }

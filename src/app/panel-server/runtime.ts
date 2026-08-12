@@ -105,6 +105,7 @@ import {
   type WorkbenchDataMaintenance,
 } from "./workbench-data-maintenance.js";
 import { createSpaceReferenceDeletionFilePort } from "./space-reference-deletion.js";
+import { workbenchDeletionLifecycleLockKey } from "./workbench-deletion-lifecycle-lock.js";
 import {
   createOrdinaryConversationTitleGenerator,
 } from "./ordinary-conversation-title.js";
@@ -788,6 +789,10 @@ function assemblePanelRuntime(input: {
     }),
     ...(input.ordinaryAgentExecution === undefined ? {} : { testOnlyAllowSessionlessExecution: true }),
   });
+  // 三个删除 / 链接生命周期协调器共享同一把 sentinel 互斥键：彼此串行、与整仓备份互斥，
+  // 但不独占 runtimeHome 本身，避免盖住 SpaceFeature 引用删除生命周期在同一协调器上申请的
+  // runtimeHome 子目录锁而自死锁（见 workbench-deletion-lifecycle-lock.ts）。
+  const deletionLifecycleLockKey = workbenchDeletionLifecycleLockKey(runtimeHome);
   const spaceConversationDeletion = createSpaceConversationDeletionCoordinator({
     spaces: spaceFeature,
     ordinary: ordinaryAgentFeature,
@@ -797,7 +802,7 @@ function assemblePanelRuntime(input: {
     processes: processRegistry,
     processTerminator,
     journal: spaceConversationDeletionJournal,
-    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
+    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(deletionLifecycleLockKey, operation),
   });
   const workspaceDeletion = createWorkspaceDeletionCoordinator({
     workspaces: {
@@ -816,7 +821,7 @@ function assemblePanelRuntime(input: {
     memory: pathDependencyFeature.commands,
     processes: processRegistry,
     processTerminator,
-    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
+    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(deletionLifecycleLockKey, operation),
   });
   const spaceConversationLink = createSpaceConversationLinkCoordinator({
     spaces: spaceFeature,
@@ -827,7 +832,7 @@ function assemblePanelRuntime(input: {
     processes: processRegistry,
     processTerminator,
     journal: spaceConversationLinkJournal,
-    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(runtimeHome, operation),
+    runExclusive: async (operation) => await fileMutationCoordinator.runExclusive(deletionLifecycleLockKey, operation),
   });
   const projectionChangeUnsubscribers = [
     spaceFeature.events.subscribe((event) => {

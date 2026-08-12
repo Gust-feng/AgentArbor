@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import type { ProcessRegistryCleanupResult } from "../runtime-guard/index.js";
+import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import {
   createSpaceConversationDeletionCoordinator,
   createSpaceConversationLinkCoordinator,
 } from "./space-conversation-coordinator.js";
+import { workbenchDeletionLifecycleLockKey } from "./workbench-deletion-lifecycle-lock.js";
 import type {
   SpaceConversationDeletionJournal,
   SpaceConversationDeletionRecord,
@@ -82,6 +85,95 @@ test("Space deletion stops owned processes before deleting conversations and Spa
     "cleanup-knowledge:space-1",
     "delete-space:space-1",
   ]);
+});
+
+test("deleteSpace does not self-deadlock when the deletion lifecycle takes a runtimeHome subdirectory lease on the same coordinator", async () => {
+  // Reproduces the composition-root nesting: the deletion coordinator holds its
+  // exclusive lifecycle lock while SpaceFeature's reference deletion lifecycle
+  // acquires a runtimeHome subdirectory lease (space-reference-deletions) on the
+  // SAME, non-reentrant coordinator. Binding the lifecycle lock to runtimeHome
+  // itself would make the inner lease block on its own ancestor forever.
+  const runtimeHome = process.platform === "win32" ? "C:\\runtime-home" : "/runtime-home";
+  const coordinator = new InMemoryLocalWorkspaceMutationCoordinator();
+  const spaceReferenceDeletionsRoot = path.join(runtimeHome, "space-reference-deletions");
+  let innerLeaseRan = false;
+
+  const deletion = createSpaceConversationDeletionCoordinator({
+    journal: memoryJournal(),
+    processTerminator: { killTree: () => ({ status: "killed" }) },
+    processes: {
+      async cleanupBySpace(spaceId: string) {
+        return cleanupResult("space", "space_deleted", { spaceId });
+      },
+    },
+    spaces: {
+      queries: {
+        async getTree() {
+          return { space: { id: "space-1", title: "Space", createdAt: "now", updatedAt: "now" }, entries: [] };
+        },
+      },
+      commands: {
+        async deleteSpace() {
+          await coordinator.runExclusive(spaceReferenceDeletionsRoot, async () => { innerLeaseRan = true; });
+        },
+      },
+    },
+    ordinary: {
+      commands: { async deleteConversation() {} },
+      queries: { async listConversationsByOwner() { return []; } },
+    },
+    personalKnowledge: { commands: { async cleanupSpace() {} } },
+    memory: { async deleteByOwner() { return 0; } },
+    agentNotes: { async deleteByOwner() {} },
+    runExclusive: (operation) => coordinator.runExclusive(workbenchDeletionLifecycleLockKey(runtimeHome), operation),
+  });
+
+  await withDeadlockTimeout(
+    deletion.deleteSpace("space-1"),
+    "deleteSpace deadlocked while holding the deletion lifecycle lock",
+  );
+  assert.equal(innerLeaseRan, true);
+});
+
+test("deletion lifecycle lock stays mutually exclusive with the runtimeHome backup lease but not with its subdirectories", async () => {
+  const runtimeHome = process.platform === "win32" ? "C:\\runtime-home" : "/runtime-home";
+  const coordinator = new InMemoryLocalWorkspaceMutationCoordinator();
+  const lifecycleLock = workbenchDeletionLifecycleLockKey(runtimeHome);
+
+  // Backup snapshots take an exclusive runtimeHome lease; it must still block the
+  // lifecycle lock (an ancestor overlaps its descendant).
+  let backupHeld = false;
+  let lifecycleRanDuringBackup = false;
+  let releaseBackup!: () => void;
+  const backup = coordinator.runExclusive(runtimeHome, async () => {
+    backupHeld = true;
+    await new Promise<void>((resolve) => { releaseBackup = resolve; });
+  });
+  await Promise.resolve();
+  const blockedLifecycle = coordinator.runExclusive(lifecycleLock, async () => { lifecycleRanDuringBackup = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(backupHeld, true);
+  assert.equal(lifecycleRanDuringBackup, false, "lifecycle lock must wait for the runtimeHome backup lease");
+  releaseBackup();
+  await backup;
+  await blockedLifecycle;
+  assert.equal(lifecycleRanDuringBackup, true);
+
+  // Holding the lifecycle lock must NOT block a runtimeHome subdirectory lease
+  // (siblings, not ancestor/descendant) — this is what breaks the self-deadlock.
+  let subdirRanDuringLifecycle = false;
+  let releaseLifecycle!: () => void;
+  const lifecycle = coordinator.runExclusive(lifecycleLock, async () => {
+    await new Promise<void>((resolve) => { releaseLifecycle = resolve; });
+  });
+  await Promise.resolve();
+  await withDeadlockTimeout(
+    coordinator.runExclusive(path.join(runtimeHome, "space-reference-deletions"), async () => { subdirRanDuringLifecycle = true; }),
+    "subdirectory lease blocked on the sibling lifecycle lock",
+  );
+  assert.equal(subdirRanDuringLifecycle, true);
+  releaseLifecycle();
+  await lifecycle;
 });
 
 test("Space admission drains before deletion snapshots conversations and rejects late owners", async () => {
@@ -564,6 +656,18 @@ function cleanupResult(
       ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
     },
   };
+}
+
+async function withDeadlockTimeout<T>(operation: Promise<T>, message: string, timeoutMs = 2_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const guard = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Deadlock timeout: ${message}`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, guard]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function memoryJournal(...initial: SpaceConversationDeletionRecord[]): SpaceConversationDeletionJournal {

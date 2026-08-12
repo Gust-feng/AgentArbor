@@ -3,6 +3,7 @@ import { runAgentDefinitionRef } from "./agent-definition-ref.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
   DESKTOP_ROOT_AGENT,
+  DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5,
@@ -30,6 +31,7 @@ export function createRuntimeAgentDefinitionCatalog(
   const builtInDefinitions = definitionsNotAlreadyIncluded(
     [
       DESKTOP_ROOT_AGENT,
+      DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7,
       DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6,
       DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5,
       DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V4,

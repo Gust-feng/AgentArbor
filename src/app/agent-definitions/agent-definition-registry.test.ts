@@ -5,6 +5,7 @@ import { agentDefinitionHash, runAgentDefinitionRef } from "./agent-definition-r
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
   DESKTOP_ROOT_AGENT,
+  DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5,
@@ -53,6 +54,7 @@ test("AgentDefinitionRegistry resolves definitions by exact safe run ref", () =>
 test("AgentDefinitionRegistry resolves current and legacy desktop root prompt versions", () => {
   const registry = new AgentDefinitionRegistry([
     DESKTOP_ROOT_AGENT,
+    DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7,
     DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6,
     DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5,
     DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V4,
@@ -62,6 +64,7 @@ test("AgentDefinitionRegistry resolves current and legacy desktop root prompt ve
     DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1,
   ]);
   const currentRef = runAgentDefinitionRef(DESKTOP_ROOT_AGENT);
+  const legacyV7Ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7);
   const legacyV6Ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6);
   const legacyV5Ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5);
   const legacyV4Ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V4);
@@ -70,7 +73,8 @@ test("AgentDefinitionRegistry resolves current and legacy desktop root prompt ve
   const legacyV1Ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1);
   const legacyRef = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1);
 
-  assert.equal(currentRef.promptVersion, "v7");
+  assert.equal(currentRef.promptVersion, "v8");
+  assert.equal(legacyV7Ref.promptVersion, "v7");
   assert.equal(legacyV6Ref.promptVersion, "v6");
   assert.equal(legacyV5Ref.promptVersion, "v5");
   assert.equal(legacyV4Ref.promptVersion, "v4");
@@ -78,7 +82,8 @@ test("AgentDefinitionRegistry resolves current and legacy desktop root prompt ve
   assert.equal(legacyV2Ref.promptVersion, "v2");
   assert.equal(legacyV1Ref.promptVersion, "v1");
   assert.equal(legacyRef.promptVersion, "1");
-  assert.notEqual(agentDefinitionHash(DESKTOP_ROOT_AGENT), agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6));
+  assert.notEqual(agentDefinitionHash(DESKTOP_ROOT_AGENT), agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7));
+  assert.notEqual(agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7), agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6));
   assert.notEqual(agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6), agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5));
   assert.notEqual(
     agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5),
@@ -101,6 +106,7 @@ test("AgentDefinitionRegistry resolves current and legacy desktop root prompt ve
     agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1)
   );
   assert.equal(registry.resolve(currentRef), DESKTOP_ROOT_AGENT);
+  assert.equal(registry.resolve(legacyV7Ref), DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V7);
   assert.equal(registry.resolve(legacyV6Ref), DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V6);
   assert.equal(registry.resolve(legacyV5Ref), DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V5);
   assert.equal(registry.resolve(legacyV4Ref), DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V4);

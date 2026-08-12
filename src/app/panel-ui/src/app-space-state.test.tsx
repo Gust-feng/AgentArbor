@@ -13,7 +13,7 @@ import {
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
   updatePersonalNote,
-} from "./personal-workbench/redesign/app/components/personalKnowledgeClient";
+} from "./personal-workbench/workbench/app/components/personalKnowledgeClient";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -179,6 +179,37 @@ test("deduplicates an in-flight Space mutation and reconciles from the backend",
 
   expect(result.current.mutationPending).toBe(false);
   expect(result.current.error).toBeUndefined();
+});
+
+test("deletes a Space and refreshes the complete Space list", async () => {
+  const requests: Array<{ path: string; method: string }> = [];
+  let deleted = false;
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request, init?: RequestInit) => {
+    const request = { path: String(path), method: init?.method ?? "GET" };
+    requests.push(request);
+    if (request.path === "/api/spaces" && request.method === "GET") {
+      return jsonResponse({ spaces: deleted ? [] : [{ id: "space-a", title: "空间 A" }] });
+    }
+    if (request.path === "/api/spaces/space-a" && request.method === "GET") {
+      return jsonResponse({ tree: {
+        space: { id: "space-a", title: "空间 A", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+        entries: [],
+      } });
+    }
+    if (request.path === "/api/spaces/space-a" && request.method === "DELETE") {
+      deleted = true;
+      return jsonResponse({ ok: true });
+    }
+    throw new Error(`unexpected request: ${request.method} ${request.path}`);
+  }));
+
+  const { result } = renderHook(() => useSpaceProjection());
+  await waitFor(() => expect(result.current.spaces).toHaveLength(1));
+  await act(async () => result.current.deleteSpace("space-a"));
+
+  expect(result.current.spaces).toEqual([]);
+  expect(requests.filter((request) => request.path === "/api/spaces" && request.method === "GET")).toHaveLength(2);
+  expect(requests).toContainEqual({ path: "/api/spaces/space-a", method: "DELETE" });
 });
 
 test("refreshes only the owning Space after a reference mutation", async () => {

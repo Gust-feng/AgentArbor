@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, EyeOff, Trash2 } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import type { ModelForm, ModelProviderListItem } from "./model-settings-projection";
 import { modelProtocolKind, requestPathOptionsForProvider } from "./model-settings-projection";
 
@@ -7,14 +7,13 @@ export function ModelProviderForm(props: {
   readonly item: ModelProviderListItem;
   readonly modelForm: ModelForm;
   readonly revealed: boolean;
-  readonly fetchBusy: boolean;
+  readonly revealBusy: boolean;
   readonly saving?: boolean;
   readonly hasApiKeyAction: boolean;
   readonly selectedSecretConfigured: boolean;
-  readonly onSetRevealed: (value: boolean) => void;
   readonly onUpdateModelForm: (patch: Partial<ModelForm>) => void;
   readonly onSetModelForm: (form: ModelForm) => void;
-  readonly onClearApiKey: () => Promise<void>;
+  readonly onRevealApiKey: () => Promise<void>;
   readonly onScheduleModelSave: (form: ModelForm) => void;
 }): React.ReactElement {
   return (
@@ -26,6 +25,7 @@ export function ModelProviderForm(props: {
             type={props.revealed ? "text" : "password"}
             className={props.revealed ? undefined : "api-key-input-masked"}
             value={props.modelForm.apiKey}
+            readOnly={props.selectedSecretConfigured}
             autoComplete="off"
             spellCheck={false}
             onChange={(event) => {
@@ -38,32 +38,20 @@ export function ModelProviderForm(props: {
               props.onSetModelForm(nextForm);
               props.onScheduleModelSave(nextForm);
             }}
-            placeholder={props.fetchBusy ? "加载中…" : "请输入密钥"}
+            placeholder={props.selectedSecretConfigured ? "••••••••••••••••" : "请输入密钥"}
           />
           <span className="api-key-actions">
             <button
               type="button"
               className="api-key-action"
               aria-label={props.revealed ? "隐藏 API Key" : "查看 API Key"}
-              disabled={!props.hasApiKeyAction || props.fetchBusy || props.saving}
+              disabled={!props.hasApiKeyAction || props.revealBusy || props.saving}
               onMouseDown={(event) => {
                 event.preventDefault();
               }}
-              onClick={() => props.onSetRevealed(!props.revealed)}
+              onClick={() => void props.onRevealApiKey()}
             >
               {props.revealed ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-            <button
-              type="button"
-              className="api-key-action"
-              aria-label="清空 API Key"
-              disabled={!props.hasApiKeyAction || props.saving}
-              onMouseDown={(event) => {
-                event.preventDefault();
-              }}
-              onClick={() => void props.onClearApiKey()}
-            >
-              <Trash2 size={15} />
             </button>
           </span>
         </div>

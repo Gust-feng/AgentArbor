@@ -4,11 +4,12 @@ import { createTwoFilesPatch } from "diff";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import {
   asRecord,
+  authorizedPathFacts,
   decodeUtf8Text,
   DEFAULT_LOCAL_WORKSPACE_ROOT,
   MAX_LOCAL_WORKSPACE_FILE_BYTES,
   requireText,
-  resolveWorkspacePath,
+  resolveAuthorizedWorkspacePath,
   sha256Hex,
   stringOrFallback,
   throwIfAborted,
@@ -58,7 +59,7 @@ export function createLocalWriteFileTool(
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", minLength: 1, description: "Workspace-relative file path." },
+          path: { type: "string", minLength: 1, description: "Absolute or run-root-relative file path." },
           content: { type: "string", description: "Complete UTF-8 text content." },
         },
         required: ["path", "content"],
@@ -69,7 +70,14 @@ export function createLocalWriteFileTool(
       throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const content = requireText(record.content, "content", { allowEmpty: true });
-      const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, ""));
+      const target = await resolveAuthorizedWorkspacePath(
+        rootDirectory,
+        stringOrFallback(record.path, ""),
+        "write",
+        context,
+        options.pathAuthorization,
+      );
+      const pathFacts = authorizedPathFacts(target);
       return mutationCoordinator.run(target.absolutePath, async () => {
         let original: string | undefined;
         try {
@@ -88,7 +96,7 @@ export function createLocalWriteFileTool(
         }
 
         const changed = original === undefined || original !== content;
-        assertSandboxAllowed(sandboxPolicy, sandboxRequest("write", rootDirectory, target.relativePath, {
+        assertSandboxAllowed(sandboxPolicy, sandboxRequest("write", target.rootDirectory, target.relativePath, {
           bytes: Buffer.byteLength(content, "utf8"),
         }));
         if (changed) {
@@ -99,6 +107,7 @@ export function createLocalWriteFileTool(
         return {
           refId: `workspace:file:${target.relativePath}`,
           path: target.relativePath,
+          ...pathFacts,
           operation: original === undefined ? "create" : "write",
           changed,
           beforeHash: original === undefined ? undefined : sha256Hex(original),
@@ -130,7 +139,7 @@ export function createLocalEditFileTool(
       inputSchema: {
         type: "object",
         properties: {
-          path: { type: "string", minLength: 1, description: "Workspace-relative file path." },
+          path: { type: "string", minLength: 1, description: "Absolute or run-root-relative file path." },
           edits: {
             type: "array",
             minItems: 1,
@@ -154,9 +163,16 @@ export function createLocalEditFileTool(
       throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const edits = parseExactEdits(record.edits);
-      const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, ""));
+      const target = await resolveAuthorizedWorkspacePath(
+        rootDirectory,
+        stringOrFallback(record.path, ""),
+        "edit",
+        context,
+        options.pathAuthorization,
+      );
+      const pathFacts = authorizedPathFacts(target);
       return mutationCoordinator.run(target.absolutePath, async () => {
-        assertSandboxAllowed(sandboxPolicy, sandboxRequest("edit", rootDirectory, target.relativePath));
+        assertSandboxAllowed(sandboxPolicy, sandboxRequest("edit", target.rootDirectory, target.relativePath));
         const stat = await fs.stat(target.absolutePath);
         if (!stat.isFile()) throw new Error(`Edit expects a file path: ${target.relativePath}`);
         if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES) {
@@ -177,7 +193,7 @@ export function createLocalEditFileTool(
         const changed = updated !== original;
         throwIfAborted(context.abortSignal);
         if (changed) {
-          assertSandboxAllowed(sandboxPolicy, sandboxRequest("edit", rootDirectory, target.relativePath, {
+          assertSandboxAllowed(sandboxPolicy, sandboxRequest("edit", target.rootDirectory, target.relativePath, {
             bytes: Buffer.byteLength(updated, "utf8"),
           }));
           await fs.writeFile(target.absolutePath, updated, "utf8");
@@ -186,6 +202,7 @@ export function createLocalEditFileTool(
         return {
           refId: `workspace:file:${target.relativePath}`,
           path: target.relativePath,
+          ...pathFacts,
           operation: "edit",
           changed,
           replacements: changed ? located.length : 0,

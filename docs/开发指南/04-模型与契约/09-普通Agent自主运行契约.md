@@ -157,7 +157,7 @@ Ordinary SSE 只是实时观察通道，不拥有运行事实。相邻文本增�
 - provider/protocol 切换由 Pi provider binding 按公开能力处理；历史 Session 保持原样，不能回写篡改审计事实。
 - 失败、blocked 或取消 run 若已经形成 Pi Session 消息，下一轮沿用其中真实消息；若在模型调用前失败，则使用更早的 Session context。不得另造“中断上下文”，Panel 错误文案也不能冒充模型输出。
 - `visibleAssistantText` 只恢复用户已经看见的正文，不参与下一轮模型上下文；进程退出后的静默视图恢复不得被解释为同一模型调用可以续跑。
-- 附件字节、未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
+- 附件原始字节不写入 Ordinary run snapshot、事件或 Panel read-model；支持的 inline image 由 Pi durable Session 持有并在后续轮次重建。无法由当前 Pi 公共消息契约无损表达的附件必须形成明确 delivery failure，不能静默删除后继续报告成功。未知 provider 私有字段、悬空 continuation 和无法证明结果的内部执行对象一律不持久化，不能为了“续跑”伪造 tool call/result 对。
 - 开发期旧 snapshot 直接视为不兼容数据；不得从可见回答、event payload 或当前全局配置迁移、双读或猜测回填。
 
 恢复审批时仍必须匹配原 confirmation id；不允许因为重新进入 loop 而绕过确认。进程重启导致 live continuation 丢失时，Ordinary 必须为待审批调用记录“未执行并已取消”的真实 tool result，再进入 blocked，不能留下孤立 assistant tool call 或重放命令。

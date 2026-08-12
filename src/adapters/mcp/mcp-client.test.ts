@@ -208,6 +208,121 @@ test("McpClientWrapper connects and disconnects", async () => {
   assert.equal(client.isConnected(), false);
 });
 
+test("McpClientWrapper retains failed close handles and retries the same transport", async () => {
+  const server = createTestServer();
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const originalClose = clientTransport.close.bind(clientTransport);
+  const closeError = new Error("transport close failed");
+  let failClose = true;
+  let closeCalls = 0;
+  clientTransport.close = async () => {
+    closeCalls += 1;
+    if (failClose) throw closeError;
+    await originalClose();
+  };
+  const client = new McpClientWrapper(
+    { serverId: "retry-close", transport: "stdio" },
+    { transport: clientTransport },
+  );
+  await client.connect();
+
+  await assert.rejects(client.disconnect(), (error: unknown) => error === closeError);
+  assert.equal(client.isConnected(), false);
+  assert.equal(closeCalls, 1);
+
+  failClose = false;
+  await client.disconnect();
+  const closeCallsAfterRetry = closeCalls;
+  assert.equal(closeCallsAfterRetry > 2, true);
+
+  await client.disconnect();
+
+  assert.equal(closeCalls, closeCallsAfterRetry);
+});
+
+test("McpClientWrapper retains a stale transport when setup cleanup first fails", async () => {
+  const [clientTransport] = InMemoryTransport.createLinkedPair();
+  const originalClose = clientTransport.close.bind(clientTransport);
+  let failClose = true;
+  let closeCalls = 0;
+  clientTransport.close = async () => {
+    closeCalls += 1;
+    if (failClose) throw new Error("stale transport close failed");
+    await originalClose();
+  };
+  let resolveTransport!: (transport: Transport) => void;
+  const transport = new Promise<Transport>((resolve) => { resolveTransport = resolve; });
+  let signalFactoryStarted!: () => void;
+  const factoryStarted = new Promise<void>((resolve) => { signalFactoryStarted = resolve; });
+  const client = new McpClientWrapper(
+    { serverId: "stale-close-retry", transport: "stdio" },
+    {
+      transportFactory: async () => {
+        signalFactoryStarted();
+        return transport;
+      },
+    },
+  );
+
+  const connecting = client.connect();
+  await factoryStarted;
+  await client.disconnect();
+  resolveTransport(clientTransport);
+  await assert.rejects(connecting, /connection became stale and its transport could not be released/u);
+  assert.equal(closeCalls, 1);
+  await assert.rejects(client.connect(), /still owns resources from a failed disconnect/u);
+
+  failClose = false;
+  await client.disconnect();
+  const closeCallsAfterRetry = closeCalls;
+  assert.equal(closeCallsAfterRetry > 1, true);
+  await client.disconnect();
+  assert.equal(closeCalls, closeCallsAfterRetry, "a released stale transport must not be closed again");
+});
+
+test("McpClientWrapper reports failed connection cleanup and retains it for explicit release", async () => {
+  const connectError = new Error("initialize send failed");
+  const closeError = new Error("failed connection transport close failed");
+  let failClose = true;
+  let closeCalls = 0;
+  const transport = {
+    onclose: undefined,
+    onerror: undefined,
+    onmessage: undefined,
+    async start() { return undefined; },
+    async send() { throw connectError; },
+    async close() {
+      closeCalls += 1;
+      if (failClose) throw closeError;
+    },
+  } satisfies Transport;
+  const client = new McpClientWrapper(
+    { serverId: "failed-connect-cleanup", transport: "stdio" },
+    { transport },
+  );
+
+  await assert.rejects(client.connect(), (error: unknown) => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.message, "MCP client \"failed-connect-cleanup\" failed to connect and release its transport.");
+    assert.equal(error.errors[0], connectError);
+    assert.equal(error.errors[1], closeError);
+    return true;
+  });
+  assert.equal(client.isConnected(), false);
+  assert.equal(closeCalls >= 1, true);
+  const closeCallsAfterFailure = closeCalls;
+
+  failClose = false;
+  await client.disconnect();
+  const closeCallsAfterRetry = closeCalls;
+  assert.equal(closeCallsAfterRetry > closeCallsAfterFailure, true);
+
+  await client.disconnect();
+
+  assert.equal(closeCalls, closeCallsAfterRetry);
+});
+
 test("McpClientWrapper listTools returns expected format", async () => {
   const { client } = await createConnectedPair();
 

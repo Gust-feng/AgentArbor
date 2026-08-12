@@ -12,6 +12,7 @@ import { loadConversationSession, resetConversationSession } from "./app-convers
 import { submitPanelTask } from "./app-task-submission";
 import { invalidateUsageStatistics } from "./usage-statistics-query";
 import type { AppState } from "./app-state";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";
 import type { BasicAgentRun } from "./contracts/run";
@@ -19,9 +20,10 @@ import type { BasicAgentRun } from "./contracts/run";
 export type AppRunController = {
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly submissionAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly loadConversation: (conversationId: string) => Promise<boolean>;
-  readonly startTask: (explicitGoal?: string) => Promise<void>;
-  readonly startNewConversation: (explicitGoal?: string) => Promise<boolean>;
+  readonly startTask: (explicitGoal?: string) => Promise<boolean>;
+  readonly startNewConversation: (owner?: { readonly kind: "space" | "workspace"; readonly id: string }) => Promise<boolean>;
   readonly refreshConversations: () => Promise<void>;
   readonly startLiveUpdates: (input: LiveRunSubscription) => void;
   readonly cancelRun: () => Promise<void>;
@@ -32,11 +34,10 @@ export type AppRunController = {
 export type AppRunControllerOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly setGoal: (goal: string) => void;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
-  readonly selectedWorkspaceDirectory?: string;
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;
@@ -48,10 +49,14 @@ export type AppRunControllerOptions = {
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly pollTimer: React.MutableRefObject<number | undefined>;
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
+  readonly fallbackPollRef: React.MutableRefObject<AbortController | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly submissionAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
   readonly setCancellingRunId: React.Dispatch<React.SetStateAction<string | undefined>>;
+  /** Owner 为空间的对话提交（创建/续接）成功后刷新对应空间 read-model。 */
+  readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 };
 
 export function createAppRunController(options: AppRunControllerOptions): AppRunController {
@@ -61,6 +66,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     mountedRef: options.mountedRef,
     pollTimer: options.pollTimer,
     streamRef: options.streamRef,
+    fallbackPollRef: options.fallbackPollRef,
     activeRunIdRef: options.activeRunIdRef,
     viewEpochRef: options.viewEpochRef,
     refreshConversations,
@@ -85,23 +91,25 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     }
   }
 
-  async function startTask(explicitGoal?: string): Promise<void> {
-    await submitTask("continue", explicitGoal);
+  async function startTask(explicitGoal?: string): Promise<boolean> {
+    return await submitTask("continue", explicitGoal);
   }
 
-  async function startNewConversation(explicitGoal?: string): Promise<boolean> {
-    return await submitTask("new", explicitGoal);
+  async function startNewConversation(owner?: { readonly kind: "space" | "workspace"; readonly id: string }): Promise<boolean> {
+    return await submitTask("new", undefined, undefined, owner);
   }
 
   async function submitTask(
     conversationBehavior: "continue" | "new",
     explicitGoal?: string,
+    newConversationSpaceId?: string,
+    newConversationOwner?: { readonly kind: "space" | "workspace"; readonly id: string },
   ): Promise<boolean> {
     return await submitPanelTask({
       ...options,
       refreshConversations,
       startLiveUpdates: liveUpdates.startLiveUpdates,
-    }, explicitGoal, conversationBehavior);
+    }, explicitGoal, conversationBehavior, newConversationSpaceId, newConversationOwner);
   }
 
   async function refreshConversations(): Promise<void> {
@@ -114,7 +122,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     if (currentRunId === undefined) return;
     const cancellationEpoch = options.viewEpochRef.current;
     options.setCancellingRunId(currentRunId);
-    stopLiveUpdates(options.pollTimer, options.streamRef);
+    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
     try {
       const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
       if (!options.mountedRef.current) return;
@@ -181,6 +189,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
   return {
     activeRunIdRef: options.activeRunIdRef,
     viewEpochRef: options.viewEpochRef,
+    submissionAttemptRef: options.submissionAttemptRef,
     loadConversation,
     startTask,
     startNewConversation,

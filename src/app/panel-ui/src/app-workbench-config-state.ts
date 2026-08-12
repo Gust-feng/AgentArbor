@@ -6,7 +6,7 @@ import type {
   VisibleAiMode,
 } from "./app-config-projection";
 import type { AppState } from "./app-state";
-import type { ChatModelOption } from "./components/chat-empty";
+import type { ChatModelOption } from "./contracts/composer";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
@@ -23,8 +23,6 @@ export type AppWorkbenchConfigState = {
   readonly setComposerSelectedModelId: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly modelCatalogs: Record<string, ModelProviderModelCatalog>;
   readonly setModelCatalogs: React.Dispatch<React.SetStateAction<Record<string, ModelProviderModelCatalog>>>;
-  readonly workspaceDirectory: string;
-  readonly setWorkspaceDirectory: React.Dispatch<React.SetStateAction<string>>;
   readonly desktopAgentSystemPrompt: string;
   readonly setDesktopAgentSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
   readonly toolForm: ToolForm;
@@ -55,7 +53,6 @@ export function useAppWorkbenchConfigState(app: AppState): AppWorkbenchConfigSta
   const [toolConfirmationPolicy, setToolConfirmationPolicy] = useState<ComposerToolConfirmationPolicy>("prompt");
   const [composerSelectedModelId, setComposerSelectedModelId] = useState<string | undefined>(undefined);
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
-  const [workspaceDirectory, setWorkspaceDirectory] = useState("");
   const [desktopAgentSystemPrompt, setDesktopAgentSystemPrompt] = useState("");
   const [toolForm, setToolForm] = useState<ToolForm>({
     provider: "tavily",
@@ -114,7 +111,6 @@ export function useAppWorkbenchConfigState(app: AppState): AppWorkbenchConfigSta
     app,
     setAiMode,
     setModelForm,
-    setWorkspaceDirectory,
     setDesktopAgentSystemPrompt,
     setToolConfirmationPolicy,
     setToolForm,
@@ -141,8 +137,6 @@ export function useAppWorkbenchConfigState(app: AppState): AppWorkbenchConfigSta
     setComposerSelectedModelId,
     modelCatalogs,
     setModelCatalogs,
-    workspaceDirectory,
-    setWorkspaceDirectory,
     desktopAgentSystemPrompt,
     setDesktopAgentSystemPrompt,
     toolForm,

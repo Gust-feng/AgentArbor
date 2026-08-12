@@ -3,20 +3,27 @@ import type { ToolDefinition, ToolExecutionContext, ToolExecutor, ToolJsonSchema
 import { asOptionalRecord, asRecord, stringOrUndefined } from "../../kernel/values/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { AgentToolRegistryContribution } from "../tool-center/factory.js";
-import { createLocalEditFileTool, createLocalWriteFileTool } from "../tool-center/adapters/local-workspace-write-tools.js";
-import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import {
-  isSpaceReferenceWritePermission,
-  spaceReferenceAttachmentId,
+  attachmentEntries,
+  resolveAttachmentTarget,
+} from "../tool-center/adapters/context-attachment-access.js";
+import {
   spaceReferenceIdFromAttachmentId,
-  spaceReferenceWritePermission,
 } from "./space-file-access.js";
-import { SpaceFeatureError, type SpaceFeature, type SpaceReference, type SpaceTarget } from "./contracts.js";
+import { SpaceFeatureError, type SpaceAddableReference, type SpaceFeature, type SpaceReference, type SpaceTarget } from "./contracts.js";
 
 export type SpaceToolOptions = {
   readonly spaces: Pick<SpaceFeature, "commands" | "queries">;
+  readonly workspaceRoot: string;
   readonly taskSoil?: TaskSoil;
-  readonly mutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  /** Host deletion-coordinator admission check for Space-scoped writes. */
+  readonly assertSpaceAvailable?: (spaceId: string) => void;
+  /** Host-owned durable Space deletion workflow. */
+  readonly deleteSpace?: (spaceId: string) => Promise<void>;
+  /** Host-owned durable Conversation deletion workflow. */
+  readonly deleteConversation?: (conversationId: string) => Promise<void>;
+  /** Revocations observed since this run froze its grants. */
+  readonly revocationOverlay?: SpaceRevocationOverlay;
 };
 
 /** All Agent-visible operations on the reference-only SpaceTree feature. */
@@ -24,17 +31,17 @@ export function createSpaceTools(options: SpaceToolOptions): readonly ToolExecut
   const tools = [
     createSpaceListTool(options),
     createSpaceCreateTool(options),
+    createSpaceDeleteTool(options),
+    createConversationDeleteTool(options),
     createSpaceMoveTool(options),
     createSpaceAddReferenceTool(options),
     createSpaceUnlinkReferenceTool(options),
     createSpaceRemoveReferenceTool(options),
     createSpaceRenameTool(options),
   ];
-  // Snapshot assembly has no Task Soil and must catalog the definitions. At
-  // execution time, omit them unless this run actually froze a Space grant.
-  return options.taskSoil === undefined || hasSpaceWriteGrant(options.taskSoil)
-    ? [...tools, createSpaceWriteTool(options), createSpaceEditTool(options)]
-    : tools;
+  // File I/O stays on the mature Read/Glob/Grep/Write/Edit executors. The Host
+  // injects Space path authority into those tools, avoiding a second file API.
+  return tools;
 }
 
 /** Host-selected contribution; it does not create a registry or make visibility decisions. */
@@ -75,10 +82,41 @@ export function createSpaceCreateTool(options: SpaceToolOptions): ToolExecutor {
   });
 }
 
+export function createSpaceDeleteTool(options: SpaceToolOptions): ToolExecutor {
+  return tool({
+    name: "SpaceDelete",
+    description: "Delete a Space and its Space-owned materials and Conversations. External files and folders are only unlinked; their source content is preserved.",
+    metadata: destructiveMetadata,
+    inputSchema: requiredSchema({ spaceId: { type: "string", minLength: 1 } }, ["spaceId"]),
+    execute: async (input) => {
+      const spaceId = stringOrUndefined(asRecord(input).spaceId);
+      if (spaceId === undefined) return invalid("spaceId must be a string.");
+      options.assertSpaceAvailable?.(spaceId);
+      if (options.deleteSpace === undefined) return { status: "space_delete_unavailable", spaceId, message: "The Host Space deletion coordinator is not available." };
+      return resultFor(() => options.deleteSpace!(spaceId), () => ({ status: "deleted", spaceId }));
+    },
+  });
+}
+
+export function createConversationDeleteTool(options: SpaceToolOptions): ToolExecutor {
+  return tool({
+    name: "ConversationDelete",
+    description: "Delete a Conversation and its Space owner link. This is irreversible for the Conversation history and requires confirmation.",
+    metadata: destructiveMetadata,
+    inputSchema: requiredSchema({ conversationId: { type: "string", minLength: 1 } }, ["conversationId"]),
+    execute: async (input) => {
+      const conversationId = stringOrUndefined(asRecord(input).conversationId);
+      if (conversationId === undefined) return invalid("conversationId must be a string.");
+      if (options.deleteConversation === undefined) return { status: "conversation_delete_unavailable", conversationId, message: "The Host Conversation deletion coordinator is not available." };
+      return resultFor(() => options.deleteConversation!(conversationId), () => ({ status: "deleted", conversationId }));
+    },
+  });
+}
+
 export function createSpaceMoveTool(options: SpaceToolOptions): ToolExecutor {
   return tool({
     name: "SpaceMove",
-    description: "Move a top-level reference item to another Space. Moving changes only Space metadata; it never moves the referenced filesystem object.",
+    description: "Move a Space-owned material to another Space. External file/folder references and Conversation owners cannot be moved; web pages and generated artifacts may retain metadata-only moves.",
     metadata: writeMetadata,
     inputSchema: requiredSchema({
       targetKind: { type: "string", enum: ["reference"] }, targetId: { type: "string" }, destinationSpaceId: { type: "string" },
@@ -88,6 +126,18 @@ export function createSpaceMoveTool(options: SpaceToolOptions): ToolExecutor {
       const target = movableTarget(record.targetKind, record.targetId);
       const destinationSpaceId = stringOrUndefined(record.destinationSpaceId);
       if (target === undefined || destinationSpaceId === undefined) return invalid("targetKind, targetId and destinationSpaceId are required strings.");
+      const item = await options.spaces.queries.getReference(target.id);
+      if (item === undefined) return { status: "space_reference_not_found", itemId: target.id };
+      options.assertSpaceAvailable?.(item.spaceId);
+      options.assertSpaceAvailable?.(destinationSpaceId);
+      if (!isMovableSpaceMaterial(item.reference)) {
+        return {
+          status: "space_reference_move_unavailable",
+          itemId: target.id,
+          referenceKind: item.reference.kind,
+          message: "External file/folder references and Conversation owners cannot be moved.",
+        };
+      }
       return resultFor(() => options.spaces.commands.move({ target, destinationSpaceId }), () => ({ status: "moved", target, destinationSpaceId }));
     },
   });
@@ -96,7 +146,7 @@ export function createSpaceMoveTool(options: SpaceToolOptions): ToolExecutor {
 export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExecutor {
   return tool({
     name: "SpaceAddReference",
-    description: "Add an opaque reference to a local file, workspace folder, web page, generated artifact, or Ordinary conversation. This never copies the target's content or transfers its ownership.",
+    description: "Add an external file/folder reference or Space material from the current Task Soil attachment. Select local files and folders by attachmentId from AttachmentList; raw local paths are not accepted. Conversation owners are created only by the conversation workflow.",
     metadata: writeMetadata,
     inputSchema: requiredSchema({
       spaceId: { type: "string" }, title: { type: "string" }, reference: referenceSchema,
@@ -105,9 +155,11 @@ export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExec
       const record = asRecord(input);
       const spaceId = stringOrUndefined(record.spaceId);
       const title = stringOrUndefined(record.title);
-      const reference = referenceFromUnknown(record.reference);
-      if (spaceId === undefined || title === undefined || reference === undefined) return invalid("spaceId, title and a valid reference are required.");
-      return resultFor(() => options.spaces.commands.addReference({ spaceId, title, reference }), (item) => ({ status: "added", item }));
+      if (spaceId === undefined || title === undefined) return invalid("spaceId, title and a valid reference are required.");
+      options.assertSpaceAvailable?.(spaceId);
+      const resolution = await resolveAgentSpaceReference(record.reference, options);
+      if ("error" in resolution) return resolution.error;
+      return resultFor(() => options.spaces.commands.addReference({ spaceId, title, reference: resolution.reference }), (item) => ({ status: "added", item }));
     },
   });
 }
@@ -115,12 +167,25 @@ export function createSpaceAddReferenceTool(options: SpaceToolOptions): ToolExec
 export function createSpaceUnlinkReferenceTool(options: SpaceToolOptions): ToolExecutor {
   return tool({
     name: "SpaceUnlinkReference",
-    description: "Remove a Space metadata link while preserving the referenced file, folder, web page, artifact, or conversation source.",
+    description: "Remove an external file, folder, web page, or generated artifact reference while preserving its source. Space-owned materials and Conversation owners use their own deletion workflows.",
     metadata: writeMetadata,
     inputSchema: requiredSchema({ itemId: { type: "string" } }, ["itemId"]),
     execute: async (input) => {
       const itemId = stringOrUndefined(asRecord(input).itemId);
       if (itemId === undefined) return invalid("itemId must be a string.");
+      const item = await options.spaces.queries.getReference(itemId);
+      if (item === undefined) return { status: "space_reference_not_found", itemId };
+      options.assertSpaceAvailable?.(item.spaceId);
+      if (!isExternalReference(item.reference)) {
+        return {
+          status: item.reference.kind === "conversation" ? "space_conversation_owner_immutable" : "space_reference_unlink_unavailable",
+          itemId,
+          referenceKind: item.reference.kind,
+          message: item.reference.kind === "conversation"
+            ? "Conversation ownership can only be changed by creating or deleting the Conversation."
+            : "Space-owned materials must be deleted through their material workflow.",
+        };
+      }
       return resultFor(() => options.spaces.commands.unlinkReference(itemId), () => ({ status: "unlinked", itemId }));
     },
   });
@@ -129,7 +194,7 @@ export function createSpaceUnlinkReferenceTool(options: SpaceToolOptions): ToolE
 export function createSpaceRemoveReferenceTool(options: SpaceToolOptions): ToolExecutor {
   return tool({
     name: "SpaceRemoveReference",
-    description: "Physically delete a referenced local file or AgentArbor-managed folder and remove its Space metadata. Use SpaceUnlinkReference when the source must be preserved; external workspace folders cannot be deleted by this tool.",
+    description: "Delete a Space-owned material and remove its Space metadata. External files, folders, web pages, generated artifacts, and Conversation owners cannot be physically deleted by this tool.",
     metadata: destructiveMetadata,
     inputSchema: requiredSchema({ itemId: { type: "string" } }, ["itemId"]),
     execute: async (input) => {
@@ -137,12 +202,15 @@ export function createSpaceRemoveReferenceTool(options: SpaceToolOptions): ToolE
       if (itemId === undefined) return invalid("itemId must be a string.");
       const item = await options.spaces.queries.getReference(itemId);
       if (item === undefined) return { status: "space_reference_not_found", itemId };
-      if (item.reference.kind !== "local_file" && item.reference.kind !== "managed_folder") {
+      options.assertSpaceAvailable?.(item.spaceId);
+      if (!isSpaceOwnedMaterial(item.reference)) {
         return {
           status: "reference_delete_unavailable",
           itemId,
           referenceKind: item.reference.kind,
-          message: "This reference can only be unlinked; its source cannot be deleted by SpaceRemoveReference.",
+          message: item.reference.kind === "conversation"
+            ? "Conversation owners can only be removed by deleting the Conversation."
+            : "This external reference can only be unlinked; its source cannot be deleted by SpaceRemoveReference.",
         };
       }
       return resultFor(() => options.spaces.commands.removeReference(itemId), () => ({ status: "removed", itemId }));
@@ -161,75 +229,19 @@ export function createSpaceRenameTool(options: SpaceToolOptions): ToolExecutor {
       const target = targetFrom(record.targetKind, record.targetId);
       const title = stringOrUndefined(record.title);
       if (target === undefined || title === undefined) return invalid("targetKind, targetId and title must be strings.");
+      if (target.kind === "space") {
+        options.assertSpaceAvailable?.(target.id);
+      } else {
+        const item = await options.spaces.queries.getReference(target.id);
+        if (item === undefined) return { status: "space_reference_not_found", itemId: target.id };
+        options.assertSpaceAvailable?.(item.spaceId);
+        if (item.reference.kind === "conversation") {
+          return { status: "space_conversation_owner_immutable", itemId: target.id, message: "Conversation ownership cannot be renamed as a generic Space reference." };
+        }
+      }
       return resultFor(() => options.spaces.commands.rename({ target, title }), () => ({ status: "renamed", target, title }));
     },
   });
-}
-
-export function createSpaceWriteTool(options: SpaceToolOptions): ToolExecutor {
-  return {
-    definition: {
-      name: "SpaceWrite",
-      description: "Create or completely rewrite a UTF-8 text file inside a local file or folder reference frozen for the current conversation Space. Select the resource by referenceId; raw absolute paths are not accepted.",
-      metadata: fileWriteMetadata,
-      inputSchema: requiredSchema({
-        referenceId: { type: "string", minLength: 1, description: "SpaceList reference id or the full space-reference attachment id." },
-        path: { type: "string", minLength: 1, description: "Folder-relative file path. Omit for a single-file reference." },
-        content: { type: "string", description: "Complete UTF-8 text content." },
-      }, ["referenceId", "content"]),
-    },
-    execute: async (input, context) => {
-      const record = asRecord(input);
-      const referenceId = normalizedReferenceId(record.referenceId);
-      if (referenceId === undefined || typeof record.content !== "string") {
-        return invalid("referenceId and string content are required.");
-      }
-      const target = resolveSpaceFileTarget(options.taskSoil, referenceId, optionalString(record.path));
-      const result = await createLocalWriteFileTool(target.rootPath, {
-        mutationCoordinator: options.mutationCoordinator,
-      }).execute({ path: target.relativePath, content: record.content }, context);
-      return result;
-    },
-  };
-}
-
-export function createSpaceEditTool(options: SpaceToolOptions): ToolExecutor {
-  return {
-    definition: {
-      name: "SpaceEdit",
-      description: "Replace exact text in one UTF-8 file inside a local file or folder reference frozen for the current conversation Space. Every oldText must match exactly once.",
-      metadata: fileWriteMetadata,
-      inputSchema: requiredSchema({
-        referenceId: { type: "string", minLength: 1, description: "SpaceList reference id or the full space-reference attachment id." },
-        path: { type: "string", minLength: 1, description: "Folder-relative file path. Omit for a single-file reference." },
-        edits: {
-          type: "array",
-          minItems: 1,
-          items: {
-            type: "object",
-            properties: {
-              oldText: { type: "string", minLength: 1 },
-              newText: { type: "string" },
-            },
-            required: ["oldText", "newText"],
-            additionalProperties: false,
-          },
-        },
-      }, ["referenceId", "edits"]),
-    },
-    execute: async (input, context) => {
-      const record = asRecord(input);
-      const referenceId = normalizedReferenceId(record.referenceId);
-      if (referenceId === undefined || !Array.isArray(record.edits)) {
-        return invalid("referenceId and edits are required.");
-      }
-      const target = resolveSpaceFileTarget(options.taskSoil, referenceId, optionalString(record.path));
-      const result = await createLocalEditFileTool(target.rootPath, {
-        mutationCoordinator: options.mutationCoordinator,
-      }).execute({ path: target.relativePath, edits: record.edits }, context);
-      return result;
-    },
-  };
 }
 
 type ToolSpec = {
@@ -254,7 +266,6 @@ function tool(spec: ToolSpec): ToolExecutor {
 const readMetadata = { category: "workspace", riskLevel: "low", operationType: "read-only", requiresConfirmation: false } as const;
 const writeMetadata = { category: "workspace", riskLevel: "low", operationType: "read-write", requiresConfirmation: false } as const;
 const destructiveMetadata = { category: "workspace", riskLevel: "high", operationType: "read-write", requiresConfirmation: true, fileOperation: "delete" } as const;
-const fileWriteMetadata = { category: "filesystem", riskLevel: "medium", operationType: "read-write", requiresConfirmation: false } as const;
 
 function requiredSchema(properties: ToolDefinition["inputSchema"]["properties"], required: readonly string[]): ToolDefinition["inputSchema"] {
   return { type: "object" as const, properties, required };
@@ -263,53 +274,56 @@ function requiredSchema(properties: ToolDefinition["inputSchema"]["properties"],
 const referenceSchema: ToolJsonSchema = {
   type: "object",
   oneOf: [
-    { type: "object", properties: { kind: { const: "local_file" }, path: { type: "string" } }, required: ["kind", "path"], additionalProperties: false },
-    { type: "object", properties: { kind: { const: "workspace_folder" }, path: { type: "string" } }, required: ["kind", "path"], additionalProperties: false },
+    {
+      type: "object",
+      properties: {
+        kind: { const: "local_attachment" },
+        attachmentId: { type: "string", minLength: 1, description: "Current Task Soil attachment id returned by AttachmentList." },
+      },
+      required: ["kind", "attachmentId"],
+      additionalProperties: false,
+    },
     { type: "object", properties: { kind: { const: "web_page" }, url: { type: "string", format: "uri" } }, required: ["kind", "url"], additionalProperties: false },
     { type: "object", properties: { kind: { const: "generated_artifact" }, artifactRef: { type: "string" } }, required: ["kind", "artifactRef"], additionalProperties: false },
-    { type: "object", properties: { kind: { const: "conversation" }, conversationId: { type: "string" }, conversationTitle: { type: "string" } }, required: ["kind", "conversationId"], additionalProperties: false },
   ],
 };
 
 function invalid(message: string) { return { status: "invalid_input", message }; }
-function optionalString(value: unknown): string | undefined | null { return value === undefined ? undefined : stringOrUndefined(value) ?? null; }
 
-function resolveSpaceFileTarget(
-  taskSoil: TaskSoil | undefined,
-  referenceId: string,
-  requestedPath: string | undefined | null,
-): { readonly rootPath: string; readonly relativePath: string } {
-  if (requestedPath === null) throw new Error("path must be a string when provided.");
-  if (taskSoil === undefined || !taskSoil.permissionBoundaryRefs.includes(spaceReferenceWritePermission(referenceId))) {
-    throw new Error(`Space reference ${referenceId} is not writable in this run.`);
-  }
-  const contextRef = taskSoil.contextRefs.find((ref) => ref.attachmentId === spaceReferenceAttachmentId(referenceId));
-  if (contextRef?.kind === "file" && contextRef.ref.startsWith("local-file:")) {
-    if (requestedPath !== undefined && requestedPath !== ".") {
-      throw new Error("A single-file Space reference does not accept a nested path.");
+/**
+ * Deny set layered over the run's frozen grants. It records only references
+ * observed being revoked, because "absent from this Space" cannot distinguish a
+ * revoked reference from one that was never there, and denying on absence alone
+ * would reject legitimate writes.
+ */
+export type SpaceRevocationOverlay = {
+  has(referenceId: string): boolean;
+  assertReadAllowed(attachmentId: string): void;
+};
+
+/** Accumulates live revocations so in-flight runs cannot reuse removed references. */
+export function createSpaceRevocationOverlay(
+  events: Pick<SpaceFeature, "events">["events"],
+): SpaceRevocationOverlay & { dispose(): void } {
+  const revoked = new Set<string>();
+  const unsubscribe = events.subscribe((event) => {
+    if (event.type === "space.reference_removed") {
+      revoked.add(event.itemId);
+      for (const id of event.removedItemIds) revoked.add(id);
+    } else if (event.type === "space.deleted") {
+      for (const id of event.removedReferenceIds) revoked.add(id);
     }
-    const absolutePath = path.resolve(contextRef.ref.slice("local-file:".length));
-    return { rootPath: path.dirname(absolutePath), relativePath: path.basename(absolutePath) };
-  }
-  if (contextRef?.kind === "project" && contextRef.ref.startsWith("local-project:")) {
-    if (requestedPath === undefined || requestedPath === ".") {
-      throw new Error("A folder Space reference requires a relative file path.");
-    }
-    return {
-      rootPath: path.resolve(contextRef.ref.slice("local-project:".length)),
-      relativePath: requestedPath,
-    };
-  }
-  throw new Error(`Space reference ${referenceId} has no frozen local file grant.`);
-}
-
-function hasSpaceWriteGrant(taskSoil: TaskSoil): boolean {
-  return taskSoil.permissionBoundaryRefs.some(isSpaceReferenceWritePermission);
-}
-
-function normalizedReferenceId(value: unknown): string | undefined {
-  const selector = stringOrUndefined(value);
-  return selector === undefined ? undefined : spaceReferenceIdFromAttachmentId(selector) ?? selector;
+  });
+  return {
+    has: (referenceId) => revoked.has(referenceId),
+    assertReadAllowed(attachmentId) {
+      const referenceId = spaceReferenceIdFromAttachmentId(attachmentId);
+      if (referenceId !== undefined && revoked.has(referenceId)) {
+        throw new Error(`Space reference ${referenceId} was revoked and is no longer readable.`);
+      }
+    },
+    dispose: unsubscribe,
+  };
 }
 
 function targetFrom(kind: unknown, id: unknown): SpaceTarget | undefined {
@@ -324,19 +338,79 @@ function movableTarget(kind: unknown, id: unknown): { readonly kind: "reference"
   return target?.kind === "reference" ? { kind: "reference", id: target.id } : undefined;
 }
 
-function referenceFromUnknown(value: unknown): SpaceReference | undefined {
+type AgentSpaceReferenceResolution =
+  | { readonly reference: SpaceAddableReference }
+  | { readonly error: Readonly<Record<string, unknown>> };
+
+async function resolveAgentSpaceReference(
+  value: unknown,
+  options: SpaceToolOptions,
+): Promise<AgentSpaceReferenceResolution> {
   const record = asOptionalRecord(value);
-  if (record === undefined) return undefined;
+  if (record === undefined) return { error: invalid("spaceId, title and a valid reference are required.") };
   const kind = stringOrUndefined(record.kind);
-  if ((kind === "local_file" || kind === "workspace_folder") && stringOrUndefined(record.path) !== undefined) return { kind, path: stringOrUndefined(record.path)! };
-  if (kind === "web_page" && stringOrUndefined(record.url) !== undefined) return { kind, url: stringOrUndefined(record.url)! };
-  if (kind === "generated_artifact" && stringOrUndefined(record.artifactRef) !== undefined) return { kind, artifactRef: stringOrUndefined(record.artifactRef)! };
-  if (kind === "conversation" && stringOrUndefined(record.conversationId) !== undefined) {
-    const conversationTitle = optionalString(record.conversationTitle);
-    if (conversationTitle === null) return undefined;
-    return { kind, conversationId: stringOrUndefined(record.conversationId)!, conversationTitle };
+  if (kind === "local_attachment") {
+    const attachmentId = stringOrUndefined(record.attachmentId);
+    if (attachmentId === undefined) return { error: invalid("local_attachment requires attachmentId from AttachmentList.") };
+    const attachment = attachmentEntries(options.taskSoil).find((entry) => entry.attachmentId === attachmentId);
+    if (attachment === undefined) {
+      return {
+        error: {
+          status: "space_reference_attachment_not_found",
+          attachmentId,
+          message: "No current Task Soil attachment matched this attachmentId.",
+        },
+      };
+    }
+    if (!attachment.authorized) {
+      return {
+        error: {
+          status: "space_reference_attachment_not_authorized",
+          attachmentId,
+          message: "The selected attachment is not authorized for reading in this run.",
+        },
+      };
+    }
+    try {
+      const target = await resolveAttachmentTarget({
+        entry: attachment,
+        workspaceRoot: options.workspaceRoot,
+        requireFile: false,
+        projectPathRequired: false,
+      });
+      return {
+        reference: target.rootKind === "file"
+          ? { kind: "local_file", path: target.rootAbsolutePath }
+          : { kind: "workspace_folder", path: target.rootAbsolutePath },
+      };
+    } catch (error) {
+      return {
+        error: {
+          status: "space_reference_attachment_unsupported",
+          attachmentId,
+          message: error instanceof Error ? error.message : "The selected attachment is not a local file or folder.",
+        },
+      };
+    }
   }
-  return undefined;
+  if (kind === "web_page" && stringOrUndefined(record.url) !== undefined) return { reference: { kind, url: stringOrUndefined(record.url)! } };
+  if (kind === "generated_artifact" && stringOrUndefined(record.artifactRef) !== undefined) return { reference: { kind, artifactRef: stringOrUndefined(record.artifactRef)! } };
+  return { error: invalid("spaceId, title and a valid reference are required.") };
+}
+
+function isExternalReference(reference: SpaceReference): boolean {
+  return reference.kind === "local_file" ||
+    reference.kind === "workspace_folder" ||
+    reference.kind === "web_page" ||
+    reference.kind === "generated_artifact";
+}
+
+function isSpaceOwnedMaterial(reference: SpaceReference): boolean {
+  return !isExternalReference(reference) && reference.kind !== "conversation";
+}
+
+function isMovableSpaceMaterial(reference: SpaceReference): boolean {
+  return reference.kind !== "local_file" && reference.kind !== "workspace_folder" && reference.kind !== "conversation";
 }
 
 async function resultFor<T>(operation: () => Promise<T>, project: (value: T) => unknown): Promise<unknown> {
@@ -351,5 +425,12 @@ async function resultFor<T>(operation: () => Promise<T>, project: (value: T) => 
 }
 
 function isExpectedSpaceOperationError(code: SpaceFeatureError["code"]): boolean {
-  return code === "space_not_found" || code === "space_reference_not_found" || code === "space_invalid_move" || code === "space_invalid_input" || code === "space_id_collision";
+  return code === "space_not_found"
+    || code === "space_reference_not_found"
+    || code === "space_invalid_move"
+    || code === "space_invalid_input"
+    || code === "space_id_collision"
+    || code === "space_workspace_mount_conflict"
+    || code === "space_asset_ownership_conflict"
+    || code === "space_conversation_ownership_conflict";
 }

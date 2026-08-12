@@ -29,6 +29,7 @@ export type McpClientConfig = {
 
 export type McpClientWrapperOptions = {
   readonly transport?: Transport;
+  readonly transportFactory?: () => Transport | Promise<Transport>;
 };
 
 export type McpCallOptions = {
@@ -171,6 +172,9 @@ export class McpClientWrapper {
   private client: Client | undefined;
   private connected = false;
   private transport: Transport | undefined;
+  private transportCloseLease: McpTransportCloseLease | undefined;
+  private readonly pendingTransportCloseLeases = new Set<McpTransportCloseLease>();
+  private disconnecting: Promise<void> | undefined;
   private activeToolCalls = 0;
   private readonly pendingToolCalls: Array<PendingToolCallSlot> = [];
   private readonly maxConcurrentCalls: number | undefined;
@@ -206,20 +210,42 @@ export class McpClientWrapper {
   }
 
   async connect(options: McpLifecycleRequestOptions = {}): Promise<void> {
+    if (this.disconnecting !== undefined) {
+      await this.disconnecting;
+    }
     if (this.connected) {
       return;
     }
+    if (this.client !== undefined || this.transport !== undefined ||
+        this.transportCloseLease !== undefined || this.pendingTransportCloseLeases.size > 0) {
+      throw new Error(
+        `MCP client "${this.config.serverId}" still owns resources from a failed disconnect.`,
+      );
+    }
     const generation = ++this.lifecycleGeneration;
-    const transport = this.options.transport ?? await buildTransport(this.config);
+    const transportCloseLease = createMcpTransportCloseLease(
+      this.options.transport ?? await (this.options.transportFactory?.() ?? buildTransport(this.config)),
+    );
+    const transport = transportCloseLease.transport;
     if (generation !== this.lifecycleGeneration) {
-      await transport.close().catch(() => undefined);
-      throw staleConnectionAttemptError(this.config.serverId);
+      const staleError = staleConnectionAttemptError(this.config.serverId);
+      try {
+        await transportCloseLease.release();
+      } catch (cleanupError) {
+        this.pendingTransportCloseLeases.add(transportCloseLease);
+        throw new AggregateError(
+          [staleError, cleanupError],
+          `MCP client "${this.config.serverId}" connection became stale and its transport could not be released.`,
+        );
+      }
+      throw staleError;
     }
     const client = new Client(
       { name: `agentarbor-${this.config.serverId}`, version: "0.1.0" },
       { capabilities: {} }
     );
     this.transport = transport;
+    this.transportCloseLease = transportCloseLease;
     this.client = client;
     try {
       await client.connect(transport, lifecycleRequestOptions(options));
@@ -236,12 +262,17 @@ export class McpClientWrapper {
     } catch (error) {
       if (this.client === client && this.transport === transport) {
         this.lifecycleGeneration += 1;
-        this.client = undefined;
-        this.transport = undefined;
         this.connected = false;
         this.rejectPendingToolCalls(new Error(`MCP client "${this.config.serverId}" disconnected.`));
+        try {
+          await this.closeOwnedResources(client, transport, transportCloseLease);
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            `MCP client "${this.config.serverId}" failed to connect and release its transport.`,
+          );
+        }
       }
-      await closeClientAndTransport(client, transport);
       throw error;
     }
   }
@@ -250,21 +281,10 @@ export class McpClientWrapper {
     this.lifecycleGeneration += 1;
     const client = this.client;
     const transport = this.transport;
-    if (client === undefined && transport === undefined) {
-      return;
-    }
-    this.client = undefined;
-    this.transport = undefined;
+    const transportCloseLease = this.transportCloseLease;
     this.connected = false;
     this.rejectPendingToolCalls(new Error(`MCP client "${this.config.serverId}" disconnected.`));
-    if (client !== undefined) {
-      try {
-        await client.close();
-        return;
-      } catch {
-      }
-    }
-    await transport?.close();
+    await this.closeOwnedResources(client, transport, transportCloseLease);
   }
 
   async listTools(options: McpLifecycleRequestOptions = {}): Promise<readonly McpToolInfo[]> {
@@ -481,6 +501,57 @@ export class McpClientWrapper {
       recordedAt: new Date().toISOString(),
     };
   }
+
+  private async closeOwnedResources(
+    client: Client | undefined,
+    transport: Transport | undefined,
+    transportCloseLease: McpTransportCloseLease | undefined,
+  ): Promise<void> {
+    const pendingTransportCloseLeases = [...this.pendingTransportCloseLeases]
+      .filter((lease) => lease !== transportCloseLease);
+    if (client === undefined && transport === undefined && transportCloseLease === undefined &&
+        pendingTransportCloseLeases.length === 0) return;
+    if (this.disconnecting !== undefined) return this.disconnecting;
+
+    const releases: Array<{
+      readonly release: () => Promise<void>;
+      readonly commit: () => void;
+    }> = [];
+    if (client !== undefined || transport !== undefined || transportCloseLease !== undefined) {
+      releases.push({
+        release: () => releaseMcpTransport(client, transport, transportCloseLease),
+        commit: () => {
+          if (this.client === client) this.client = undefined;
+          if (this.transport === transport) this.transport = undefined;
+          if (this.transportCloseLease === transportCloseLease) this.transportCloseLease = undefined;
+        },
+      });
+    }
+    for (const lease of pendingTransportCloseLeases) {
+      releases.push({
+        release: () => lease.release(),
+        commit: () => { this.pendingTransportCloseLeases.delete(lease); },
+      });
+    }
+    const disconnecting = (async () => {
+      const results = await Promise.allSettled(releases.map((release) => release.release()));
+      const failures: unknown[] = [];
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled") releases[index]!.commit();
+        else failures.push(result.reason);
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) {
+        throw new AggregateError(failures, `MCP client "${this.config.serverId}" could not release all transports.`);
+      }
+    })();
+    this.disconnecting = disconnecting;
+    try {
+      await disconnecting;
+    } finally {
+      if (this.disconnecting === disconnecting) this.disconnecting = undefined;
+    }
+  }
 }
 
 function lifecycleRequestOptions(options: McpLifecycleRequestOptions): {
@@ -496,13 +567,58 @@ function lifecycleRequestOptions(options: McpLifecycleRequestOptions): {
   };
 }
 
-async function closeClientAndTransport(client: Client, transport: Transport): Promise<void> {
-  try {
-    await client.close();
-    return;
-  } catch {
+async function releaseMcpTransport(
+  client: Client | undefined,
+  transport: Transport | undefined,
+  transportCloseLease: McpTransportCloseLease | undefined,
+): Promise<void> {
+  if (transportCloseLease !== undefined) return transportCloseLease.release();
+  if (transport !== undefined) return transport.close();
+  await client?.close();
+}
+
+type McpTransportCloseLease = {
+  readonly transport: Transport;
+  release(): Promise<void>;
+};
+
+function createMcpTransportCloseLease(ownedTransport: Transport): McpTransportCloseLease {
+  let releasePromise: Promise<void> | undefined;
+  let released = false;
+  const release = (): Promise<void> => {
+    if (released) return Promise.resolve();
+    releasePromise ??= Promise.resolve()
+      .then(() => ownedTransport.close())
+      .then(
+        () => { released = true; },
+        (error: unknown) => {
+          releasePromise = undefined;
+          throw error;
+        },
+      );
+    return releasePromise;
+  };
+  const transport: Transport = {
+    start: () => ownedTransport.start(),
+    send: (message, options) => ownedTransport.send(message, options),
+    async close() {
+      // The MCP SDK fires and forgets close() when initialization fails.
+      // The wrapper-owned lease remains the awaited, retryable error boundary.
+      await release().catch(() => undefined);
+    },
+    get onclose() { return ownedTransport.onclose; },
+    set onclose(listener) { ownedTransport.onclose = listener; },
+    get onerror() { return ownedTransport.onerror; },
+    set onerror(listener) { ownedTransport.onerror = listener; },
+    get onmessage() { return ownedTransport.onmessage; },
+    set onmessage(listener) { ownedTransport.onmessage = listener; },
+    get sessionId() { return ownedTransport.sessionId; },
+    set sessionId(value) { ownedTransport.sessionId = value; },
+  };
+  if (ownedTransport.setProtocolVersion !== undefined) {
+    transport.setProtocolVersion = (version) => ownedTransport.setProtocolVersion?.(version);
   }
-  await transport.close().catch(() => undefined);
+  return { transport, release };
 }
 
 function staleConnectionAttemptError(serverId: string): Error {

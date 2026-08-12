@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { CodedExecutionError } from "../execution-errors/index.js";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import { createTaskSoil } from "../../domain/soil/index.js";
@@ -77,7 +78,7 @@ test("Desktop Agent resolves authorized local image refs into ephemeral model at
   }
 });
 
-test("Desktop Agent does not attach image payloads for non-vision models", async () => {
+test("Desktop Agent rejects image input for non-vision models", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-no-vision-"));
   const imagePath = path.join(root, "screen.png");
   await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -91,14 +92,126 @@ test("Desktop Agent does not attach image payloads for non-vision models", async
     });
     const messages: readonly ModelMessage[] = [{ role: "user", content: "Describe the image." }];
 
+    await assert.rejects(
+      attachDesktopFileInputsToModelMessages({
+        messages,
+        taskSoil,
+        modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
+        workspaceRoot: root,
+      }),
+      (error: unknown) => error instanceof CodedExecutionError && error.code === "model_vision_input_unsupported",
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent rejects an image ref that becomes unreadable before model preparation", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-missing-"));
+  const imagePath = path.join(root, "missing.png");
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the image",
+      goalId: "goal-missing-image",
+      traceId: "trace-missing-image",
+      contextRefs: [{ ref: `local-file:${imagePath}`, kind: "file", metadata: { mimeType: "image/png" } }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+
+    await assert.rejects(
+      attachDesktopFileInputsToModelMessages({
+        messages: [{ role: "user", content: "Describe the image." }],
+        taskSoil,
+        modelCapabilities: VISION_CAPABILITIES,
+        workspaceRoot: root,
+      }),
+      (error: unknown) => error instanceof CodedExecutionError && error.code === "model_input_attachment_unavailable",
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent rechecks live attachment authorization before reading a local image", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-file-input-revoked-"));
+  const imagePath = path.join(root, "replaced.png");
+  await fs.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the image",
+      contextRefs: [{
+        attachmentId: "space-reference:reference-1",
+        ref: `local-file:${imagePath}`,
+        kind: "file",
+        metadata: { mimeType: "image/png" },
+      }],
+      permissionBoundaryRefs: [`read:local-file:${imagePath}`],
+    });
+    const checked: string[] = [];
+
+    await assert.rejects(
+      attachDesktopFileInputsToModelMessages({
+        messages: [{ role: "user", content: "Describe the image." }],
+        taskSoil,
+        modelCapabilities: VISION_CAPABILITIES,
+        workspaceRoot: root,
+        readAuthorization: {
+          assertReadAllowed(attachmentId) {
+            checked.push(attachmentId);
+            throw new Error("the Space reference no longer points to its original source");
+          },
+        },
+      }),
+      (error: unknown) => error instanceof CodedExecutionError &&
+        error.code === "model_input_attachment_unavailable" &&
+        error.message.includes("no longer points to its original source"),
+    );
+    assert.deepEqual(checked, ["space-reference:reference-1"]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Desktop Agent resolves authorized managed images without persisting their storage path", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-model-managed-image-"));
+  const imagePath = path.join(root, "content");
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await fs.writeFile(imagePath, bytes);
+  try {
+    const taskSoil = createTaskSoil({
+      rawGoal: "describe the managed image",
+      goalId: "goal-managed-image",
+      traceId: "trace-managed-image",
+      contextRefs: [{
+        attachmentId: "managed-image",
+        ref: "uploaded-attachment:managed-image",
+        kind: "file",
+        title: "screen.png",
+        metadata: { byteLength: bytes.length, mimeType: "image/png", available: true },
+      }],
+      permissionBoundaryRefs: ["read:uploaded-attachment:managed-image"],
+    });
+    const messages: readonly ModelMessage[] = [{ role: "user", content: "Describe it." }];
+    const resolvedIds: string[] = [];
+
     const resolved = await attachDesktopFileInputsToModelMessages({
       messages,
       taskSoil,
-      modelCapabilities: { ...VISION_CAPABILITIES, supportsVisionInput: false },
-      workspaceRoot: root,
+      modelCapabilities: VISION_CAPABILITIES,
+      resolveManagedAttachmentPath: async (attachmentId) => {
+        resolvedIds.push(attachmentId);
+        return imagePath;
+      },
     });
 
-    assert.equal(resolved[0]?.attachments, undefined);
+    assert.deepEqual(resolvedIds, ["managed-image"]);
+    assert.equal(resolved[0]?.attachments?.[0]?.inputRef, "uploaded-attachment:managed-image");
+    assert.deepEqual(resolved[0]?.attachments?.[0]?.source, {
+      kind: "data",
+      mimeType: "image/png",
+      data: bytes.toString("base64"),
+    });
+    assert.equal(JSON.stringify(taskSoil).includes(imagePath), false);
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

@@ -26,6 +26,7 @@ export function createSqliteWorkbenchAssetRepository(database: SqliteRuntimeData
     INSERT INTO workbench_assets(id, payload_json) VALUES (?, ?)
     ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json
   `);
+  const remove = database.connection.prepare("DELETE FROM workbench_assets WHERE id = ?");
   return {
     async get(id) {
       const row = selectById.get(id) as { payloadJson: string } | undefined;
@@ -38,6 +39,11 @@ export function createSqliteWorkbenchAssetRepository(database: SqliteRuntimeData
     async upsertMany(assets) {
       database.transaction(() => {
         for (const asset of assets) upsert.run(asset.id, JSON.stringify(asset));
+      });
+    },
+    async removeMany(assetIds) {
+      database.transaction(() => {
+        for (const assetId of new Set(assetIds)) remove.run(assetId);
       });
     },
     async updateText(input) {

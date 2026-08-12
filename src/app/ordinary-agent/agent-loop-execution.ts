@@ -83,8 +83,8 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
         }
         throw error;
       }
-      sessionControl.attach(resources);
       const lease = createResourceLease(resources);
+      sessionControl.attach(resources, lease);
       try {
         const result = await resources.loop.execute({
           instructions: executionInput.birth.instructions,
@@ -99,6 +99,7 @@ export function createOrdinaryAgentLoopExecutionPort(input: {
           onReasoningDelta: executionInput.onReasoningDelta,
           onReasoningCompleted: executionInput.onReasoningCompleted,
           onToolRequested: executionInput.onToolRequested,
+          onNestedToolRequestsAccepted: executionInput.onNestedToolRequestsAccepted,
           onToolProgress: executionInput.onToolProgress,
           onSessionWriteCheckpoint: executionInput.onSessionWriteCheckpoint,
           onToolResult: executionInput.onToolResult,
@@ -139,11 +140,19 @@ function createResourceLease(
   resources: OrdinaryAgentLoopRunResources,
 ): ResourceLease {
   let releasePromise: Promise<void> | undefined;
+  let released = false;
   return {
     release() {
-      releasePromise ??= Promise.resolve().then(async () => {
-        await resources.release();
-      });
+      if (released) return Promise.resolve();
+      releasePromise ??= Promise.resolve()
+        .then(() => resources.release())
+        .then(
+          () => { released = true; },
+          (error: unknown) => {
+            releasePromise = undefined;
+            throw error;
+          },
+        );
       return releasePromise;
     },
   };
@@ -220,9 +229,14 @@ function mapContinuation(
         throw error;
       }
     },
-    release() {
+    async release() {
       consumed = true;
-      return releaseWithoutReplacingOutcome(lease, onReleaseError);
+      try {
+        await lease.release();
+      } catch (error) {
+        reportReleaseError(error, onReleaseError);
+        throw error;
+      }
     },
   };
 }
@@ -239,22 +253,27 @@ async function releaseWithoutReplacingOutcome(
   try {
     await lease.release();
   } catch (error) {
-    try {
-      onReleaseError?.(error);
-    } catch {
-      // Diagnostics cannot replace the already-known model/tool outcome either.
-    }
+    reportReleaseError(error, onReleaseError);
+  }
+}
+
+function reportReleaseError(error: unknown, onReleaseError?: (error: unknown) => void): void {
+  try {
+    onReleaseError?.(error);
+  } catch {
+    // Diagnostics cannot replace the already-known model/tool outcome.
   }
 }
 
 type ActiveSessionControl = {
-  attach(resources: OrdinaryAgentLoopRunResources): void;
+  attach(resources: OrdinaryAgentLoopRunResources, lease: ResourceLease): void;
   finalize(target?: AgentSessionEntryRef | null): Promise<void>;
   finish(): void;
 };
 
 function createActiveSessionControl(): ActiveSessionControl {
   let resources: OrdinaryAgentLoopRunResources | undefined;
+  let resourceLease: ResourceLease | undefined;
   let requested = false;
   let targetLeaf: AgentSessionEntryRef | null = null;
   let finished = false;
@@ -272,9 +291,10 @@ function createActiveSessionControl(): ActiveSessionControl {
   };
 
   return {
-    attach(acquired) {
+    attach(acquired, lease) {
       if (resources !== undefined) throw new Error("Ordinary Session control already has acquired resources.");
       resources = acquired;
+      resourceLease = lease;
       if (requested) {
         void startRevoke().then(
           () => pending?.resolve(),
@@ -299,6 +319,7 @@ function createActiveSessionControl(): ActiveSessionControl {
         await pending.promise;
       }
       if (shouldRevoke) await startRevoke();
+      await resourceLease?.release();
       await resources?.releaseSession?.();
       finished = true;
     },

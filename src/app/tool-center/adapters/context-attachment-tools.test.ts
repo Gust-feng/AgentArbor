@@ -63,6 +63,93 @@ test("context attachment tools read selected local file by attachmentId without 
   }
 });
 
+test("attachment list shows only server-authorized local paths", async () => {
+  const taskSoil = taskSoilWithContext({
+    contextRefs: [
+      {
+        attachmentId: "ctx_visible_local",
+        ref: "local-file:C:/work/visible.txt",
+        pathGranted: true,
+        kind: "file",
+      },
+      {
+        attachmentId: "ctx_hidden_local",
+        ref: "local-project:C:/work/hidden",
+        kind: "project",
+      },
+      {
+        attachmentId: "upload-1",
+        ref: "uploaded-attachment:upload-1",
+        pathGranted: true,
+        kind: "file",
+      },
+    ],
+    permissionBoundaryRefs: [
+      "read:local-file:C:/work/visible.txt",
+      "read:local-project:C:/work/hidden",
+      "read:uploaded-attachment:upload-1",
+    ],
+  });
+  const center = contextAttachmentToolCenter({ taskSoil, workspaceRoot: "C:/work" });
+
+  const result = await center.execute(
+    { callId: "call:list-paths", toolName: "AttachmentList", input: {} },
+    TOOL_CONTEXT,
+    { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["AttachmentList"] },
+  );
+  const attachments = asRecord(result.output).attachments as readonly Record<string, unknown>[];
+
+  assert.equal(result.status, "completed");
+  assert.equal(attachments[0]?.ref, "local-file:C:/work/visible.txt");
+  assert.equal(attachments[1]?.ref, undefined);
+  assert.equal(attachments[2]?.ref, undefined);
+});
+
+test("context attachment reads honor live authorization after the run grant was frozen", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-live-authorization-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  const localFile = path.join(root, "note.txt");
+  await fs.writeFile(localFile, "still private", "utf8");
+  let revoked = false;
+  const taskSoil = taskSoilWithContext({
+    contextRefs: [{
+      attachmentId: "space-reference:reference-1",
+      ref: `local-file:${localFile}`,
+      kind: "file",
+      title: "note.txt",
+    }],
+    permissionBoundaryRefs: [`read:local-file:${localFile}`],
+  });
+  const center = contextAttachmentToolCenter({
+    taskSoil,
+    workspaceRoot: root,
+    readAuthorization: {
+      assertReadAllowed(attachmentId) {
+        if (revoked && attachmentId === "space-reference:reference-1") {
+          throw new Error("Space reference reference-1 was revoked and is no longer readable.");
+        }
+      },
+    },
+  });
+  const permission = { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["AttachmentRead"] };
+
+  const before = await center.execute(
+    { callId: "call:before-revoke", toolName: "AttachmentRead", input: { attachmentId: "space-reference:reference-1" } },
+    TOOL_CONTEXT,
+    permission,
+  );
+  assert.equal(before.status, "completed");
+
+  revoked = true;
+  const after = await center.execute(
+    { callId: "call:after-revoke", toolName: "AttachmentRead", input: { attachmentId: "space-reference:reference-1" } },
+    TOOL_CONTEXT,
+    permission,
+  );
+  assert.equal(after.status, "failed");
+  assert.match(JSON.stringify(after.error), /revoked.*no longer readable/u);
+});
+
 test("context attachment text read returns executable character continuation", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-workspace-"));
   const localRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-text-continuation-"));
@@ -725,6 +812,50 @@ test("context attachment tools reject refs outside current Task Soil permissions
   } finally {
     await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     await fs.rm(localRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("context attachment tools resolve managed uploads without exposing their storage path", async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-managed-workspace-"));
+  const managedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ctx-managed-storage-"));
+  const managedFile = path.join(managedRoot, "content");
+  await fs.writeFile(managedFile, "managed attachment body", "utf8");
+  try {
+    const taskSoil = taskSoilWithContext({
+      contextRefs: [{
+        attachmentId: "managed-text",
+        ref: "uploaded-attachment:managed-text",
+        kind: "file",
+        title: "notes.txt",
+        metadata: { available: true, mimeType: "text/plain", byteLength: 23 },
+      }],
+      permissionBoundaryRefs: ["read:uploaded-attachment:managed-text"],
+    });
+    const resolvedIds: string[] = [];
+    const center = contextAttachmentToolCenter({
+      taskSoil,
+      workspaceRoot: workspace,
+      resolveManagedAttachmentPath: async (attachmentId) => {
+        resolvedIds.push(attachmentId);
+        return managedFile;
+      },
+    });
+
+    const result = await center.execute(
+      { callId: "call:read-managed-text", toolName: "AttachmentRead", input: { attachmentId: "managed-text" } },
+      TOOL_CONTEXT,
+      { callerAgentId: TOOL_CONTEXT.callerAgentId, allowedTools: ["AttachmentRead"] },
+    );
+    const serialized = JSON.stringify(result);
+
+    assert.equal(result.status, "completed");
+    assert.deepEqual(resolvedIds, ["managed-text"]);
+    assert.equal(serialized.includes("managed attachment body"), true);
+    assert.equal(serialized.includes(managedRoot), false);
+    assert.equal(serialized.includes("uploaded-attachment:"), false);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await fs.rm(managedRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

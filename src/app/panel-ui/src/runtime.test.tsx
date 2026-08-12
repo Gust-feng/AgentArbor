@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunEvent } from "./contracts/run";
-import { openBasicRunStream } from "./runtime";
+import { openBasicRunStream, safeConversation } from "./runtime";
 
-describe("Ordinary run SSE adapter", () => {
+describe("Panel runtime adapters", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     FakeEventSource.instances = [];
@@ -27,6 +27,17 @@ describe("Ordinary run SSE adapter", () => {
 
     expect(observed).toEqual([{ event: runEvent(), cursor: "cursor-5" }]);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("propagates non-missing conversation read failures", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: "projection_unavailable", message: "投影暂时不可用" },
+    }), { status: 503 })));
+
+    await expect(safeConversation("conversation-1")).rejects.toMatchObject({
+      status: 503,
+      code: "projection_unavailable",
+    });
   });
 });
 

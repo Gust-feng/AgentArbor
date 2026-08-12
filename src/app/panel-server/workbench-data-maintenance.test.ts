@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
 import { SqliteRuntimeDatabase } from "../../adapters/runtime-storage/index.js";
 import { createSqlitePersonalKnowledgeRepository } from "../personal-knowledge/index.js";
-import { createSqliteSpaceRepository } from "../spaces/index.js";
+import {
+  createSqliteSpaceRepository,
+  inspectFileSystemSpaceReferenceDeletionJournal,
+} from "../spaces/index.js";
 import { makeTestDirectory, removeTestDirectory } from "../testing/fs-test-directories.js";
 import { InMemoryLocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import {
@@ -20,6 +23,7 @@ test("Workbench data maintenance backs up, stages and atomically applies a valid
   const currentPath = path.join(runtimeHome, "workbench.sqlite3");
   const restorePath = path.join(runtimeHome, "selected.sqlite3");
   const current = new SqliteRuntimeDatabase(currentPath);
+  t.after(() => current.close());
   createSqliteSpaceRepository(current);
   createSqlitePersonalKnowledgeRepository(current);
   current.connection.exec("CREATE TABLE restore_probe(value TEXT NOT NULL) STRICT; INSERT INTO restore_probe(value) VALUES ('current')");
@@ -71,7 +75,7 @@ test("Workbench data maintenance backs up, stages and atomically applies a valid
   assert.equal(maintenance.health().pendingRestore, true);
   current.close();
 
-  applyPendingWorkbenchRestore(runtimeHome);
+  applyPendingRestore(runtimeHome);
   const restored = new SqliteRuntimeDatabase(currentPath);
   assert.equal(restored.connection.prepare("SELECT value FROM restore_probe").get()?.value, "restored");
   restored.close();
@@ -138,6 +142,44 @@ test("Workbench backup holds the owned-storage root lease for the complete snaps
   assert.equal(mutationEvents.length, 1);
 });
 
+test("Workbench restore staging rejects a second request after the first request quiesces writers", async (t) => {
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-restore-admission-");
+  t.after(() => removeTestDirectory(runtimeHome));
+  const currentPath = path.join(runtimeHome, "workbench.sqlite3");
+  const firstRestorePath = path.join(runtimeHome, "first.sqlite3");
+  const secondRestorePath = path.join(runtimeHome, "second.sqlite3");
+  const current = new SqliteRuntimeDatabase(currentPath);
+  t.after(() => current.close());
+  createSqliteSpaceRepository(current);
+  createSqlitePersonalKnowledgeRepository(current);
+  await writeStorageFixture(runtimeHome, "current");
+  await writeSelectedWorkbenchBackup(firstRestorePath, "first");
+  await writeSelectedWorkbenchBackup(secondRestorePath, "second");
+  const selected = [firstRestorePath, secondRestorePath];
+  let pickerCalls = 0;
+  const maintenance = createWorkbenchDataMaintenance({
+    database: current,
+    runtimeHome,
+    restorePicker: async () => selected[pickerCalls++],
+    beforeRestoreStage: async () => undefined,
+  });
+
+  const first = maintenance.selectAndStageRestore();
+  const second = maintenance.selectAndStageRestore();
+  assert.equal((await first).status, "staged");
+  await assert.rejects(
+    second,
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "data_maintenance_failed",
+  );
+
+  assert.equal(pickerCalls, 1);
+  assert.equal(
+    readWorkbenchProbe(path.join(runtimeHome, "workbench.restore-pending.sqlite3")),
+    "first",
+  );
+  current.close();
+});
+
 test("Workbench restore normalizes legacy v1 knowledge-only backup bundles", async (t) => {
   const runtimeHome = await makeTestDirectory("agentarbor-workbench-v1-restore-");
   t.after(() => removeTestDirectory(runtimeHome));
@@ -165,7 +207,7 @@ test("Workbench restore normalizes legacy v1 knowledge-only backup bundles", asy
   });
   assert.equal((await maintenance.selectAndStageRestore()).status, "staged");
   current.close();
-  applyPendingWorkbenchRestore(runtimeHome);
+  applyPendingRestore(runtimeHome);
 
   assert.equal(await readFile(path.join(runtimeHome, "knowledge-assets", "legacy.txt"), "utf8"), "legacy asset");
   assert.deepEqual(await readdir(path.join(runtimeHome, "space-folders")), []);
@@ -193,7 +235,7 @@ test("Workbench restore rejects an incomplete pending bundle before replacing cu
   await writeFile(path.join(runtimeHome, "space-folders", "current.txt"), "current space", "utf8");
 
   assert.throws(
-    () => applyPendingWorkbenchRestore(runtimeHome),
+    () => applyPendingRestore(runtimeHome),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "restore_source_invalid",
   );
 
@@ -203,3 +245,158 @@ test("Workbench restore rejects an incomplete pending bundle before replacing cu
   assert.equal(await readFile(path.join(runtimeHome, "knowledge-assets", "current.txt"), "utf8"), "current asset");
   assert.equal(await readFile(path.join(runtimeHome, "space-folders", "current.txt"), "utf8"), "current space");
 });
+
+test("Workbench restore refuses to combine a pending bundle with a Space deletion journal", async (t) => {
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-restore-space-deletion-");
+  t.after(() => removeTestDirectory(runtimeHome));
+  const currentPath = path.join(runtimeHome, "workbench.sqlite3");
+  const pendingPath = path.join(runtimeHome, "workbench.restore-pending.sqlite3");
+  createWorkbenchProbeDatabase(currentPath, "current");
+  createWorkbenchProbeDatabase(pendingPath, "restored");
+  await writeStorageFixture(runtimeHome, "current");
+  await writeStorageFixture(path.join(runtimeHome, "workbench.restore-pending.assets"), "restored");
+  const deletionJournalRoot = path.join(runtimeHome, "space-reference-deletions");
+  await mkdir(deletionJournalRoot, { recursive: true });
+  const deletionJournalPath = path.join(deletionJournalRoot, "pending-delete.json");
+  await writeFile(deletionJournalPath, "{}", "utf8");
+
+  assert.throws(
+    () => applyPendingRestore(runtimeHome),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "data_maintenance_failed",
+  );
+
+  assert.equal(readWorkbenchProbe(currentPath), "current");
+  assert.equal(existsSync(pendingPath), true);
+  assert.equal(existsSync(deletionJournalPath), true);
+  assert.equal(await readFile(path.join(runtimeHome, "space-folders", "current.txt"), "utf8"), "current");
+});
+
+test("Workbench restore recovers a journal-only crash after installing the pending database", async (t) => {
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-restore-crash-prepared-");
+  t.after(() => removeTestDirectory(runtimeHome));
+  const currentPath = path.join(runtimeHome, "workbench.sqlite3");
+  const pendingPath = path.join(runtimeHome, "workbench.restore-pending.sqlite3");
+  createWorkbenchProbeDatabase(currentPath, "current");
+  createWorkbenchProbeDatabase(pendingPath, "restored");
+  await writeStorageFixture(runtimeHome, "current");
+  await writeStorageFixture(path.join(runtimeHome, "workbench.restore-pending.assets"), "restored");
+
+  const restoreId = "prepared-crash";
+  const backupStem = path.join(runtimeHome, "backups", "replaced-prepared-crash");
+  const originalDatabaseSuffixes = await moveCurrentDataToRestoreBackup(runtimeHome, backupStem);
+  await writeFile(path.join(runtimeHome, "workbench.restore-journal.json"), JSON.stringify({
+    version: 1,
+    restoreId,
+    backupStem,
+    originalDatabaseSuffixes,
+    originalStorageNames: ["knowledge-assets", "space-folders"],
+  }), "utf8");
+  await rename(pendingPath, currentPath);
+
+  applyPendingRestore(runtimeHome);
+
+  assert.equal(readWorkbenchProbe(currentPath), "restored");
+  assert.equal(await readFile(path.join(runtimeHome, "knowledge-assets", "restored.txt"), "utf8"), "restored");
+  assert.equal(await readFile(path.join(runtimeHome, "space-folders", "restored.txt"), "utf8"), "restored");
+  assert.equal(existsSync(path.join(runtimeHome, "workbench.restore-journal.json")), false);
+  assert.equal(existsSync(path.join(runtimeHome, "workbench.restore-commit.json")), false);
+  assert.equal(existsSync(pendingPath), false);
+});
+
+test("Workbench restore finalizes a committed install after cleanup was interrupted", async (t) => {
+  const runtimeHome = await makeTestDirectory("agentarbor-workbench-restore-crash-committed-");
+  t.after(() => removeTestDirectory(runtimeHome));
+  const currentPath = path.join(runtimeHome, "workbench.sqlite3");
+  const pendingPath = path.join(runtimeHome, "workbench.restore-pending.sqlite3");
+  const pendingAssetsPath = path.join(runtimeHome, "workbench.restore-pending.assets");
+  createWorkbenchProbeDatabase(currentPath, "current");
+  createWorkbenchProbeDatabase(pendingPath, "restored");
+  await writeStorageFixture(runtimeHome, "current");
+  await writeStorageFixture(pendingAssetsPath, "restored");
+
+  const restoreId = "committed-crash";
+  const backupStem = path.join(runtimeHome, "backups", "replaced-committed-crash");
+  const originalDatabaseSuffixes = await moveCurrentDataToRestoreBackup(runtimeHome, backupStem);
+  await writeFile(path.join(runtimeHome, "workbench.restore-journal.json"), JSON.stringify({
+    version: 1,
+    restoreId,
+    backupStem,
+    originalDatabaseSuffixes,
+    originalStorageNames: ["knowledge-assets", "space-folders"],
+  }), "utf8");
+  await rename(pendingPath, currentPath);
+  await rename(path.join(pendingAssetsPath, "knowledge-assets"), path.join(runtimeHome, "knowledge-assets"));
+  await rename(path.join(pendingAssetsPath, "space-folders"), path.join(runtimeHome, "space-folders"));
+  await writeFile(path.join(runtimeHome, "workbench.restore-commit.json"), JSON.stringify({
+    version: 1,
+    restoreId,
+  }), "utf8");
+
+  applyPendingRestore(runtimeHome);
+
+  assert.equal(readWorkbenchProbe(currentPath), "restored");
+  assert.equal(await readFile(path.join(runtimeHome, "knowledge-assets", "restored.txt"), "utf8"), "restored");
+  assert.equal(await readFile(path.join(runtimeHome, "space-folders", "restored.txt"), "utf8"), "restored");
+  assert.equal(existsSync(pendingAssetsPath), false);
+  assert.equal(existsSync(path.join(runtimeHome, "workbench.restore-journal.json")), false);
+  assert.equal(existsSync(path.join(runtimeHome, "workbench.restore-commit.json")), false);
+});
+
+function applyPendingRestore(runtimeHome: string): void {
+  applyPendingWorkbenchRestore(runtimeHome, {
+    assertSpaceDeletionIdle: () => {
+      const status = inspectFileSystemSpaceReferenceDeletionJournal(
+        path.join(runtimeHome, "space-reference-deletions"),
+      );
+      if (status !== "idle") throw new Error("Space deletion recovery is pending.");
+    },
+  });
+}
+
+function createWorkbenchProbeDatabase(filePath: string, value: string): void {
+  const database = new SqliteRuntimeDatabase(filePath);
+  createSqliteSpaceRepository(database);
+  createSqlitePersonalKnowledgeRepository(database);
+  database.connection.exec(`CREATE TABLE restore_probe(value TEXT NOT NULL) STRICT; INSERT INTO restore_probe(value) VALUES ('${value}')`);
+  database.close();
+}
+
+function readWorkbenchProbe(filePath: string): string | undefined {
+  const database = new SqliteRuntimeDatabase(filePath);
+  try {
+    return database.connection.prepare("SELECT value FROM restore_probe").get()?.value as string | undefined;
+  } finally {
+    database.close();
+  }
+}
+
+async function writeStorageFixture(root: string, value: string): Promise<void> {
+  for (const storageName of ["knowledge-assets", "space-folders"] as const) {
+    const storageRoot = path.join(root, storageName);
+    await mkdir(storageRoot, { recursive: true });
+    await writeFile(path.join(storageRoot, `${value}.txt`), value, "utf8");
+  }
+}
+
+async function writeSelectedWorkbenchBackup(filePath: string, value: string): Promise<void> {
+  createWorkbenchProbeDatabase(filePath, value);
+  await writeStorageFixture(`${filePath}.assets`, value);
+  await writeFile(`${filePath}.manifest.json`, JSON.stringify({
+    version: 2,
+    database: path.basename(filePath),
+    assets: path.basename(`${filePath}.assets`),
+    roots: ["knowledge-assets", "space-folders"],
+  }), "utf8");
+}
+
+async function moveCurrentDataToRestoreBackup(runtimeHome: string, backupStem: string): Promise<readonly string[]> {
+  await mkdir(path.dirname(backupStem), { recursive: true });
+  const suffixes = ["", "-wal", "-shm"].filter((suffix) => existsSync(path.join(runtimeHome, `workbench.sqlite3${suffix}`)));
+  for (const suffix of suffixes) {
+    await rename(path.join(runtimeHome, `workbench.sqlite3${suffix}`), `${backupStem}.sqlite3${suffix}`);
+  }
+  for (const storageName of ["knowledge-assets", "space-folders"] as const) {
+    await rename(path.join(runtimeHome, storageName), `${backupStem}.${storageName}`);
+  }
+  return suffixes;
+}

@@ -2,22 +2,23 @@ import React, { useState } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
-import type { ChatInputProps } from "../components/chat-empty";
+import type { ChatInputProps } from "../contracts/composer";
+import type { Conversation } from "../contracts/conversation";
 import { PersonalWorkbench, type PersonalWorkbenchProps } from "./personal-workbench";
-import { BrainPage } from "./redesign/app/components/BrainPage";
+import { BrainPage } from "./workbench/app/components/BrainPage";
 import {
   collectManagedSpaceReference,
   getPersonalKnowledgeError,
   getPersonalKnowledgeSnapshot,
   resetPersonalKnowledgeForTesting,
   setPersonalKnowledgePersistenceEnabled,
-} from "./redesign/app/components/personalKnowledgeClient";
-import { fetchDocumentPreview, getCachedReferencePreview } from "./redesign/app/components/referencePreviewClient";
-import { resolvePage } from "./redesign/app/components/brainStore";
+} from "./workbench/app/components/personalKnowledgeClient";
+import { fetchDocumentPreview, getCachedReferencePreview } from "./workbench/app/components/referencePreviewClient";
+import { resolvePage } from "./workbench/app/components/brainStore";
 
 beforeEach(() => resetPersonalKnowledgeForTesting());
 
-test("submits a real Ordinary task from the redesign home", async () => {
+test("submits a real Ordinary task from the workbench home", async () => {
   const user = userEvent.setup();
   const onStartNewConversation = vi.fn(async () => true);
   const onContinueConversation = vi.fn();
@@ -97,23 +98,23 @@ test("falls back to a valid Space item when the selected reference disappears fr
     spaceId: "space-study",
     title: "学习空间",
     items: [
-      { itemId: "conversation-removed", title: "即将删除的对话", kind: "conversation_reference" as const, conversationId: "conversation-removed" },
-      { itemId: "conversation-kept", title: "保留的对话", kind: "conversation_reference" as const, conversationId: "conversation-kept" },
+      { itemId: "asset-removed", title: "即将删除的资料", kind: "workbench_asset" as const, assetId: "asset-removed", referenceId: "asset-removed" },
+      { itemId: "asset-kept", title: "保留的资料", kind: "workbench_asset" as const, assetId: "asset-kept", referenceId: "asset-kept" },
     ],
   };
   const rendered = render(<PersonalWorkbench {...baseProps({ spaces: [initialSpace] })} />);
   await user.click(screen.getByRole("button", { name: "学习空间" }));
   const tree = await screen.findByRole("tree", { name: "学习空间资料" });
-  await user.click(within(tree).getByText("即将删除的对话"));
-  expect(screen.getAllByText("即将删除的对话").length).toBeGreaterThan(1);
+  await user.click(within(tree).getByText("即将删除的资料"));
+  expect(screen.getAllByText("即将删除的资料").length).toBeGreaterThan(1);
 
   rendered.rerender(<PersonalWorkbench {...baseProps({
     spaces: [{ ...initialSpace, items: [initialSpace.items[1]!] }],
   })} />);
 
   await waitFor(() => {
-    expect(within(screen.getByRole("tree", { name: "学习空间资料" })).queryByText("即将删除的对话")).toBeNull();
-    expect(screen.getAllByText("保留的对话").length).toBeGreaterThan(1);
+    expect(within(screen.getByRole("tree", { name: "学习空间资料" })).queryByText("即将删除的资料")).toBeNull();
+    expect(screen.getAllByText("保留的资料").length).toBeGreaterThan(1);
   });
 });
 
@@ -515,7 +516,7 @@ test("starts inline naming only after the created Space returns in the real proj
   expect((input as HTMLInputElement).selectionEnd).toBe("新空间".length);
 });
 
-test("shows Space projection failures in the Redesign sidebar and retries them", async () => {
+test("shows Space projection failures in the workbench sidebar and retries them", async () => {
   const user = userEvent.setup();
   const onRetry = vi.fn().mockResolvedValue(undefined);
   renderWorkbench({
@@ -532,7 +533,7 @@ test("shows Space projection failures in the Redesign sidebar and retries them",
   expect(onRetry).toHaveBeenCalledTimes(1);
 });
 
-test("keeps bootstrap failures inside the Redesign workbench and retries in place", async () => {
+test("keeps bootstrap failures inside the personal workbench and retries in place", async () => {
   const onRetry = vi.fn();
   renderWorkbench({
     bootstrapState: {
@@ -548,7 +549,7 @@ test("keeps bootstrap failures inside the Redesign workbench and retries in plac
   expect(screen.queryByText("新任务")).toBeNull();
 });
 
-test("uses the motion-only Workbench loader while bootstrap data is pending", () => {
+test("renders the Home surface directly while bootstrap data is pending", () => {
   const { container } = renderWorkbench({
     bootstrapState: {
       status: "loading",
@@ -556,10 +557,12 @@ test("uses the motion-only Workbench loader while bootstrap data is pending", ()
     },
   });
 
+  expect(screen.queryByRole("status", { name: "正在准备工作台" })).toBeNull();
+  expect(container.querySelector(".workbench-bootstrap-loading__progress")).toBeNull();
+  expect(screen.getByPlaceholderText("想从哪里开始？")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "知识库" }));
   expect(screen.getByRole("status", { name: "正在准备工作台" })).toBeTruthy();
-  expect(screen.queryByText("正在准备工作台")).toBeNull();
-  expect(container.querySelector(".workbench-bootstrap-loading__progress")).toBeTruthy();
-  expect(screen.queryByText("新任务")).toBeNull();
 });
 
 test("keeps folder expansion isolated per Space when switching projections", async () => {
@@ -642,7 +645,6 @@ test("routes Space rename, unlink, and physical deletion through distinct action
   const rename = vi.fn().mockResolvedValue(undefined);
   const unlinkReference = vi.fn().mockResolvedValue(undefined);
   const removeReference = vi.fn().mockResolvedValue(undefined);
-  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   renderWorkbench({
     spaces: [{
       spaceId: "space-reading",
@@ -662,47 +664,47 @@ test("routes Space rename, unlink, and physical deletion through distinct action
   });
 
   await user.click(screen.getByRole("button", { name: "阅读资料" }));
+  const materialTree = screen.getByRole("tree", { name: "阅读资料资料" });
+  fireEvent.mouseEnter(within(materialTree).getByText("阅读摘要.md"));
   await user.click(await screen.findByRole("button", { name: "阅读摘要.md操作" }));
-  await user.click(screen.getByRole("button", { name: "重命名" }));
+  await user.click(screen.getByRole("menuitem", { name: "重命名" }));
   const input = screen.getByDisplayValue("阅读摘要.md");
   await user.clear(input);
   await user.type(input, "阅读摘录.md{Enter}");
   expect(rename).toHaveBeenCalledWith({ kind: "reference", id: "reference-material" }, "阅读摘录.md");
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
-  await user.click(screen.getByRole("button", { name: "取消链接" }));
+  await user.click(screen.getByRole("menuitem", { name: "移除引用" }));
   expect(unlinkReference).toHaveBeenCalledWith("reference-material");
-  expect(confirm).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole("button", { name: "阅读摘要.md操作" }));
-  await user.click(screen.getByRole("button", { name: "删除文件" }));
-  expect(removeReference).toHaveBeenCalledWith("reference-material");
-  expect(confirm).toHaveBeenLastCalledWith("确定要删除“阅读摘要.md”吗？此操作会从磁盘上删除该文件。");
+  expect(screen.queryByRole("menuitem", { name: "删除文件" })).toBeNull();
 
+  fireEvent.mouseEnter(within(materialTree).getByText("项目目录"));
   await user.click(screen.getByRole("button", { name: "项目目录操作" }));
-  expect(screen.getByRole("button", { name: "取消链接" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "删除文件夹" })).toBeNull();
-  await user.click(screen.getByRole("button", { name: "取消链接" }));
+  expect(screen.getByRole("menuitem", { name: "移除引用" })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: "删除文件夹" })).toBeNull();
+  await user.click(screen.getByRole("menuitem", { name: "移除引用" }));
   expect(unlinkReference).toHaveBeenCalledWith("workspace-reference");
 
+  fireEvent.mouseEnter(within(materialTree).getByText("资料组"));
   await user.click(screen.getByRole("button", { name: "资料组操作" }));
+  await user.click(screen.getByRole("menuitem", { name: "删除文件夹" }));
+  expect(screen.getByRole("alertdialog", { name: "删除“资料组”及其所有子项" })).toBeTruthy();
+  expect(removeReference).toHaveBeenCalledTimes(0);
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
   expect(removeReference).toHaveBeenCalledWith("reference-group");
-  expect(confirm).toHaveBeenLastCalledWith("确定删除“资料组”及其所有子项吗？其中本地文件和软件自建文件夹会从磁盘删除，其他内容仅取消链接。");
 });
 
-test("deletes app-owned folders and creates files from a linked workspace folder", async () => {
+test("deletes app-owned folders but keeps linked workspace folders read-only", async () => {
   const user = userEvent.setup();
   const removeReference = vi.fn().mockResolvedValue(undefined);
+  const unlinkReference = vi.fn().mockResolvedValue(undefined);
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === "POST" && url.endsWith("/references/managed-folder/entry")) {
       expect(JSON.parse(String(init.body))).toEqual({ parentRelativePath: "", name: "internal-note.md", kind: "file" });
       return jsonResponse({ entry: { relativePath: "internal-note.md" } });
-    }
-    if (init?.method === "POST" && url.endsWith("/references/folder-reference/entry")) {
-      expect(JSON.parse(String(init.body))).toEqual({ parentRelativePath: "", name: "new-note.md", kind: "file" });
-      return jsonResponse({ entry: { relativePath: "new-note.md" } });
     }
     if (url.includes("/references/managed-folder/preview?path=internal-note.md")) {
       return jsonResponse({ preview: {
@@ -715,20 +717,6 @@ test("deletes app-owned folders and creates files from a linked workspace folder
         content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
       } });
     }
-    if (url.includes("/references/folder-reference/preview?path=new-note.md")) {
-      return jsonResponse({ preview: {
-        itemId: "folder-reference",
-        title: "项目文件",
-        sourceKind: "workspace_folder",
-        source: "C:/project/new-note.md",
-        status: "ready",
-        presentation: { kind: "markdown", editable: true, sourceMode: true },
-        content: { kind: "text", text: "", truncated: false, editable: true, language: "md" },
-      } });
-    }
-    if (url.endsWith("/references/folder-reference/preview")) {
-      return jsonResponse({ preview: directoryPreview("", [{ name: "new-note.md", relativePath: "new-note.md", kind: "file" }]) });
-    }
     if (url.endsWith("/references/managed-folder/preview")) {
       return jsonResponse({ preview: {
         ...directoryPreview("", [{ name: "internal-note.md", relativePath: "internal-note.md", kind: "file" }]),
@@ -740,7 +728,6 @@ test("deletes app-owned folders and creates files from a linked workspace folder
     return jsonResponse({ ok: true });
   });
   vi.stubGlobal("fetch", fetchMock);
-  vi.spyOn(window, "confirm").mockReturnValue(true);
   renderWorkbench({
     spaces: [{
       spaceId: "space-files",
@@ -750,12 +737,21 @@ test("deletes app-owned folders and creates files from a linked workspace folder
         { itemId: "folder-reference", title: "项目文件", kind: "workspace_folder", referenceId: "folder-reference" },
       ],
     }],
-    spaceActions: { removeReference },
+    spaceActions: { removeReference, unlinkReference },
   });
 
   await user.click(screen.getByRole("button", { name: "项目空间" }));
+  // 外部 Workspace 是只读数据源：根项只能移除当前 Space 的引用。
+  const materialTree = screen.getByRole("tree", { name: "项目空间资料" });
+  fireEvent.mouseEnter(within(materialTree).getByText("项目文件"));
+  await user.click(await screen.findByRole("button", { name: "项目文件操作" }));
+  expect(screen.queryByRole("menuitem", { name: "新建文件" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "重命名" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "删除文件夹" })).toBeNull();
+
+  fireEvent.mouseEnter(within(materialTree).getByText("软件资料"));
   await user.click(await screen.findByRole("button", { name: "软件资料操作" }));
-  await user.click(screen.getByRole("button", { name: "新建文件" }));
+  await user.click(screen.getByRole("menuitem", { name: "新建文件" }));
   await user.type(screen.getByRole("textbox", { name: "文件名称" }), "internal-note.md{Enter}");
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
     "/api/spaces/references/managed-folder/entry",
@@ -763,48 +759,41 @@ test("deletes app-owned folders and creates files from a linked workspace folder
   ));
 
   await user.click(screen.getByRole("button", { name: "软件资料操作" }));
+  await user.click(screen.getByRole("menuitem", { name: "删除文件夹" }));
+  expect(screen.getByRole("alertdialog", { name: "删除“软件资料”及其中的所有文件" })).toBeTruthy();
+  expect(removeReference).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "删除文件夹" }));
   expect(removeReference).toHaveBeenCalledWith("managed-folder");
 
-  await user.click(screen.getByRole("button", { name: "项目文件操作" }));
-  await user.click(screen.getByRole("button", { name: "新建文件" }));
-  await user.type(screen.getByRole("textbox", { name: "文件名称" }), "new-note.md{Enter}");
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-    "/api/spaces/references/folder-reference/entry",
-    expect.objectContaining({ method: "POST" }),
-  ));
 });
 
-test("routes the Redesign material add menu through Space actions", async () => {
+test("routes the workbench material add menu through Space actions", async () => {
   const user = userEvent.setup();
   const createManagedFolder = vi.fn().mockResolvedValue(undefined);
   const addLocalFile = vi.fn().mockResolvedValue(undefined);
   const addWorkspaceFolder = vi.fn().mockResolvedValue(undefined);
-  const addConversation = vi.fn().mockResolvedValue(undefined);
   renderWorkbench({
     conversation: { conversationId: "conversation-current", title: "当前对话", turns: [] },
     spaces: [{ spaceId: "space-reading", title: "阅读资料", items: [] }],
-    spaceActions: { createManagedFolder, addLocalFile, addWorkspaceFolder, addConversation },
+    spaceActions: { createManagedFolder, addLocalFile, addWorkspaceFolder },
   });
 
   await user.click(screen.getByRole("button", { name: "阅读资料" }));
   await user.click(await screen.findByRole("button", { name: "添加资料" }));
-  await user.click(screen.getByRole("button", { name: "新建文件夹" }));
+  await user.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
   await user.type(screen.getByRole("textbox", { name: "文件夹名称" }), "研究资料{Enter}");
   expect(createManagedFolder).toHaveBeenCalledWith("space-reading", "研究资料");
   expect(createManagedFolder).toHaveBeenCalledTimes(1);
 
   await user.click(screen.getByRole("button", { name: "添加资料" }));
-  await user.click(screen.getByRole("button", { name: "添加本地文件" }));
+  await user.click(screen.getByRole("menuitem", { name: "添加本地文件" }));
   expect(addLocalFile).toHaveBeenCalledWith("space-reading");
 
   await user.click(screen.getByRole("button", { name: "添加资料" }));
-  await user.click(screen.getByRole("button", { name: "添加工作区文件夹" }));
+  await user.click(screen.getByRole("menuitem", { name: "添加工作区文件夹" }));
   expect(addWorkspaceFolder).toHaveBeenCalledWith("space-reading");
-
   await user.click(screen.getByRole("button", { name: "添加资料" }));
-  await user.click(screen.getByRole("button", { name: "加入当前对话" }));
-  expect(addConversation).toHaveBeenCalledWith("space-reading", "conversation-current", "当前对话");
+  expect(screen.queryByRole("button", { name: "加入当前对话" })).toBeNull();
 });
 
 test("opens a Search result in the Space that owns the reference", async () => {
@@ -824,7 +813,7 @@ test("opens a Search result in the Space that owns the reference", async () => {
   expect(screen.queryByRole("tree", { name: "空间甲资料" })).toBeNull();
 });
 
-test("clears a Search target when the user switches to another Space", async () => {
+test("clears a Search target and keeps the next Space unselected", async () => {
   const user = userEvent.setup();
   vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ preview: {
     itemId: "ref-a",
@@ -846,8 +835,8 @@ test("clears a Search target when the user switches to another Space", async () 
   await user.click(await screen.findByRole("button", { name: /乙资料\.pdf/u }));
   await user.click(screen.getByRole("button", { name: "空间甲" }));
 
-  expect(await screen.findByText("甲正文")).toBeTruthy();
-  expect(screen.queryByText("从左侧选择一篇笔记或材料")).toBeNull();
+  expect(await screen.findByText(/从左侧选择一篇笔记或材料/u)).toBeTruthy();
+  expect(screen.queryByText("甲正文")).toBeNull();
 });
 
 test("opens a real conversation directly from Search", async () => {
@@ -1052,6 +1041,81 @@ test("keeps a recovered running Ordinary run visible after startup", async () =>
   expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
 });
 
+test("keeps the Home view when a run is still running instead of hijacking navigation", async () => {
+  const user = userEvent.setup();
+  renderWorkbench({
+    conversation: { conversationId: "conversation-running", title: "正在整理面板", turns: [] },
+    currentRun: {
+      events: [],
+      transcriptNodes: [],
+      run: {
+        runId: "run-1",
+        conversationId: "conversation-running",
+        title: "正在整理面板",
+        goalSummary: "整理面板",
+        status: "running",
+        runMode: "agent",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        requiresUserAction: false,
+        eventCursor: { lastSequence: 0, eventCount: 0 },
+      },
+    },
+  });
+
+  // 启动时恢复运行中的对话（尚无用户导航意图）
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+
+  // 用户显式点击首页：停留在首页，不再被强制拽回对话页
+  await user.click(screen.getByRole("button", { name: "首页" }));
+  expect(screen.getByRole("main", { name: "个人首页" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
+
+  // 运行状态仍通过全局徽标可见，不阻塞当前视图
+  expect(screen.getByText("处理中")).toBeTruthy();
+});
+
+test("keeps the Brain view when a confirmation is pending", async () => {
+  const user = userEvent.setup();
+  renderWorkbench({
+    conversation: { conversationId: "conversation-confirm", title: "等待确认", turns: [] },
+    currentRun: {
+      events: [],
+      transcriptNodes: [],
+      run: {
+        runId: "run-confirm",
+        conversationId: "conversation-confirm",
+        title: "等待确认",
+        goalSummary: "等待确认",
+        status: "running",
+        runMode: "agent",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        requiresUserAction: true,
+        eventCursor: { lastSequence: 0, eventCount: 0 },
+      },
+    },
+    pendingConfirmation: {
+      confirmationId: "confirmation-1",
+      title: "执行命令",
+      question: "是否执行？",
+      consequence: "影响文件",
+      riskLevel: "medium",
+    },
+  });
+
+  // 启动时因待确认恢复对话视图
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+
+  // 用户显式点击知识库：停留在知识库，不被拽回
+  await user.click(screen.getByRole("button", { name: "知识库" }));
+  expect(screen.getByRole("main", { name: "知识库" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "对话工作台" })).toBeNull();
+
+  // 待确认状态仍通过全局徽标可见
+  expect(screen.getByText("需要确认")).toBeTruthy();
+});
+
 test("keeps a failed conversation outside the complete Home empty state", async () => {
   render(<FailedConversationWorkbench />);
 
@@ -1111,68 +1175,269 @@ test("uses Home as the only non-destructive empty-state entry in the primary sid
   expect((screen.getByPlaceholderText("想从哪里开始？") as HTMLTextAreaElement).value).toBe("尚未提交的想法");
 });
 
-test("renders and opens backend conversation projections in pinned and updated order", async () => {
+test("renders and opens workspace conversation projections in updated order", async () => {
   const user = userEvent.setup();
   const onOpenConversation = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request) => {
+    if (String(path).startsWith("/api/workspaces")) {
+      return jsonResponse({ ok: true, workspaces: [{ id: "workspace-1", title: "AgentArbor", status: "available", currentMount: { rootPath: "Z:\\AgentArbor" }, linkCount: 0 }] });
+    }
+    return jsonResponse({ ok: true });
+  }));
   renderWorkbench({
     conversations: [
-      { conversationId: "older", title: "较早对话", updatedAt: "2026-07-20T00:00:00.000Z" },
-      { conversationId: "pinned", title: "置顶对话", pinnedAt: "2026-07-10T00:00:00.000Z", updatedAt: "2026-07-10T00:00:00.000Z" },
-      { conversationId: "newer", title: "较新对话", updatedAt: "2026-07-28T00:00:00.000Z" },
+      { conversationId: "older", title: "较早对话", updatedAt: "2026-07-20T00:00:00.000Z", owner: { kind: "workspace", id: "workspace-1" } },
+      { conversationId: "newer", title: "较新对话", updatedAt: "2026-07-28T00:00:00.000Z", owner: { kind: "workspace", id: "workspace-1" } },
     ],
     onOpenConversation,
   });
 
   const sidebar = within(screen.getByRole("complementary"));
-  const pinned = sidebar.getByText("置顶对话");
+  await sidebar.findByText("AgentArbor");
+  await user.click(sidebar.getByRole("button", { name: /^AgentArbor$/u }));
   const newer = sidebar.getByText("较新对话");
   const older = sidebar.getByText("较早对话");
-  expect(pinned.compareDocumentPosition(newer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 
   await user.click(older);
   expect(onOpenConversation).toHaveBeenCalledWith("older");
 });
 
-test("keeps a long conversation history inside the redesign scroll section", () => {
+test("keeps a long workspace conversation history inside the workbench scroll section", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request) => {
+    if (String(path).startsWith("/api/workspaces")) {
+      return jsonResponse({ ok: true, workspaces: [{ id: "workspace-1", title: "AgentArbor", status: "available", currentMount: { rootPath: "Z:\\AgentArbor" }, linkCount: 0 }] });
+    }
+    return jsonResponse({ ok: true });
+  }));
   renderWorkbench({
     conversations: Array.from({ length: 12 }, (_, index) => ({
       conversationId: `conversation-${index}`,
       title: `对话 ${index + 1}`,
       updatedAt: new Date(Date.UTC(2026, 6, 29, 0, 0, index)).toISOString(),
+      owner: { kind: "workspace", id: "workspace-1" },
     })),
   });
 
+  const sidebar = within(screen.getByRole("complementary"));
+  await sidebar.findByText("AgentArbor");
+  await user.click(sidebar.getByRole("button", { name: /^AgentArbor$/u }));
   const scrollArea = document.querySelector<HTMLElement>("[data-conversation-scroll]");
   expect(scrollArea).not.toBeNull();
-  expect(scrollArea?.style.maxHeight).toBe("170px");
+  expect(scrollArea?.style.maxHeight).toBe("220px");
   expect(scrollArea?.className).toContain("overflow-y-auto");
   expect(within(scrollArea!).getAllByText(/^对话 \d+$/u)).toHaveLength(12);
 });
 
-test("routes sidebar conversation actions to backend commands", async () => {
-  const user = userEvent.setup();
-  const onToggleConversationPinned = vi.fn();
+test("keeps space-owned conversations out of the primary sidebar list", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (path: string | URL | Request) => {
+    if (String(path).startsWith("/api/workspaces")) {
+      return jsonResponse({ ok: true, workspaces: [] });
+    }
+    return jsonResponse({ ok: true });
+  }));
   renderWorkbench({
-    conversations: [{ conversationId: "conversation-1", title: "真实会话" }],
+    conversations: [{ conversationId: "conversation-1", title: "真实会话", owner: { kind: "space", id: "space-study" } }],
+  });
+
+  const sidebar = within(screen.getByRole("complementary"));
+  expect(sidebar.queryByText("真实会话")).toBeNull();
+  expect(sidebar.getByText("工作区")).toBeTruthy();
+});
+
+test("shows owned conversations inside the Space page left rail", async () => {
+  const user = userEvent.setup();
+  const onOpenConversation = vi.fn();
+  renderWorkbench({
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [
+        { conversationId: "conversation-1", title: "Rust 学习" },
+        { conversationId: "conversation-2", title: "整理笔记" },
+      ],
+    }],
+    onOpenConversation,
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  expect(await screen.findByText("Rust 学习")).toBeTruthy();
+  expect(screen.getByText("整理笔记")).toBeTruthy();
+
+  await user.click(screen.getByRole("button", { name: "Rust 学习" }));
+  expect(onOpenConversation).toHaveBeenCalledWith("conversation-1");
+});
+
+test("orders pinned Space conversations first with a divider and allows unpinning", async () => {
+  const user = userEvent.setup();
+  const onToggleConversationPinned = vi.fn().mockResolvedValue(undefined);
+  const { container } = renderWorkbench({
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [
+        { conversationId: "plain-1", title: "普通会话", updatedAt: "2026-07-30T12:00:00.000Z" },
+        { conversationId: "pinned-1", title: "置顶会话", updatedAt: "2026-07-28T12:00:00.000Z", pinnedAt: "2026-07-29T12:00:00.000Z" },
+      ],
+    }],
     onToggleConversationPinned,
   });
 
-  fireEvent.mouseEnter(screen.getByRole("button", { name: "真实会话" }));
-  await user.click(screen.getByRole("button", { name: "更多操作" }));
-  await user.click(screen.getByRole("button", { name: "置顶" }));
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  const pinnedRow = await screen.findByRole("button", { name: "置顶会话" });
+  const plainRow = screen.getByRole("button", { name: "普通会话" });
+  expect(pinnedRow.compareDocumentPosition(plainRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // 分割线在置顶会话下方、普通会话上方。
+  const divider = container.querySelector(".aa-conversation-divider");
+  expect(divider).toBeTruthy();
+  expect(pinnedRow.compareDocumentPosition(divider!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(divider!.compareDocumentPosition(plainRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-  expect(onToggleConversationPinned).toHaveBeenCalledWith("conversation-1", true);
+  // 已置顶的会话提供"取消置顶"。
+  fireEvent.mouseEnter(pinnedRow);
+  await user.click(screen.getByRole("button", { name: "置顶会话操作" }));
+  await user.click(screen.getByRole("menuitem", { name: "取消置顶" }));
+  expect(onToggleConversationPinned).toHaveBeenCalledWith("pinned-1", false);
 });
 
-test("exposes model, context usage, and reasoning controls in the redesign composer", async () => {
+test("opens a Space conversation as the formal workbench in the right pane", async () => {
+  const user = userEvent.setup();
+  const onOpenConversation = vi.fn();
+  renderWorkbench({
+    conversation: {
+      conversationId: "conversation-1",
+      title: "Rust 学习",
+      owner: { kind: "space", id: "space-study" },
+      turns: [
+        { turnId: "turn-1", role: "user" as const, title: "Rust 学习", content: "帮我看看错误", status: "completed" },
+        { turnId: "turn-2", role: "assistant" as const, title: "Rust 学习", content: "错误在 main.rs 第 3 行", status: "completed" },
+      ],
+      workspaceFolder: undefined,
+      queuedRunIds: [],
+    },
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [{ conversationId: "conversation-1", title: "Rust 学习" }],
+    }],
+    onOpenConversation,
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click(await screen.findByRole("button", { name: "Rust 学习" }));
+
+  expect(onOpenConversation).toHaveBeenCalledWith("conversation-1");
+  expect(await screen.findByText("错误在 main.rs 第 3 行")).toBeTruthy();
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+  expect(await screen.findByPlaceholderText("继续对话...")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "打开完整对话" })).toBeNull();
+});
+
+test("enters and exits the shared focus mode from a Space conversation", async () => {
+  const user = userEvent.setup();
+  renderWorkbench({
+    conversation: {
+      conversationId: "conversation-focus",
+      title: "专注会话",
+      owner: { kind: "space", id: "space-study" },
+      turns: [{ turnId: "turn-focus", role: "assistant", title: "专注会话", content: "继续阅读这里", status: "completed" }],
+    },
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [{ conversationId: "conversation-focus", title: "专注会话" }],
+    }],
+  });
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  await user.click(await screen.findByRole("button", { name: "专注会话" }));
+  await user.click(await screen.findByRole("button", { name: "专注阅读" }));
+
+  expect(await screen.findByRole("region", { name: "专注阅读" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "退出专注" }));
+
+  expect(await screen.findByRole("region", { name: "对话工作台" })).toBeTruthy();
+  expect(screen.getByText("继续阅读这里")).toBeTruthy();
+});
+
+test("keeps the current Space conversation surface mounted while switching", async () => {
+  const user = userEvent.setup();
+  let finishOpen!: (opened: boolean) => void;
+  const pendingOpen = new Promise<boolean>((resolve) => { finishOpen = resolve; });
+  const onOpenConversation = vi.fn(() => pendingOpen);
+  resetPersonalKnowledgeForTesting({ notes: [{
+    id: "note-fallback",
+    spaceId: "space-study",
+    title: "切换中的笔记",
+    bodyMarkdown: "笔记回退内容",
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  }] });
+
+  const firstConversation: Conversation = {
+    conversationId: "conversation-1",
+    title: "Rust 学习",
+    owner: { kind: "space", id: "space-study" },
+    turns: [{ turnId: "turn-1", role: "assistant", title: "Rust 学习", content: "旧会话内容", status: "completed" }],
+  };
+  const nextConversation: Conversation = {
+    conversationId: "conversation-2",
+    title: "整理笔记",
+    owner: { kind: "space", id: "space-study" },
+    turns: [{ turnId: "turn-2", role: "assistant", title: "整理笔记", content: "新会话内容", status: "completed" }],
+  };
+
+  render(<ControlledSpaceConversationWorkbench
+    conversation={firstConversation}
+    nextConversation={nextConversation}
+    onOpenConversation={onOpenConversation}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "学习空间" }));
+  expect(await screen.findByText("旧会话内容")).toBeTruthy();
+  await user.click(await screen.findByRole("button", { name: "整理笔记" }));
+
+  // The host has already switched the active conversation, but the load
+  // promise is still open. The right pane must stay on conversation content,
+  // never render the note fallback for this intermediate frame.
+  expect(onOpenConversation).toHaveBeenCalledWith("conversation-2");
+  expect(await screen.findByText("新会话内容")).toBeTruthy();
+  expect(screen.queryByText("笔记回退内容")).toBeNull();
+
+  finishOpen(true);
+});
+
+test("exposes model, context usage, and reasoning controls in the workbench composer", async () => {
   const user = userEvent.setup();
   const onModelSelect = vi.fn();
   const onReasoningEffortChange = vi.fn();
   renderWorkbench({
+    conversation: { conversationId: "conversation-context", title: "上下文测试", turns: [] },
+    currentRun: {
+      events: [],
+      transcriptNodes: [],
+      run: {
+        runId: "run-context",
+        conversationId: "conversation-context",
+        title: "上下文测试",
+        goalSummary: "上下文测试",
+        status: "running",
+        runMode: "agent",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        requiresUserAction: false,
+        eventCursor: { lastSequence: 0, eventCount: 0 },
+      },
+    },
     inputProps: inputProps({
       models: [
-        { id: "model-1", name: "Model 1", label: "模型一", providerLabel: "OpenAI", providerIdentity: "openai", profileId: "profile-1", modelId: "model-1" },
+        { id: "model-1", name: "Model 1", label: "模型一", providerLabel: "OpenAI", providerIdentity: "openai", profileId: "profile-1", modelId: "model-1", iconSvg: '<svg viewBox="0 0 16 16"><path d="M1 1h14v14H1z"/></svg>' },
         { id: "model-2", name: "Model 2", label: "模型二", providerLabel: "OpenAI", providerIdentity: "openai", profileId: "profile-1", modelId: "model-2" },
       ],
       selectedModelId: "model-1",
@@ -1192,13 +1457,22 @@ test("exposes model, context usage, and reasoning controls in the redesign compo
     }),
   });
 
-  expect(await screen.findByRole("progressbar", { name: "上下文已用 85%" })).toBeTruthy();
+  const contextUsage = await screen.findByRole("button", { name: "上下文已用 85%" });
+  expect(contextUsage.textContent).toBe("");
+  expect(contextUsage.querySelector(".aa-context-usage__ring")).not.toBeNull();
+  expect(contextUsage.querySelector(".aa-context-usage__ring-value")).not.toBeNull();
+  await user.click(contextUsage);
+  expect(await screen.findByRole("dialog", { name: "上下文用量" })).toBeTruthy();
+  expect(screen.getByText("已使用 85 / 100")).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "上下文用量" })).toBeNull();
+  expect(screen.getByRole("button", { name: "选择模型" }).querySelector(".model-picker-icon svg")).not.toBeNull();
   await user.click(screen.getByRole("button", { name: "选择模型" }));
   await user.click(screen.getByRole("option", { name: /Model 2/u }));
-  await user.selectOptions(screen.getByRole("combobox", { name: "推理力度" }), "high");
+  expect(screen.queryByRole("combobox", { name: "推理力度" })).toBeNull();
 
   expect(onModelSelect).toHaveBeenCalledWith("model-2");
-  expect(onReasoningEffortChange).toHaveBeenCalledWith("high");
+  expect(onReasoningEffortChange).not.toHaveBeenCalled();
 });
 
 function ControlledWorkbench(props: {
@@ -1242,6 +1516,30 @@ function ControlledActiveConversationWorkbench(props: {
     },
     inputProps: inputProps({ value, onChange: setValue, onSubmit: props.onContinueConversation }),
     onStartNewConversation: props.onStartNewConversation,
+  })} />;
+}
+
+function ControlledSpaceConversationWorkbench(props: {
+  readonly conversation: Conversation;
+  readonly nextConversation: Conversation;
+  readonly onOpenConversation: (conversationId: string) => Promise<boolean>;
+}) {
+  const [conversation, setConversation] = useState(props.conversation);
+  return <PersonalWorkbench {...baseProps({
+    conversation,
+    spaces: [{
+      spaceId: "space-study",
+      title: "学习空间",
+      items: [],
+      conversations: [
+        { conversationId: "conversation-1", title: "Rust 学习" },
+        { conversationId: "conversation-2", title: "整理笔记" },
+      ],
+    }],
+    onOpenConversation: (conversationId) => {
+      setConversation(props.nextConversation);
+      return props.onOpenConversation(conversationId);
+    },
   })} />;
 }
 

@@ -3,17 +3,14 @@ import { Cpu, Globe, Link2, MessageSquareText, Plus, RotateCcw, Save, SlidersHor
 import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog, SkillTriggerMode } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { modelOptionsFromConfig } from "../model-options";
-import type { ChatModelOption } from "./chat-empty";
+import type { ChatModelOption, ConversationFollowUpMode } from "../contracts/composer";
 import { ModelOptionPicker } from "./model-option-picker";
+import { SettingsSelectControl } from "./settings-select-control";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import "./capability-settings.css";
 
 const SAVED_API_KEY_MASK = "****************";
 type McpCatalogServer = NonNullable<ToolsResponse["mcpCatalog"]>[number];
-type SettingsSelectOption = {
-  readonly value: string;
-  readonly label: string;
-};
 type ModelCapabilityTarget = {
   readonly key: string;
   readonly option: ChatModelOption;
@@ -43,13 +40,10 @@ export function BasicCapabilitiesSettings(props: {
     readonly model: string;
     readonly capabilities: ModelCapabilities;
   }) => Promise<void>;
-  readonly desktopAgentSystemPrompt: string;
-  readonly setDesktopAgentSystemPrompt: (value: string) => void;
   readonly modelUsageDisplayEnabled: boolean;
   readonly onModelUsageDisplayChange: (enabled: boolean) => void;
-  readonly savingDesktopAgent?: boolean;
-  readonly onSaveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
-  readonly onResetDesktopAgentSystemPrompt: () => Promise<void>;
+  readonly conversationFollowUpMode: ConversationFollowUpMode;
+  readonly onConversationFollowUpModeChange: (mode: ConversationFollowUpMode) => void;
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
@@ -66,14 +60,6 @@ export function BasicCapabilitiesSettings(props: {
         saving={props.savingTools}
         onSaveTools={props.onSaveTools}
       />
-      <DesktopAgentPromptSettings
-        config={props.config}
-        systemPrompt={props.desktopAgentSystemPrompt}
-        setSystemPrompt={props.setDesktopAgentSystemPrompt}
-        saving={props.savingDesktopAgent}
-        onSave={props.onSaveDesktopAgentSystemPrompt}
-        onReset={props.onResetDesktopAgentSystemPrompt}
-      />
       <CapabilityGroup
         icon={<SlidersHorizontal size={16} />}
         title="运行偏好"
@@ -82,6 +68,10 @@ export function BasicCapabilitiesSettings(props: {
           <ModelUsageDisplaySettings
             enabled={props.modelUsageDisplayEnabled}
             onChange={props.onModelUsageDisplayChange}
+          />
+          <ConversationFollowUpSettings
+            mode={props.conversationFollowUpMode}
+            onChange={props.onConversationFollowUpModeChange}
           />
           <SkillTriggerSettings
             config={props.config}
@@ -147,6 +137,30 @@ function ModelUsageDisplaySettings(props: {
   );
 }
 
+function ConversationFollowUpSettings(props: {
+  readonly mode: ConversationFollowUpMode;
+  readonly onChange: (mode: ConversationFollowUpMode) => void;
+}): React.ReactElement {
+  return (
+    <div className="capability-preference-row" aria-label="默认追加方式">
+      <div className="capability-preference-copy">
+        <strong>默认追加方式</strong>
+        <span>运行中发送新消息时</span>
+      </div>
+      <SettingsSelectControl
+        id="conversation-follow-up-mode"
+        ariaLabel="默认追加方式"
+        value={props.mode}
+        options={[
+          { value: "queue", label: "排队" },
+          { value: "guide", label: "引导" },
+        ]}
+        onChange={(value) => props.onChange(value as ConversationFollowUpMode)}
+      />
+    </div>
+  );
+}
+
 function SkillTriggerSettings(props: {
   readonly config?: ConfigResponse;
   readonly saving?: boolean;
@@ -186,7 +200,7 @@ function SkillTriggerSettings(props: {
   );
 }
 
-function DesktopAgentPromptSettings(props: {
+export function DesktopAgentPromptSettings(props: {
   readonly config?: ConfigResponse;
   readonly systemPrompt: string;
   readonly setSystemPrompt: (value: string) => void;
@@ -1443,98 +1457,6 @@ function McpConfirmationModeField(props: {
         onChange={(value) => props.setForm({ ...props.form, confirmationMode: confirmationModeFromValue(value) })}
       />
     </label>
-  );
-}
-
-function SettingsSelectControl(props: {
-  readonly id: string;
-  readonly ariaLabel: string;
-  readonly value: string;
-  readonly options: readonly SettingsSelectOption[];
-  readonly onChange: (value: string) => void;
-  readonly disabled?: boolean;
-}): React.ReactElement {
-  const [open, setOpen] = React.useState(false);
-  const selectedIndex = Math.max(0, props.options.findIndex((option) => option.value === props.value));
-  const selectedOption = props.options[selectedIndex] ?? props.options[0];
-  const listId = `${props.id}-listbox`;
-  const updateSelection = (value: string): void => {
-    props.onChange(value);
-    setOpen(false);
-  };
-  const stepSelection = (direction: 1 | -1): void => {
-    if (props.options.length === 0) return;
-    const nextIndex = (selectedIndex + direction + props.options.length) % props.options.length;
-    const nextOption = props.options[nextIndex];
-    if (nextOption !== undefined) {
-      props.onChange(nextOption.value);
-      setOpen(true);
-    }
-  };
-  return (
-    <div
-      className={`settings-select-control ${open ? "open" : ""}`}
-      onBlur={(event) => {
-        const nextFocus = event.relatedTarget as Node | null;
-        if (!event.currentTarget.contains(nextFocus)) {
-          setOpen(false);
-        }
-      }}
-    >
-      <button
-        id={props.id}
-        type="button"
-        className="settings-select-trigger"
-        aria-label={props.ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listId}
-        disabled={props.disabled}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown") {
-            event.preventDefault();
-            stepSelection(1);
-          } else if (event.key === "ArrowUp") {
-            event.preventDefault();
-            stepSelection(-1);
-          } else if (event.key === "Escape") {
-            setOpen(false);
-          }
-        }}
-      >
-        <span>{selectedOption?.label ?? props.value}</span>
-        <span className="settings-select-chevron" aria-hidden="true" />
-      </button>
-      {open && (
-        <div id={listId} className="settings-select-popover" role="listbox" aria-label={props.ariaLabel}>
-          {props.options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className="settings-select-option"
-              role="option"
-              aria-selected={option.value === props.value}
-              data-selected={option.value === props.value}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                updateSelection(option.value);
-              }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                updateSelection(option.value);
-              }}
-              onClick={() => updateSelection(option.value)}
-            >
-              <span>{option.label}</span>
-              <span className="settings-select-option-mark" aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 

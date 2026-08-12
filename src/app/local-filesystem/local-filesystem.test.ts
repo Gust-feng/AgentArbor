@@ -48,9 +48,10 @@ test("local filesystem resolves only normalized paths inside an authorized root"
   t.after(() => removeTestDirectory(root));
   await fs.mkdir(path.join(root, "notes"));
   await fs.writeFile(path.join(root, "notes", "one.md"), "one", "utf8");
+  const realRoot = await fs.realpath(root);
 
-  assert.equal(await resolveWithinRoot(root, "notes/one.md"), path.join(root, "notes", "one.md"));
-  assert.equal(await resolveDestinationWithinRoot(root, "notes/two.md"), path.join(root, "notes", "two.md"));
+  assert.equal(await resolveWithinRoot(root, "notes/one.md"), path.join(realRoot, "notes", "one.md"));
+  assert.equal(await resolveDestinationWithinRoot(root, "notes/two.md"), path.join(realRoot, "notes", "two.md"));
   assert.throws(() => normalizeRelativePath("notes/../outside.md"));
   assert.throws(() => normalizeRelativePath("C:\\outside.md"));
   assert.throws(() => normalizeRelativePath("/outside.md"));

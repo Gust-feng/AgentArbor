@@ -138,7 +138,7 @@ test("local workspace tools read and grep within workspace boundary", async () =
     assert.equal(rangedReadFacts.hasMoreAfter, true);
     assert.equal(rangedReadFacts.nextStartLine, 3);
     assert.deepEqual(asRecord(asRecord(rangedReadFacts.continuation).nextInput), {
-      path: "src/note.txt",
+      path: path.join(root, "src", "note.txt"),
       startLine: 3,
     });
 
@@ -287,7 +287,7 @@ test("local grep returns complete executable continuations", async () => {
     const firstGrepNextInput = asRecord(asRecord(firstGrep.continuation).nextInput);
     assert.deepEqual(firstGrepNextInput, {
       query: "needle",
-      path: "src",
+      path: path.join(root, "src"),
       limit: 2,
       offset: 2,
     });
@@ -300,7 +300,7 @@ test("local grep returns complete executable continuations", async () => {
     assert.equal(secondGrep.nextOffset, 4);
     assert.deepEqual(asRecord(asRecord(secondGrep.continuation).nextInput), {
       query: "needle",
-      path: "src",
+      path: path.join(root, "src"),
       limit: 2,
       offset: 4,
     });
@@ -338,7 +338,7 @@ test("local read keeps output-budget continuations executable without text gaps"
       }
       const nextInput = asRecord(asRecord(output.continuation).nextInput);
       assert.deepEqual(nextInput, {
-        path: "long.txt",
+        path: path.join(root, "long.txt"),
         maxLength: content.length + 1,
         startChar: reconstructed.length,
       });
@@ -551,7 +551,7 @@ test("local read returns a complete character continuation for maxLength windows
     assert.equal(firstResult.charCount, 10);
     assert.equal(firstRead.nextStartChar, 4);
     const firstNextInput = asRecord(asRecord(firstRead.continuation).nextInput);
-    assert.deepEqual(firstNextInput, { path: "src/long.txt", maxLength: 5, startChar: 4 });
+    assert.deepEqual(firstNextInput, { path: path.join(root, "src", "long.txt"), maxLength: 5, startChar: 4 });
 
     const secondRead = asDirectToolFacts(await readFileTool.execute(firstNextInput, context));
     const secondResult = secondRead;
@@ -559,7 +559,7 @@ test("local read returns a complete character continuation for maxLength windows
     assert.equal(secondResult.startChar, 4);
     assert.equal(secondRead.nextStartChar, 8);
     assert.deepEqual(asRecord(asRecord(secondRead.continuation).nextInput), {
-      path: "src/long.txt",
+      path: path.join(root, "src", "long.txt"),
       maxLength: 5,
       startChar: 8,
     });
@@ -814,7 +814,7 @@ test("local read preserves line endings while streaming a large line range", asy
     assert.equal(result.hasMoreAfter, true);
     assert.equal(result.nextStartLine, 4);
     assert.deepEqual(asRecord(asRecord(result.continuation).nextInput), {
-      path: "large.txt",
+      path: path.join(root, "large.txt"),
       startLine: 4,
     });
   } finally {

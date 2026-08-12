@@ -10,10 +10,7 @@ import {
   projectStandaloneAssistantWorkflowDisplay,
   type ConversationWorkflowDisplayState,
 } from "./panel-conversation-workflow-display.js";
-import type {
-  AssistantWorkflowProjectionInput,
-  StableAssistantTurnDisplay,
-} from "../panel-read-model/assistant/panel-assistant-turn-display.js";
+import type { StableAssistantTurnDisplay } from "../panel-read-model/assistant/panel-assistant-turn-display.js";
 import type { AssistantTranscriptNodeLike, AssistantTranscriptRunLike } from "../panel-read-model/transcript/panel-transcript-turn-projection.js";
 import type {
   AssistantWorkflowDisplay,
@@ -25,12 +22,6 @@ import {
   type AssistantFailureParts,
   type AssistantTerminalStatus,
 } from "../panel-read-model/assistant/panel-assistant-failure.js";
-
-export type AssistantRenderProjectionInput<
-  TTurn extends WorklineConversationTurn,
-  TNode extends AssistantTranscriptNodeLike,
-  TPending extends ConfirmationIdentity,
-> = AssistantWorkflowProjectionInput<TTurn, TNode, AssistantDeliverableLike, TPending>;
 
 export type ConversationDisplayItem<
   TTurn extends WorklineConversationTurn,
@@ -47,7 +38,6 @@ export type ConversationDisplayItem<
       readonly key: string;
       readonly source: "turn";
       readonly turn: TTurn;
-      readonly projectionInput: AssistantRenderProjectionInput<TTurn, TNode, TPending>;
       readonly workflow?: AssistantWorkflowDisplay<TNode, TPending>;
       readonly live: boolean;
       readonly animateOnMount: boolean;
@@ -286,7 +276,6 @@ function conversationDisplayItemsFromTurns<
       continue;
     }
     const { assistant, workflow } = assistantDisplay;
-    const projectionInput: AssistantRenderProjectionInput<TTurn, TNode, TPending> = assistantDisplay.projectionInput;
     const terminalStatus = turn.interruption === undefined
       ? assistantTerminalStatus(turn.status)
       : undefined;
@@ -296,7 +285,6 @@ function conversationDisplayItemsFromTurns<
           key: turn.turnId,
           source: "turn",
           turn,
-          projectionInput,
           workflow,
           live: false,
           animateOnMount: false,
@@ -309,7 +297,6 @@ function conversationDisplayItemsFromTurns<
           key: turn.turnId,
           source: "turn",
           turn,
-          projectionInput,
           workflow,
           live: assistant.live,
           animateOnMount: assistant.animateOnMount,

@@ -68,6 +68,8 @@ export function createReadContextAttachmentImageTool(
         requestedPath: stringOrUndefined(record.path),
         requireFile: true,
         projectPathRequired: true,
+        resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+        readAuthorization: options.readAuthorization,
       });
       const stat = await statAttachmentTarget(target.targetAbsolutePath, "Attachment image target could not be read.");
       const detail = imageDetailFromUnknown(record.detail);
@@ -201,4 +203,3 @@ function imageMimeTypeForTarget(ref: TaskSoilContextRef, target: AttachmentTarge
 function imageDetailFromUnknown(value: unknown): "auto" | "low" | "high" {
   return value === "low" || value === "high" ? value : "auto";
 }
-

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { isFileNotFound } from "../../kernel/values/index.js";
 import {
+  diagnoseIgnoredSubAgentFrontmatter,
   normalizeSubAgentFrontmatter,
   parseSubAgentMarkdown,
   validateSubAgentFrontmatter,
@@ -11,6 +12,14 @@ import {
 
 export type { SubAgentValidationIssue } from "./sub-agent-validation.js";
 export { hashSubAgentText, parseSubAgentMarkdown } from "./sub-agent-validation.js";
+
+const V032_BUILTIN_LEGACY_STEP_HASHES: ReadonlySet<string> = new Set([
+  "sha256:872dbbc2a479f9aee8dce492053042b0b8541495bdd84ae3d144a89015083be2",
+  "sha256:51c49b61e274a20f55a8e6edb915fecd8f3bef371003c183977e6f5fe5b1be53",
+  "sha256:e3cdfcd699ab6cdf2a8120f459a26dc2b6f7c87df11b2772227115b9d9a42e66",
+  "sha256:b148adb87fa6b96fe2a29006af078766f20f74abb2233b0bb38ee3dcda1cbc9a",
+  "sha256:809122d8f184cf2f565ec162764a57bd7ccf78621c0c839c7ca361cab6d92516",
+]);
 
 export type SubAgentDiscoveryOptions = {
   readonly roots: readonly SubAgentRootInput[];
@@ -39,8 +48,6 @@ export type SubAgentDefinition = {
   readonly whenToUse: readonly string[];
   readonly whenNotToUse: readonly string[];
   readonly allowedTools: readonly string[];
-  readonly model?: string;
-  readonly maxSteps?: number;
   readonly sourceKind: SubAgentSourceKind;
   readonly sourceRootId: string;
   readonly sourcePrecedence: number;
@@ -49,6 +56,7 @@ export type SubAgentDefinition = {
   readonly packagePath: string;
   readonly loadError?: string;
   readonly validationErrors?: readonly SubAgentValidationIssue[];
+  readonly validationWarnings?: readonly SubAgentValidationIssue[];
   readonly contentHash: string;
   readonly bodyHash: string;
   readonly metadataHash: string;
@@ -146,6 +154,11 @@ async function readSubAgentDefinition(
   const parsed = parseSubAgentMarkdown(raw);
   const frontmatter = normalizeSubAgentFrontmatter(parsed.frontmatter);
   const validationErrors = validateSubAgentFrontmatter(frontmatter);
+  // Bundled v0.3.2 files retain legacy metadata bytes so frozen content hashes remain executable.
+  const ignoredControlWarnings = diagnoseIgnoredSubAgentFrontmatter(parsed.frontmatter);
+  const validationWarnings = root.sourceKind === "builtin" && V032_BUILTIN_LEGACY_STEP_HASHES.has(parsed.contentHash)
+    ? ignoredControlWarnings.filter((warning) => warning.code !== "ignored_step_limit")
+    : ignoredControlWarnings;
   const hasErrors = validationErrors.length > 0;
   const name = frontmatter.name ?? packageName;
   const id = safeSubAgentId(hasErrors ? packageName : name);
@@ -162,8 +175,6 @@ async function readSubAgentDefinition(
     whenToUse: [...frontmatter.whenToUse],
     whenNotToUse: [...frontmatter.whenNotToUse],
     allowedTools: [...frontmatter.allowedTools],
-    model: frontmatter.model,
-    maxSteps: frontmatter.maxSteps,
     sourceKind: root.sourceKind,
     sourceRootId: root.sourceRootId,
     sourcePrecedence: root.precedence,
@@ -172,6 +183,7 @@ async function readSubAgentDefinition(
     packagePath: resolvedSubAgentDir,
     loadError,
     validationErrors: hasErrors ? validationErrors : undefined,
+    validationWarnings: validationWarnings.length > 0 ? validationWarnings : undefined,
     contentHash: parsed.contentHash,
     bodyHash: parsed.bodyHash,
     metadataHash: parsed.metadataHash,

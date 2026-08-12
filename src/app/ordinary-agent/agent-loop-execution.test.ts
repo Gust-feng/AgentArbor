@@ -70,6 +70,49 @@ test("cleanup failure cannot replace a known completed outcome", async () => {
   assert.deepEqual(observed, [cleanupError]);
 });
 
+test("Session finalization retries a failed terminal resource release before releasing its writer", async () => {
+  const releaseError = new Error("run resource release failed");
+  const observed: unknown[] = [];
+  const calls: string[] = [];
+  let releases = 0;
+  const resources = {
+    loop: {
+      async execute() { return completedResult(); },
+      async release() { return undefined; },
+    },
+    resolvedMessages: [{ role: "user", content: "hello" }],
+    tools: toolBoundary(),
+    async releaseSession() { calls.push("session"); },
+    async release() {
+      releases += 1;
+      calls.push(`resources:${releases}`);
+      if (releases <= 2) throw releaseError;
+    },
+  } satisfies OrdinaryAgentLoopRunResources;
+  const execution = createOrdinaryAgentLoopExecutionPort({
+    resources: { async acquire() { return resources; } },
+    onReleaseError(error) { observed.push(error); },
+  });
+
+  const outcome = await execution.execute(executionInput());
+
+  assert.equal(outcome.status, "completed");
+  assert.deepEqual(calls, ["resources:1"]);
+  assert.deepEqual(observed, [releaseError]);
+  const finalizeSession = execution.finalizeSession;
+  assert.ok(finalizeSession);
+
+  await assert.rejects(
+    finalizeSession("run-1"),
+    (error: unknown) => error === releaseError,
+  );
+  assert.deepEqual(calls, ["resources:1", "resources:2"]);
+
+  await finalizeSession("run-1");
+
+  assert.deepEqual(calls, ["resources:1", "resources:2", "resources:3", "session"]);
+});
+
 test("resource acquisition maps only explicitly coded execution failures", async () => {
   const failures = [
     {
@@ -264,6 +307,43 @@ test("discarding an approval continuation releases its lease idempotently", asyn
   );
 });
 
+test("discarding an approval continuation reports release failure and allows a retry", async () => {
+  const request = confirmation("confirmation-release-retry");
+  const releaseError = new Error("run resource release failed");
+  const observed: unknown[] = [];
+  let releases = 0;
+  const resources = {
+    loop: {
+      async execute() {
+        return approvalResult(request, {
+          availability: "live_only" as const,
+          async decide() { throw new Error("must not decide"); },
+        });
+      },
+      async release() { return undefined; },
+    },
+    resolvedMessages: [{ role: "user", content: "hello" }],
+    tools: toolBoundary(),
+    async release() {
+      releases += 1;
+      if (releases === 1) throw releaseError;
+    },
+  } satisfies OrdinaryAgentLoopRunResources;
+  const execution = createOrdinaryAgentLoopExecutionPort({
+    resources: { async acquire() { return resources; } },
+    onReleaseError(error) { observed.push(error); },
+  });
+  const outcome = await execution.execute(executionInput());
+  assert.equal(outcome.status, "approval_required");
+  if (outcome.status !== "approval_required") return;
+
+  await assert.rejects(outcome.continuation.release(), (error: unknown) => error === releaseError);
+  await outcome.continuation.release();
+
+  assert.equal(releases, 2);
+  assert.deepEqual(observed, [releaseError]);
+});
+
 test("cancellation signal reaches the loop and cancelled execution releases resources", async () => {
   const controller = new AbortController();
   let observedSignal: AbortSignal | undefined;
@@ -301,7 +381,7 @@ test("feature-owned Session revoke reaches the active lease without waiting for 
   let loopEntered!: () => void;
   const entered = new Promise<void>((resolve) => { loopEntered = resolve; });
   const run = new Promise<AgentLoopResult>((resolve) => { finishLoop = resolve; });
-  const revokedTargets: unknown[] = [];
+  const lifecycleCalls: unknown[] = [];
   const resources: OrdinaryAgentLoopRunResources = {
     loop: {
       async execute() { loopEntered(); return run; },
@@ -309,8 +389,9 @@ test("feature-owned Session revoke reaches the active lease without waiting for 
     },
     resolvedMessages: [{ role: "user", content: "hello" }],
     tools: toolBoundary(),
-    async revokeSessionTo(target) { revokedTargets.push(target); },
-    async release() { return undefined; },
+    async revokeSessionTo(target) { lifecycleCalls.push(["revoke", target]); },
+    async releaseSession() { lifecycleCalls.push(["release_session"]); },
+    async release() { lifecycleCalls.push(["release_resources"]); },
   };
   const execution = createOrdinaryAgentLoopExecutionPort({
     resources: { async acquire() { return resources; } },
@@ -320,7 +401,11 @@ test("feature-owned Session revoke reaches the active lease without waiting for 
   const safeLeafRef = { sessionId: "session-1", entryId: "safe-leaf" };
 
   await execution.finalizeSession?.("run-1", safeLeafRef);
-  assert.deepEqual(revokedTargets, [safeLeafRef]);
+  assert.deepEqual(lifecycleCalls, [
+    ["revoke", safeLeafRef],
+    ["release_resources"],
+    ["release_session"],
+  ]);
   finishLoop(completedResult());
   assert.equal((await executing).status, "completed");
 });
@@ -451,6 +536,7 @@ function progressiveVisibilityPlan(): AgentLoopToolVisibilityPlan {
 function executionInput(abortSignal = new AbortController().signal) {
   return {
     runId: "run-1",
+    conversationId: "conversation-1",
     sessionRef: {
       sessionId: "session-1",
       storageKey: "session-1.jsonl",

@@ -44,6 +44,7 @@ type ModelProviderProjectionDraft = {
 
 export function ModelSettings(props: {
   readonly config?: ConfigResponse;
+  readonly active?: boolean;
   readonly modelForm: ModelForm;
   readonly setModelForm: (form: ModelForm) => void;
   readonly saving?: boolean;
@@ -63,12 +64,12 @@ export function ModelSettings(props: {
   });
   const [query, setQuery] = useState("");
   const [revealed, setRevealed] = useState(false);
-  const [fetchBusy, setFetchBusy] = useState(false);
+  const [revealBusy, setRevealBusy] = useState(false);
   const [modelsFetchBusy, setModelsFetchBusy] = useState(false);
   const [selectedKey, setSelectedKey] = useState("");
   const saveTimerRef = useRef<number | undefined>(undefined);
   const pendingModelSaveRef = useRef<ModelForm | undefined>(undefined);
-  const fetchSeqRef = useRef(0);
+  const revealSeqRef = useRef(0);
   const providerOrderRef = useRef<readonly string[]>([]);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const selectedKeyRef = useRef(selectedKey);
@@ -83,7 +84,7 @@ export function ModelSettings(props: {
   );
   const activeProfileId = projectedConfig?.config?.profileId ?? "";
   const providerItems = useMemo(() => modelProviderItems(projectedConfig), [projectedConfig]);
-  const items = useMemo(() => providerItems.filter((item) => item.configured), [providerItems]);
+  const items = providerItems;
   providerOrderRef.current = items.map((item) => item.key);
   const filteredItems = items.filter((item) => {
     const normalized = query.trim().toLowerCase();
@@ -107,6 +108,8 @@ export function ModelSettings(props: {
   const selectedBuiltinLocked = selectedItem?.protectedBuiltin === true;
   const hasKey = selectedForm.apiKey.length > 0;
   const hasApiKeyAction = hasKey || selectedSecretConfigured;
+  const isActive = props.active !== false;
+  const initializedItemKeyRef = useRef<string | undefined>(undefined);
   modelFormRef.current = selectedForm;
   selectedKeyRef.current = selectedKey;
 
@@ -127,33 +130,14 @@ export function ModelSettings(props: {
   }, [activeProfileId, items, selectedKey]);
 
   useEffect(() => {
-    if (selectedItem === undefined) return;
-    const seq = ++fetchSeqRef.current;
+    if (!isActive || selectedItem === undefined || initializedItemKeyRef.current === selectedItem.key) return;
+    initializedItemKeyRef.current = selectedItem.key;
     const nextForm = modelFormFromProviderItem(selectedItem);
     setRevealed(false);
     catalogState.setModelQuery("");
     catalogState.setSelectedModelRowId(nextForm.model.trim().length === 0 ? undefined : nextForm.model);
     props.setModelForm(nextForm);
-
-    if (!selectedSecretConfigured || selectedProfileId === undefined) {
-      setFetchBusy(false);
-      return;
-    }
-
-    setFetchBusy(true);
-    void revealRef.current(selectedProfileId).then((key) => {
-      if (seq !== fetchSeqRef.current) return;
-      setFetchBusy(false);
-      if (typeof key === "string" && key.length > 0) {
-        setRevealed(false);
-        if (modelFormRef.current.profileId === nextForm.profileId && modelFormRef.current.apiKey.length === 0) {
-          props.setModelForm({ ...modelFormRef.current, apiKey: key, apiKeyCleared: false });
-        }
-      }
-    }).catch(() => {
-      if (seq === fetchSeqRef.current) setFetchBusy(false);
-    });
-  }, [selectedItem?.key, selectedProfileId, selectedSecretConfigured]);
+  }, [isActive, props.setModelForm, selectedItem]);
 
   useEffect(() => {
     return () => {
@@ -373,19 +357,28 @@ export function ModelSettings(props: {
     });
   }
 
-  async function clearApiKey(): Promise<void> {
-    if (selectedItem === undefined) return;
-    fetchSeqRef.current += 1;
-    const nextForm = modelFormForProviderItem({
-      ...selectedForm,
-      apiKey: "",
-      apiKeyCleared: selectedSecretConfigured || hasKey,
-    }, selectedItem);
-    setRevealed(false);
-    props.setModelForm(nextForm);
-    if (selectedItem.profileId !== undefined || selectedSecretConfigured) {
-      await saveModelImmediately(nextForm).catch(() => undefined);
+  async function revealSelectedApiKey(): Promise<void> {
+    if (selectedProfileId === undefined || revealBusy) return;
+    if (revealed && selectedForm.apiKey.length > 0) {
+      setRevealed(false);
       return;
+    }
+    const seq = ++revealSeqRef.current;
+    setRevealBusy(true);
+    try {
+      const key = await revealRef.current(selectedProfileId);
+      if (seq !== revealSeqRef.current || selectedKeyRef.current !== selectedItem?.key) return;
+      if (typeof key === "string" && key.length > 0) {
+        const nextForm = modelFormForProviderItem({
+          ...modelFormRef.current,
+          apiKey: key,
+          apiKeyCleared: false,
+        }, selectedItem!);
+        props.setModelForm(nextForm);
+        setRevealed(true);
+      }
+    } finally {
+      if (seq === revealSeqRef.current) setRevealBusy(false);
     }
   }
 
@@ -577,14 +570,13 @@ export function ModelSettings(props: {
           item={selectedItem}
           modelForm={selectedForm}
           revealed={revealed}
-          fetchBusy={fetchBusy}
+          revealBusy={revealBusy}
           saving={props.saving}
           hasApiKeyAction={hasApiKeyAction}
           selectedSecretConfigured={selectedSecretConfigured}
-          onSetRevealed={setRevealed}
           onUpdateModelForm={updateModelForm}
           onSetModelForm={setSelectedModelForm}
-          onClearApiKey={clearApiKey}
+          onRevealApiKey={revealSelectedApiKey}
           onScheduleModelSave={scheduleSelectedModelSave}
         />
 

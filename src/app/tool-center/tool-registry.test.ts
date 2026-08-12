@@ -414,7 +414,7 @@ test("desktop-basic tool registry keeps MCP tools in the dedicated mcp scope", (
     playwrightAvailable: true,
     mcpManager: {
       getToolsForRegistry: () => [mcpToolExecutor()],
-    } as never,
+    },
   });
   const desktopCatalog = registry.catalog("desktop-basic");
   const mcpCatalog = registry.catalog("mcp");
@@ -434,7 +434,7 @@ test("desktop-basic tool registry applies the frozen tool catalog to MCP executo
     toolCatalogNames: ["Read"],
     mcpManager: {
       getToolsForRegistry: () => [mcpToolExecutor()],
-    } as never,
+    },
   });
   const included = createDesktopBasicToolRegistry({
     env: {},
@@ -443,7 +443,7 @@ test("desktop-basic tool registry applies the frozen tool catalog to MCP executo
     toolCatalogNames: ["mcp_docs_search"],
     mcpManager: {
       getToolsForRegistry: () => [mcpToolExecutor()],
-    } as never,
+    },
   });
 
   assert.deepEqual(hidden.catalog("mcp").tools, []);

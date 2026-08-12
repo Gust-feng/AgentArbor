@@ -330,11 +330,11 @@ html[data-style="glass"] {
   --row-active-shadow: var(--liquid-row-shadow-active);
   --list-row-radius: var(--radius-lg);
   --list-row-marker-width: var(--border-width-thick);
-  --list-row-border: transparent;
-  --list-row-hover-border: var(--row-hover-border);
+  --list-row-border: color-mix(in oklch, white 28%, var(--border));
+  --list-row-hover-border: color-mix(in oklch, var(--accent) 28%, var(--border));
   --list-row-hover-marker: transparent;
   --list-row-hover-shadow: var(--row-hover-shadow);
-  --list-row-active-border: var(--row-active-border);
+  --list-row-active-border: color-mix(in oklch, var(--accent) 46%, var(--border));
   --list-row-active-marker: transparent;
   --list-row-active-shadow: var(--row-active-shadow);
   --list-pane-bg: var(--surface-panel-subtle);
@@ -1171,8 +1171,8 @@ html[data-style="glass"] .composer-reasoning-popover button:hover,
 html[data-style="glass"] .composer-reasoning-popover button.selected,
 html[data-style="glass"] .composer-access-popover button:hover,
 html[data-style="glass"] .composer-access-popover button.selected,
-html[data-style="glass"] .settings-select-option:hover,
-html[data-style="glass"] .settings-select-option:focus-visible {
+html[data-style="glass"] .settings-select-option:not(:disabled):hover,
+html[data-style="glass"] .settings-select-option:not(:disabled):focus-visible {
   background:
     linear-gradient(180deg, color-mix(in oklch, white 22%, transparent), transparent 60%),
     color-mix(in oklch, var(--accent) 6%, transparent);
@@ -1423,7 +1423,15 @@ html[data-style="glass"] .model-catalog-grid button:hover {
 }
 
 html[data-style="glass"] .provider-row.selected,
-html[data-style="glass"] .model-list-row.saved.selected,
+html[data-style="glass"] .model-list-row.saved.selected {
+  border-color: var(--list-row-border);
+  border-left-color: color-mix(in oklch, var(--accent) 64%, var(--border));
+  background: var(--row-active-bg);
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, white 24%, var(--accent)),
+    var(--liquid-row-shadow);
+}
+
 html[data-style="glass"] .mcp-service-card.selected,
 html[data-style="glass"] .model-catalog-grid button.active,
 html[data-style="glass"] .settings-sidebar nav button.active {
@@ -1436,12 +1444,10 @@ html[data-style="glass"] .settings-sidebar nav button.active {
 }
 
 html[data-style="glass"] .provider-row.selected {
-  border-left-color: color-mix(in oklch, white 20%, var(--row-active-border));
+  border-left-color: color-mix(in oklch, white 18%, var(--accent));
   box-shadow:
-    inset 1px 0 0 color-mix(in oklch, white 24%, var(--accent)),
-    0 8px 18px color-mix(in oklch, var(--shadow-ink) 5%, transparent),
-    inset 0 1px 0 color-mix(in oklch, white 70%, transparent),
-    inset 0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent);
+    inset 2px 0 0 color-mix(in oklch, white 24%, var(--accent)),
+    var(--liquid-row-shadow);
 }
 
 html[data-style="glass"] .provider-logo,

@@ -34,31 +34,29 @@ export function ModelCatalogPanel(props: {
           <strong>模型列表</strong>
           {props.showSavedCount && <span>{formatModelCount(props.visibleCatalogModels.length, props.catalogModels.length, props.hasModelQuery)}</span>}
         </div>
-        <div className="model-panel-actions">
-          {props.showModelSearch && (
-            <label className="model-search-field">
-              <Search size={14} />
-              <input
-                value={props.modelQuery}
-                onChange={(event) => props.onModelQueryChange(event.target.value)}
-                placeholder="搜索模型"
-                spellCheck={false}
-              />
-            </label>
-          )}
-          <button
-            type="button"
-            className={`model-fetch-button ${props.modelsFetchBusy ? "loading" : ""}`}
-            onClick={() => void props.onFetchModels()}
-            disabled={props.saving || props.modelsFetchBusy}
-            aria-busy={props.modelsFetchBusy ? "true" : "false"}
-          >
-            <RefreshCw className="model-fetch-icon" size={14} />
-            <span className="model-fetch-label" aria-live="polite">
-              {props.modelsFetchBusy ? "获取中" : "获取模型"}
-            </span>
-          </button>
-        </div>
+        {props.showModelSearch && (
+          <label className="model-search-field">
+            <Search size={14} />
+            <input
+              value={props.modelQuery}
+              onChange={(event) => props.onModelQueryChange(event.target.value)}
+              placeholder="搜索模型"
+              spellCheck={false}
+            />
+          </label>
+        )}
+        <button
+          type="button"
+          className={`model-fetch-button ${props.modelsFetchBusy ? "loading" : ""}`}
+          onClick={() => void props.onFetchModels()}
+          disabled={props.saving || props.modelsFetchBusy}
+          aria-busy={props.modelsFetchBusy ? "true" : "false"}
+        >
+          <RefreshCw className="model-fetch-icon" size={14} />
+          <span className="model-fetch-label" aria-live="polite">
+            {props.modelsFetchBusy ? "获取中" : "获取模型"}
+          </span>
+        </button>
       </div>
       <SavedModels {...props} />
       {props.fetched && <FetchedModels {...props} />}

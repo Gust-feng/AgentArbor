@@ -33,5 +33,29 @@ export interface WorkbenchAssetRepository {
   get(id: string): Promise<WorkbenchAsset | undefined>;
   list(): Promise<readonly WorkbenchAsset[]>;
   upsertMany(assets: readonly WorkbenchAsset[]): Promise<void>;
+  /** Removes software-owned assets by id. Missing ids are ignored for idempotent Space cleanup. */
+  removeMany(assetIds: readonly string[]): Promise<void>;
   updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult>;
 }
+
+/** 资产变更事件：资产编辑与删除的单一观察事实。 */
+export type WorkbenchAssetEvent = {
+  readonly type: "workbench_asset.changed";
+  readonly assetId: string;
+};
+
+/** 资产 feature 的公开 command/query/event facade（第二阶段受管内容同步使用）。 */
+export type WorkbenchAssetsFeature = {
+  readonly commands: {
+    replace(asset: WorkbenchAsset): Promise<void>;
+    updateText(input: UpdateWorkbenchAssetTextInput): Promise<UpdateWorkbenchAssetTextResult>;
+  };
+  readonly queries: {
+    get(id: string): Promise<WorkbenchAsset | undefined>;
+    list(): Promise<readonly WorkbenchAsset[]>;
+  };
+  readonly events: {
+    subscribe(listener: (event: WorkbenchAssetEvent) => void): () => void;
+  };
+  release(): Promise<void>;
+};

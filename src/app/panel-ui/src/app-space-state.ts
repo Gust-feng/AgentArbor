@@ -5,7 +5,7 @@ import { selectTaskWorkspaceDirectory } from "./app-workspace-selection";
 import type { SpaceReference, SpaceSummary, SpaceTree, SpaceTreeEntry } from "../../spaces";
 import type { PersonalSpaceItemProjection, PersonalSpaceProjection } from "./personal-workbench/space";
 import { subscribeWorkbenchProjectionChanges } from "./app-workbench-projection-changes";
-import { invalidateDocumentPreviews } from "./personal-workbench/redesign/app/components/referencePreviewClient";
+import { invalidateDocumentPreviews } from "./personal-workbench/workbench/app/components/referencePreviewClient";
 
 type SpaceSummaryResponse = {
   readonly spaces: readonly SpaceSummary[];
@@ -13,6 +13,12 @@ type SpaceSummaryResponse = {
 
 type SpaceTreeResponse = {
   readonly tree: SpaceTree;
+  readonly conversations?: readonly {
+    readonly conversationId: string;
+    readonly title: string;
+    readonly updatedAt?: string;
+    readonly pinnedAt?: string;
+  }[];
 };
 
 type SpaceReferenceKind = SpaceReference["kind"];
@@ -21,21 +27,18 @@ type SpaceReferenceKind = SpaceReference["kind"];
 export function useSpaceProjection(enabled = true): {
   readonly spaces: readonly PersonalSpaceProjection[];
   readonly createSpace: (title: string) => Promise<void>;
+  readonly deleteSpace: (spaceId: string) => Promise<void>;
   readonly createManagedFolder: (spaceId: string, title: string) => Promise<void>;
   readonly addLocalFile: (spaceId: string) => Promise<void>;
   readonly addWorkspaceFolder: (spaceId: string) => Promise<void>;
   readonly addWebReference: (spaceId: string, title: string, url: string) => Promise<void>;
-  readonly addConversation: (spaceId: string, conversationId: string, conversationTitle: string) => Promise<void>;
-  readonly move: (
-    sourceSpaceId: string,
-    target: { readonly kind: "reference"; readonly id: string },
-    destinationSpaceId: string,
-  ) => Promise<void>;
   readonly rename: (target: { readonly kind: "space" | "reference"; readonly id: string }, title: string) => Promise<void>;
   readonly unlinkReference: (itemId: string) => Promise<void>;
   readonly removeReference: (itemId: string) => Promise<void>;
   readonly openReference: (spaceId: string, itemId: string) => Promise<void>;
   readonly refresh: () => Promise<void>;
+  /** 会话控制变更后刷新单个空间的 owner read-model。 */
+  readonly refreshSpace: (spaceId: string) => Promise<void>;
   readonly loading: boolean;
   readonly mutationPending: boolean;
   readonly error?: string;
@@ -57,12 +60,12 @@ export function useSpaceProjection(enabled = true): {
     const abortController = new AbortController();
     spaceRefreshControllersRef.current.set(spaceId, abortController);
     try {
-      const { tree } = await getJson<SpaceTreeResponse>(
+      const { tree, conversations } = await getJson<SpaceTreeResponse>(
         `/api/spaces/${encodeURIComponent(spaceId)}`,
         { signal: abortController.signal },
       );
       if (spaceRefreshRevisionRef.current.get(spaceId) !== revision) return;
-      setSpaces((current) => current.map((space) => space.spaceId === spaceId ? projectTree(tree) : space));
+      setSpaces((current) => current.map((space) => space.spaceId === spaceId ? projectTree(tree, conversations) : space));
     } catch (reason: unknown) {
       // A newer refresh for the same Space owns the result. Superseded reads
       // are normal during quick successive mutations and must not surface as
@@ -95,11 +98,11 @@ export function useSpaceProjection(enabled = true): {
         listed.spaces.map((summary) => [summary.id, spaceRefreshRevisionRef.current.get(summary.id) ?? 0]),
       );
       const trees = await Promise.all(listed.spaces.map(async (summary) => {
-        const { tree } = await getJson<SpaceTreeResponse>(
+        const { tree, conversations } = await getJson<SpaceTreeResponse>(
           `/api/spaces/${encodeURIComponent(summary.id)}`,
           { signal: abortController.signal },
         );
-        return projectTree(tree);
+        return projectTree(tree, conversations);
       }));
       if (epoch !== refreshEpochRef.current) return;
       setSpaces((current) => {
@@ -179,6 +182,10 @@ export function useSpaceProjection(enabled = true): {
     await runMutation(`create-space:${title.trim()}`, () => postJson("/api/spaces", { title }));
   }, [runMutation]);
 
+  const deleteSpace = useCallback(async (spaceId: string): Promise<void> => {
+    await runMutation(`delete-space:${spaceId}`, () => deleteJson(`/api/spaces/${encodeURIComponent(spaceId)}`));
+  }, [runMutation]);
+
   const createManagedFolder = useCallback(async (spaceId: string, title: string): Promise<void> => {
     await runMutation(`create-managed-folder:${spaceId}:${title.trim()}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/managed-folders`, {
       title,
@@ -216,28 +223,6 @@ export function useSpaceProjection(enabled = true): {
     }), [spaceId]);
   }, [runMutation]);
 
-  const addConversation = useCallback(async (
-    spaceId: string,
-    conversationId: string,
-    conversationTitle: string,
-  ): Promise<void> => {
-    await runMutation(`add-conversation:${spaceId}:${conversationId}`, () => postJson(`/api/spaces/${encodeURIComponent(spaceId)}/references`, {
-      title: conversationTitle,
-      reference: { kind: "conversation", conversationId, conversationTitle },
-    }), [spaceId]);
-  }, [runMutation]);
-
-  const move = useCallback(async (
-    sourceSpaceId: string,
-    target: { readonly kind: "reference"; readonly id: string },
-    destinationSpaceId: string,
-  ): Promise<void> => {
-    await runMutation(`move:${target.kind}:${target.id}`, () => postJson(`/api/spaces/${encodeURIComponent(sourceSpaceId)}/move`, {
-      target,
-      destinationSpaceId,
-    }), [sourceSpaceId, destinationSpaceId]);
-  }, [runMutation]);
-
   const rename = useCallback(async (
     target: { readonly kind: "space" | "reference"; readonly id: string },
     title: string,
@@ -260,20 +245,26 @@ export function useSpaceProjection(enabled = true): {
     await postJson(`/api/spaces/references/${encodeURIComponent(itemId)}/open`, {});
   }, []);
 
+  // 会话控制变更（置顶/重命名/删除）不经过 Space 命令，但会改变 owner read-model；
+  // 由会话管理侧在成功后主动刷新对应空间。
+  const refreshSpace = useCallback(async (spaceId: string): Promise<void> => {
+    await refreshAffectedSpaces([spaceId]);
+  }, [refreshAffectedSpaces]);
+
   return {
     spaces,
     createSpace,
+    deleteSpace,
     createManagedFolder,
     addLocalFile,
     addWorkspaceFolder,
     addWebReference,
-    addConversation,
-    move,
     rename,
     unlinkReference,
     removeReference,
     openReference,
     refresh,
+    refreshSpace,
     loading,
     mutationPending: mutationPendingCount > 0,
     error,
@@ -305,13 +296,19 @@ function basename(value: string): string {
   return segment === undefined || segment.length === 0 ? "工作区文件夹" : segment;
 }
 
-function projectTree(tree: SpaceTree): PersonalSpaceProjection {
+function projectTree(tree: SpaceTree, conversations?: SpaceTreeResponse["conversations"]): PersonalSpaceProjection {
   return {
     spaceId: tree.space.id,
     title: tree.space.title,
     itemCount: countEntries(tree.entries),
     color: colorFor(tree.space.id),
     items: projectEntries(tree.entries),
+    ...(conversations === undefined ? {} : { conversations: conversations.map((conversation) => ({
+      conversationId: conversation.conversationId,
+      title: conversation.title,
+      ...(conversation.updatedAt === undefined ? {} : { updatedAt: conversation.updatedAt }),
+      ...(conversation.pinnedAt === undefined ? {} : { pinnedAt: conversation.pinnedAt }),
+    })) }),
   };
 }
 
@@ -320,8 +317,11 @@ function countEntries(entries: readonly SpaceTreeEntry[]): number {
 }
 
 function projectEntries(entries: readonly SpaceTreeEntry[]): PersonalSpaceItemProjection[] {
+  // 对话不再属于空间树（ADR-0035 §8.1）：旧 conversation 引用只作兼容数据保留，
+  // 关联对话统一从 owner read-model 展示（侧边栏空间行展开）。
+  const visibleEntries = entries.filter((entry) => entry.item.reference.kind !== "conversation");
   const childrenByParent = new Map<string | undefined, SpaceTreeEntry[]>();
-  for (const entry of entries) {
+  for (const entry of visibleEntries) {
     const group = childrenByParent.get(entry.item.parentId) ?? [];
     group.push(entry);
     childrenByParent.set(entry.item.parentId, group);

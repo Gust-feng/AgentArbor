@@ -4,36 +4,39 @@
   flex-direction: column;
   overflow: visible;
   border-top: 1px solid var(--border);
-  margin-top: var(--space-5);
-  padding-top: var(--space-4);
+  margin-top: 28px;
+  padding-top: 20px;
   background: transparent;
 }
 
 .model-panel-toolbar {
   display: grid;
   min-height: 36px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
-  gap: var(--space-3);
+  column-gap: 12px;
   padding: 0 0 var(--space-3);
 }
 
-.model-panel-title,
-.model-panel-actions {
+.model-panel-title {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 8px;
+  overflow: hidden;
 }
 
-.model-panel-actions {
-  justify-content: flex-end;
+.model-panel-title strong {
+  display: block;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .model-list-panel strong {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: var(--weight-heading);
   white-space: nowrap;
 }
@@ -55,15 +58,14 @@
 .model-search-field {
   display: inline-flex;
   width: 100%;
-  max-width: 240px;
   min-width: 0;
-  height: 34px;
+  height: 38px;
   align-items: center;
   gap: 7px;
   border: 1px solid var(--field-border);
   border-radius: var(--radius-sm);
   background: var(--field-bg);
-  padding: 0 10px;
+  padding: 0 11px;
   color: var(--muted);
 }
 
@@ -73,13 +75,14 @@
   border: 0;
   background: transparent;
   color: var(--fg);
-  font-size: 12px;
+  font-size: 13px;
   outline: none;
 }
 
 .model-search-field input:hover,
 .model-search-field input:focus,
 .model-search-field input:focus-visible {
+  border: 0;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
@@ -92,16 +95,16 @@
 
 .model-list-panel button {
   display: inline-flex;
-  height: 34px;
+  height: 38px;
   align-items: center;
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--field-border);
   border-radius: var(--radius-sm);
   background: var(--field-bg);
-  padding: 0 10px;
+  padding: 0 12px;
   color: var(--fg);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
   box-shadow: none;
 }
@@ -113,6 +116,7 @@
 }
 
 .model-fetch-button {
+  grid-column: 3;
   width: 108px;
   min-width: 108px;
   overflow: hidden;
@@ -194,18 +198,18 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 
 .model-list-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  min-height: 42px;
-  gap: 9px;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  min-height: 48px;
+  gap: 10px;
   align-items: center;
   border: 1px solid var(--list-row-border);
   border-left: var(--list-row-marker-width) solid transparent;
   border-radius: var(--list-row-radius);
-  padding: 6px 7px;
+  padding: 6px 10px;
 }
 
 .model-list-row:not(.saved) {
-  grid-template-columns: 22px minmax(0, 1fr) 46px;
+  grid-template-columns: 26px minmax(0, 1fr) 46px;
   color: var(--fg);
   transition:
     border-color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -220,7 +224,7 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 }
 
 .model-list-row.saved {
-  grid-template-columns: 22px minmax(0, 1fr) 28px;
+  grid-template-columns: 26px minmax(0, 1fr) 28px;
   background: transparent;
   cursor: pointer;
   transition:
@@ -230,7 +234,7 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 }
 
 .model-list-row.saved.selected {
-  border-color: var(--list-row-active-border);
+  border-color: var(--list-row-border);
   border-left-color: var(--list-row-active-marker);
   background: var(--row-active-bg);
   box-shadow: var(--list-row-active-shadow);
@@ -249,7 +253,7 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 }
 
 .model-list-row.saved.selected:hover {
-  border-color: var(--list-row-active-border);
+  border-color: var(--list-row-border);
   border-left-color: var(--list-row-active-marker);
   background: var(--row-active-bg);
   box-shadow: var(--list-row-active-shadow);
@@ -257,8 +261,8 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 
 .model-row-icon {
   display: inline-flex;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   align-items: center;
   justify-content: center;
   overflow: hidden;
@@ -271,8 +275,8 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
 .model-row-icon > span,
 .model-row-icon svg {
   display: block;
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
 }
 
 .model-row-copy {
@@ -292,8 +296,8 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
   background: transparent;
   padding: 0;
   color: var(--fg);
-  font-size: 13px;
-  font-weight: var(--weight-body);
+  font-size: 14px;
+  font-weight: 550;
   line-height: 20px;
   outline: none;
   text-decoration: none;
@@ -322,8 +326,8 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
   overflow: hidden;
   padding: 0;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -409,47 +413,20 @@ html[data-motion-effective="reduced"] .model-fetch-button.loading .model-fetch-i
   line-height: 14px;
 }
 
-@media (max-width: 620px) {
-  .model-panel-toolbar {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
-  .model-panel-actions {
-    justify-content: stretch;
-  }
-
-  .model-search-field {
-    max-width: none;
-  }
-
-  .model-panel-actions button {
-    flex-shrink: 0;
-  }
-}
-
 @media (max-width: 460px) {
-  .model-panel-actions {
-    flex-wrap: wrap;
-  }
-
-  .model-search-field {
-    flex-basis: 100%;
-  }
-
   .model-list-row {
-    grid-template-columns: 20px minmax(0, 1fr) auto;
-    gap: 7px;
+    grid-template-columns: 26px minmax(0, 1fr) auto;
+    gap: 8px;
     padding-right: 4px;
     padding-left: 4px;
   }
 
   .model-list-row.saved {
-    grid-template-columns: 20px minmax(0, 1fr) 26px;
+    grid-template-columns: 26px minmax(0, 1fr) 26px;
   }
 
   .model-list-row:not(.saved) {
-    grid-template-columns: 20px minmax(0, 1fr) 38px;
+    grid-template-columns: 26px minmax(0, 1fr) 38px;
   }
 
   .model-list-row .model-row-add {

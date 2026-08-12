@@ -26,7 +26,11 @@ import type {
   ToolExecutor,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
-import { withToolModelAttachments } from "../../domain/tools/index.js";
+import {
+  toolCallFactId,
+  toolModelAttachmentsFromOutput,
+  withToolModelAttachments,
+} from "../../domain/tools/index.js";
 import { createAgentSessionLoop } from "./agent-session-loop.js";
 import { ToolCenter } from "../../app/tool-center/tool-center.js";
 import { createReadToolOutputTool } from "../../app/tool-center/adapters/tool-output-read-tool.js";
@@ -797,6 +801,8 @@ test("load activation rolls the ordered active set back when Ordinary rejects th
   assert.deepEqual(context.activeToolNames, ["mcp_search", "mcp_load"]);
   const toolResultEntries = (await fixture.session.getBranch()).flatMap((entry) =>
     entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : []);
+  // The owning feature rejected the load fact and the active set was rolled
+  // back, so the failed result must not retain Pi's activation marker.
   assert.equal(toolResultEntries[0]?.addedToolNames, undefined);
   await loop.release();
 });
@@ -1119,15 +1125,24 @@ test("agent session loop reads prior turns from the injected session", async (t)
   await secondLoop.release();
 });
 
-test("agent session loop sends image bytes to the provider without persisting them in Session", async (t) => {
+test("agent session loop persists image bytes in Session so later turns can reference them", async (t) => {
   const fixture = await createFixture(t);
   const imageData = Buffer.from("ephemeral-image-bytes").toString("base64");
-  fixture.faux.setResponses([(context) => {
-    const current = context.messages.at(-1);
-    assert.equal(current?.role, "user");
-    assert.equal(JSON.stringify(current).includes(imageData), true);
-    return fauxAssistantMessage("image inspected");
-  }]);
+  fixture.faux.setResponses([
+    (context) => {
+      const current = context.messages.at(-1);
+      assert.equal(current?.role, "user");
+      assert.equal(JSON.stringify(current).includes(imageData), true);
+      return fauxAssistantMessage("image inspected");
+    },
+    (context) => {
+      assert.equal(
+        context.messages.some((message) => message.role === "user" && JSON.stringify(message).includes(imageData)),
+        true,
+      );
+      return fauxAssistantMessage("follow-up image inspected");
+    },
+  ]);
   const loop = createAgentSessionLoop(fixture);
 
   const result = await loop.execute(loopInput(emptyGateway(), {
@@ -1148,9 +1163,20 @@ test("agent session loop sends image bytes to the provider without persisting th
 
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
   const branchJson = JSON.stringify(await fixture.session.getBranch());
-  assert.equal(branchJson.includes(imageData), false);
-  assert.match(branchJson, /image attachment omitted from durable Session/u);
+  // 图片字节必须进入 durable Session：否则后续轮次模型无法再引用此前发送的图片。
+  assert.equal(branchJson.includes(imageData), true);
   await loop.release();
+
+  const secondLoop = createAgentSessionLoop(fixture);
+  const second = await secondLoop.execute(loopInput(emptyGateway(), {
+    messages: [
+      { role: "system", content: "You are the Ordinary Agent." },
+      { role: "user", content: "请继续说明刚才图片里的内容。" },
+    ],
+  }));
+
+  assert.equal(second.status, "completed", second.status === "failed" ? second.error : undefined);
+  await secondLoop.release();
 });
 
 test("agent session loop does not call the provider when cancellation is already requested", async (t) => {
@@ -1538,7 +1564,7 @@ test("agent session loop reads an oversized ToolCenter result through Pi continu
   await loop.release();
 });
 
-test("agent session loop keeps tool-origin images available to the next model request only", async (t) => {
+test("agent session loop persists tool-origin images so later turns can reference them", async (t) => {
   const fixture = await createFixture(t);
   const imageData = Buffer.from("tool-image-bytes").toString("base64");
   fixture.faux.setResponses([
@@ -1571,12 +1597,124 @@ test("agent session loop keeps tool-origin images available to the next model re
   });
   const loop = createAgentSessionLoop(fixture);
 
-  const result = await loop.execute(loopInput(gateway));
+  const result = await loop.execute(loopInput(gateway, {
+    onToolResult: async (toolResult) => {
+      // The owning feature is notified only after Pi has appended message_end,
+      // so a crash cannot leave a durable run fact ahead of its image entry.
+      assert.equal(JSON.stringify(await fixture.session.getBranch()).includes(imageData), true);
+      assert.equal(toolModelAttachmentsFromOutput(toolResult.output)?.length, 1);
+    },
+  }));
 
   assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.equal(
+    toolModelAttachmentsFromOutput(result.toolResults.find((item) => item.callId === "image-call")?.output)?.length,
+    1,
+  );
   const branchJson = JSON.stringify(await fixture.session.getBranch());
-  assert.equal(branchJson.includes(imageData), false);
-  assert.match(branchJson, /image attachment omitted from durable Session/u);
+  // 工具产出的图片同样必须进入 durable Session，跨轮引用才成立。
+  assert.equal(branchJson.includes(imageData), true);
+  await loop.release();
+
+  fixture.faux.setResponses([(context) => {
+    assert.equal(
+      context.messages.some((message) => message.role === "toolResult" && JSON.stringify(message).includes(imageData)),
+      true,
+    );
+    return fauxAssistantMessage("follow-up tool image inspected");
+  }]);
+  const secondLoop = createAgentSessionLoop(fixture);
+  const second = await secondLoop.execute(loopInput(gateway, {
+    messages: [
+      { role: "system", content: "You are the Ordinary Agent." },
+      { role: "user", content: "请继续说明刚才工具返回的图片。" },
+    ],
+  }));
+
+  assert.equal(second.status, "completed", second.status === "failed" ? second.error : undefined);
+  await secondLoop.release();
+});
+
+test("agent session loop rejects tool-origin images when the frozen run capability is text-only", async (t) => {
+  const fixture = await createFixture(t);
+  const imageData = Buffer.from("tool-image-without-vision").toString("base64");
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("inspect_image", { path: "image.png" }, { id: "text-only-image-call" }), {
+      stopReason: "toolUse",
+    }),
+  ]);
+  const gateway = gatewayFor({
+    definition: toolDefinition("inspect_image", "read-only"),
+    execute: async (request) => ({
+      ...request,
+      output: withToolModelAttachments({ kind: "image-result" }, [{
+        kind: "image",
+        attachmentId: "text-only-image",
+        source: { kind: "data", mimeType: "image/png", data: imageData },
+      }]),
+      status: "completed",
+      durationMs: 1,
+    }),
+  });
+  const accepted: ToolCallResult[] = [];
+  const loop = createAgentSessionLoop({ ...fixture, supportsVisionInput: false });
+
+  const result = await loop.execute(loopInput(gateway, {
+    onToolResult: async (toolResult) => { accepted.push(toolResult); },
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(accepted[0]?.status, "failed");
+  assert.equal(accepted[0]?.errorFacts?.code, "tool_result_image_input_unsupported");
+  assert.equal(accepted[0]?.errorFacts?.sourceExecutionStatus, "completed");
+  assert.equal(accepted[0]?.errorFacts?.doNotBlindlyRetry, true);
+  assert.equal(JSON.stringify(await fixture.session.getBranch()).includes(imageData), false);
+  await loop.release();
+});
+
+test("agent session loop rejects current user images when Pi model.input is text-only", async (t) => {
+  const fixture = await createFixture(t);
+  const imageData = Buffer.from("current-user-image").toString("base64");
+  const textOnlyModel = { ...fixture.selectedModel, input: ["text"] as ("text" | "image")[] };
+  const loop = createAgentSessionLoop({ ...fixture, selectedModel: textOnlyModel });
+
+  const result = await loop.execute(loopInput(emptyGateway(), {
+    messages: [{
+      role: "user",
+      content: "inspect this image",
+      attachments: [{
+        kind: "image",
+        attachmentId: "current-user-image",
+        source: { kind: "data", mimeType: "image/png", data: imageData },
+      }],
+    }],
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "model_image_input_unsupported");
+  assert.equal(fixture.faux.state.callCount, 0);
+  await loop.release();
+});
+
+test("agent session loop rejects historical Session images when Pi model.input is text-only", async (t) => {
+  const fixture = await createFixture(t);
+  const imageData = Buffer.from("historical-session-image").toString("base64");
+  await fixture.session.appendMessage({
+    role: "user",
+    content: [{ type: "image", mimeType: "image/png", data: imageData }],
+    timestamp: Date.now(),
+  });
+  fixture.faux.setResponses([fauxAssistantMessage("must not reach provider")]);
+  const textOnlyModel = { ...fixture.selectedModel, input: ["text"] as ("text" | "image")[] };
+  const loop = createAgentSessionLoop({ ...fixture, selectedModel: textOnlyModel });
+
+  const result = await loop.execute(loopInput(emptyGateway(), {
+    messages: [{ role: "user", content: "continue" }],
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "model_image_input_unsupported");
+  assert.equal(fixture.faux.state.callCount, 0);
   await loop.release();
 });
 
@@ -2180,11 +2318,13 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   ]);
   const accepted: ToolCallResult[] = [];
   const delivered: ToolCallResult[] = [];
+  const order: string[] = [];
   let observedCallerAgentId: string | undefined;
   let observedAllowedTools: readonly string[] | undefined;
   const gateway = gatewayFor({
     definition: toolDefinition("read", "read-only"),
     execute: async (request, context, permission) => {
+      order.push("execute");
       observedCallerAgentId = context.callerAgentId;
       observedAllowedTools = permission.allowedTools;
       return { ...request, output: "contents", status: "completed", durationMs: 1 };
@@ -2204,6 +2344,12 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
 
   const result = await loop.execute(loopInput(gateway, {
     agentTools: [delegatedAgentTool(["read"])],
+    onNestedToolRequestsAccepted: async (requests) => {
+      assert.deepEqual(requests.map((request) => request.factId), [
+        "agent-tool:11:shared-call/tool:shared-call",
+      ]);
+      order.push("accepted");
+    },
     onToolResult: async (toolResult) => { accepted.push(toolResult); },
   }));
 
@@ -2222,6 +2368,7 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   assert.equal(accepted[1]?.delegatedExecution?.toolCallCount, 1);
   assert.equal(accepted[1]?.delegatedExecution?.usage.requestCount, 2);
   assert.equal(result.usage.requestCount, 4);
+  assert.deepEqual(order, ["accepted", "execute"]);
   assert.equal(observedCallerAgentId, "sub-agent:reviewer");
   assert.deepEqual(observedAllowedTools, ["read"]);
   assert.deepEqual(delivered.map((item) => item.toolName), ["agent_call"]);
@@ -2232,6 +2379,129 @@ test("agent session loop keeps delegated transcripts isolated while preserving n
   assert.equal(rootMessages.filter((message) => message.role === "toolResult").length, 1);
   assert.equal(rootMessages.find((message) => message.role === "toolResult")?.toolCallId, "shared-call");
   assert.match(JSON.stringify(rootMessages.find((message) => message.role === "toolResult")?.content), /tool-output:\/\/delegated-result/u);
+  await loop.release();
+});
+
+test("delegated tools accept one provider message as a single nested write-ahead batch", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect both" }, { id: "batch-parent" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage([
+      fauxToolCall("read", { path: "a.txt" }, { id: "nested-a" }),
+      fauxToolCall("read", { path: "b.txt" }, { id: "nested-b" }),
+    ], { stopReason: "toolUse" }),
+    fauxAssistantMessage("delegated batch complete"),
+    fauxAssistantMessage("parent synthesis"),
+  ]);
+  const acceptedBatches: string[][] = [];
+  let executeCalls = 0;
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    execute: async (request) => {
+      assert.equal(acceptedBatches.length, 1, "the whole nested batch must be accepted before execution");
+      executeCalls += 1;
+      return { ...request, output: "contents", status: "completed", durationMs: 1 };
+    },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool(["read"])],
+    async onNestedToolRequestsAccepted(requests) {
+      acceptedBatches.push(requests.map((request) => toolCallFactId(request)));
+    },
+  }));
+
+  assert.equal(result.status, "completed", result.status === "failed" ? result.error : undefined);
+  assert.deepEqual(acceptedBatches, [[
+    "agent-tool:12:batch-parent/tool:nested-a",
+    "agent-tool:12:batch-parent/tool:nested-b",
+  ]]);
+  assert.equal(executeCalls, 2);
+  await loop.release();
+});
+
+test("delegated tools never reach preflight when nested request acceptance fails", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect" }, { id: "delegate-wal-failure" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("read", { path: "README.md" }, { id: "nested-wal-failure" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("child must not continue"),
+    fauxAssistantMessage("parent must not continue"),
+  ]);
+  let preflightCalls = 0;
+  let executeCalls = 0;
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    preflight: (request) => {
+      preflightCalls += 1;
+      return { status: "ready", request };
+    },
+    execute: async (request) => {
+      executeCalls += 1;
+      return { ...request, output: "contents", status: "completed", durationMs: 1 };
+    },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool(["read"])],
+    async onNestedToolRequestsAccepted() {
+      throw new Error("nested request persistence failed");
+    },
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "tool_request_acceptance_failed");
+  assert.match(result.status === "failed" ? result.error : "", /nested request persistence failed/u);
+  assert.equal(preflightCalls, 0);
+  assert.equal(executeCalls, 0);
+  assert.equal(fixture.faux.state.callCount, 2);
+  await loop.release();
+});
+
+test("delegated tools reject a reused scoped call identity before a second side effect", async (t) => {
+  const fixture = await createFixture(t);
+  fixture.faux.setResponses([
+    fauxAssistantMessage(fauxToolCall("agent_call", { task: "inspect twice" }, { id: "delegate-reuse" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("read", { path: "a.txt" }, { id: "nested-reuse" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(fauxToolCall("read", { path: "b.txt" }, { id: "nested-reuse" }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("child must not continue"),
+    fauxAssistantMessage("parent must not continue"),
+  ]);
+  let executeCalls = 0;
+  const gateway = gatewayFor({
+    definition: toolDefinition("read", "read-only"),
+    execute: async (request) => {
+      executeCalls += 1;
+      return { ...request, output: "contents", status: "completed", durationMs: 1 };
+    },
+    deliverResult: async (result) => result,
+  });
+  const loop = createAgentSessionLoop(fixture);
+
+  const result = await loop.execute(loopInput(gateway, {
+    agentTools: [delegatedAgentTool(["read"])],
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.status === "failed" ? result.errorCode : undefined, "session_tool_request_duplicate");
+  assert.equal(executeCalls, 1);
+  assert.equal(fixture.faux.state.callCount, 3);
   await loop.release();
 });
 

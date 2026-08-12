@@ -42,6 +42,5 @@ function panelDevProxy(): Record<string, string> {
     "/api": target,
     "/health": target,
     "/favicon.svg": target,
-    "/favicon.ico": target,
   };
 }

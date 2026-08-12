@@ -1,20 +1,21 @@
 import type React from "react";
 import {
+  discardManagedUploadAttachment,
+  isManagedUploadAttachment,
   selectLocalContextAttachment,
   uniqueAttachments,
   uploadContextAttachmentFiles,
 } from "./app-attachments";
+import { ApiError } from "./api";
 import type { ComposerToolConfirmationPolicy } from "./app-config-projection";
-import { selectTaskWorkspaceDirectory } from "./app-workspace-selection";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 
 export type AppComposerController = {
   readonly selectInputModel: (modelOptionId: string) => void;
   readonly selectAttachment: () => Promise<void>;
-  readonly selectTaskWorkspace: () => Promise<void>;
   readonly uploadAttachments: (files: readonly File[]) => Promise<void>;
-  readonly removeAttachment: (attachmentId: string) => void;
+  readonly removeAttachment: (attachmentId: string) => Promise<void>;
   readonly changeToolConfirmationPolicy: (nextPolicy: ComposerToolConfirmationPolicy) => void;
 };
 
@@ -23,8 +24,9 @@ export type AppComposerControllerOptions = {
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly contextBusy: boolean;
   readonly setContextBusy: React.Dispatch<React.SetStateAction<boolean>>;
+  readonly attachmentUploadAttemptRef: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
-  readonly setSelectedWorkspaceDirectory: React.Dispatch<React.SetStateAction<string | undefined>>;
+  readonly attachments?: readonly ContextAttachment[];
   readonly selectedModelId: string;
   readonly setComposerSelectedModelId: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly selectComposerModel: (modelOptionId: string) => Promise<void>;
@@ -63,34 +65,37 @@ export function createAppComposerController(
     }
   }
 
-  async function selectTaskWorkspace(): Promise<void> {
-    if (options.contextBusy) return;
-    options.setContextBusy(true);
-    try {
-      const directory = await selectTaskWorkspaceDirectory();
-      if (options.mountedRef.current && directory !== undefined) {
-        options.setSelectedWorkspaceDirectory(directory);
-        options.setApp((previous) => ({ ...previous, error: undefined }));
-      }
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, error: errorText(error, "选择工作区失败。") }));
-      }
-    } finally {
-      if (options.mountedRef.current) options.setContextBusy(false);
-    }
-  }
-
   async function uploadAttachments(files: readonly File[]): Promise<void> {
     if (options.contextBusy || files.length === 0) return;
+    const requestKey = JSON.stringify(files.map((file) => ({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      lastModified: file.lastModified,
+    })));
+    const existingAttempt = options.attachmentUploadAttemptRef.current;
+    const uploadRequestId = existingAttempt?.key === requestKey
+      ? existingAttempt.id
+      : crypto.randomUUID();
+    options.attachmentUploadAttemptRef.current = { key: requestKey, id: uploadRequestId };
     options.setContextBusy(true);
     try {
-      const uploaded = await uploadContextAttachmentFiles(files);
-      if (options.mountedRef.current && uploaded.length > 0) {
+      const uploaded = await uploadContextAttachmentFiles(files, uploadRequestId);
+      if (options.attachmentUploadAttemptRef.current?.id === uploadRequestId) {
+        options.attachmentUploadAttemptRef.current = undefined;
+      }
+      if (!options.mountedRef.current) {
+        await Promise.allSettled(uploaded.filter(isManagedUploadAttachment).map((attachment) =>
+          discardManagedUploadAttachment(attachment.attachmentId)));
+      } else if (uploaded.length > 0) {
         options.setAttachments((previous) => uniqueAttachments([...previous, ...uploaded]));
         options.setApp((previous) => ({ ...previous, error: undefined }));
       }
     } catch (error) {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500 &&
+        options.attachmentUploadAttemptRef.current?.id === uploadRequestId) {
+        options.attachmentUploadAttemptRef.current = undefined;
+      }
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, error: errorText(error, "上传附件失败。") }));
       }
@@ -99,8 +104,17 @@ export function createAppComposerController(
     }
   }
 
-  function removeAttachment(attachmentId: string): void {
-    options.setAttachments((previous) => previous.filter((attachment) => attachment.attachmentId !== attachmentId));
+  async function removeAttachment(attachmentId: string): Promise<void> {
+    const attachment = options.attachments?.find((candidate) => candidate.attachmentId === attachmentId);
+    options.setAttachments((previous) => previous.filter((candidate) => candidate.attachmentId !== attachmentId));
+    if (attachment === undefined || !isManagedUploadAttachment(attachment)) return;
+    try {
+      await discardManagedUploadAttachment(attachmentId);
+    } catch (error) {
+      if (!options.mountedRef.current) return;
+      options.setAttachments((previous) => uniqueAttachments([...previous, attachment]));
+      options.setApp((previous) => ({ ...previous, error: errorText(error, "移除附件失败。") }));
+    }
   }
 
   function changeToolConfirmationPolicy(nextPolicy: ComposerToolConfirmationPolicy): void {
@@ -116,7 +130,6 @@ export function createAppComposerController(
   return {
     selectInputModel,
     selectAttachment,
-    selectTaskWorkspace,
     uploadAttachments,
     removeAttachment,
     changeToolConfirmationPolicy,

@@ -21,7 +21,6 @@ export type AppFormStateSyncOptions = {
   readonly app: AppState;
   readonly setAiMode: Dispatch<SetStateAction<VisibleAiMode>>;
   readonly setModelForm: Dispatch<SetStateAction<ModelForm>>;
-  readonly setWorkspaceDirectory: Dispatch<SetStateAction<string>>;
   readonly setDesktopAgentSystemPrompt: Dispatch<SetStateAction<string>>;
   readonly setToolConfirmationPolicy: Dispatch<SetStateAction<ComposerToolConfirmationPolicy>>;
   readonly setToolForm: Dispatch<SetStateAction<ToolForm>>;
@@ -55,9 +54,6 @@ export function useAppFormStateSync(options: AppFormStateSyncOptions): void {
         apiKey: "",
         apiKeyCleared: false,
       });
-    }
-    if (options.app.config?.workspace !== undefined) {
-      options.setWorkspaceDirectory(options.app.config.workspace.workspaceDirectory ?? "");
     }
     if (options.app.config?.desktopAgent?.systemPrompt !== undefined) {
       options.setDesktopAgentSystemPrompt(options.app.config.desktopAgent.systemPrompt);

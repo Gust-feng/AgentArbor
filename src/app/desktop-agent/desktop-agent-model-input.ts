@@ -16,6 +16,8 @@ export type BuildDesktopAgentModelInputOptions = {
   readonly taskSoil: TaskSoil;
   readonly priorModelContext?: readonly ModelMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  /** 模型可见的 owner 区块（ADR-0035 §6.2）；随 birth 冻结，未提供时不注入。 */
+  readonly ownerContext?: string;
 };
 
 /**
@@ -55,10 +57,12 @@ function currentUserMessageContent(input: BuildDesktopAgentModelInputOptions): s
     .map((ref, index) => attachmentBlock(ref, input.taskSoil, index))
     .filter(isString);
   const goal = normalizeModelFacingText(input.goal);
-  if (skills.length === 0 && attachments.length === 0) {
+  const owner = input.ownerContext === undefined ? undefined : normalizeModelFacingText(input.ownerContext);
+  if (skills.length === 0 && attachments.length === 0 && owner === undefined) {
     return goal;
   }
   return [
+    owner === undefined ? undefined : owner,
     skills.length === 0 ? undefined : `[Selected skill instructions]\n${skills.join("\n\n")}`,
     attachments.length === 0 ? undefined : `[User-provided context]\n${attachments.join("\n")}`,
     `[Current user request]\n${goal}`,
@@ -137,7 +141,7 @@ function attachmentBlock(
   if (!isModelVisibleContextRef(ref, taskSoil)) {
     return undefined;
   }
-  const safeRef = modelSafeContextRef(ref.ref);
+  const safeRef = modelSafeContextRef(ref.ref, ref.pathGranted === true);
   return [
     "User-provided attachment:",
     `attachment_id=${normalizeModelFacingText(ref.attachmentId ?? safeRef ?? `attachment-${index}`)}`,
@@ -165,7 +169,16 @@ function isModelVisibleContextRef(
   return ref.kind === "workspace" || ref.kind === "file" || ref.kind === "project" || ref.kind === "web";
 }
 
-function modelSafeContextRef(ref: string): string | undefined {
+function modelSafeContextRef(
+  ref: string,
+  pathGranted: boolean,
+): string | undefined {
+  // A granted path is an explicit user authorization, and the model can only call
+  // Read/Glob/Grep/Write/Edit if it sees the real absolute path behind it. Ungranted
+  // local paths carry no such authorization, so they stay hidden.
+  if (pathGranted) {
+    return ref;
+  }
   const normalized = ref.toLowerCase();
   return normalized.startsWith("local-file:") || normalized.startsWith("local-project:")
     ? undefined

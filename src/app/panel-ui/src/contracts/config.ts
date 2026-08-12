@@ -10,6 +10,7 @@ export type ConfigResponse = {
     readonly baseUrl?: string;
     readonly model?: string;
     readonly defaultAiMode?: "none" | "openai-compatible" | "openai-responses";
+    readonly enabled?: boolean;
     readonly secretConfigured?: boolean;
   };
   readonly profile?: ModelProviderProfile;
@@ -19,9 +20,6 @@ export type ConfigResponse = {
   readonly modelCapabilityProfiles?: readonly ModelCapabilityProfile[];
   readonly modelProviderMarket?: {
     readonly presets?: readonly ModelProviderPreset[];
-  };
-  readonly workspace?: {
-    readonly workspaceDirectory?: string;
   };
   readonly commandShell?: CommandShellConfig;
   readonly toolConfirmation?: ToolConfirmationConfig;

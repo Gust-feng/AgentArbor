@@ -2,6 +2,7 @@ import type { DesktopTaskSoilInput, DesktopTaskSoilContextRefInput } from "../ta
 import {
   spaceReferenceAttachmentId,
   spaceReferenceWritePermission,
+  spaceScopePermission,
   type SpaceFeature,
   type SpaceReferenceItem,
 } from "../spaces/index.js";
@@ -20,25 +21,27 @@ type AgentAccessibleSpaceReferenceItem = SpaceReferenceItem & {
 
 /**
  * Resolves the unique Space owning a conversation and freezes that Space's
- * local references into this turn's Task Soil. Later Space edits affect only
- * later turns; they cannot expand or revoke a run that already started.
+ * local references into this turn's Task Soil. Later additions affect only
+ * later turns; removals are enforced separately by the live deny overlay.
  */
 export async function resolveConversationSpaceAccess(
-  spaces: Pick<SpaceFeature, "queries">,
+  spaces: Pick<SpaceFeature, "commands" | "queries">,
   conversationId: string | undefined,
   taskSoilInput: DesktopTaskSoilInput | undefined,
+  requestedSpaceId?: string,
 ): Promise<ConversationSpaceAccess> {
-  if (conversationId === undefined) return { taskSoilInput };
-  const owner = await spaces.queries.findConversationOwner(conversationId);
+  const owner = conversationId === undefined
+    ? (requestedSpaceId === undefined ? undefined : { spaceId: requestedSpaceId })
+    : await spaces.queries.findConversationOwner(conversationId);
   if (owner === undefined) return { taskSoilInput };
+  if (conversationId !== undefined && requestedSpaceId !== undefined && owner.spaceId !== requestedSpaceId) {
+    throw new Error(`Conversation ${conversationId} belongs to Space ${owner.spaceId}, not ${requestedSpaceId}.`);
+  }
   const tree = await spaces.queries.getTree(owner.spaceId);
   if (tree === undefined) return { taskSoilInput };
-
   const fileItems = tree.entries
     .map((entry) => entry.item)
     .filter(isAgentAccessibleLocalReference);
-  if (fileItems.length === 0) return { spaceId: owner.spaceId, taskSoilInput };
-
   const generatedAttachmentIds = new Set(fileItems.map((item) => spaceReferenceAttachmentId(item.id)));
   const contextRefs = [
     ...fileItems.map(contextRefFor),
@@ -47,6 +50,7 @@ export async function resolveConversationSpaceAccess(
     ),
   ];
   const permissionBoundaryRefs = unique([
+    spaceScopePermission(owner.spaceId),
     ...fileItems.flatMap(permissionRefsFor),
     ...(taskSoilInput?.permissionBoundaryRefs ?? []),
   ]);
@@ -69,6 +73,8 @@ function contextRefFor(
   return {
     attachmentId: spaceReferenceAttachmentId(item.id),
     ref: `${file ? "local-file" : "local-project"}:${item.reference.path}`,
+    pathGranted: true,
+    ...(item.sourceIdentity === undefined ? {} : { sourceIdentity: item.sourceIdentity }),
     kind: file ? "file" : "project",
     title: item.title,
     summary: "当前对话所属空间授权的本地资源。",

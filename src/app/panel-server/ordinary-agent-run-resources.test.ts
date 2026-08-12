@@ -26,16 +26,34 @@ import type { AgentLoopTokenCounter } from "../context-maintenance/index.js";
 import { SubAgentRegistry } from "../sub-agents/sub-agent-registry.js";
 import { createSubAgentAgentToolCatalogContribution } from "../sub-agents/sub-agent-agent-tools.js";
 import { toolDefinitionContractHash } from "../capability/tool-definition-contract.js";
-import type { AgentHostRunResources } from "./agent-run-resources.js";
+import type { AgentHostRunResources, AgentRunResourceHost } from "./agent-run-resources.js";
 import type { AgentToolRegistryContribution } from "../tool-center/index.js";
 import { InMemoryToolOutputStore } from "../tool-center/tool-output-store.js";
 import { createReadToolOutputTool } from "../tool-center/adapters/tool-output-read-tool.js";
 import { createLocalReadFileTool } from "../tool-center/adapters/local-workspace-read-tools.js";
 import { createReadSkillResourceTool } from "../skills/skill-resource-tool.js";
 import { CodedExecutionError } from "../execution-errors/index.js";
+import { InMemoryProcessRegistry } from "../runtime-guard/process-registry.js";
 import { createOrdinaryAgentRunResourceAcquirer } from "./ordinary-agent-run-resources.js";
 
 const AGENT_TOOL_NAMES = ["Agent", "AgentSpawn"];
+
+/**
+ * Tests below inject a `prepareHostResources` double, so no Host member should be
+ * reached. Throwing rather than returning undefined turns an accidental real call
+ * into a named failure instead of a downstream `undefined` dereference.
+ */
+function unusedHost(overrides: Partial<AgentRunResourceHost> = {}): AgentRunResourceHost {
+  return {
+    configCenter: new Proxy({}, {
+      get(_target, property) {
+        throw new Error(`unexpected configCenter access: ${String(property)}`);
+      },
+    }) as AgentRunResourceHost["configCenter"],
+    processRegistry: new InMemoryProcessRegistry(),
+    ...overrides,
+  };
+}
 
 test("Ordinary Host resources preserve canonical context and expose mechanical, MCP, Skill, and native Sub-Agent capabilities", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-run-resources-"));
@@ -71,7 +89,9 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   let hostReleases = 0;
   let loopReleases = 0;
   let loopConfig: AgentSessionLoopOptions | undefined;
+  let resolvedAgentNoteVersions: OrdinaryRunBirth["agentNoteVersions"];
   const countedToolContracts: string[] = [];
+  const checkedAttachmentIds: string[] = [];
   const routingProvider = fauxProvider();
   routingProvider.setResponses([
     fauxAssistantMessage('{"selectedSkillIds":["review-skill"]}'),
@@ -86,7 +106,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     requestSettings: snapshot.activeModel.openAI,
   }, { createResponsesTransport: () => providerStreams(routingProvider.provider) });
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore(createMinimalSoilConstraints()),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -110,7 +130,16 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
         triggerReason: "Explicit review request.",
       }];
     },
+    resolveFeatureToolContributions(input) {
+      resolvedAgentNoteVersions = input.agentNoteVersions;
+      return [];
+    },
     resolveSubAgentRoots: () => [subAgentRoot],
+    contextAttachmentReadAuthorization: {
+      assertReadAllowed(attachmentId) {
+        checkedAttachmentIds.push(attachmentId);
+      },
+    },
   }, {
     async prepareHostResources() {
       return resources(snapshot, root, () => { hostReleases += 1; });
@@ -122,7 +151,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     createProviderBinding: () => providerBinding,
     createTokenCounter: () => observingTokenCounter(countedToolContracts),
   });
-  const execution = executionInput(snapshot, {
+  const baseExecution = executionInput(snapshot, {
     contextRefs: [{
       attachmentId: "screen",
       ref: `local-file:${imagePath}`,
@@ -133,6 +162,16 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     }],
     permissionBoundaryRefs: [`read:local-file:${imagePath}`],
   });
+  const execution: OrdinaryExecutionInput = {
+    ...baseExecution,
+    birth: {
+      ...baseExecution.birth,
+      agentNoteVersions: {
+        global: `sha256:${"a".repeat(64)}`,
+        workspace: `sha256:${"b".repeat(64)}`,
+      },
+    },
+  };
 
   const acquired = await acquirer.acquire(execution);
 
@@ -142,6 +181,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
   assert.equal(acquired.resolvedMessages.filter((message) => message.role === "system").length, 1);
   assert.equal(acquired.resolvedMessages.filter((message) => message.role === "tool").length, 0);
   assert.equal(acquired.resolvedMessages.at(-1)?.attachments?.[0]?.attachmentId, "screen");
+  assert.deepEqual(checkedAttachmentIds, ["screen"]);
   assert.equal(acquired.resolvedMessages.at(-1)?.content.includes("Review Skill"), true);
   assert.equal(acquired.resolvedMessages.at(-1)?.content.includes("review the image"), true);
   assert.equal(acquired.tools.permission.allowedTools.includes("Read"), true);
@@ -156,6 +196,7 @@ test("Ordinary Host resources preserve canonical context and expose mechanical, 
     "AgentSpawn",
   ]);
   assert.equal(acquired.capabilityResolution?.runMode, "agent");
+  assert.deepEqual(resolvedAgentNoteVersions, execution.birth.agentNoteVersions);
   assert.equal(AGENT_TOOL_NAMES.some((name) => acquired.tools.gateway.has(name)), false);
   assert.deepEqual(acquired.agentTools?.map((tool) => tool.toolName), ["Agent", "AgentSpawn"]);
   assert.equal(loopConfig?.toolDefinitionTokenCounter?.("visible definition"), "visible definition".length);
@@ -202,7 +243,7 @@ test("Ordinary Host resources defer costly MCP definitions without narrowing exe
   const tokenCounter = progressiveTokenCounter("mcp_lookup");
   let loopConfig: AgentSessionLoopOptions | undefined;
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -241,7 +282,7 @@ test("Ordinary Host resources keep MCP definitions direct when the tokenizer is 
   const matched = progressiveTokenCounter("mcp_lookup");
   const fallbackCounter: AgentLoopTokenCounter = { ...matched, tokenizerMatch: "fallback" };
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -321,7 +362,7 @@ test("Ordinary Host resources run retained Skill evidence and confirmation throu
     enabledByDefault: true,
   });
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -427,7 +468,7 @@ test("Ordinary resources pass through Chat Completions configuration and clean H
   let received: AgentSessionLoopOptions | undefined;
   const failure = new Error("loop construction failed");
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -452,6 +493,7 @@ test("Ordinary resources pass through Chat Completions configuration and clean H
 
   await assert.rejects(acquirer.acquire({
     runId: "run-chat",
+    conversationId: "conversation-chat",
     sessionRef: agentSessionRef(),
     birth,
     runInput: { userMessage: "hello" },
@@ -473,7 +515,7 @@ test("Ordinary resources preserve provider-native Web Search in the frozen Respo
   let loopReleases = 0;
   let received: AgentSessionLoopOptions | undefined;
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -515,7 +557,7 @@ test("Ordinary resources reject an incomplete or mismatched AgentDefinition ref 
   const base = ordinaryRunBirth();
   let acquisitions = 0;
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -529,6 +571,7 @@ test("Ordinary resources reject an incomplete or mismatched AgentDefinition ref 
 
   await assert.rejects(acquirer.acquire({
     runId: "run-invalid-ref",
+    conversationId: "conversation-invalid-ref",
     sessionRef: agentSessionRef(),
     birth: base,
     runInput: { userMessage: "hello" },
@@ -547,6 +590,7 @@ test("Ordinary resources classify tool-boundary failures without parsing message
   };
   const input = {
     runId: "run-boundary-error",
+    conversationId: "conversation-boundary-error",
     sessionRef: agentSessionRef(),
     birth,
     runInput: { userMessage: "hello" },
@@ -556,7 +600,7 @@ test("Ordinary resources classify tool-boundary failures without parsing message
   const boundaryCause = new Error("arbitrary tool policy defect");
   let boundaryReleases = 0;
   const boundaryAcquirer = createOrdinaryAgentRunResourceAcquirer({
-    host: {} as never,
+    host: unusedHost(),
     sessionRepository: sessionRepository(),
     soilStore: createMinimalReadonlySoilStore([]),
     resolveAgentDefinition: () => DESKTOP_ROOT_AGENT,
@@ -574,10 +618,11 @@ test("Ordinary resources classify tool-boundary failures without parsing message
   assert.equal(boundaryReleases, 1);
 });
 
-test("Ordinary run release cleans run resources without discarding retained output", async () => {
+test("Ordinary run release retries only failed cleanup without discarding retained output", async () => {
   const base = ordinaryRunBirth();
   const calls: string[] = [];
   const cleanupFailure = new Error("process cleanup failed");
+  let processCleanupAttempts = 0;
   const outputStore = new InMemoryToolOutputStore();
   const retained = await outputStore.retain({
     mediaType: "text/plain",
@@ -586,17 +631,21 @@ test("Ordinary run release cleans run resources without discarding retained outp
     sourceCallId: "call-retained-output",
     ownerId: "run-cleanup",
   });
-  const host = {
-    processRegistry: {
-      register() { return undefined; },
-      async cleanupByRun(runId: string) {
-        calls.push(`process:${runId}`);
-        throw cleanupFailure;
+  const realRegistry = new InMemoryProcessRegistry();
+  const host = unusedHost({
+    processRegistry: Object.assign(Object.create(realRegistry) as InMemoryProcessRegistry, {
+      async cleanupByRun(
+        ...args: Parameters<InMemoryProcessRegistry["cleanupByRun"]>
+      ): ReturnType<InMemoryProcessRegistry["cleanupByRun"]> {
+        calls.push(`process:${args[0]}`);
+        processCleanupAttempts += 1;
+        if (processCleanupAttempts === 1) throw cleanupFailure;
+        return realRegistry.cleanupByRun(...args);
       },
-    },
+    }),
     processTerminator: { killTree: async () => ({ status: "killed" as const }) },
     toolOutputStore: outputStore,
-  } as never;
+  });
   const acquirer = createOrdinaryAgentRunResourceAcquirer({
     host,
     sessionRepository: sessionRepository(),
@@ -613,6 +662,7 @@ test("Ordinary run release cleans run resources without discarding retained outp
   });
   const acquired = await acquirer.acquire({
     runId: "run-cleanup",
+    conversationId: "conversation-cleanup",
     sessionRef: agentSessionRef(),
     birth: { ...base, instructions: DESKTOP_ROOT_AGENT.prompt.systemPrompt, agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT) },
     runInput: { userMessage: "cleanup" },
@@ -620,8 +670,9 @@ test("Ordinary run release cleans run resources without discarding retained outp
   });
 
   await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
-  await assert.rejects(acquired.release(), (error: unknown) => error === cleanupFailure);
-  assert.deepEqual(calls, ["loop", "host", "process:run-cleanup"]);
+  await acquired.release();
+  await acquired.release();
+  assert.deepEqual(calls, ["loop", "host", "process:run-cleanup", "process:run-cleanup"]);
   assert.equal(
     (await outputStore.read(retained.ref, { startChar: 0, maxChars: 64 }))?.content,
     "continue reading this result",
@@ -635,6 +686,7 @@ function executionInput(
   const base = ordinaryRunBirth();
   return {
     runId: "run-responses",
+    conversationId: "conversation-responses",
     sessionRef: agentSessionRef(),
     birth: {
       ...base,

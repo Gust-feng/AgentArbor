@@ -1,5 +1,5 @@
 /**
- * Redesign Space 只消费这些领域投影和动作契约。
+ * Workbench Space surface 只消费这些领域投影和动作契约。
  *
  * 文件树的事实仍由 SpaceFeature 提供；这里仅定义 Panel 需要的显示投影，
  * 不复制文件系统状态，也不区分另一套“旧空间”语义。
@@ -33,19 +33,16 @@ export type PersonalSpaceProjection = {
   readonly description?: string;
   readonly color?: string;
   readonly items: readonly PersonalSpaceItemProjection[];
+  /** 关联对话（组合根 read-model，ADR-0035 §8.1）；新对话不再出现在 Space 树中。 */
+  readonly conversations?: readonly PersonalSpaceConversationContext[];
 };
 
 export type PersonalSpaceActions = {
+  readonly deleteSpace?: (spaceId: string) => void | Promise<void>;
   readonly createManagedFolder?: (spaceId: string, title: string) => void | Promise<void>;
   readonly addLocalFile?: (spaceId: string) => void | Promise<void>;
   readonly addWorkspaceFolder?: (spaceId: string) => void | Promise<void>;
   readonly addWebReference?: (spaceId: string, title: string, url: string) => void | Promise<void>;
-  readonly addConversation?: (spaceId: string, conversationId: string, title: string) => void | Promise<void>;
-  readonly move?: (
-    sourceSpaceId: string,
-    target: { readonly kind: "reference"; readonly id: string },
-    destinationSpaceId: string,
-  ) => void | Promise<void>;
   readonly rename?: (target: PersonalSpaceRenameTarget, title: string) => void | Promise<void>;
   /** Removes only the Space link and preserves the referenced source. */
   readonly unlinkReference?: (itemId: string) => void | Promise<void>;
@@ -61,4 +58,6 @@ export type PersonalSpaceRenameTarget = {
 export type PersonalSpaceConversationContext = {
   readonly conversationId: string;
   readonly title: string;
+  readonly updatedAt?: string;
+  readonly pinnedAt?: string;
 };

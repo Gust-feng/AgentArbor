@@ -4,7 +4,16 @@ import minimaxLogo from "./assets/providers/minimax.svg?raw";
 import modelProviderLogo from "./assets/providers/model-provider.svg?raw";
 import openaiLogo from "./assets/providers/openai.svg?raw";
 import zaiLogo from "./assets/providers/zai.svg?raw";
+import {
+  resolveModelFamilyIdentity,
+  resolveModelProviderIdentityFromSignal,
+  type ModelFamilyIdentity,
+  type ModelProviderIdentity,
+} from "../../model-visuals/model-family";
 import { decorativeSvg } from "./icon-svg";
+
+export { resolveModelFamilyIdentity };
+export type { ModelFamilyIdentity, ModelProviderIdentity };
 
 const providerLogos = {
   deepseek: decorativeSvg(deepseekLogo),
@@ -31,9 +40,6 @@ export type ModelProviderLogo = {
   readonly tone: string;
 };
 
-export type ModelProviderIdentity = "openai" | "deepseek" | "kimi" | "glm" | "minimax" | "unknown";
-export type ModelFamilyIdentity = ModelProviderIdentity | "claude";
-
 const builtinProviderPresetAliases = new Map<string, Exclude<ModelProviderIdentity, "unknown">>([
   ["default", "openai"],
   ["openai", "openai"],
@@ -45,14 +51,6 @@ const builtinProviderPresetAliases = new Map<string, Exclude<ModelProviderIdenti
   ["zai", "glm"],
   ["minimax", "minimax"],
 ]);
-
-const providerIdentityPatterns: readonly [Exclude<ModelProviderIdentity, "unknown">, RegExp][] = [
-  ["openai", /api\.openai\.com|openai|chatgpt|gpt/iu],
-  ["deepseek", /deepseek/iu],
-  ["kimi", /moonshot|kimi|月之暗面/iu],
-  ["glm", /bigmodel|zhipu|glm|智谱/iu],
-  ["minimax", /minimaxi?|mini\s*max/iu],
-];
 
 export function modelProviderDisplayName(identity: Exclude<ModelProviderIdentity, "unknown">): string {
   if (identity === "openai") return "OpenAI";
@@ -74,28 +72,12 @@ export function resolveModelProviderIdentity(input: ModelProviderLogoInput): Mod
   return "unknown";
 }
 
-export function resolveModelFamilyIdentity(input: {
-  readonly model?: string;
-  readonly displayName?: string;
-}): ModelFamilyIdentity {
-  const signal = normalizeProviderSignal([input.displayName, input.model].filter(Boolean).join(" "));
-  if (/anthropic|claude/iu.test(signal)) {
-    return "claude";
-  }
-  return resolveStrongProviderSignal(signal) ?? "unknown";
-}
-
 function normalizeProviderSignal(value: string | undefined): string {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
 function resolveStrongProviderSignal(value: string): Exclude<ModelProviderIdentity, "unknown"> | undefined {
-  for (const [identity, pattern] of providerIdentityPatterns) {
-    if (pattern.test(value)) {
-      return identity;
-    }
-  }
-  return undefined;
+  return resolveModelProviderIdentityFromSignal(value);
 }
 
 export function modelProviderSortRank(input: ModelProviderLogoInput): number {

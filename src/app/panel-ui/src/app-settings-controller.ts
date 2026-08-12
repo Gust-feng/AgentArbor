@@ -22,8 +22,6 @@ import {
   saveSkillTriggerConfig,
   saveToolConfirmationConfig,
   saveToolSettings,
-  saveWorkspaceDirectory,
-  selectWorkspaceDirectory,
   selectModelProviderModel,
   testMcpServer,
   checkMcpEnvironment,
@@ -55,8 +53,6 @@ export type AppSettingsController = {
   readonly fetchModelsForProfile: (profileId?: string) => Promise<ModelProviderModelCatalog | undefined>;
   readonly saveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
   readonly saveModelCapabilities: (form: ModelCapabilityUpdateForm) => Promise<void>;
-  readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
-  readonly selectWorkspace: () => Promise<void>;
   readonly saveCommandShell: (kind: CommandShellKind | "auto") => Promise<void>;
   readonly saveToolConfirmationPolicy: (policy: ComposerToolConfirmationPolicy) => Promise<void>;
   readonly saveDesktopAgentSystemPrompt: (systemPrompt: string) => Promise<void>;
@@ -86,7 +82,6 @@ export type AppSettingsControllerOptions = {
   readonly modelForm: ModelForm;
   readonly setModelForm: React.Dispatch<React.SetStateAction<ModelForm>>;
   readonly setModelCatalogs: React.Dispatch<React.SetStateAction<Record<string, ModelProviderModelCatalog>>>;
-  readonly workspaceDirectory: string;
   readonly setDesktopAgentSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
   readonly toolForm: ToolForm;
   readonly setToolForm: React.Dispatch<React.SetStateAction<ToolForm>>;
@@ -99,7 +94,7 @@ export type AppSettingsControllerOptions = {
   readonly mcpToolUpdateVersionRef: React.MutableRefObject<number>;
   readonly mcpToolCatalogDraftRef: React.MutableRefObject<readonly McpServerCatalogItem[] | undefined>;
   readonly setSavingModel: React.Dispatch<React.SetStateAction<boolean>>;
-  readonly setSavingWorkspace: React.Dispatch<React.SetStateAction<boolean>>;
+  readonly setSavingEnvironment: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingDesktopAgent: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingTools: React.Dispatch<React.SetStateAction<boolean>>;
 };
@@ -412,56 +407,8 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function saveWorkspace(nextWorkspaceDirectory: string = options.workspaceDirectory): Promise<void> {
-    options.setSavingWorkspace(true);
-    try {
-      const workspace = await saveWorkspaceDirectory(nextWorkspaceDirectory);
-      const skills = await refreshSkillCatalog().catch(() => undefined);
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          config: { ...previous.config, workspace },
-          skills: skills ?? previous.skills,
-        }));
-      }
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          error: error instanceof Error ? error.message : "默认文件夹保存失败。",
-        }));
-      }
-    } finally {
-      if (options.mountedRef.current) options.setSavingWorkspace(false);
-    }
-  }
-
-  async function selectWorkspace(): Promise<void> {
-    options.setSavingWorkspace(true);
-    try {
-      const workspace = await selectWorkspaceDirectory();
-      const skills = await refreshSkillCatalog().catch(() => undefined);
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          config: { ...previous.config, workspace },
-          skills: skills ?? previous.skills,
-        }));
-      }
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          error: error instanceof Error ? error.message : "默认文件夹选择失败。",
-        }));
-      }
-    } finally {
-      if (options.mountedRef.current) options.setSavingWorkspace(false);
-    }
-  }
-
   async function saveCommandShell(kind: CommandShellKind | "auto"): Promise<void> {
-    options.setSavingWorkspace(true);
+    options.setSavingEnvironment(true);
     try {
       const response = await saveCommandShellConfig(kind);
       if (options.mountedRef.current) {
@@ -479,7 +426,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       }
       throw error;
     } finally {
-      if (options.mountedRef.current) options.setSavingWorkspace(false);
+      if (options.mountedRef.current) options.setSavingEnvironment(false);
     }
   }
 
@@ -932,8 +879,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     fetchModelsForProfile,
     saveModelCatalog,
     saveModelCapabilities,
-    saveWorkspace,
-    selectWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
     saveDesktopAgentSystemPrompt,

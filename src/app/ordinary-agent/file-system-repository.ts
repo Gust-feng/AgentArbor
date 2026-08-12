@@ -8,6 +8,7 @@ import {
   ORDINARY_RUN_SCHEMA_VERSION,
   OrdinaryFeatureError,
   type OrdinaryRunRepository,
+  type OrdinaryRunRecoveryInventory,
   type OrdinaryRunSnapshotDocument,
   type OrdinaryRunState,
   type OrdinaryRunSummary,
@@ -29,6 +30,14 @@ export class OrdinaryRunSnapshotIncompatibleError extends Error {
 const jsonValueSchema: z.ZodType<unknown> = z.lazy(() => z.union([
   z.null(), z.string(), z.number().finite(), z.boolean(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema),
 ]));
+const modelAttachmentRefSchema = z.object({
+  kind: z.literal("image"),
+  attachmentId: z.string().min(1).optional(),
+  inputRef: z.string().min(1).optional(),
+  mimeType: z.string().min(1),
+  byteLength: z.number().int().nonnegative().optional(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+}).strict();
 const toolInputSchemaSchema = z.custom<ToolInputSchema>((value) => {
   try {
     cloneToolInputSchema(value);
@@ -130,9 +139,17 @@ const toolMetricsSchema = z.object({
 const canonicalToolNameSchema = z.string().min(1).refine(isCanonicalToolName, {
   message: "tool identity must be a canonical provider-portable name",
 });
+const pendingNestedToolCallSchema = z.object({
+  callId: z.string().min(1),
+  factId: z.string().min(1),
+  parentToolCallFactId: z.string().min(1),
+  toolName: canonicalToolNameSchema,
+  input: jsonValueSchema.optional(),
+}).strict();
 const toolCallSchema = z.object({
   callId: z.string().min(1), factId: z.string().min(1).optional(), parentToolCallFactId: z.string().min(1).optional(), toolName: canonicalToolNameSchema, input: jsonValueSchema.optional(),
   output: jsonValueSchema.optional(), status: z.enum(["completed", "failed", "approval_required", "cancelled"]),
+  modelAttachmentRefs: z.array(modelAttachmentRefSchema).optional(),
   error: z.string().optional(), errorDomain: z.string().optional(), errorFacts: z.record(z.string(), jsonValueSchema).optional(),
   failureAttribution: z.enum(["schema_validation", "execution_failure"]).optional(),
   delegatedExecution: z.object({
@@ -193,7 +210,12 @@ const birthSchema = z.object({
     outputContractId: z.string().min(1), toolVisibilityProfileId: z.string().min(1), definitionHash: z.string().optional(),
   }).strict(),
   capabilitySnapshot: capabilitySnapshotSchema,
+  agentNoteVersions: z.object({
+    global: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    workspace: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  }).strict().optional(),
   workspaceSelection: z.enum(["default", "explicit"]).optional(),
+  ownerContext: z.string().max(16_000).optional(),
   informationAccess: z.object({
     sourcePreference: z.array(z.string()), web: z.object({
       provider: z.enum(["tavily", "exa", "zai", "metaso", "google", "bing", "model_builtin", "none"]),
@@ -340,6 +362,8 @@ const rawStateSchema = z.object({
       contextRefs: z.array(z.object({
         attachmentId: z.string().optional(),
         ref: z.string().min(1),
+        pathGranted: z.boolean().optional(),
+        sourceIdentity: z.string().min(1).optional(),
         kind: z.enum(["file", "project", "web", "workspace"]),
         title: z.string().optional(),
         summary: z.string().optional(),
@@ -365,6 +389,7 @@ const rawStateSchema = z.object({
     assistantEntryRef: sessionEntryRefSchema,
     toolCallIds: z.array(z.string().min(1)).min(1),
   }).strict().optional(),
+  pendingNestedToolCalls: z.array(pendingNestedToolCallSchema).min(1).optional(),
   toolCalls: z.array(toolCallSchema),
   toolResultRecordedAt: z.record(z.string(), z.string().min(1)),
   usage: usageSchema,
@@ -393,6 +418,14 @@ const rawStateSchema = z.object({
     if (state.session.phase !== "rollbackable") {
       context.addIssue({ code: "custom", message: "pending tool round requires a rollbackable Session prefix", path: ["session"] });
     }
+  }
+  if (state.pendingNestedToolCalls !== undefined &&
+      (state.status.kind === "queued" || state.status.kind === "completed")) {
+    context.addIssue({
+      code: "custom",
+      message: "run status cannot own pending nested tool calls",
+      path: ["pendingNestedToolCalls"],
+    });
   }
   const sessionRefs = state.session.phase === "not_started"
     ? []
@@ -623,6 +656,9 @@ export function createFileSystemOrdinaryRunRepository(rootDir: string): Ordinary
       }
       return toPersistedJsonShape(available);
     },
+    inspectRecoveryInventory() {
+      return scanRecoveryInventory(rootDir);
+    },
     delete(runId) {
       return enqueueRun(runId, async () => {
         await fs.rm(runDirectory(rootDir, runId), { recursive: true, force: true });
@@ -768,30 +804,43 @@ async function preserveV5Snapshot(rootDir: string, runId: string, content: strin
 }
 
 async function scanSummaries(rootDir: string): Promise<OrdinaryRunSummary[]> {
+  return [...(await scanRecoveryInventory(rootDir)).summaries];
+}
+
+async function scanRecoveryInventory(rootDir: string): Promise<OrdinaryRunRecoveryInventory> {
   const directory = path.join(rootDir, "runs");
   const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
     if (isNodeError(error, "ENOENT")) return [];
     throw error;
   });
-  const documents = await Promise.allSettled(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+  const documents = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
     let runId: string;
     try {
       runId = decodeURIComponent(entry.name);
-    } catch {
-      throw new OrdinaryRunSnapshotIncompatibleError(entry.name, "run directory name is invalid");
+    } catch (error) {
+      return {
+        runId: entry.name,
+        error: new OrdinaryRunSnapshotIncompatibleError(entry.name, "run directory name is invalid"),
+      } as const;
     }
-    return readSnapshot(rootDir, runId);
+    try {
+      const document = await readSnapshot(rootDir, runId);
+      return document === undefined
+        ? { runId, error: new OrdinaryRunSnapshotIncompatibleError(runId, "snapshot is missing") } as const
+        : { runId, document } as const;
+    } catch (error) {
+      return { runId, error } as const;
+    }
   }));
   const summaries: OrdinaryRunSummary[] = [];
+  const issues: OrdinaryRunRecoveryInventory["issues"][number][] = [];
   for (const document of documents) {
-    if (document.status === "fulfilled") {
-      if (document.value !== undefined) summaries.push(summaryFromDocument(document.value));
-      continue;
+    if ("document" in document && document.document !== undefined) {
+      summaries.push(summaryFromDocument(document.document));
     }
-    if (document.reason instanceof OrdinaryRunSnapshotIncompatibleError) continue;
-    throw document.reason;
+    else issues.push({ runId: document.runId, error: document.error });
   }
-  return sortedSummaries(summaries);
+  return { summaries: sortedSummaries(summaries), issues };
 }
 async function writeManifest(rootDir: string, entries: readonly OrdinaryRunSummary[]): Promise<void> {
   const manifest = { schemaVersion: MANIFEST_SCHEMA_VERSION, entries };

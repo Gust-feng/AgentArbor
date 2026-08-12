@@ -1,4 +1,4 @@
-import { getJson } from "./api";
+import { ApiError, getJson } from "./api";
 import type { Conversation } from "./contracts/conversation";
 import type { DeepStreamEvent } from "./contracts/deep";
 import type { BasicAgentRunView, DesktopWorkView, OrdinaryRunCursor, RunEvent } from "./contracts/run";
@@ -60,8 +60,9 @@ export async function safeBasicRunView(
       ordinaryRunResourceUrl(runId, "view", cursor),
       init
     )).view;
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (isMissingRead(error, "run_not_found")) return undefined;
+    throw error;
   }
 }
 
@@ -71,9 +72,14 @@ export async function safeConversation(conversationId: string, init?: RequestIni
       `/api/conversations/${encodeURIComponent(conversationId)}`,
       init
     )).conversation;
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (isMissingRead(error, "conversation_not_found")) return undefined;
+    throw error;
   }
+}
+
+function isMissingRead(error: unknown, code: string): boolean {
+  return error instanceof ApiError && (error.code === code || error.status === 404);
 }
 
 export function ordinaryWorkViewFromRunView(

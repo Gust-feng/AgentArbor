@@ -1,5 +1,5 @@
 import type { ConfirmationRequest } from "../confirmation/contracts.js";
-import type { ModelInputAttachment } from "../intelligence/model-input-attachments.js";
+import type { ModelInputAttachmentRef } from "../intelligence/model-input-attachments.js";
 import type { ToolFactValue } from "./fact-value.js";
 import type { ToolJsonSchema, ToolJsonSchemaValue } from "./schema.js";
 
@@ -183,6 +183,8 @@ export type ToolCallResult = {
   readonly toolName: string;
   readonly input: ToolFactValue | undefined;
   readonly output: ToolFactValue | undefined;
+  /** JSON-safe identity retained across restart for Pi Session image reconciliation. */
+  readonly modelAttachmentRefs?: readonly ModelInputAttachmentRef[];
   readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly error?: string;
   readonly errorDomain?: ToolErrorDomain;
@@ -233,10 +235,18 @@ export interface ToolSecurityPolicy {
   evaluateToolCall(request: ToolCallRequest, definition: ToolDefinition, context: ToolSecurityEvaluationContext): ToolSecurityDecision;
 }
 
+/** Host-owned product scope carried through neutral tool execution facts. */
+export type ToolExecutionResourceScope = {
+  readonly ownerKind: string;
+  readonly ownerId: string;
+};
+
 export type ToolExecutionContext = {
   readonly callerAgentId: string;
   readonly traceId: string;
   readonly goalId: string;
+  readonly conversationId?: string;
+  readonly resourceScope?: ToolExecutionResourceScope;
   readonly toolCallId?: string;
   readonly approvedConfirmationIds?: readonly string[];
   readonly confirmationPolicy?: ToolConfirmationPolicy;

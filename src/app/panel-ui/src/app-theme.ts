@@ -75,9 +75,9 @@ export const COLOR_REGISTRY: readonly ColorSchemeDefinition[] = [
     styleId: "default",
     label: "深色",
     swatches: [
-      { label: "背景", value: "#101318" },
-      { label: "主色", value: "#60a5fa" },
-      { label: "辅色", value: "#2dd4bf" },
+      { label: "背景", value: "#1b1b20" },
+      { label: "主色", value: "#9892b0" },
+      { label: "辅色", value: "#777477" },
     ],
   },
   /* Classic palettes */

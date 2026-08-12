@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import type { AppState } from "./app-state";
+import { useState } from "react";
 import type { ContextAttachment } from "./contracts/context";
 
 export type AppWorkbenchTaskState = {
@@ -7,33 +6,16 @@ export type AppWorkbenchTaskState = {
   readonly setGoal: React.Dispatch<React.SetStateAction<string>>;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
-  readonly selectedWorkspaceDirectory?: string;
-  readonly setSelectedWorkspaceDirectory: React.Dispatch<React.SetStateAction<string | undefined>>;
 };
 
-export function useAppWorkbenchTaskState(app: Pick<AppState, "agentMode" | "conversation" | "deep">): AppWorkbenchTaskState {
+export function useAppWorkbenchTaskState(): AppWorkbenchTaskState {
   const [goal, setGoal] = useState("");
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
-  const [selectedWorkspaceDirectory, setSelectedWorkspaceDirectory] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (app.agentMode !== "normal" || app.conversation === undefined) return;
-    const workspace = app.conversation.workspaceFolder;
-    setSelectedWorkspaceDirectory(workspace?.selection === "explicit" ? workspace.path : undefined);
-  }, [app.agentMode, app.conversation?.conversationId, app.conversation?.workspaceFolder?.path, app.conversation?.workspaceFolder?.selection]);
-
-  useEffect(() => {
-    if (app.agentMode !== "deep" || app.deep === undefined) return;
-    const workspace = app.deep.run.workspaceFolder;
-    setSelectedWorkspaceDirectory(workspace?.selection === "explicit" ? workspace.path : undefined);
-  }, [app.agentMode, app.deep?.run.runId, app.deep?.run.workspaceFolder?.path, app.deep?.run.workspaceFolder?.selection]);
 
   return {
     goal,
     setGoal,
     attachments,
     setAttachments,
-    selectedWorkspaceDirectory,
-    setSelectedWorkspaceDirectory,
   };
 }

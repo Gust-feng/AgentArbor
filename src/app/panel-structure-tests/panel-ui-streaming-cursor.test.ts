@@ -6,7 +6,7 @@ import { readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-util
 
 test("streaming assistant answers render through RichText without a visible cursor node", async () => {
   const [transcript, richText, richTextStyles] = await Promise.all([
-    readPanelUiSource(path.join("personal-workbench", "redesign", "app", "components", "RedesignTranscript.tsx")),
+    readPanelUiSource(path.join("personal-workbench", "workbench", "app", "components", "ConversationTranscript.tsx")),
     readPanelUiSource(path.join("components", "rich-text.tsx")),
     readPanelUiStyle("rich-text.css"),
   ]);

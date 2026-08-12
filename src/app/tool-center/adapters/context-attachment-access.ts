@@ -9,11 +9,19 @@ import { stringOrUndefined } from "../../../kernel/values/index.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { TaskSoil, TaskSoilContextRef } from "../../../domain/soil/index.js";
+import { managedUploadAttachmentId } from "../../task-soil/context-attachments.js";
 
 export type ContextAttachmentToolOptions = {
   readonly taskSoil?: TaskSoil;
   readonly workspaceRoot?: string;
   readonly supportsVisionInput?: boolean;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly readAuthorization?: ContextAttachmentReadAuthorization;
+};
+
+/** Optional run-scoped live deny layered over the frozen Task Soil grant. */
+export type ContextAttachmentReadAuthorization = {
+  assertReadAllowed(attachmentId: string): void | Promise<void>;
 };
 
 export type AttachmentEntry = {
@@ -75,7 +83,7 @@ export function attachmentSummary(entry: AttachmentEntry): Readonly<Record<strin
     available: entry.ref.metadata?.available,
     previewTruncated: entry.ref.metadata?.truncated === true || entry.ref.readonlyPreview?.truncated === true,
     authorized: entry.authorized,
-    ref: modelSafeRef(entry.ref.ref),
+    ref: modelSafeRef(entry.ref.ref, entry.authorized && entry.ref.pathGranted === true),
     canReadText: capabilities.canReadText,
     canReadPdfText: capabilities.canReadPdfText,
     canReadImage: capabilities.canReadImage,
@@ -118,8 +126,15 @@ export async function resolveAttachmentTarget(input: {
   readonly requestedPath?: string;
   readonly requireFile: boolean;
   readonly projectPathRequired: boolean;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly readAuthorization?: ContextAttachmentReadAuthorization;
 }): Promise<AttachmentTarget> {
-  const root = resolveAttachmentRoot(input.entry.ref, input.workspaceRoot);
+  await input.readAuthorization?.assertReadAllowed(input.entry.attachmentId);
+  const root = await resolveAttachmentRoot(
+    input.entry.ref,
+    input.workspaceRoot,
+    input.resolveManagedAttachmentPath,
+  );
   if (root === undefined) {
     throw new Error("This context attachment cannot be inspected by local attachment tools.");
   }
@@ -230,16 +245,26 @@ function attachmentCapabilities(ref: TaskSoilContextRef): {
   };
 }
 
-function resolveAttachmentRoot(
+async function resolveAttachmentRoot(
   ref: TaskSoilContextRef,
   workspaceRoot: string,
-): { readonly kind: "file" | "project"; readonly absolutePath: string } | undefined {
+  resolveManagedAttachmentPath: ((attachmentId: string) => Promise<string | undefined>) | undefined,
+): Promise<{ readonly kind: "file" | "project"; readonly absolutePath: string } | undefined> {
   const normalized = ref.ref.toLowerCase();
+  const managedAttachmentId = managedUploadAttachmentId(ref.ref);
+  if (ref.kind === "file" && managedAttachmentId !== undefined) {
+    const absolutePath = await resolveManagedAttachmentPath?.(managedAttachmentId);
+    return absolutePath !== undefined && path.isAbsolute(absolutePath)
+      ? { kind: "file", absolutePath: path.resolve(absolutePath) }
+      : undefined;
+  }
   if (ref.kind === "file" && normalized.startsWith("local-file:")) {
-    return { kind: "file", absolutePath: path.resolve(ref.ref.slice("local-file:".length)) };
+    const absolutePath = ref.ref.slice("local-file:".length);
+    return path.isAbsolute(absolutePath) ? { kind: "file", absolutePath: path.resolve(absolutePath) } : undefined;
   }
   if (ref.kind === "project" && normalized.startsWith("local-project:")) {
-    return { kind: "project", absolutePath: path.resolve(ref.ref.slice("local-project:".length)) };
+    const absolutePath = ref.ref.slice("local-project:".length);
+    return path.isAbsolute(absolutePath) ? { kind: "project", absolutePath: path.resolve(absolutePath) } : undefined;
   }
   if (ref.kind === "file" && normalized.startsWith("file:")) {
     return { kind: "file", absolutePath: resolveInsideRoot(workspaceRoot, ref.ref.slice("file:".length)).absolutePath };
@@ -288,6 +313,10 @@ function isAttachmentReadAuthorized(ref: TaskSoilContextRef, permissionBoundaryR
   const normalized = ref.ref.toLowerCase();
   if (ref.kind === "file" && normalized.startsWith("local-file:")) {
     return permissions.has(`read:local-file:${ref.ref.slice("local-file:".length)}`);
+  }
+  const managedAttachmentId = managedUploadAttachmentId(ref.ref);
+  if (ref.kind === "file" && managedAttachmentId !== undefined) {
+    return permissions.has(`read:uploaded-attachment:${managedAttachmentId}`);
   }
   if (ref.kind === "project" && normalized.startsWith("local-project:")) {
     return permissions.has(`read:local-project:${ref.ref.slice("local-project:".length)}`);
@@ -367,9 +396,13 @@ function isTextExtension(extension: string): boolean {
   );
 }
 
-function modelSafeRef(ref: string): string | undefined {
+function modelSafeRef(ref: string, pathGranted: boolean): string | undefined {
   const normalized = ref.toLowerCase();
-  return normalized.startsWith("local-file:") || normalized.startsWith("local-project:") ? undefined : ref;
+  if (normalized.startsWith("uploaded-attachment:")) return undefined;
+  if (normalized.startsWith("local-file:") || normalized.startsWith("local-project:")) {
+    return pathGranted ? ref : undefined;
+  }
+  return ref;
 }
 
 

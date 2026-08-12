@@ -45,3 +45,24 @@ test("Sub Agent refresh remains available from the panel toolbar", async () => {
 
   expect(onRefresh).toHaveBeenCalledOnce();
 });
+
+test("Sub Agent panel exposes ignored legacy controls as configuration diagnostics", async () => {
+  const user = userEvent.setup();
+  render(<SubAgentSettings
+    subAgents={[{
+      ...subAgent,
+      diagnostics: [{
+        severity: "warning",
+        code: "ignored_step_limit",
+        path: "maxSteps",
+        message: "Sub-agent step limit is ignored because the nested loop has no defined step unit.",
+      }],
+    }]}
+    onRefresh={vi.fn()}
+  />);
+
+  await user.click(screen.getByText("code-expert"));
+
+  expect(screen.getByText("配置提示")).toBeTruthy();
+  expect(screen.getByText(/step limit is ignored/u)).toBeTruthy();
+});

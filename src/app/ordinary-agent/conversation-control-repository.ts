@@ -20,6 +20,11 @@ export class OrdinaryConversationSnapshotIncompatibleError extends Error {
   }
 }
 
+const ownerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("space"), id: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("workspace"), id: z.string().min(1) }).strict(),
+]);
+
 const stateSchema: z.ZodType<OrdinaryConversationControlState> = z.object({
   conversationId: z.string().min(1),
   createdAt: z.string().min(1),
@@ -29,6 +34,7 @@ const stateSchema: z.ZodType<OrdinaryConversationControlState> = z.object({
     sessionCwd: z.string().min(1),
     createdAt: z.string().min(1),
   }).strict(),
+  owner: ownerSchema.optional(),
   titleOverride: z.string().min(1).max(80).optional(),
   titleEditedAt: z.string().min(1).optional(),
   pinnedAt: z.string().min(1).optional(),
@@ -73,6 +79,19 @@ export function createFileSystemOrdinaryConversationControlRepository(rootDir: s
         if (!result.success) throw new OrdinaryConversationSnapshotIncompatibleError(state.conversationId, z.prettifyError(result.error));
         await writeJsonAtomically(documentPath(rootDir, state.conversationId), document);
         return structuredClone(document);
+      });
+    },
+    delete(conversationId, expectedRevision) {
+      return enqueue(async () => {
+        const current = await readDocument(rootDir, conversationId);
+        if (current === undefined) return;
+        if (current.revision !== expectedRevision) {
+          const cause = new Error(
+            `Ordinary conversation ${conversationId} revision conflict: expected ${expectedRevision}, received ${current.revision}`,
+          );
+          throw new OrdinaryFeatureError("ordinary_revision_conflict", cause.message, { cause });
+        }
+        await fs.rm(path.dirname(documentPath(rootDir, conversationId)), { recursive: true, force: true });
       });
     },
     get(conversationId) { return readDocument(rootDir, conversationId); },

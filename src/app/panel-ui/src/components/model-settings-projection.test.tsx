@@ -20,6 +20,27 @@ test("custom provider objects retain their own labels and logos when they share 
   ]);
 });
 
+test("provider presets remain visible without becoming configured profiles", () => {
+  const items = modelProviderItems({
+    profiles: [],
+    modelProviderMarket: {
+      presets: [
+        preset("openai", "https://api.openai.com/v1"),
+        {
+          ...preset("moonshot", "https://api.moonshot.cn/v1"),
+          label: "月之暗面",
+          vendor: "Moonshot AI",
+        },
+      ],
+    },
+  });
+
+  expect(items.map((item) => ({ key: item.key, configured: item.configured, profileId: item.profileId }))).toEqual([
+    { key: "preset:openai", configured: false, profileId: undefined },
+    { key: "preset:moonshot", configured: false, profileId: undefined },
+  ]);
+});
+
 function profile(profileId: string, label: string, logoDataUrl: string) {
   return {
     profileId,

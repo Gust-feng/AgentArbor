@@ -154,7 +154,7 @@ Harness 要求注入 `ExecutionEnv`，但不会自动把 env 的 shell/filesyste
 - 可以实现 `SessionStorage`/`SessionRepo` 接到 AgentArbor `runtimeHome` 和 conversation 生命周期，或在验证后采用 `JsonlSessionRepo`。这是存储接线，不是重写 tree。
 - conversation title、pin、delete、当前产品 conversation id 与 run refs 仍是 Ordinary control facts；Pi Session 保存消息树、active leaf、compaction、model/thinking/active-tools entry。
 - 旧 AgentArbor 会话按用户决定直接废弃，不做旧 `ordinary-run/v3`/lineage 双读迁移。
-- 默认 JSONL 会原样序列化 message；AgentArbor 要求附件字节不持久化，因此 storage adapter 必须在写入边界执行可验证的 ephemeral attachment policy，不能把 base64 image 写进长期 Session。
+- 默认 JSONL 会原样序列化 message；当前 Ordinary 允许支持的 inline image 作为跨轮上下文持久化到 durable Session，但图片字节仍只能由 Session owner 保存，不能复制进 Ordinary run snapshot、事件或 Panel read-model。file/audio/URL/file-id 等无法由当前 Pi 公共消息契约无损表达的附件，仍必须在 adapter 边界形成明确失败。
 - Session JSONL 是 append-only，但 parser 只校验 header 和 entry 基础字段；AgentArbor 仍需 runtimeHome 单写者锁、容量/损坏处理和删除时 evidence cleanup。
 
 ### 4.3 `PiToolCenterBridge`
@@ -246,9 +246,9 @@ toolResults    = [call-first]
 
 ### 6.3 已确认的表示限制：file/audio attachment 不在公开 Message 类型中
 
-`<PI_AI>/dist/types.d.ts` 的 user/tool result/agent tool result 内容只有 `TextContent | ImageContent`；没有公开 file/audio block。默认 JSONL Session 还会原样写入 image base64。AgentArbor 当前附件/MCP 能力更宽，不能假定全面接入后自然保留。
+`<PI_AI>/dist/types.d.ts` 的 user/tool result/agent tool result 内容只有 `TextContent | ImageContent`；没有公开 file/audio block。默认 JSONL Session 会原样写入支持的 image base64，因此 Ordinary 可以在后续轮次继续引用已持久化图片；file/audio 等其他附件仍不能假定全面接入后自然保留。
 
-**最小复现实验建议。** 按现有 Chat/Responses 矩阵覆盖 user/tool-origin image、inline file、file id/url、wav/mp3 audio、MCP image/audio/file；逐项断言 provider payload、失败域、Session 不落字节和下一轮可继续性。
+**最小复现实验建议。** 按现有 Chat/Responses 矩阵覆盖 user/tool-origin image、inline file、file id/url、wav/mp3 audio、MCP image/audio/file；逐项断言 provider payload、失败域、支持的 image 在 Session 中可跨轮恢复，以及其他不支持附件的明确失败。
 
 如确有现有必要场景无法由附件 adapter 表达，应先报告用户，不得扩展 Pi 类型或 provider 实现。
 
@@ -352,7 +352,7 @@ Pi 提供“一个 Agent 如何运行”，未来 Multi-Agent feature 仍决定�
 - [ ] 回退到任意 user message，编辑重试生成新 branch；旧 branch 可审计且不进入当前 context。
 - [ ] `fork(before/at)` 的边界和 parent metadata 正确。
 - [ ] title/pin/delete 与 Pi Session 分离；删除 conversation 同步清理 session 和 evidence owner。
-- [ ] image/file/audio 原始字节不进入长期 Session。
+- [ ] 支持的 image 原始字节进入 Ordinary durable Session，file/audio 等不支持附件不进入长期 Session并形成明确失败。
 - [ ] malformed entry、缺 parent、重复/缺失 tool result 明确失败。
 
 ### Loop、工具与确认

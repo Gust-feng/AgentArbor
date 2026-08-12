@@ -4,7 +4,7 @@ import {
   contextWindowUsageFrom,
   contextWindowTokensForActiveRun,
   latestModelUsageFromEvents,
-  latestModelUsageForRunFromTranscript,
+  latestModelUsageFromTranscript,
 } from "../src/context-window-usage.js";
 
 test("context window usage prefers provider input tokens", () => {
@@ -84,7 +84,7 @@ test("active run keeps the selected model context window until its capability pr
 });
 
 test("latest model usage helpers require the newest provider-measured Agent request", () => {
-  assert.deepEqual(latestModelUsageForRunFromTranscript("run-new", [
+  assert.deepEqual(latestModelUsageFromTranscript([
     { runId: "run-old", modelUsage: { inputTokens: 10_000, latestAgentRequest: { inputTokens: 100 } } },
     {},
     { runId: "run-new", modelUsage: { inputTokens: 20_000, latestAgentRequest: { inputTokens: 220 } } },
@@ -96,11 +96,14 @@ test("latest model usage helpers require the newest provider-measured Agent requ
   ]), { inputTokens: 14_000, latestAgentRequest: { inputTokens: 140 } });
 });
 
-test("a new run never inherits provider usage from an older conversation turn", () => {
-  assert.equal(latestModelUsageForRunFromTranscript("run-new", [{
-    runId: "run-old",
-    modelUsage: { latestAgentRequest: { inputTokens: 250_000 } },
-  }]), undefined);
+test("a new run keeps the latest measured usage from an older conversation turn until its own arrives", () => {
+  assert.deepEqual(latestModelUsageFromTranscript([
+    { runId: "run-old", modelUsage: { inputTokens: 10_000, latestAgentRequest: { inputTokens: 250_000 } } },
+    { runId: "run-new", modelUsage: { inputTokens: 20_000 } },
+  ]), { inputTokens: 10_000, latestAgentRequest: { inputTokens: 250_000 } });
+  assert.equal(latestModelUsageFromTranscript([
+    { runId: "run-old", modelUsage: { inputTokens: 10_000 } },
+  ]), undefined);
 });
 
 test("context window usage never falls back to cumulative run input", () => {

@@ -5,7 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { OrdinaryFeatureError } from "./contracts.js";
 import { createFileSystemOrdinaryRunRepository, OrdinaryRunSnapshotIncompatibleError } from "./file-system-repository.js";
-import { createInitialOrdinaryRunState, transitionOrdinaryRun } from "./state.js";
+import {
+  createInitialOrdinaryRunState,
+  recordOrdinaryToolResult,
+  recordOrdinaryNestedToolRequests,
+  transitionOrdinaryRun,
+} from "./state.js";
 import { ordinaryAgentSessionRef, ordinaryCapabilityResolution, ordinaryRunBirth, ordinaryRunTurn } from "./test-support.js";
 import { OrdinaryToolMetricsCollector } from "./tool-runtime-metrics.js";
 
@@ -49,6 +54,138 @@ test("file repository atomically replaces the v6 snapshot and advances revisions
     /revision conflict/u.test(error.cause.message));
 });
 
+test("file repository round-trips optional nested tool write-ahead facts", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-nested-write-ahead-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("nested-write-ahead", "2026-01-01T00:00:00.000Z");
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "started",
+  });
+  const withInput = withInputEntry(running);
+  const withRootPending = transitionOrdinaryRun({
+    state: withInput,
+    transition: {
+      type: "record_session_checkpoint",
+      checkpoint: {
+        kind: "assistant_tool_call_entry_committed",
+        sessionId: "agent-session-1",
+        assistantEntryRef: entryRef("assistant-tools"),
+        toolCallIds: ["parent-call"],
+      },
+    },
+    recordedAt: "2026-01-01T00:00:01.300Z",
+    eventId: "checkpoint-tools",
+  });
+  const request = {
+    callId: "nested-call",
+    factId: "agent-tool:11:parent-call/tool:nested-call",
+    parentToolCallFactId: "parent-call",
+    toolName: "write",
+    input: { path: "result.txt" },
+  };
+  const pending = recordOrdinaryNestedToolRequests({
+    state: withRootPending,
+    requests: [request],
+    recordedAt: "2026-01-01T00:00:02.000Z",
+  });
+
+  await repository.save(pending, 0);
+
+  assert.deepEqual(
+    (await repository.get("nested-write-ahead"))?.state.pendingNestedToolCalls,
+    [request],
+  );
+});
+
+test("recovery inventory reports incompatible snapshots without hiding healthy runs", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-recovery-inventory-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  await repository.save(state("healthy-inventory-run", "2026-01-01T00:00:00.000Z"), 0);
+  const damagedRunDirectory = path.join(root, "runs", "damaged-inventory-run");
+  await fs.mkdir(damagedRunDirectory, { recursive: true });
+  await fs.writeFile(path.join(damagedRunDirectory, "snapshot.json"), "{ invalid", "utf8");
+
+  const inventory = await repository.inspectRecoveryInventory();
+
+  assert.deepEqual(inventory.summaries.map((summary) => summary.runId), ["healthy-inventory-run"]);
+  assert.equal(inventory.issues.length, 1);
+  assert.equal(inventory.issues[0]?.runId, "damaged-inventory-run");
+  assert.equal(inventory.issues[0]?.error instanceof OrdinaryRunSnapshotIncompatibleError, true);
+});
+
+test("file repository round-trips frozen Agent Note versions and accepts older runs without them", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-note-versions-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("note-version-run", "2026-01-01T00:00:00.000Z");
+  const withVersions = {
+    ...initial,
+    birth: {
+      ...initial.birth,
+      agentNoteVersions: {
+        global: `sha256:${"a".repeat(64)}` as const,
+        workspace: `sha256:${"b".repeat(64)}` as const,
+      },
+    },
+  };
+
+  await repository.save(withVersions, 0);
+  assert.deepEqual((await repository.get("note-version-run"))?.state.birth.agentNoteVersions, {
+    global: `sha256:${"a".repeat(64)}`,
+    workspace: `sha256:${"b".repeat(64)}`,
+  });
+
+  const snapshotPath = path.join(root, "runs", "note-version-run", "snapshot.json");
+  const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
+    state: { birth: { agentNoteVersions?: unknown } };
+  };
+  delete snapshot.state.birth.agentNoteVersions;
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+  assert.equal((await createFileSystemOrdinaryRunRepository(root).get("note-version-run"))?.state.birth.agentNoteVersions, undefined);
+
+  snapshot.state.birth.agentNoteVersions = { global: "invalid", workspace: `sha256:${"b".repeat(64)}` };
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+  await assert.rejects(
+    () => createFileSystemOrdinaryRunRepository(root).get("note-version-run"),
+    (error: unknown) => error instanceof OrdinaryRunSnapshotIncompatibleError,
+  );
+});
+
+test("file repository reads v0.3.2 Sub-Agent catalog extras without requiring them in the current contract", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-sub-agent-compat-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  await repository.save(state("legacy-sub-agent-catalog", "2026-01-01T00:00:00.000Z"), 0);
+  const snapshotPath = path.join(root, "runs", "legacy-sub-agent-catalog", "snapshot.json");
+  const snapshot = JSON.parse(await fs.readFile(snapshotPath, "utf8")) as {
+    state: {
+      birth: {
+        capabilitySnapshot: {
+          subAgentCatalog: Array<Record<string, unknown>>;
+        };
+      };
+    };
+  };
+  snapshot.state.birth.capabilitySnapshot.subAgentCatalog.push({
+    id: "legacy-helper",
+    name: "legacy-helper",
+    description: "A catalog entry written by v0.3.2.",
+    enabled: true,
+    model: "gpt-5",
+    maxSteps: 12,
+  });
+  await fs.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
+
+  const restored = await createFileSystemOrdinaryRunRepository(root).get("legacy-sub-agent-catalog");
+
+  assert.equal(restored?.state.birth.capabilitySnapshot.subAgentCatalog[0]?.name, "legacy-helper");
+});
+
 test("file repository never writes ephemeral attachment bytes into an Ordinary snapshot", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-no-attachments-"));
   t.after(() => removeTestDirectory(root));
@@ -72,6 +209,43 @@ test("file repository never writes ephemeral attachment bytes into an Ordinary s
   assert.equal(rawSnapshot.includes("BASE64_MUST_NOT_REACH_DISK"), false);
   assert.equal(rawSnapshot.includes('"attachmentId": "image"'), true);
   assert.equal(rawSnapshot.includes("read:file:image.png"), true);
+});
+
+test("file repository round-trips JSON-safe model attachment references in tool facts", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-ordinary-tool-attachment-refs-"));
+  t.after(() => removeTestDirectory(root));
+  const repository = createFileSystemOrdinaryRunRepository(root);
+  const initial = state("tool-attachment-refs", "2026-01-01T00:00:00.000Z");
+  const running = transitionOrdinaryRun({
+    state: initial,
+    transition: { type: "start" },
+    recordedAt: "2026-01-01T00:00:01.000Z",
+    eventId: "event-2",
+  });
+  const result = {
+    callId: "capture-call",
+    toolName: "capture",
+    input: {},
+    output: { captured: true },
+    modelAttachmentRefs: [{
+      kind: "image" as const,
+      attachmentId: "capture-image",
+      mimeType: "image/png",
+      byteLength: 5,
+      sha256: "a".repeat(64),
+    }],
+    status: "completed" as const,
+    durationMs: 5,
+  };
+  const withResult = recordOrdinaryToolResult({
+    state: running,
+    result,
+    recordedAt: "2026-01-01T00:00:02.000Z",
+  });
+
+  await repository.save(withResult, 0);
+
+  assert.deepEqual((await repository.get(withResult.runId))?.state.toolCalls[0]?.modelAttachmentRefs, result.modelAttachmentRefs);
 });
 
 test("v6 output events persist only Session entry refs instead of assistant text", async (t) => {

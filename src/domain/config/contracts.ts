@@ -122,6 +122,12 @@ export type ModelCapabilities = {
   readonly supportsStructuredOutputs: boolean;
   readonly supportsStreaming: boolean;
   readonly supportsVisionInput: boolean;
+  /** Provenance-rich image capability fact; Pi model.input remains final transport authority. */
+  readonly imageInput?: {
+    readonly status: "supported" | "unsupported" | "unknown";
+    readonly source: "registry" | "override" | "protocol_default";
+    readonly verifiedAt?: string;
+  };
   readonly supportsReasoningEffort: boolean;
   readonly supportsReasoningOutput?: boolean;
   readonly preferredApiStyle: ModelPreferredApiStyle;
@@ -192,10 +198,16 @@ export type ToolConfirmationSettings = {
   readonly updatedAt: string;
 };
 
-export type DesktopAgentSettings = {
-  readonly systemPrompt: string;
-  readonly updatedAt: string;
-};
+export type DesktopAgentSettings =
+  | {
+      readonly systemPromptMode: "built_in";
+      readonly updatedAt: string;
+    }
+  | {
+      readonly systemPromptMode: "custom";
+      readonly systemPrompt: string;
+      readonly updatedAt: string;
+    };
 
 export type SkillTriggerMode = "keyword" | "model";
 
@@ -522,6 +534,13 @@ export type CapabilitySkillCatalogItem = {
   readonly validationErrors?: readonly string[];
 };
 
+export type CapabilitySubAgentDiagnostic = {
+  readonly severity: "warning" | "error";
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+};
+
 export type CapabilitySubAgentCatalogItem = {
   readonly id: string;
   readonly name: string;
@@ -535,8 +554,7 @@ export type CapabilitySubAgentCatalogItem = {
   readonly whenToUse?: readonly string[];
   readonly whenNotToUse?: readonly string[];
   readonly allowedTools?: readonly string[];
-  readonly model?: string;
-  readonly maxSteps?: number;
+  readonly diagnostics?: readonly CapabilitySubAgentDiagnostic[];
   readonly contentHash?: string;
   readonly bodyHash?: string;
 };

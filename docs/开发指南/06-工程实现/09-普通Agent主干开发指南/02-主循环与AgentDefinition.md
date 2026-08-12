@@ -55,8 +55,9 @@ else:
 - prompt 文案、输出契约和工具可见性不能分别散落在 session、context pack、UI copy 和测试 fixture 中。
 - 新增 Agent 时先定义它是什么，再接入运行时。
 - 已经写入运行记录的 `AgentDefinition` 引用必须可解析。修改当前 prompt 时，只能推进新的 prompt version；旧版 prompt 常量必须冻结保留，用于恢复和审计历史运行记录。
+- 桌面根 Agent 的配置必须以 `built_in / custom` 判别状态持久化：默认状态不复制内置 prompt 正文，只有用户在开发者设置中显式保存时才写入 `custom` 正文。没有判别字段的历史配置中，已知内置版本迁移为 `built_in`，其他文本继续作为用户覆盖；因此新内置版本可自动作用于默认状态，显式覆盖不会被升级误改。
 - `AgentDefinition` 的安全 run ref 必须携带语义 hash；hash 覆盖 prompt、turn policy、output contract 和 tool visibility profile。只要这些语义资产漂移，恢复执行就必须拒绝，而不是回退到当前默认定义继续运行。
-- 上下文装配可以把 `AgentDefinition.prompt.systemPrompt` 作为模型输入，但用户可见 read-model、运行恢复响应、持久化 run facts 和前端状态只能暴露安全引用或摘要，不能泄漏完整 prompt 正文。
+- 上下文装配可以把 `AgentDefinition.prompt.systemPrompt` 作为模型输入；完整正文只允许在开发者设置的提示词编辑入口中读写，普通用户可见 read-model、运行恢复响应和持久化 run facts 只能暴露安全引用或摘要。
 
 禁止事项：
 

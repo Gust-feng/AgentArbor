@@ -185,7 +185,8 @@ function interruptionProjection(
   }
   if (run.status.kind === "blocked" && (
     run.status.reason.code === "execution_continuation_lost" ||
-    run.status.reason.code === "confirmation_continuation_lost"
+    run.status.reason.code === "confirmation_continuation_lost" ||
+    run.status.reason.code === "tool_execution_outcome_unknown"
   )) {
     return { interruption: "runtime_stopped" };
   }

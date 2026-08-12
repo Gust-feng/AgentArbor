@@ -1,5 +1,9 @@
 import type { AgentMode, ComposerToolConfirmationPolicy } from "./app-config-projection";
-import type { ChatInputProps, ChatModelOption } from "./components/chat-empty";
+import type {
+  ChatInputProps,
+  ChatModelOption,
+  ConversationFollowUpMode,
+} from "./contracts/composer";
 import type { ContextAttachment } from "./contracts/context";
 import type { ContextWindowUsage } from "./context-window-usage";
 
@@ -8,8 +12,6 @@ export type WorkbenchInputPropsOptions = {
   readonly goal: string;
   readonly setGoal: (value: string) => void;
   readonly attachments: readonly ContextAttachment[];
-  readonly selectedWorkspaceDirectory?: string;
-  readonly selectTaskWorkspace: () => void | Promise<void>;
   readonly selectAttachment: () => void | Promise<void>;
   readonly uploadAttachments: (files: readonly File[]) => void | Promise<void>;
   readonly removeAttachment: (attachmentId: string) => void;
@@ -28,10 +30,12 @@ export type WorkbenchInputPropsOptions = {
   readonly onOpenSettings: () => void;
   readonly submitDeepInput: () => void | Promise<void>;
   readonly enqueueMessage: (content: string) => void;
-  readonly startTask: (explicitGoal?: string) => void | Promise<void>;
+  readonly startTask: (explicitGoal?: string) => void | Promise<boolean>;
+  readonly clearQueuedMessages: () => void;
   readonly cancelRun: () => void | Promise<void>;
   readonly stopDeepTask: () => void | Promise<void>;
   readonly modelResponding: boolean;
+  readonly followUpMode: ConversationFollowUpMode;
   readonly deepBusy: boolean;
   readonly deep: unknown;
   readonly deepActiveRunId?: string;
@@ -43,7 +47,7 @@ export type WorkbenchInputPropsViewModel = {
   readonly inputProps: ChatInputProps;
 };
 
-export function buildWorkbenchInputProps(
+export function workbenchInputPropsFrom(
   options: WorkbenchInputPropsOptions,
 ): WorkbenchInputPropsViewModel {
   const activeInputAgentMode: AgentMode = options.agentClusterActive ? "deep" : "normal";
@@ -52,8 +56,6 @@ export function buildWorkbenchInputProps(
     onChange: options.setGoal,
     agentMode: activeInputAgentMode,
     attachments: options.attachments,
-    selectedWorkspaceDirectory: options.selectedWorkspaceDirectory,
-    onSelectWorkspaceDirectory: () => void options.selectTaskWorkspace(),
     onSelectAttachment: () => void options.selectAttachment(),
     onUploadAttachmentFiles: (files: readonly File[]) => void options.uploadAttachments(files),
     onRemoveAttachment: options.removeAttachment,
@@ -74,6 +76,9 @@ export function buildWorkbenchInputProps(
     onSubmit: () => {
       if (options.agentClusterActive) {
         void options.submitDeepInput();
+      } else if (options.modelResponding && options.followUpMode === "guide") {
+        options.setGoal("");
+        void options.startTask();
       } else if (options.busy || options.modelResponding) {
         options.enqueueMessage(options.goal);
         options.setGoal("");
@@ -83,6 +88,7 @@ export function buildWorkbenchInputProps(
     },
     allowInputWhileBusy: true,
     onCancel: () => {
+      options.clearQueuedMessages();
       void options.cancelRun();
     },
   };

@@ -12,11 +12,12 @@ import { createAppSettingsController, type AppSettingsController } from "./app-s
 import { createAppComposerController } from "./app-composer-controller";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
+import { resetTranscriptCache } from "./panel-ui-transcript-store";
 import {
   contextWindowUsageFrom,
   contextWindowTokensForActiveRun,
   latestModelUsageFromEvents,
-  latestModelUsageForRunFromTranscript,
+  latestModelUsageFromTranscript,
   type ContextWindowUsage,
 } from "./context-window-usage";
 import { isConversationWaitingForUser } from "./conversation-state";
@@ -26,7 +27,7 @@ import type {
   ComposerToolConfirmationPolicy,
   VisibleAiMode,
 } from "./app-config-projection";
-import type { Screen } from "./app-screen";
+import type { LegacyConversationScreen } from "./app-screen";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
@@ -36,7 +37,7 @@ import type { McpServerCatalogItem } from "./contracts/tools";
 export type AppWorkbenchRuntimeOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: React.Dispatch<React.SetStateAction<Screen>>;
+  readonly setLegacyConversationScreen: React.Dispatch<React.SetStateAction<LegacyConversationScreen>>;
   readonly setGoal: React.Dispatch<React.SetStateAction<string>>;
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
@@ -47,7 +48,6 @@ export type AppWorkbenchRuntimeOptions = {
   readonly modelForm: ModelForm;
   readonly setModelForm: React.Dispatch<React.SetStateAction<ModelForm>>;
   readonly setModelCatalogs: React.Dispatch<React.SetStateAction<Record<string, ModelProviderModelCatalog>>>;
-  readonly workspaceDirectory: string;
   readonly setDesktopAgentSystemPrompt: React.Dispatch<React.SetStateAction<string>>;
   readonly toolForm: ToolForm;
   readonly setToolForm: React.Dispatch<React.SetStateAction<ToolForm>>;
@@ -55,13 +55,13 @@ export type AppWorkbenchRuntimeOptions = {
   readonly setMcpServerForm: React.Dispatch<React.SetStateAction<McpServerForm>>;
   readonly attachments: readonly ContextAttachment[];
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly ContextAttachment[]>>;
-  readonly selectedWorkspaceDirectory?: string;
-  readonly setSelectedWorkspaceDirectory: React.Dispatch<React.SetStateAction<string | undefined>>;
   readonly selectedModelId: string;
   readonly selectedModelSupportsReasoningEffort: boolean;
   readonly selectedModelContextWindowTokens?: number;
   readonly agentClusterActive: boolean;
   readonly setInputCloseSignal: React.Dispatch<React.SetStateAction<number>>;
+  /** Owner 为空间的会话变更（创建/置顶/重命名/删除）成功后刷新对应空间 read-model。 */
+  readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 };
 
 export type AppWorkbenchRuntime = {
@@ -77,7 +77,7 @@ export type AppWorkbenchRuntime = {
   readonly pendingConversationIds: ReadonlySet<string>;
 
   readonly savingModel: boolean;
-  readonly savingWorkspace: boolean;
+  readonly savingEnvironment: boolean;
   readonly savingDesktopAgent: boolean;
   readonly savingTools: boolean;
   readonly runActions: Pick<
@@ -107,7 +107,7 @@ export type AppWorkbenchRuntime = {
   readonly settingsController: AppSettingsController;
   readonly composerActions: Pick<
     ReturnType<typeof createAppComposerController>,
-    "selectInputModel" | "selectAttachment" | "selectTaskWorkspace" | "uploadAttachments" | "removeAttachment" | "changeToolConfirmationPolicy"
+    "selectInputModel" | "selectAttachment" | "uploadAttachments" | "removeAttachment" | "changeToolConfirmationPolicy"
   >;
 };
 
@@ -122,7 +122,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const [confirmationBusy, setConfirmationBusy] = useState(false);
   const [contextBusy, setContextBusy] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
-  const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [savingEnvironment, setSavingEnvironment] = useState(false);
   const [savingDesktopAgent, setSavingDesktopAgent] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | undefined>(undefined);
@@ -133,8 +133,11 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   appRef.current = options.app;
   const pollTimer = useRef<number | undefined>(undefined);
   const streamRef = useRef<EventSource | undefined>(undefined);
+  const fallbackPollRef = useRef<AbortController | undefined>(undefined);
   const activeRunIdRef = useRef<string | undefined>(undefined);
   const viewEpochRef = useRef(0);
+  const submissionAttemptRef = useRef<{ readonly key: string; readonly id: string } | undefined>(undefined);
+  const attachmentUploadAttemptRef = useRef<{ readonly key: string; readonly id: string } | undefined>(undefined);
 
   const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
   const bootstrapAbortRef = useRef<AbortController | undefined>(undefined);
@@ -188,7 +191,8 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
       bootstrapAbortRef.current = undefined;
       conversationLoadAbortRef.current?.abort();
       conversationLoadAbortRef.current = undefined;
-      stopLiveUpdates(pollTimer, streamRef);
+      stopLiveUpdates(pollTimer, streamRef, fallbackPollRef);
+      resetTranscriptCache();
 
     };
   }, [loadBootstrap]);
@@ -197,10 +201,8 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const hasNormalConversationContext =
     !options.agentClusterActive && (options.app.conversation !== undefined || currentRun.run !== undefined);
   const latestModelUsage = useMemo(
-    () => latestModelUsageFromEvents(currentRun.events) ?? (currentRun.run === undefined
-      ? undefined
-      : latestModelUsageForRunFromTranscript(currentRun.run.runId, currentRun.transcriptNodes)),
-    [currentRun.events, currentRun.run, currentRun.transcriptNodes],
+    () => latestModelUsageFromEvents(currentRun.events) ?? latestModelUsageFromTranscript(currentRun.transcriptNodes),
+    [currentRun.events, currentRun.transcriptNodes],
   );
   const contextUsage = useMemo(() => {
     if (!hasNormalConversationContext) {
@@ -232,11 +234,10 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
   const runController = useMemo(() => createAppRunController({
     app: options.app,
     setApp: options.setApp,
-    setScreen: options.setScreen,
+    setLegacyConversationScreen: options.setLegacyConversationScreen,
     setGoal: options.setGoal,
     attachments: options.attachments,
     setAttachments: options.setAttachments,
-    selectedWorkspaceDirectory: options.selectedWorkspaceDirectory,
     goal: options.goal,
     aiMode: options.aiMode,
     composerReasoningEffort: options.composerReasoningEffort,
@@ -248,10 +249,13 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mountedRef,
     pollTimer,
     streamRef,
+    fallbackPollRef,
     activeRunIdRef,
     viewEpochRef,
+    submissionAttemptRef,
     conversationLoadAbortRef,
     setCancellingRunId,
+    refreshSpaceConversations: options.refreshSpaceConversations,
   }), [
     confirmationBusy,
     options.aiMode,
@@ -259,20 +263,20 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.attachments,
     options.composerReasoningEffort,
     options.goal,
+    options.refreshSpaceConversations,
     options.selectedModelId,
     options.selectedModelSupportsReasoningEffort,
-    options.selectedWorkspaceDirectory,
     options.setApp,
     options.setAttachments,
     options.setGoal,
-    options.setScreen,
+    options.setLegacyConversationScreen,
     options.toolConfirmationPolicy,
   ]);
 
   // Deep/Multi-Agent 已从运行时剥离（后端返回 410），保留空操作桩维持接口稳定。
   const noop = () => undefined;
   const deepEntryActions = {
-    openNormalAgentEntry: () => { runController.resetChat(); options.setScreen("chat-empty"); },
+    openNormalAgentEntry: () => { runController.resetChat(); options.setLegacyConversationScreen("chat-empty"); },
     openNormalTaskEntry: noop,
     openNormalConversation: runController.loadConversation,
     openAgentClusterRun: noop,
@@ -296,19 +300,19 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mutationConversationIdsRef,
     setMutationConversationIds: setPendingConversationIds,
     resetChat: runController.resetChat,
-    setSelectedWorkspaceDirectory: options.setSelectedWorkspaceDirectory,
     setInputCloseSignal: options.setInputCloseSignal,
     setGoal: options.setGoal,
     setAttachments: options.setAttachments,
-    setScreen: options.setScreen,
+    setLegacyConversationScreen: options.setLegacyConversationScreen,
+    refreshSpaceConversations: options.refreshSpaceConversations,
   }), [
     options.app,
     options.setApp,
     options.setAttachments,
     options.setGoal,
     options.setInputCloseSignal,
-    options.setScreen,
-    options.setSelectedWorkspaceDirectory,
+    options.setLegacyConversationScreen,
+    options.refreshSpaceConversations,
     runController.resetChat,
   ]);
 
@@ -319,7 +323,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     modelForm: options.modelForm,
     setModelForm: options.setModelForm,
     setModelCatalogs: options.setModelCatalogs,
-    workspaceDirectory: options.workspaceDirectory,
     setDesktopAgentSystemPrompt: options.setDesktopAgentSystemPrompt,
     toolForm: options.toolForm,
     setToolForm: options.setToolForm,
@@ -332,7 +335,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mcpToolUpdateVersionRef,
     mcpToolCatalogDraftRef,
     setSavingModel,
-    setSavingWorkspace,
+    setSavingEnvironment,
     setSavingDesktopAgent,
     setSavingTools,
   }), [
@@ -347,7 +350,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setModelForm,
     options.setToolForm,
     options.toolForm,
-    options.workspaceDirectory,
   ]);
 
   const composerController = useMemo(() => createAppComposerController({
@@ -355,8 +357,9 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     mountedRef,
     contextBusy,
     setContextBusy,
+    attachmentUploadAttemptRef,
     setAttachments: options.setAttachments,
-    setSelectedWorkspaceDirectory: options.setSelectedWorkspaceDirectory,
+    attachments: options.attachments,
     selectedModelId: options.selectedModelId,
     setComposerSelectedModelId: options.setComposerSelectedModelId,
     selectComposerModel: settingsController.selectComposerModel,
@@ -365,11 +368,11 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     saveToolConfirmationPolicy: settingsController.saveToolConfirmationPolicy,
   }), [
     contextBusy,
+    options.attachments,
     options.selectedModelId,
     options.setApp,
     options.setAttachments,
     options.setComposerSelectedModelId,
-    options.setSelectedWorkspaceDirectory,
     options.setToolConfirmationPolicy,
     options.toolConfirmationPolicy,
     settingsController.saveToolConfirmationPolicy,
@@ -389,7 +392,7 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     pendingConversationIds,
 
     savingModel,
-    savingWorkspace,
+    savingEnvironment,
     savingDesktopAgent,
     savingTools,
     runActions: {
@@ -411,7 +414,6 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     composerActions: {
       selectInputModel: composerController.selectInputModel,
       selectAttachment: composerController.selectAttachment,
-      selectTaskWorkspace: composerController.selectTaskWorkspace,
       uploadAttachments: composerController.uploadAttachments,
       removeAttachment: composerController.removeAttachment,
       changeToolConfirmationPolicy: composerController.changeToolConfirmationPolicy,

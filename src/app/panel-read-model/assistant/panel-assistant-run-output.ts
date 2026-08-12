@@ -70,7 +70,7 @@ export function visibleRunProblem(
   if (run?.status === "blocked" || run?.status === "paused") {
     return {
       title: workView?.headline ?? "任务没有完成",
-      message: visibleBlockedMessage(detail?.error?.code, detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "任务没有完成。",
+      message: visibleBlockedMessage(detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "任务没有完成。",
       tone: "warning",
     };
   }
@@ -113,10 +113,10 @@ function readableAppError(error: string): string {
   return message.length === 0 ? "发生了错误，但没有返回详情。" : friendlyUserFacingFailureText(message);
 }
 
-function visibleBlockedMessage(code: string | undefined, message: string | undefined): string | undefined {
-  if (code === "out_of_fuel") {
-    return "任务没有完成。";
-  }
+function visibleBlockedMessage(message: string | undefined): string | undefined {
+  // 如实透传 blocked 原因。此前对 out_of_fuel 硬编码 "任务没有完成。" 会掩盖真实原因，
+  // 且 Ordinary 的 Pi 执行链并不产生 out_of_fuel（那只存在于已归档的 Deep/agent-turn-runtime），
+  // 该分支是无意义的死代码。
   return visibleProblemText(message);
 }
 

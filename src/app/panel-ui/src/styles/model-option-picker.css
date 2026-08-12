@@ -31,7 +31,8 @@
 }
 
 .model-option-picker[data-variant="composer"] {
-  width: min(152px, 32vw);
+  width: fit-content;
+  max-width: min(240px, 100%);
   flex: 0 1 auto;
 }
 
@@ -167,10 +168,32 @@
   transform: rotate(180deg);
 }
 
-.model-option-picker[data-variant="composer"] .model-picker-trigger-chevron,
-.model-option-picker[data-variant="composer"] > .model-picker-trigger > .model-picker-icon,
 .model-option-picker[data-variant="settings"] > .model-picker-trigger > .model-picker-icon {
   display: none;
+}
+
+.model-option-picker[data-variant="composer"] .model-picker-trigger {
+  height: 28px;
+  min-width: 0;
+  gap: 6px;
+}
+
+.model-option-picker[data-variant="composer"] > .model-picker-trigger {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.model-option-picker[data-variant="composer"] > .model-picker-trigger > .model-picker-icon {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.model-option-picker[data-variant="composer"] .model-picker-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 .model-picker-icon {
@@ -256,8 +279,8 @@
 
 .model-picker-search input:focus,
 .model-picker-search input:focus-visible,
-.aa-redesign-root .settings-content .model-picker-search input:focus,
-.aa-redesign-root .settings-content .model-picker-search input:focus-visible {
+.aa-workbench-root .settings-content .model-picker-search input:focus,
+.aa-workbench-root .settings-content .model-picker-search input:focus-visible {
   border-color: transparent;
   box-shadow: none;
   outline: none;
@@ -384,7 +407,7 @@
 
 @media (max-width: 760px) {
   .model-option-picker[data-variant="composer"] {
-    width: min(138px, 36vw);
+    max-width: min(210px, 100%);
   }
 
   .model-picker-popover,

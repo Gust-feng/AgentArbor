@@ -1,5 +1,5 @@
 import type React from "react";
-import { isObservedRunSettled, shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
+import { isObservedRunSettled, shouldKeepRefreshing, stopLiveUpdates, stopPolling } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import {
   isLiveAppendOnlyEvent,
@@ -44,6 +44,7 @@ export type LiveRunUpdateControllerOptions = {
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly pollTimer: React.MutableRefObject<number | undefined>;
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
+  readonly fallbackPollRef: React.MutableRefObject<AbortController | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
   readonly refreshConversations: () => Promise<void>;
@@ -110,17 +111,19 @@ export function createLiveRunUpdateController(
   function startPolling(subscription: LiveRunSubscription): void {
     appendOnlyBatcher.clear();
     const { runId } = subscription;
-    stopPolling(options.pollTimer);
-    stopStream(options.streamRef);
+    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
     let lastCursor = subscription.cursor;
     const tick = async (): Promise<void> => {
-      if (!subscriptionIsCurrent(subscription)) return;
+      if (!subscriptionIsCurrent(subscription) || options.fallbackPollRef.current !== undefined) return;
+      const abortController = new AbortController();
+      options.fallbackPollRef.current = abortController;
       try {
-        const runView = await fetchBasicRunView(runId, lastCursor);
+        const runView = await fetchBasicRunView(runId, lastCursor, abortController.signal);
+        if (abortController.signal.aborted || !subscriptionIsCurrent(subscription)) return;
         lastCursor = runView.replay.cursor.token;
         await applyRunViewProjection(subscription, runView);
       } catch (error) {
-        if (!subscriptionIsCurrent(subscription)) return;
+        if (abortController.signal.aborted || isAbortError(error) || !subscriptionIsCurrent(subscription)) return;
         options.setApp((previous) =>
           canApplyToState(previous, subscription)
             ? {
@@ -129,6 +132,10 @@ export function createLiveRunUpdateController(
               }
             : previous
         );
+      } finally {
+        if (options.fallbackPollRef.current === abortController) {
+          options.fallbackPollRef.current = undefined;
+        }
       }
     };
     void tick();
@@ -138,7 +145,7 @@ export function createLiveRunUpdateController(
   function startLiveUpdates(subscription: LiveRunSubscription): void {
     appendOnlyBatcher.clear();
     const { runId } = subscription;
-    stopLiveUpdates(options.pollTimer, options.streamRef);
+    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
     options.activeRunIdRef.current = runId;
     let lastCursor = subscription.cursor;
     let streamDeliveredEvent = false;
@@ -166,9 +173,9 @@ export function createLiveRunUpdateController(
       const detail = runView.detail;
       if (run !== undefined && !shouldKeepRefreshing(run.status)) {
         const settled = await loadSettledRunProjection({ runId, run, workView, capabilityResolution });
+        if (!subscriptionIsCurrent(subscription)) return;
         liveRunSettled = true;
-        stopPolling(options.pollTimer);
-        stopStream(options.streamRef);
+        stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
         commitSettledProjection(subscription, settled, (previous) => appStateWithObservedRunEvent(previous, {
           runId,
           run,
@@ -342,6 +349,8 @@ export function createLiveRunUpdateController(
       workView: ordinaryWorkViewFromRunView(runView),
       capabilityResolution: runView.capabilityResolution,
     });
+    if (!subscriptionIsCurrent(subscription)) return;
+    stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
     commitSettledProjection(subscription, settled, (previous) => appStateWithObservedRunProjection(previous, {
       runId,
       run: runView.run,
@@ -359,9 +368,7 @@ export function createLiveRunUpdateController(
         runId: followUp.runId,
         cursor: followUp.cursor,
       });
-    } else if (!shouldKeepRefreshing(runView.run.status)) {
-      stopPolling(options.pollTimer);
-      stopStream(options.streamRef);
+    } else {
       void options.refreshConversations();
     }
   }
@@ -421,7 +428,8 @@ function scheduleAppendOnlyFlush(flush: () => void): () => void {
 
 async function fetchBasicRunView(
   runId: string,
-  cursor: OrdinaryRunCursor | undefined
+  cursor: OrdinaryRunCursor | undefined,
+  signal?: AbortSignal,
 ): Promise<{
   readonly run: BasicAgentRun;
   readonly capabilityResolution?: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["capabilityResolution"];
@@ -429,9 +437,19 @@ async function fetchBasicRunView(
   readonly detail: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["detail"];
   readonly replay: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["replay"];
 }> {
-  const view = await safeBasicRunView(runId, cursor);
+  signal?.throwIfAborted();
+  const view = signal === undefined
+    ? await safeBasicRunView(runId, cursor)
+    : await safeBasicRunView(runId, cursor, { signal });
+  signal?.throwIfAborted();
   if (view === undefined) {
     throw new Error("读取运行视图失败。");
   }
   return view;
+}
+
+function isAbortError(reason: unknown): boolean {
+  return reason instanceof DOMException
+    ? reason.name === "AbortError"
+    : reason instanceof Error && reason.name === "AbortError";
 }

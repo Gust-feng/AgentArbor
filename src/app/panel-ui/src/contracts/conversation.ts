@@ -42,8 +42,14 @@ export type ConversationTurn = {
   };
 };
 
+export type ConversationOwnerView = {
+  readonly kind: "space" | "workspace";
+  readonly id: string;
+};
+
 export type Conversation = {
   readonly conversationId: string;
+  readonly owner?: ConversationOwnerView;
   readonly spaceId?: string;
   readonly title: string;
   readonly titleEditedAt?: string;
@@ -65,6 +71,7 @@ export type ConversationPendingAction = {
 
 export type ConversationSummary = {
   readonly conversationId: string;
+  readonly owner?: ConversationOwnerView;
   readonly spaceId?: string;
   readonly title: string;
   readonly titleEditedAt?: string;

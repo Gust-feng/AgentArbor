@@ -350,6 +350,94 @@ test("stopOwned terminates one stable managed process without touching siblings"
   assert.equal(registry.get("managed-sibling")?.status, "running");
 });
 
+test("revokeByReference marks permission synchronously and keeps failed stops pending", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:05:50.000Z") });
+  registerProcess(registry, {
+    processId: "reference-process",
+    runId: "run-reference",
+    pid: 21009,
+    owned: true,
+    status: "running",
+    referenceId: "reference-a",
+    permissionState: "active",
+  });
+  let finishStop: ((result: ProcessKillTreeResult) => void) | undefined;
+
+  const cleanup = registry.revokeByReference("reference-a", {
+    killTree() {
+      return new Promise<ProcessKillTreeResult>((resolve) => { finishStop = resolve; });
+    },
+  });
+
+  assert.equal(registry.get("reference-process")?.permissionState, "revoked");
+  if (finishStop === undefined) throw new Error("Expected the stop attempt to start synchronously.");
+  finishStop({ status: "failed", errorMessage: "access denied" });
+  const failed = await cleanup;
+
+  assert.equal(failed.fact.scope, "reference");
+  assert.equal(failed.fact.reason, "reference_revoked");
+  assert.equal(failed.fact.referenceId, "reference-a");
+  assert.equal(registry.get("reference-process")?.permissionState, "stop_pending");
+
+  await registry.revokeByReference("reference-a", {
+    killTree() { return { status: "killed" }; },
+  });
+  assert.equal(registry.get("reference-process")?.permissionState, "stopped");
+});
+
+test("resource cleanup selects processes by explicit Space and Conversation facts", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:05:55.000Z") });
+  registerProcess(registry, {
+    processId: "space-a-conversation-a",
+    runId: "run-a",
+    pid: 21010,
+    owned: true,
+    status: "running",
+    spaceId: "space-a",
+    conversationId: "conversation-a",
+    permissionState: "active",
+  });
+  registerProcess(registry, {
+    processId: "space-a-conversation-b",
+    runId: "run-b",
+    pid: 21011,
+    owned: true,
+    status: "running",
+    spaceId: "space-a",
+    conversationId: "conversation-b",
+    permissionState: "active",
+  });
+  registerProcess(registry, {
+    processId: "space-b-conversation-a",
+    runId: "run-c",
+    pid: 21012,
+    owned: true,
+    status: "running",
+    spaceId: "space-b",
+    conversationId: "conversation-a",
+    permissionState: "active",
+  });
+  const stopped: number[] = [];
+  const terminator = {
+    killTree(pid: number) {
+      stopped.push(pid);
+      return { status: "killed" as const };
+    },
+  };
+
+  const conversationCleanup = await registry.cleanupByConversation("conversation-a", terminator);
+  assert.deepEqual(stopped, [21010, 21012]);
+  assert.equal(conversationCleanup.fact.scope, "conversation");
+  assert.equal(conversationCleanup.fact.conversationId, "conversation-a");
+  assert.equal(registry.get("space-a-conversation-b")?.permissionState, "active");
+
+  const spaceCleanup = await registry.cleanupBySpace("space-a", terminator);
+  assert.deepEqual(stopped, [21010, 21012, 21011]);
+  assert.equal(spaceCleanup.fact.scope, "space");
+  assert.equal(spaceCleanup.fact.spaceId, "space-a");
+  assert.equal(registry.get("space-a-conversation-b")?.permissionState, "stopped");
+});
+
 test("cleanupOwnedBackgroundProcesses terminates only owned unresolved background records on shutdown", async () => {
   const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:06:00.000Z") });
   registerProcess(registry, {
@@ -711,6 +799,10 @@ function registerProcess(
     readonly owned: boolean;
     readonly status: ProcessRecord["status"];
     readonly kind?: ProcessRecord["kind"];
+    readonly conversationId?: string;
+    readonly spaceId?: string;
+    readonly referenceId?: string;
+    readonly permissionState?: ProcessRecord["permissionState"];
   }
 ): ProcessRecord {
   return registry.register({
@@ -723,6 +815,10 @@ function registerProcess(
     cwd: "Z:\\AgentArbor",
     startedAt: "2026-06-15T00:00:00.000Z",
     status: input.status,
+    ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
+    ...(input.spaceId === undefined ? {} : { spaceId: input.spaceId }),
+    ...(input.referenceId === undefined ? {} : { referenceId: input.referenceId }),
+    ...(input.permissionState === undefined ? {} : { permissionState: input.permissionState }),
   });
 }
 

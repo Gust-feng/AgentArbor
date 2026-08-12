@@ -25,6 +25,16 @@ test("conversation projection keeps user cancellation and runtime restart as qui
       continueBy: "new_turn",
     },
     interruption: "runtime_stopped",
+  }, {
+    status: {
+      kind: "blocked",
+      reason: {
+        code: "tool_execution_outcome_unknown",
+        message: "The process restarted before at least one tool outcome could be determined.",
+      },
+      continueBy: "new_turn",
+    },
+    interruption: "runtime_stopped",
   }];
 
   for (const [index, item] of cases.entries()) {
@@ -154,7 +164,7 @@ function completedRun(
 
 function control(run: OrdinaryRunState): OrdinaryConversationControlDocument {
   return {
-    schemaVersion: "ordinary-conversation/v2",
+    schemaVersion: "ordinary-conversation/v3",
     revision: 1,
     savedAt: run.timestamps.updatedAt,
     state: {

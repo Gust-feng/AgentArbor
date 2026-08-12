@@ -1,4 +1,4 @@
-import type { ChatModelOption } from "./components/chat-empty";
+import type { ChatModelOption } from "./contracts/composer";
 import { resolveModelIconSvgForModel } from "./model-icons";
 import { modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
 import type { ConfigResponse, ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";
@@ -15,6 +15,7 @@ export function modelOptionsFromConfig(
   const capabilityLookup = modelCapabilityLookup(config);
   return (config?.profiles ?? [])
     .filter(modelProfileHasId)
+    .filter(modelProfileIsSelectable)
     .map((profile, index) => ({ profile, index }))
     .sort((left, right) => {
       const leftOrder = orderIndex(order, `profile:${left.profile.profileId}`);
@@ -116,6 +117,13 @@ export function parseModelOptionId(value: string): { readonly profileId: string;
 
 function modelProfileHasId(profile: ConfigModelProfile): profile is ConfigModelProfileWithId {
   return typeof profile.profileId === "string" && profile.profileId.trim().length > 0;
+}
+
+/** 未配置密钥或显式停用的厂商预设不进入模型选择器。 */
+function modelProfileIsSelectable(profile: ConfigModelProfileWithId): boolean {
+  return profile.enabled !== false &&
+    profile.secretConfigured === true &&
+    profile.defaultAiMode !== "none";
 }
 
 function shouldShowProviderIcon(profile: ConfigModelProfile): boolean {

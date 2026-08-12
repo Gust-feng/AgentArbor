@@ -117,7 +117,9 @@ export type OrdinaryPanelConversationPendingAction = {
 
 export type OrdinaryPanelConversation = {
   readonly conversationId: string;
-  /** Unique Space owning this conversation through its conversation reference. */
+  /** Canonical owner（ADR-0035）。v2 旧对话为 undefined。 */
+  readonly owner?: { readonly kind: "space" | "workspace"; readonly id: string };
+  /** 兼容投影：space owner 的 id；workspace owner 或无 owner 时 undefined。 */
   readonly spaceId?: string;
   readonly title: string;
   readonly titleEditedAt?: string;

@@ -1,5 +1,6 @@
 const SPACE_REFERENCE_ATTACHMENT_PREFIX = "space-reference:";
 const SPACE_REFERENCE_WRITE_PREFIX = "write:space-reference:";
+const SPACE_SCOPE_PREFIX = "scope:space:";
 
 /** Stable Task Soil identities shared by Space grant creation and execution. */
 export function spaceReferenceAttachmentId(referenceId: string): string {
@@ -18,4 +19,20 @@ export function spaceReferenceWritePermission(referenceId: string): string {
 
 export function isSpaceReferenceWritePermission(value: string): boolean {
   return value.startsWith(SPACE_REFERENCE_WRITE_PREFIX);
+}
+
+/** Internal Task Soil owner fact added by the Host after request parsing. */
+export function spaceScopePermission(spaceId: string): string {
+  return `${SPACE_SCOPE_PREFIX}${spaceId}`;
+}
+
+export function spaceScopeIdFromPermissions(values: readonly string[]): string | undefined {
+  const owners = [...new Set(values
+    .filter((value) => value.startsWith(SPACE_SCOPE_PREFIX))
+    .map((value) => value.slice(SPACE_SCOPE_PREFIX.length))
+    .filter((value) => value.length > 0))];
+  if (owners.length > 1) {
+    throw new Error(`Task Soil contains multiple Space owners: ${owners.join(", ")}.`);
+  }
+  return owners[0];
 }

@@ -38,6 +38,19 @@ describe("ModelSettings custom provider creation", () => {
   });
 });
 
+describe("ModelSettings built-in provider presets", () => {
+  test("shows unconfigured presets without creating model profiles", () => {
+    const onSave = vi.fn<(form?: ModelForm) => Promise<void>>(async () => undefined);
+
+    render(<FreshModelSettingsHarness onSave={onSave} />);
+
+    expect(document.querySelector('[data-provider-key="profile:default"]')).not.toBeNull();
+    expect(document.querySelector('[data-provider-key="preset:moonshot"]')).not.toBeNull();
+    expect(screen.getByText("月之暗面")).not.toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
 function ModelSettingsHarness(props: {
   readonly onCreateCustomProfile: (form?: ModelForm) => Promise<void>;
 }): React.ReactElement {
@@ -59,6 +72,36 @@ function ModelSettingsHarness(props: {
       setModelForm={setModelForm}
       onSave={async () => undefined}
       onCreateCustomProfile={props.onCreateCustomProfile}
+      onReorderModelProviders={async () => undefined}
+      onDeleteModelProvider={async () => undefined}
+      onFetchModels={async () => undefined}
+      onSaveModelCatalog={async (_profileId: string, _catalog: ModelProviderModelCatalog) => undefined}
+      onRevealModelApiKey={async () => undefined}
+    />
+  );
+}
+
+function FreshModelSettingsHarness(props: {
+  readonly onSave: (form?: ModelForm) => Promise<void>;
+}): React.ReactElement {
+  const [modelForm, setModelForm] = useState<ModelForm>({
+    profileId: "default",
+    label: "OpenAI",
+    logoDataUrl: "",
+    logoCleared: false,
+    baseUrl: "https://api.openai.com/v1",
+    protocolKind: "openai_responses",
+    model: "",
+    apiKey: "",
+    apiKeyCleared: false,
+  });
+  return (
+    <ModelSettings
+      config={FRESH_CONFIG}
+      modelForm={modelForm}
+      setModelForm={setModelForm}
+      onSave={props.onSave}
+      onCreateCustomProfile={async () => undefined}
       onReorderModelProviders={async () => undefined}
       onDeleteModelProvider={async () => undefined}
       onFetchModels={async () => undefined}
@@ -92,4 +135,53 @@ const CONFIG: ConfigResponse = {
     },
   ],
   modelProviderOrder: ["profile:custom_history"],
+};
+
+const FRESH_CONFIG: ConfigResponse = {
+  config: {
+    profileId: "default",
+    label: "OpenAI",
+    providerKind: "openai_compatible",
+    protocolKind: "openai_responses",
+    baseUrl: "https://api.openai.com/v1",
+    defaultAiMode: "openai-responses",
+    enabled: true,
+    secretConfigured: false,
+  },
+  profiles: [
+    {
+      profileId: "default",
+      label: "OpenAI",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_responses",
+      baseUrl: "https://api.openai.com/v1",
+      defaultAiMode: "openai-responses",
+      enabled: true,
+      secretConfigured: false,
+    },
+  ],
+  modelProviderMarket: {
+    presets: [
+      {
+        presetId: "openai",
+        label: "OpenAI",
+        vendor: "OpenAI",
+        description: "OpenAI",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_responses",
+        baseUrl: "https://api.openai.com/v1",
+        modelsPath: "/models",
+      },
+      {
+        presetId: "moonshot",
+        label: "月之暗面",
+        vendor: "Moonshot AI",
+        description: "Kimi",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: "https://api.moonshot.cn/v1",
+        modelsPath: "/models",
+      },
+    ],
+  },
 };

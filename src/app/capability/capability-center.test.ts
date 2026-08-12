@@ -193,7 +193,8 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
     await writeTestSubAgentPackage(
       path.join(runWorkspace, ".agents", "sub-agents"),
       "run-helper",
-      "Run workspace helper."
+      "Run workspace helper.",
+      ["model: gpt-5", "maxSteps: 12"],
     );
 
     const settingsStore = new FileSystemNormalSettingsStore(directory);
@@ -218,7 +219,16 @@ test("CapabilityCenter discovers project sub-agents and tools from the effective
     assert.deepEqual(runSnapshot.subAgentCatalog.map((subAgent) => `${subAgent.name}:${subAgent.sourceKind}`), [
       "run-helper:project",
     ]);
-    assert.equal(runSnapshot.subAgentCatalog[0]?.sourceRootId, "project");
+    const runSubAgent = runSnapshot.subAgentCatalog[0];
+    assert.ok(runSubAgent);
+    assert.equal(runSubAgent.sourceRootId, "project");
+    assert.equal(runSubAgent.enabled, true);
+    assert.deepEqual(runSubAgent.diagnostics?.map((diagnostic) => `${diagnostic.severity}:${diagnostic.code}`), [
+      "warning:ignored_model_override",
+      "warning:ignored_step_limit",
+    ]);
+    assert.equal("model" in runSubAgent, false);
+    assert.equal("maxSteps" in runSubAgent, false);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("Agent"), true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("AgentSpawn"), true);
     assert.equal(runSnapshot.toolCatalog.allowedTools.includes("agent_calls"), false);
@@ -784,7 +794,12 @@ async function writeTestSkillPackage(root: string, packageName: string, descript
   );
 }
 
-async function writeTestSubAgentPackage(root: string, packageName: string, description: string): Promise<void> {
+async function writeTestSubAgentPackage(
+  root: string,
+  packageName: string,
+  description: string,
+  extraFrontmatter: readonly string[] = [],
+): Promise<void> {
   const subAgentDir = path.join(root, packageName);
   await fs.mkdir(subAgentDir, { recursive: true });
   await fs.writeFile(
@@ -795,7 +810,7 @@ async function writeTestSubAgentPackage(root: string, packageName: string, descr
       `description: ${description}`,
       "enabled: true",
       "allowedTools: [read]",
-      "maxSteps: 12",
+      ...extraFrontmatter,
       "---",
       "",
       description,

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -15,7 +16,9 @@ import type {
   AgentLoopInput,
   AgentLoopToolVisibilityPlan,
 } from "../../app/model-runtime/agent-loop.js";
-import type { ToolDefinition, ToolExecutionGateway } from "../../domain/tools/index.js";
+import { canonicalToolResultMessage } from "../../app/model-runtime/tool-result-message.js";
+import { withToolModelAttachments } from "../../domain/tools/index.js";
+import type { ToolCallResult, ToolDefinition, ToolExecutionGateway } from "../../domain/tools/index.js";
 import { createAgentSessionLoop } from "./agent-session-loop.js";
 import {
   AgentSessionRepositoryError,
@@ -277,6 +280,228 @@ test("file-system agent session repository reads active tool calls and reconcile
   });
   assert.deepEqual(repeated, reconciled);
   assert.deepEqual(await fixture.repository.getActiveBranchEntryRefs(ref), firstBranch);
+});
+
+test("file-system agent session repository replaces a non-canonical fallback result on restart", async (t) => {
+  const fixture = await repositoryFixture(t);
+  const ref = await fixture.repository.create({ sessionId: "session-fallback", sessionCwd: fixture.workspace });
+  const lease = await fixture.repository.acquire(ref);
+  const assistantEntryId = await lease.session.appendMessage({
+    role: "assistant",
+    content: [{ type: "toolCall", id: "call-1", name: "write", arguments: { path: "a.txt" } }],
+    api: "openai-responses",
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "toolUse",
+    timestamp: 1,
+  });
+  const fallbackEntryId = await lease.session.appendMessage({
+    role: "toolResult",
+    toolCallId: "call-1",
+    toolName: "write",
+    content: [{ type: "text", text: "tool_result_acceptance_failed" }],
+    isError: false,
+    timestamp: 2,
+  });
+  await lease.release();
+
+  const restarted = new FileSystemAgentSessionRepository({
+    fileSystem: fixture.fileSystem,
+    sessionsRoot: fixture.sessionsRoot,
+  });
+  const assistantEntryRef = { sessionId: ref.sessionId, entryId: assistantEntryId };
+  const orderedResults: readonly ToolCallResult[] = [{
+    callId: "call-1",
+    toolName: "write",
+    input: { path: "a.txt" },
+    output: undefined,
+    status: "failed",
+    error: "Execution outcome is unknown after restart.",
+    errorFacts: { code: "tool_execution_outcome_unknown" },
+    durationMs: 0,
+  }];
+  const reconciled = await restarted.reconcileToolResultEntries({
+    sessionRef: ref,
+    assistantEntryRef,
+    orderedResults,
+  });
+  const firstBranch = await restarted.getActiveBranchEntryRefs(ref);
+  assert.deepEqual(firstBranch, [assistantEntryRef, reconciled]);
+  assert.equal(firstBranch.some((entry) => entry.entryId === fallbackEntryId), false);
+
+  const reopened = await restarted.acquire(ref);
+  const canonicalEntry = await reopened.session.getEntry(reconciled.entryId);
+  const abandonedFallback = await reopened.session.getEntry(fallbackEntryId);
+  await reopened.release();
+  assert.equal(canonicalEntry?.type, "message");
+  if (canonicalEntry?.type !== "message" || canonicalEntry.message.role !== "toolResult") {
+    assert.fail("Expected the reconciled leaf to be a canonical tool result message.");
+  }
+  assert.deepEqual(canonicalEntry.message.content, [{
+    type: "text",
+    text: canonicalToolResultMessage(orderedResults[0]!).content,
+  }]);
+  assert.equal(canonicalEntry.message.isError, true);
+  assert.equal(abandonedFallback?.type, "message");
+
+  const repeated = await restarted.reconcileToolResultEntries({
+    sessionRef: ref,
+    assistantEntryRef,
+    orderedResults,
+  });
+  assert.deepEqual(repeated, reconciled);
+  assert.deepEqual(await restarted.getActiveBranchEntryRefs(ref), firstBranch);
+});
+
+test("file-system agent session repository preserves Pi durable tool-result images during restart reconciliation", async (t) => {
+  const fixture = await repositoryFixture(t);
+  const ref = await fixture.repository.create({ sessionId: "session-image-recovery", sessionCwd: fixture.workspace });
+  const lease = await fixture.repository.acquire(ref);
+  const assistantEntryId = await lease.session.appendMessage({
+    role: "assistant",
+    content: [{ type: "toolCall", id: "call-image", name: "capture", arguments: {} }],
+    api: "openai-responses",
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "toolUse",
+    timestamp: 1,
+  });
+  await lease.release();
+
+  const image = {
+    kind: "image" as const,
+    attachmentId: "capture-image",
+    source: { kind: "data" as const, mimeType: "image/png", data: "aW1hZ2U=" },
+  };
+  const resultWithImage: ToolCallResult = {
+    callId: "call-image",
+    toolName: "capture",
+    input: {},
+    output: withToolModelAttachments({ captured: true }, [image]),
+    modelAttachmentRefs: [{
+      kind: "image",
+      attachmentId: image.attachmentId,
+      mimeType: image.source.mimeType,
+      sha256: createHash("sha256").update(Buffer.from(image.source.data, "base64")).digest("hex"),
+    }],
+    status: "completed",
+    durationMs: 1,
+  };
+  const firstLeaf = await fixture.repository.reconcileToolResultEntries({
+    sessionRef: ref,
+    assistantEntryRef: { sessionId: ref.sessionId, entryId: assistantEntryId },
+    orderedResults: [resultWithImage],
+  });
+
+  const restarted = new FileSystemAgentSessionRepository({
+    fileSystem: fixture.fileSystem,
+    sessionsRoot: fixture.sessionsRoot,
+  });
+  const resultAfterRestart = { ...resultWithImage, output: { captured: true } };
+  const recoveredLeaf = await restarted.reconcileToolResultEntries({
+    sessionRef: ref,
+    assistantEntryRef: { sessionId: ref.sessionId, entryId: assistantEntryId },
+    orderedResults: [resultAfterRestart],
+  });
+  assert.deepEqual(recoveredLeaf, firstLeaf);
+
+  const reopened = await restarted.acquire(ref);
+  const recovered = await reopened.session.getEntry(recoveredLeaf.entryId);
+  await reopened.release();
+  assert.equal(recovered?.type, "message");
+  if (recovered?.type !== "message" || recovered.message.role !== "toolResult") {
+    assert.fail("Expected the recovered Pi tool result to remain a tool-result message.");
+  }
+  assert.deepEqual(recovered.message.content, [
+    { type: "text", text: canonicalToolResultMessage(resultAfterRestart).content },
+    { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+  ]);
+});
+
+test("file-system agent session repository rejects a durable image without a persisted attachment fact", async (t) => {
+  const fixture = await repositoryFixture(t);
+  const ref = await fixture.repository.create({ sessionId: "session-image-mismatch", sessionCwd: fixture.workspace });
+  const lease = await fixture.repository.acquire(ref);
+  const assistantEntryId = await lease.session.appendMessage({
+    role: "assistant",
+    content: [{ type: "toolCall", id: "call-image", name: "capture", arguments: {} }],
+    api: "openai-responses",
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "toolUse",
+    timestamp: 1,
+  });
+  await lease.session.appendMessage({
+    role: "toolResult",
+    toolCallId: "call-image",
+    toolName: "capture",
+    content: [{ type: "text", text: "captured" }, { type: "image", mimeType: "image/png", data: "aW1hZ2U=" }],
+    isError: false,
+    timestamp: 2,
+  });
+  await lease.release();
+
+  await assert.rejects(
+    fixture.repository.reconcileToolResultEntries({
+      sessionRef: ref,
+      assistantEntryRef: { sessionId: ref.sessionId, entryId: assistantEntryId },
+      orderedResults: [{
+        callId: "call-image",
+        toolName: "capture",
+        input: {},
+        output: { captured: true },
+        status: "completed",
+        durationMs: 1,
+      }],
+    }),
+    (error: unknown) => error instanceof AgentSessionRepositoryError &&
+      error.code === "agent_session_attachment_mismatch",
+  );
+});
+
+test("file-system agent session repository rejects image manifests when restart recovery has no payload", async (t) => {
+  const fixture = await repositoryFixture(t);
+  const ref = await fixture.repository.create({ sessionId: "session-image-missing-payload", sessionCwd: fixture.workspace });
+  const lease = await fixture.repository.acquire(ref);
+  const assistantEntryId = await lease.session.appendMessage({
+    role: "assistant",
+    content: [{ type: "toolCall", id: "call-image", name: "capture", arguments: {} }],
+    api: "openai-responses",
+    provider: "test",
+    model: "test",
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    stopReason: "toolUse",
+    timestamp: 1,
+  });
+  await lease.release();
+
+  await assert.rejects(
+    fixture.repository.reconcileToolResultEntries({
+      sessionRef: ref,
+      assistantEntryRef: { sessionId: ref.sessionId, entryId: assistantEntryId },
+      orderedResults: [{
+        callId: "call-image",
+        toolName: "capture",
+        input: {},
+        output: { captured: true },
+        modelAttachmentRefs: [{
+          kind: "image",
+          attachmentId: "capture-image",
+          mimeType: "image/png",
+          byteLength: 5,
+          sha256: "a".repeat(64),
+        }],
+        status: "completed",
+        durationMs: 1,
+      }],
+    }),
+    (error: unknown) => error instanceof AgentSessionRepositoryError &&
+      error.code === "agent_session_attachment_mismatch" &&
+      /no recoverable image payload/u.test(error.message),
+  );
 });
 
 test("file-system agent session recovery does not infer protocol activation markers from public tool output", async (t) => {

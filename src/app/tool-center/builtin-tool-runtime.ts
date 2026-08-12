@@ -15,6 +15,8 @@ import {
   createContextAttachmentTools,
 } from "./adapters/context-attachment-tools.js";
 import { attachmentEntries } from "./adapters/context-attachment-access.js";
+import type { ContextAttachmentReadAuthorization } from "./adapters/context-attachment-access.js";
+import type { LocalWorkspacePathAuthorization } from "./adapters/local-workspace-common.js";
 import {
   createHttpRequestTool,
 } from "./adapters/http-request-tool.js";
@@ -63,6 +65,9 @@ export type CreateAgentToolRegistryOptions = {
   readonly outputTokenCounter?: ToolOutputTokenCounter;
   readonly metricsSink?: ToolExecutionMetricsSink;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
+  readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
+  readonly workspacePathAuthorization?: LocalWorkspacePathAuthorization;
 };
 
 export type ToolRegistryFetchLike = (
@@ -99,12 +104,12 @@ export function createAgentToolRegistry(
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
   const baseToolScopes = options.baseToolScopes ?? ["agent-basic"];
   const executors: readonly ToolExecutor[] = [
-    createLocalReadFileTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
-    createLocalGlobTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
-    createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter }),
-    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy, mutationCoordinator }),
-    createLocalEditFileTool(workspaceRoot, { sandboxPolicy, mutationCoordinator }),
-    createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
+    createLocalReadFileTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter, pathAuthorization: options.workspacePathAuthorization }),
+    createLocalGlobTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter, pathAuthorization: options.workspacePathAuthorization }),
+    createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy, outputTokenCounter: options.outputTokenCounter, pathAuthorization: options.workspacePathAuthorization }),
+    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy, mutationCoordinator, pathAuthorization: options.workspacePathAuthorization }),
+    createLocalEditFileTool(workspaceRoot, { sandboxPolicy, mutationCoordinator, pathAuthorization: options.workspacePathAuthorization }),
+    createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry, pathAuthorization: options.workspacePathAuthorization }),
     ...managedProcessExecutors(options, workspaceRoot, sandboxPolicy, commandShell),
     ...contextAttachmentExecutors(options, workspaceRoot),
     createHttpRequestTool({ outputStore: options.toolOutputStore }),
@@ -156,6 +161,8 @@ function contextAttachmentExecutors(
     taskSoil: options.taskSoil,
     workspaceRoot,
     supportsVisionInput: options.modelCapabilities?.supportsVisionInput,
+    resolveManagedAttachmentPath: options.resolveManagedAttachmentPath,
+    readAuthorization: options.contextAttachmentReadAuthorization,
   });
 }
 
@@ -173,6 +180,7 @@ function managedProcessExecutors(
   const tools = createLocalManagedProcessTools(workspaceRoot, {
     sandboxPolicy,
     commandShell,
+    pathAuthorization: options.workspacePathAuthorization,
     processRegistry: options.processRegistry,
     processTerminator: options.processTerminator,
   });

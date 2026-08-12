@@ -1,6 +1,0 @@
-@import 'tailwindcss' source(none);
-@source '../agentarbor-workbench.tsx';
-@source '../app/App.tsx';
-@source '../app/components/*.tsx';
-
-@import 'tw-animate-css';

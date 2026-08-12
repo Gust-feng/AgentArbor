@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import { createMinimalReadonlySoilStore } from "../../domain/soil/index.js";
 import { createMinimalSoilConstraints } from "../../domain/soil/index.js";
@@ -96,6 +97,34 @@ test("Desktop Task Soil input rejects unsupported write refs but accepts token-l
   assert.deepEqual(parseDesktopTaskSoilInput({
     permissionBoundaryRefs: ["read:secret:local-dev/model-provider", "execute:runtime:store/live", "ask:token:local-value"],
   }).permissionBoundaryRefs, ["read:secret:local-dev/model-provider", "execute:runtime:store/live", "ask:token:local-value"]);
+});
+
+test("Desktop selected local paths become model-visible from matching read permissions", () => {
+  const selectedFile = path.resolve("selected/report.md");
+  const selectedProject = path.resolve("selected/project");
+  const parsed = parseDesktopTaskSoilInput({
+    contextRefs: [
+      { ref: `local-file:${selectedFile}`, kind: "file" },
+      { ref: `local-project:${selectedProject}`, kind: "project" },
+    ],
+    permissionBoundaryRefs: [
+      `read:local-file:${selectedFile}`,
+      `read:local-project:${selectedProject}`,
+    ],
+  });
+  const constraints = createMinimalSoilConstraints();
+  const taskSoil = createTaskSoilFromDesktopInput({
+    goal: "Inspect selected paths.",
+    goalId: "goal-selected-paths",
+    traceId: "trace-selected-paths",
+    aiMode: "fake",
+    constraints,
+    soilStore: createMinimalReadonlySoilStore(constraints),
+    taskSoilInput: parsed,
+  });
+
+  assert.equal(taskSoil.contextRefs.find((ref) => ref.ref === `local-file:${selectedFile}`)?.pathGranted, true);
+  assert.equal(taskSoil.contextRefs.find((ref) => ref.ref === `local-project:${selectedProject}`)?.pathGranted, true);
 });
 
 test("Desktop Task Soil input preserves summaries and previews", () => {

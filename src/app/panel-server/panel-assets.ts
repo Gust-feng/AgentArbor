@@ -8,7 +8,6 @@ export type PanelStaticAsset = {
 };
 
 export const PANEL_BRAND_LOGO_PATHNAME = "/favicon.svg";
-export const PANEL_BRAND_LEGACY_ICON_PATHNAME = "/favicon.ico";
 
 export function createPanelHtml(): string {
   return readPanelTextAsset("index.html");
@@ -21,13 +20,6 @@ export function readPanelBrandLogoAsset(): PanelStaticAsset {
   };
 }
 
-export function readPanelBrandIconAsset(): PanelStaticAsset {
-  return {
-    contentType: "image/x-icon",
-    body: readFileSync(resolvePanelBrandIconPath()),
-  };
-}
-
 export function resolvePanelBrandLogoPath(): string {
   const candidates = panelAssetRoots().flatMap((root) => [
     path.join(root, "favicon.svg"),
@@ -36,12 +28,13 @@ export function resolvePanelBrandLogoPath(): string {
   return resolveFirstExistingFile(candidates, "Panel brand logo asset not found: favicon.svg");
 }
 
-export function resolvePanelBrandIconPath(): string {
-  const candidates = panelAssetRoots().flatMap((root) => [
-    path.join(root, "favicon.ico"),
-    path.join(root, "public", "favicon.ico"),
-  ]);
-  return resolveFirstExistingFile(candidates, "Panel brand icon asset not found: favicon.ico");
+export function resolvePanelDesktopIconPath(): string {
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(moduleDirectory, "..", "desktop-assets", "favicon.png"),
+    path.join(process.cwd(), "dist", "app", "desktop-assets", "favicon.png"),
+  ];
+  return resolveFirstExistingFile(candidates, "Generated desktop icon asset not found. Run pnpm generate:icons.");
 }
 
 export function readPanelStaticAsset(pathname: string): PanelStaticAsset | undefined {

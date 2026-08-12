@@ -4,23 +4,40 @@ import {
   type Space,
   type SpaceEvent,
   type SpaceFeature,
+  type SpaceAddableReference,
   type SpaceMovableTarget,
+  type SpaceReference,
   type SpaceReferenceItem,
   type SpaceRepository,
+  type SpaceOwnedAssetDeletionPort,
   type SpaceTarget,
   type SpaceTreeSnapshot,
 } from "./contracts.js";
 import { validateSpaceReference } from "./space-validation.js";
+import {
+  createSpaceReferenceDeletionLifecycle,
+  type SpaceReferenceDeletionDiagnostic,
+  type SpaceReferenceDeletionFilePort,
+  type SpaceReferenceDeletionLeasePort,
+} from "./space-reference-deletion.js";
+import type { SpaceReferenceDeletionJournalStore } from "./file-system-reference-deletion-journal.js";
+import type { SpaceExternalSourceInspector } from "./space-external-source.js";
 
 export type CreateSpaceFeatureInput = {
   readonly repository: SpaceRepository;
   readonly now?: () => string;
   readonly idFactory?: () => string;
   readonly workspaceMountIdentity?: (workspacePath: string) => Promise<string>;
-  readonly runReferenceRemoval?: (
-    items: readonly SpaceReferenceItem[],
-    removeMetadata: () => Promise<void>,
-  ) => Promise<void>;
+  readonly externalSourceInspector?: SpaceExternalSourceInspector;
+  readonly ownedAssetDeletion?: SpaceOwnedAssetDeletionPort;
+  readonly referenceDeletion?: {
+    readonly journal: SpaceReferenceDeletionJournalStore;
+    readonly files: SpaceReferenceDeletionFilePort;
+    readonly leases: SpaceReferenceDeletionLeasePort;
+    readonly createDeletionId?: () => string;
+    readonly onDiagnostic?: (diagnostic: SpaceReferenceDeletionDiagnostic) => void;
+    readonly deleteOwnedAssets?: (assetIds: readonly string[]) => Promise<void>;
+  };
 };
 
 export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature {
@@ -28,9 +45,20 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
   const createId = input.idFactory ?? (() => crypto.randomUUID());
   const listeners = new Set<(event: SpaceEvent) => void>();
   let released = false;
+  let runtimeFailure: unknown;
+  let releasePromise: Promise<void> | undefined;
+  let startupSucceeded = false;
   let tail = Promise.resolve();
-  const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = tail.then(operation, operation);
+  let startup: Promise<void> | undefined;
+  const serialize = <T>(operation: () => Promise<T>, waitForStartup = true): Promise<T> => {
+    const guarded = async () => {
+      if (waitForStartup) {
+        await startup;
+        if (runtimeFailure !== undefined) throw runtimeFailure;
+      }
+      return operation();
+    };
+    const result = tail.then(guarded, guarded);
     tail = result.then(() => undefined, () => undefined);
     return result;
   };
@@ -42,6 +70,22 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       try { listener(event); } catch { /* Observers cannot roll back an already committed Space command. */ }
     }
   };
+  const deletionLifecycle = input.referenceDeletion === undefined
+    ? undefined
+    : createSpaceReferenceDeletionLifecycle({
+        repository: input.repository,
+        ...input.referenceDeletion,
+        deleteOwnedAssets: input.referenceDeletion.deleteOwnedAssets ?? input.ownedAssetDeletion?.deleteWorkbenchAssets,
+      });
+  const ready = deletionLifecycle === undefined
+    ? Promise.resolve()
+    : serialize(() => deletionLifecycle.recover(), false);
+  void ready.then(() => { startupSucceeded = true; }, () => undefined);
+  startup = ready;
+  const waitUntilUsable = async (): Promise<void> => {
+    await ready;
+    if (runtimeFailure !== undefined) throw runtimeFailure;
+  };
   const removeReferenceWithPolicy = (
     itemId: string,
     runOwnershipLifecycle: boolean,
@@ -50,18 +94,69 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
     return serialize(async () => {
       const snapshot = await input.repository.read();
       const item = requireReference(snapshot, itemId);
+      if (item.reference.kind === "conversation") {
+        throw new SpaceFeatureError(
+          "space_invalid_input",
+          "Conversation ownership can only be removed by the Conversation coordinator.",
+        );
+      }
+      if (runOwnershipLifecycle && !isSpaceOwnedMaterial(item.reference)) {
+        throw new SpaceFeatureError(
+          "space_invalid_input",
+          "External references are links only; unlink them instead of deleting their source.",
+        );
+      }
+      if (!runOwnershipLifecycle && !isExternalReference(item.reference)) {
+        throw new SpaceFeatureError(
+          "space_invalid_input",
+          "Space-owned materials must be removed through their deletion workflow.",
+        );
+      }
       const at = now();
       const subtree = referenceSubtreeIds(snapshot, itemId);
       const removedItems = snapshot.referenceItems.filter((entry) => subtree.has(entry.id));
-      const removeMetadata = async () => await input.repository.write({
+      const ownedAssetIds = runOwnershipLifecycle ? workbenchAssetIds(removedItems) : [];
+      if (ownedAssetIds.length > 0 && input.ownedAssetDeletion === undefined) {
+        throw new SpaceFeatureError(
+          "space_deletion_journal_failure",
+          `Reference ${itemId} owns Workbench assets but no asset deletion port is configured.`,
+        );
+      }
+      const nextSnapshot = {
         ...snapshot,
         referenceItems: snapshot.referenceItems.filter((entry) => !subtree.has(entry.id)),
         spaces: touchSpaces(snapshot.spaces, [item.spaceId], at),
-      });
-      if (runOwnershipLifecycle && input.runReferenceRemoval !== undefined) {
-        await input.runReferenceRemoval(removedItems, removeMetadata);
+      };
+      if (runOwnershipLifecycle && deletionLifecycle !== undefined) {
+        try {
+          await deletionLifecycle.remove({
+            rootReferenceId: itemId,
+            removedReferences: removedItems,
+            ownedAssetIds,
+            nextSnapshot,
+            createdAt: at,
+          });
+        } catch (error) {
+          if (error instanceof SpaceFeatureError && error.code === "space_deletion_recovery_failed") {
+            runtimeFailure ??= error;
+          }
+          throw error;
+        }
       } else {
-        await removeMetadata();
+        await input.repository.write(nextSnapshot);
+      }
+      if (ownedAssetIds.length > 0 && deletionLifecycle === undefined) {
+        try {
+          await input.ownedAssetDeletion!.deleteWorkbenchAssets(ownedAssetIds);
+        } catch (error) {
+          const failure = new SpaceFeatureError(
+            "space_deletion_journal_failure",
+            `Reference ${itemId} metadata was removed but Workbench asset deletion did not complete.`,
+            { cause: error },
+          );
+          runtimeFailure ??= failure;
+          throw failure;
+        }
       }
       publish({
         type: "space.reference_removed",
@@ -69,6 +164,94 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         removedItemIds: removedItems.map((entry) => entry.id),
         spaceId: item.spaceId,
       });
+    });
+  };
+  const unlinkConversationReference = (conversationId: string): Promise<void> => {
+    assertUsable("unlink a conversation reference");
+    return serialize(async () => {
+      const snapshot = await input.repository.read();
+      const removedItems = snapshot.referenceItems.filter((item) =>
+        item.reference.kind === "conversation" && item.reference.conversationId === conversationId,
+      );
+      if (removedItems.length === 0) return;
+      const at = now();
+      const removedItemIds = new Set(removedItems.map((item) => item.id));
+      await input.repository.write({
+        ...snapshot,
+        referenceItems: snapshot.referenceItems.filter((item) => !removedItemIds.has(item.id)),
+        spaces: touchSpaces(snapshot.spaces, [...new Set(removedItems.map((item) => item.spaceId))], at),
+      });
+      for (const item of removedItems) {
+        publish({
+          type: "space.reference_removed",
+          itemId: item.id,
+          removedItemIds: [item.id],
+          spaceId: item.spaceId,
+        });
+      }
+    });
+  };
+  const unlinkConversationReferenceItem = (itemId: string): Promise<void> => {
+    assertUsable("unlink a conversation reference item");
+    return serialize(async () => {
+      const snapshot = await input.repository.read();
+      const item = snapshot.referenceItems.find((entry) => entry.id === itemId);
+      // Journal recovery is idempotent. A missing item means an earlier attempt
+      // already unlinked it, while an item with a different kind must never be
+      // removed just because its id was recorded for a conversation link.
+      if (item === undefined) return;
+      if (item.reference.kind !== "conversation") {
+        throw new SpaceFeatureError(
+          "space_invalid_input",
+          `Space reference ${itemId} is not a conversation link.`,
+        );
+      }
+      const at = now();
+      await input.repository.write({
+        ...snapshot,
+        referenceItems: snapshot.referenceItems.filter((entry) => entry.id !== itemId),
+        spaces: touchSpaces(snapshot.spaces, [item.spaceId], at),
+      });
+      publish({
+        type: "space.reference_removed",
+        itemId,
+        removedItemIds: [itemId],
+        spaceId: item.spaceId,
+      });
+    });
+  };
+  const linkConversationOwner = (command: {
+    readonly id?: string;
+    readonly spaceId: string;
+    readonly title: string;
+    readonly conversationId: string;
+    readonly conversationTitle?: string;
+  }): Promise<SpaceReferenceItem> => {
+    assertUsable("link a Conversation owner");
+    return serialize(async () => {
+      const snapshot = await input.repository.read();
+      requireSpace(snapshot, command.spaceId);
+      assertConversationOwnerUnique(snapshot, { kind: "conversation", conversationId: command.conversationId });
+      const at = now();
+      const item: SpaceReferenceItem = {
+        id: command.id === undefined ? newId(snapshot) : idFor(command.id, snapshot),
+        spaceId: command.spaceId,
+        title: titleFor(command.title),
+        reference: validateSpaceReference({
+          kind: "conversation",
+          conversationId: command.conversationId,
+          ...(command.conversationTitle === undefined ? {} : { conversationTitle: command.conversationTitle }),
+        }),
+        createdAt: at,
+        updatedAt: at,
+      };
+      await input.repository.write({
+        ...snapshot,
+        referenceItems: [item, ...snapshot.referenceItems],
+        spaces: touchSpaces(snapshot.spaces, [command.spaceId], at),
+      });
+      publish({ type: "space.reference_added", item });
+      return item;
     });
   };
   const newId = (snapshot: SpaceTreeSnapshot): string => {
@@ -80,6 +263,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
   };
 
   return {
+    ready: waitUntilUsable,
     commands: {
       createSpace({ id, title }) {
         assertUsable("create a Space");
@@ -97,17 +281,88 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           return space;
         });
       },
+      deleteSpace(spaceId) {
+        assertUsable("delete a Space");
+        return serialize(async () => {
+          const snapshot = await input.repository.read();
+          requireSpace(snapshot, spaceId);
+          const removedReferenceIds = snapshot.referenceItems
+            .filter((item) => item.spaceId === spaceId)
+            .map((item) => item.id);
+          const nextSnapshot = {
+            ...snapshot,
+            spaces: snapshot.spaces.filter((space) => space.id !== spaceId),
+            referenceItems: snapshot.referenceItems.filter((item) => item.spaceId !== spaceId),
+          };
+          const ownedAssetIds = workbenchAssetIds(removedReferenceItems(snapshot, spaceId));
+          if (ownedAssetIds.length > 0 && input.ownedAssetDeletion === undefined) {
+            throw new SpaceFeatureError(
+              "space_deletion_journal_failure",
+              `Space ${spaceId} owns Workbench assets but no asset deletion port is configured.`,
+            );
+          }
+          // Space-owned managed folders are physical assets. External files and
+          // workspace folders are links only and are intentionally excluded.
+          const ownedReferences = snapshot.referenceItems.filter((item) =>
+            item.spaceId === spaceId && item.reference.kind === "managed_folder",
+          );
+          if (deletionLifecycle !== undefined && (ownedReferences.length > 0 || ownedAssetIds.length > 0)) {
+            try {
+              const journalRoot = snapshot.referenceItems.find((item) => item.spaceId === spaceId);
+              if (journalRoot === undefined) throw new SpaceFeatureError("space_deletion_journal_failure", `Space ${spaceId} has no reference root for deletion journal.`);
+              await deletionLifecycle.remove({
+                rootReferenceId: journalRoot.id,
+                removedReferences: snapshot.referenceItems.filter((item) => item.spaceId === spaceId),
+                ownedAssetIds,
+                nextSnapshot,
+                createdAt: now(),
+              });
+            } catch (error) {
+              if (error instanceof SpaceFeatureError && error.code === "space_deletion_recovery_failed") {
+                runtimeFailure ??= error;
+              }
+              throw error;
+            }
+          } else {
+            await input.repository.write(nextSnapshot);
+          }
+          if (ownedAssetIds.length > 0 && deletionLifecycle === undefined) {
+            try {
+              await input.ownedAssetDeletion!.deleteWorkbenchAssets(ownedAssetIds);
+            } catch (error) {
+              const failure = new SpaceFeatureError(
+                "space_deletion_journal_failure",
+                `Space ${spaceId} metadata was removed but Workbench asset deletion did not complete.`,
+                { cause: error },
+              );
+              runtimeFailure ??= failure;
+              throw failure;
+            }
+          }
+          publish({ type: "space.deleted", spaceId, removedReferenceIds });
+        });
+      },
       addReference({ id, spaceId, title, parentId, reference }) {
         assertUsable("add a reference");
         return serialize(async () => {
           const snapshot = await input.repository.read();
           requireSpace(snapshot, spaceId);
           if (parentId !== undefined) requireParent(snapshot, spaceId, parentId);
-          await assertWorkspaceMountUnique(snapshot, reference, input.workspaceMountIdentity);
-          assertConversationOwnerUnique(snapshot, reference);
+          assertAddableReference(reference);
+          assertWorkbenchAssetUnique(snapshot, reference);
+          await assertExternalPathUnique(snapshot, spaceId, reference, input.workspaceMountIdentity);
+          const validatedReference = validateSpaceReference(reference);
+          const sourceIdentity = await captureExternalSourceIdentity(validatedReference, input.externalSourceInspector);
           const at = now();
           const item: SpaceReferenceItem = {
-            id: id === undefined ? newId(snapshot) : idFor(id, snapshot), spaceId, title: titleFor(title), ...(parentId === undefined ? {} : { parentId }), reference: validateSpaceReference(reference), createdAt: at, updatedAt: at,
+            id: id === undefined ? newId(snapshot) : idFor(id, snapshot),
+            spaceId,
+            title: titleFor(title),
+            ...(parentId === undefined ? {} : { parentId }),
+            reference: validatedReference,
+            ...(sourceIdentity === undefined ? {} : { sourceIdentity }),
+            createdAt: at,
+            updatedAt: at,
           };
           await input.repository.write({
             ...snapshot,
@@ -136,6 +391,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
           const snapshot = await input.repository.read();
           requireSpace(snapshot, destinationSpaceId);
           const item = requireReference(snapshot, target.id);
+          assertMovableReference(item.reference);
           const at = now();
           const subtree = referenceSubtreeIds(snapshot, item.id);
           const moved = snapshot.referenceItems.filter((entry) => subtree.has(entry.id)).map((entry) => ({
@@ -144,9 +400,22 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
             ...(entry.id === item.id ? { parentId: undefined } : {}),
             updatedAt: at,
           }));
+          for (const entry of moved) assertMovableReference(entry.reference);
+          const retained = snapshot.referenceItems.filter((entry) => !subtree.has(entry.id));
+          let mountValidationItems = retained;
+          for (const entry of moved) {
+            assertWorkbenchAssetUnique({ ...snapshot, referenceItems: mountValidationItems }, entry.reference);
+            await assertExternalPathUnique(
+              { ...snapshot, referenceItems: mountValidationItems },
+              destinationSpaceId,
+              entry.reference,
+              input.workspaceMountIdentity,
+            );
+            mountValidationItems = [...mountValidationItems, entry];
+          }
           await input.repository.write({
             ...snapshot,
-            referenceItems: [...moved, ...snapshot.referenceItems.filter((entry) => !subtree.has(entry.id))],
+            referenceItems: [...moved, ...retained],
             spaces: touchSpaces(snapshot.spaces, [item.spaceId, destinationSpaceId], at),
           });
           publish({ type: "space.moved", target, sourceSpaceId: item.spaceId, destinationSpaceId });
@@ -154,11 +423,15 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         });
       },
       unlinkReference: (itemId) => removeReferenceWithPolicy(itemId, false),
+      unlinkConversationReference,
+      unlinkConversationReferenceItem,
+      linkConversationOwner,
       removeReference: (itemId) => removeReferenceWithPolicy(itemId, true),
     },
     queries: {
       async list() {
         assertUsable("list Spaces");
+        await waitUntilUsable();
         const snapshot = await input.repository.read();
         return snapshot.spaces.map((space) => ({
           ...space,
@@ -168,6 +441,7 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       },
       async getTree(spaceId) {
         assertUsable("read a Space");
+        await waitUntilUsable();
         const snapshot = await input.repository.read();
         const space = snapshot.spaces.find((entry) => entry.id === spaceId);
         if (space === undefined) return undefined;
@@ -177,10 +451,12 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
       },
       async getReference(itemId) {
         assertUsable("read a reference");
+        await waitUntilUsable();
         return (await input.repository.read()).referenceItems.find((entry) => entry.id === itemId);
       },
       async findConversationOwner(conversationId) {
         assertUsable("resolve a conversation owner");
+        await waitUntilUsable();
         const matches = (await input.repository.read()).referenceItems.filter((entry) =>
           entry.reference.kind === "conversation" && entry.reference.conversationId === conversationId
         );
@@ -193,23 +469,27 @@ export function createSpaceFeature(input: CreateSpaceFeatureInput): SpaceFeature
         const item = matches[0];
         return item === undefined ? undefined : { spaceId: item.spaceId, referenceItemId: item.id };
       },
-      async hasWorkspaceMountConflict(itemId) {
-        assertUsable("check a workspace mount");
-        const snapshot = await input.repository.read();
-        const item = requireReference(snapshot, itemId);
-        if (item.reference.kind !== "workspace_folder") return false;
-        const identity = await workspaceMountIdentity(item.reference.path, input.workspaceMountIdentity);
-        for (const candidate of snapshot.referenceItems) {
-          if (candidate.id === item.id || candidate.reference.kind !== "workspace_folder") continue;
-          if (await workspaceMountIdentity(candidate.reference.path, input.workspaceMountIdentity) === identity) return true;
-        }
-        return false;
-      },
     },
     events: {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     },
-    async release() { released = true; await tail; listeners.clear(); },
+    async release() {
+      if (releasePromise !== undefined) return await releasePromise;
+      released = true;
+      const attempt = (async () => {
+        await ready.catch(() => undefined);
+        await tail;
+        listeners.clear();
+        if (startupSucceeded) await deletionLifecycle?.recover();
+      })();
+      releasePromise = attempt;
+      try {
+        await attempt;
+      } catch (error) {
+        releasePromise = undefined;
+        throw error;
+      }
+    },
   };
 }
 
@@ -273,14 +553,97 @@ function touchSpaces(spaces: readonly Space[], ids: readonly string[], at: strin
   const targets = new Set(ids);
   return spaces.map((space) => targets.has(space.id) ? { ...space, updatedAt: at } : space);
 }
-async function assertWorkspaceMountUnique(snapshot: SpaceTreeSnapshot, reference: SpaceReferenceItem["reference"], identify: CreateSpaceFeatureInput["workspaceMountIdentity"]): Promise<void> {
-  if (reference.kind !== "workspace_folder") return;
+
+function removedReferenceItems(snapshot: SpaceTreeSnapshot, spaceId: string): readonly SpaceReferenceItem[] {
+  return snapshot.referenceItems.filter((item) => item.spaceId === spaceId);
+}
+
+function workbenchAssetIds(items: readonly SpaceReferenceItem[]): readonly string[] {
+  return [...new Set(items.flatMap((item) =>
+    item.reference.kind === "workbench_asset" ? [item.reference.assetId] : [],
+  ))];
+}
+
+function assertAddableReference(reference: SpaceReference): asserts reference is SpaceAddableReference {
+  if (reference.kind === "conversation") {
+    throw new SpaceFeatureError(
+      "space_invalid_input",
+      "Conversation ownership must be created through the Conversation coordinator.",
+    );
+  }
+}
+
+function assertMovableReference(reference: SpaceReferenceItem["reference"]): void {
+  if (reference.kind === "local_file" || reference.kind === "workspace_folder" || reference.kind === "conversation") {
+    throw new SpaceFeatureError(
+      "space_invalid_move",
+      `${reference.kind} is a link or owner and cannot be moved between Spaces.`,
+    );
+  }
+}
+
+function isExternalReference(reference: SpaceReferenceItem["reference"]): boolean {
+  return reference.kind === "local_file"
+    || reference.kind === "workspace_folder"
+    || reference.kind === "web_page"
+    || reference.kind === "generated_artifact";
+}
+
+function isSpaceOwnedMaterial(reference: SpaceReferenceItem["reference"]): boolean {
+  return reference.kind === "managed_folder"
+    || reference.kind === "asset_folder"
+    || reference.kind === "workbench_asset";
+}
+
+function assertWorkbenchAssetUnique(
+  snapshot: SpaceTreeSnapshot,
+  reference: SpaceReferenceItem["reference"],
+): void {
+  if (reference.kind !== "workbench_asset") return;
+  const existing = snapshot.referenceItems.find((item) =>
+    item.reference.kind === "workbench_asset" && item.reference.assetId === reference.assetId,
+  );
+  if (existing !== undefined) {
+    throw new SpaceFeatureError(
+      "space_asset_ownership_conflict",
+      `Workbench asset ${reference.assetId} is already owned by Space ${existing.spaceId}.`,
+    );
+  }
+}
+
+/**
+ * External filesystem links are mutually exclusive within a Space: duplicate
+ * paths and parent/child paths would otherwise produce ambiguous grants.
+ * Separate Spaces intentionally do not enter this comparison.
+ */
+async function assertExternalPathUnique(
+  snapshot: SpaceTreeSnapshot,
+  spaceId: string,
+  reference: SpaceReferenceItem["reference"],
+  identify: CreateSpaceFeatureInput["workspaceMountIdentity"],
+): Promise<void> {
+  if (reference.kind !== "workspace_folder" && reference.kind !== "local_file") return;
   const identity = await workspaceMountIdentity(reference.path, identify);
   for (const item of snapshot.referenceItems) {
-    if (item.reference.kind === "workspace_folder" && await workspaceMountIdentity(item.reference.path, identify) === identity) {
-      throw new SpaceFeatureError("space_workspace_mount_conflict", "This workspace folder is already linked to another Space");
+    if (item.spaceId !== spaceId) continue;
+    if (item.reference.kind !== "workspace_folder" && item.reference.kind !== "local_file") continue;
+    const existing = await workspaceMountIdentity(item.reference.path, identify);
+    if (existing === identity) {
+      throw new SpaceFeatureError("space_workspace_mount_conflict", "This filesystem path is already linked to this Space");
+    }
+    if (item.reference.kind === "workspace_folder" && isMountAncestor(existing, identity)) {
+      throw new SpaceFeatureError("space_workspace_mount_conflict", "This filesystem path is inside another linked workspace folder in this Space");
+    }
+    if (reference.kind === "workspace_folder" && isMountAncestor(identity, existing)) {
+      throw new SpaceFeatureError("space_workspace_mount_conflict", "Another linked filesystem path is inside this workspace folder in this Space");
     }
   }
+}
+
+/** 判断 `ancestor` 是否为 `candidate` 的严格祖先目录，按已规范化的挂载身份做段边界比较。 */
+function isMountAncestor(ancestor: string, candidate: string): boolean {
+  const prefix = ancestor.endsWith("/") ? ancestor : `${ancestor}/`;
+  return candidate.length > prefix.length && candidate.startsWith(prefix);
 }
 
 function assertConversationOwnerUnique(
@@ -301,6 +664,24 @@ function assertConversationOwnerUnique(
 async function workspaceMountIdentity(value: string, identify: CreateSpaceFeatureInput["workspaceMountIdentity"]): Promise<string> {
   if (identify !== undefined) return await identify(value);
   return value.trim().replaceAll("\\", "/").replace(/\/+$/u, "").toLocaleLowerCase("en-US");
+}
+
+async function captureExternalSourceIdentity(
+  reference: SpaceReference,
+  inspect: SpaceExternalSourceInspector | undefined,
+): Promise<string | undefined> {
+  if (inspect === undefined || (reference.kind !== "local_file" && reference.kind !== "workspace_folder")) {
+    return undefined;
+  }
+  const source = await inspect(reference.path);
+  const expectedKind = reference.kind === "local_file" ? "file" : "folder";
+  if (source === undefined || source.kind !== expectedKind) {
+    throw new SpaceFeatureError(
+      "space_invalid_input",
+      `The ${reference.kind === "local_file" ? "file" : "workspace folder"} source does not exist at ${reference.path}.`,
+    );
+  }
+  return source.identity;
 }
 
 export function emptySpaceTreeSnapshot(): SpaceTreeSnapshot {

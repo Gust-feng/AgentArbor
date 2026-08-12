@@ -55,8 +55,6 @@ export type StableAssistantTurnDisplay<
   TPending extends ConfirmationIdentity,
 > = {
   readonly assistant: AssistantTranscriptTurnProjection<TTurn, TDeliverable, TPending>;
-  /** Exact visible facts used to build workflow; suitable for reference-only render stability checks. */
-  readonly projectionInput: AssistantWorkflowProjectionInput<TTurn, TNode, TDeliverable, TPending>;
   readonly workflow?: AssistantWorkflowDisplay<TNode, TPending>;
   readonly failure?: AssistantFailureParts;
 };
@@ -116,7 +114,7 @@ export function projectStableAssistantTurnDisplay<
     interruptionNodes,
     failure,
   );
-  const projectionInput: AssistantWorkflowProjectionInput<TTurn, TNode, TDeliverable, TPending> = {
+  const workflowInput: AssistantWorkflowProjectionInput<TTurn, TNode, TDeliverable, TPending> = {
     turn: input.projectedTurn.turn,
     content: failure?.previous ?? assistant.content,
     deliverable: failure === undefined ? assistant.deliverable : undefined,
@@ -133,12 +131,11 @@ export function projectStableAssistantTurnDisplay<
     // current nodes so a run.failed activity cached one frame earlier cannot
     // survive beside that notice; real tool activity remains in the nodes.
     previous: failure === undefined ? input.previousWorkflow : undefined,
-    ...projectionInput,
+    ...workflowInput,
   });
   return {
     display: {
       assistant,
-      projectionInput,
       workflow: workflow.workflow,
       failure,
     },

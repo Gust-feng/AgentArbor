@@ -1,137 +1,185 @@
-import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { SpaceReferenceItem } from "../spaces/index.js";
-import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
-import { PanelHttpError } from "./http-utils.js";
+import { renameWithRetry } from "../../kernel/fs/atomic-write.js";
+import { isNodeError } from "../../kernel/values/index.js";
 import { isWithinRoot } from "../local-filesystem/index.js";
+import type { SpaceReferenceDeletionTarget } from "../spaces/file-system-reference-deletion-journal.js";
+import type { SpaceReferenceItem } from "../spaces/index.js";
+import type { SpaceReferenceDeletionFilePort } from "../spaces/space-reference-deletion.js";
+import { PanelHttpError } from "./http-utils.js";
 
-export type StagedSpaceReferenceDeletion = {
-  readonly commit: () => Promise<void>;
-  readonly rollback: () => Promise<void>;
-};
+const WINDOWS_UNSUPPORTED_DIRECTORY_FSYNC_CODES = new Set(["EINVAL", "EPERM", "ENOTSUP", "EISDIR"]);
 
-export async function runSpaceReferenceRemoval(
-  items: readonly SpaceReferenceItem[],
-  managedFolderRoot: string,
-  coordinator: LocalWorkspaceMutationCoordinator,
-  removeMetadata: () => Promise<void>,
-): Promise<void> {
-  const targets = ownedDeletionTargets(items);
-  await runWithMutationKeys(coordinator, targets.map((target) => target.mutationKey), async () => {
-    const staged: StagedSpaceReferenceDeletion[] = [];
-    try {
-      for (const target of targets) {
-        const deletion = await stageOwnedSpaceReferenceDeletion(target.item, managedFolderRoot);
-        if (deletion !== undefined) staged.push(deletion);
-      }
-    } catch (error) {
-      await rollbackStagedDeletions(staged, error);
-    }
-    try {
-      await removeMetadata();
-    } catch (error) {
-      await rollbackStagedDeletions(staged, error);
-    }
-    for (const deletion of staged) {
-      try {
-        await deletion.commit();
-      } catch (error) {
-        // The source path and metadata are already gone. Cleanup failure is a
-        // host diagnostic, not a reason to report the committed delete as failed.
-        console.error("[panel-server] Committed Space reference cleanup failed", error);
-      }
-    }
-  });
-}
-
+/**
+ * 路径类引用按规范化路径取互斥键，使不同 Space 指向同一目录的引用共享同一把锁。
+ * 跨 Space 重叠引用是合法状态，串行化是它的并发安全边界。
+ */
 export function spaceReferenceMutationKey(item: SpaceReferenceItem): string {
-  return item.reference.kind === "local_file" || item.reference.kind === "workspace_folder" || item.reference.kind === "managed_folder"
-    ? item.reference.path
-    : item.id;
-}
-
-type OwnedDeletionTarget = {
-  readonly item: SpaceReferenceItem;
-  readonly source: string;
-  readonly mutationKey: string;
-};
-
-function ownedDeletionTargets(items: readonly SpaceReferenceItem[]): readonly OwnedDeletionTarget[] {
-  const candidates = items.flatMap((item): OwnedDeletionTarget[] => {
-    if (item.reference.kind !== "local_file" && item.reference.kind !== "managed_folder") return [];
-    const source = path.resolve(item.reference.path);
-    return [{ item, source, mutationKey: mutationPath(source) }];
-  }).sort((left, right) => left.source.length - right.source.length || left.mutationKey.localeCompare(right.mutationKey));
-  const roots: OwnedDeletionTarget[] = [];
-  for (const candidate of candidates) {
-    if (roots.some((root) => root.mutationKey === candidate.mutationKey
-      || (root.item.reference.kind === "managed_folder" && isWithinRoot(root.source, candidate.source)))) continue;
-    roots.push(candidate);
+  if (item.reference.kind !== "local_file" && item.reference.kind !== "workspace_folder" && item.reference.kind !== "managed_folder") {
+    return item.id;
   }
-  return roots.sort((left, right) => left.mutationKey.localeCompare(right.mutationKey));
+  const absolute = path.resolve(item.reference.path);
+  return process.platform === "win32" ? absolute.toLocaleLowerCase("en-US") : absolute;
 }
 
-async function runWithMutationKeys<T>(
-  coordinator: LocalWorkspaceMutationCoordinator,
-  keys: readonly string[],
-  operation: () => Promise<T>,
-  index = 0,
-): Promise<T> {
-  const key = keys[index];
-  return key === undefined
-    ? await operation()
-    : await coordinator.run(key, async () => await runWithMutationKeys(coordinator, keys, operation, index + 1));
-}
-
-async function rollbackStagedDeletions(
-  staged: readonly StagedSpaceReferenceDeletion[],
-  cause: unknown,
-): Promise<never> {
-  try {
-    for (const deletion of [...staged].reverse()) await deletion.rollback();
-  } catch (rollbackError) {
-    throw new AggregateError([cause, rollbackError], "Space reference removal and filesystem rollback both failed.");
-  }
-  throw cause;
-}
-
-function mutationPath(value: string): string {
-  return process.platform === "win32" ? value.toLowerCase() : value;
-}
-
-/** Moves owned content aside before metadata commit so a failed SQLite write can restore it. */
-export async function stageOwnedSpaceReferenceDeletion(
-  item: SpaceReferenceItem,
+export function createSpaceReferenceDeletionFilePort(
   managedFolderRoot: string,
-): Promise<StagedSpaceReferenceDeletion | undefined> {
-  if (item.reference.kind !== "local_file" && item.reference.kind !== "managed_folder") return undefined;
-  const source = path.resolve(item.reference.path);
-  if (item.reference.kind === "managed_folder") {
-    const resolvedRoot = path.resolve(managedFolderRoot);
-    if (path.relative(resolvedRoot, source).length === 0 || !isWithinRoot(resolvedRoot, source)) {
-      throw new PanelHttpError(409, "space_managed_folder_not_found", "软件文件夹不属于当前维护空间。");
+): SpaceReferenceDeletionFilePort {
+  const resolvedManagedFolderRoot = path.resolve(managedFolderRoot);
+
+  return {
+    async prepare({ item, deletionId, targetIndex }) {
+      if (item.reference.kind !== "local_file" && item.reference.kind !== "managed_folder") return undefined;
+      const sourcePath = path.resolve(item.reference.path);
+      if (item.reference.kind === "managed_folder") {
+        assertManagedFolderPath(resolvedManagedFolderRoot, sourcePath);
+      }
+
+      const sourceStat = await fs.lstat(sourcePath).catch((error: unknown) => {
+        if (isNodeError(error, "ENOENT") && item.reference.kind === "local_file") return undefined;
+        if (isNodeError(error, "ENOENT")) {
+          throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
+        }
+        throw error;
+      });
+      if (sourceStat === undefined) return undefined;
+      if (item.reference.kind === "local_file" && !sourceStat.isFile() && !sourceStat.isSymbolicLink()) {
+        throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "这个引用不再是可删除的单个文件。");
+      }
+      if (item.reference.kind === "managed_folder" && !sourceStat.isDirectory()) {
+        throw new PanelHttpError(409, "space_managed_folder_not_found", "软件维护的文件夹已不存在。");
+      }
+      if (item.reference.kind === "managed_folder") {
+        await assertManagedFolderRealPath(resolvedManagedFolderRoot, sourcePath);
+      }
+
+      const stagedPath = stagedSiblingPath(sourcePath, deletionId, targetIndex);
+      await assertStagedPathAvailable(stagedPath);
+      const target: SpaceReferenceDeletionTarget = {
+        referenceId: item.id,
+        kind: item.reference.kind,
+        sourcePath,
+        stagedPath,
+      };
+      return target;
+    },
+
+    async inspect(target) {
+      assertManagedTargetPath(resolvedManagedFolderRoot, target);
+      const [sourceExists, stagedExists] = await Promise.all([
+        exactPathExists(target.sourcePath),
+        exactPathExists(target.stagedPath),
+      ]);
+      return { sourceExists, stagedExists };
+    },
+
+    async stage(target) {
+      assertManagedTargetPath(resolvedManagedFolderRoot, target);
+      await assertStagedPathAvailable(target.stagedPath);
+      await renameWithRetry(target.sourcePath, target.stagedPath);
+      await fsyncDirectory(path.dirname(target.sourcePath));
+    },
+
+    async restore(target) {
+      assertManagedTargetPath(resolvedManagedFolderRoot, target);
+      if (await exactPathExists(target.sourcePath)) {
+        throw new PanelHttpError(
+          409,
+          "space_reference_deletion_restore_conflict",
+          "来源位置已出现新内容，无法覆盖恢复。",
+        );
+      }
+      await renameWithRetry(target.stagedPath, target.sourcePath);
+      await fsyncDirectory(path.dirname(target.sourcePath));
+    },
+
+    async removeStaged(target) {
+      assertManagedTargetPath(resolvedManagedFolderRoot, target);
+      await fs.rm(target.stagedPath, {
+        recursive: target.kind === "managed_folder",
+        force: true,
+      });
+      await fsyncDirectory(path.dirname(target.stagedPath));
+    },
+  };
+}
+
+function assertManagedTargetPath(
+  managedFolderRoot: string,
+  target: SpaceReferenceDeletionTarget,
+): void {
+  if (target.kind !== "managed_folder") return;
+  assertManagedFolderPath(managedFolderRoot, path.resolve(target.sourcePath));
+  if (path.dirname(path.resolve(target.stagedPath)) !== path.dirname(path.resolve(target.sourcePath))) {
+    throw new PanelHttpError(409, "space_managed_folder_not_found", "删除暂存位置不属于软件维护空间。");
+  }
+}
+
+function assertManagedFolderPath(managedFolderRoot: string, sourcePath: string): void {
+  if (path.relative(managedFolderRoot, sourcePath).length === 0 || !isWithinRoot(managedFolderRoot, sourcePath)) {
+    throw new PanelHttpError(409, "space_managed_folder_not_found", "软件文件夹不属于当前维护空间。");
+  }
+}
+
+async function assertManagedFolderRealPath(managedFolderRoot: string, sourcePath: string): Promise<void> {
+  const [realManagedFolderRoot, realSourcePath] = await Promise.all([
+    fs.realpath(managedFolderRoot),
+    fs.realpath(sourcePath),
+  ]);
+  assertManagedFolderPath(realManagedFolderRoot, realSourcePath);
+}
+
+function stagedSiblingPath(sourcePath: string, deletionId: string, targetIndex: number): string {
+  return path.join(
+    path.dirname(sourcePath),
+    `.${path.basename(sourcePath)}.agentarbor-delete-${deletionId}-${targetIndex}`,
+  );
+}
+
+async function assertStagedPathAvailable(stagedPath: string): Promise<void> {
+  if (!await exactPathExists(stagedPath)) return;
+  throw new PanelHttpError(
+    409,
+    "space_reference_deletion_stage_exists",
+    "删除暂存位置已存在，无法安全删除这个引用。",
+  );
+}
+
+async function exactPathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.lstat(targetPath);
+    return true;
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) return false;
+    throw error;
+  }
+}
+
+async function fsyncDirectory(directoryPath: string): Promise<void> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  let primaryFailure: unknown;
+  try {
+    handle = await fs.open(directoryPath, "r");
+    await handle.sync();
+  } catch (error) {
+    if (!isUnsupportedWindowsDirectoryFsync(error)) {
+      primaryFailure = error;
+      throw error;
+    }
+  } finally {
+    try {
+      await handle?.close();
+    } catch (error) {
+      if (primaryFailure === undefined) throw error;
     }
   }
-  const stat = await fs.lstat(source).catch((error: NodeJS.ErrnoException) => {
-    // User-confirmed file deletion is idempotent: if the source is already
-    // gone, only the stale Space metadata still needs to be committed.
-    if (error.code === "ENOENT" && item.reference.kind === "local_file") return undefined;
-    if (error.code === "ENOENT") throw new PanelHttpError(404, "space_reference_source_missing", "来源文件已不存在。");
-    throw error;
-  });
-  if (stat === undefined) return undefined;
-  if (item.reference.kind === "local_file" && !stat.isFile() && !stat.isSymbolicLink()) {
-    throw new PanelHttpError(409, "space_reference_file_delete_unavailable", "这个引用不再是可删除的单个文件。");
+}
+
+function isUnsupportedWindowsDirectoryFsync(error: unknown): boolean {
+  if (process.platform !== "win32") return false;
+  for (const code of WINDOWS_UNSUPPORTED_DIRECTORY_FSYNC_CODES) {
+    if (isNodeError(error, code)) return true;
   }
-  if (item.reference.kind === "managed_folder" && !stat.isDirectory()) {
-    throw new PanelHttpError(409, "space_managed_folder_not_found", "软件维护的文件夹已不存在。");
-  }
-  const staged = path.join(path.dirname(source), `.${path.basename(source)}.agentarbor-delete-${randomUUID()}`);
-  await fs.rename(source, staged);
-  return {
-    commit: async () => await fs.rm(staged, { recursive: true, force: true }),
-    rollback: async () => await fs.rename(staged, source),
-  };
+  return false;
 }

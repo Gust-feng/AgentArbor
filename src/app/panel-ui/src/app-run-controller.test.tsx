@@ -4,7 +4,14 @@ import { createInitialAppState, type AppState } from "./app-state";
 import { createAppRunController } from "./app-run-controller";
 import { createAppSidebarConversationController } from "./app-sidebar-conversation-controller";
 import type { ContextAttachment } from "./contracts/context";
-import type { BasicAgentRun, BasicAgentRunView } from "./contracts/run";
+import type { LegacyConversationScreen } from "./app-screen";
+import type { BasicAgentRun, BasicAgentRunView, TranscriptNode } from "./contracts/run";
+import {
+  getTranscriptCache,
+  resetTranscriptCache,
+  transcriptNodesCacheForConversation,
+  updateTranscriptRunCache,
+} from "./panel-ui-transcript-store";
 
 const statisticsMocks = vi.hoisted(() => ({
   invalidateUsageStatistics: vi.fn(),
@@ -54,7 +61,7 @@ describe("ordinary run cancellation", () => {
     const controller = createAppRunController({
       app,
       setApp: dispatch((next) => { app = next; }, () => app),
-      setScreen: () => undefined,
+      setLegacyConversationScreen: () => undefined,
       setGoal: () => undefined,
       attachments: [],
       setAttachments: () => undefined,
@@ -69,8 +76,10 @@ describe("ordinary run cancellation", () => {
       mountedRef: { current: true },
       pollTimer: { current: undefined },
       streamRef: { current: stream as EventSource },
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: running.runId },
       viewEpochRef: { current: 1 },
+      submissionAttemptRef: { current: undefined },
       conversationLoadAbortRef: { current: undefined },
       setCancellingRunId: dispatch<string | undefined>(
         (next) => { cancellingRunId = next; },
@@ -193,7 +202,7 @@ describe("conversation switching", () => {
     const controller = createAppRunController({
       app,
       setApp: dispatch((next) => { app = next; }, () => app),
-      setScreen: () => undefined,
+      setLegacyConversationScreen: () => undefined,
       setGoal: () => undefined,
       attachments: [],
       setAttachments: () => undefined,
@@ -208,8 +217,10 @@ describe("conversation switching", () => {
       mountedRef: { current: true },
       pollTimer: { current: undefined },
       streamRef: { current: undefined },
+      fallbackPollRef: { current: undefined },
       activeRunIdRef: { current: undefined },
       viewEpochRef: { current: 0 },
+      submissionAttemptRef: { current: undefined },
       conversationLoadAbortRef: { current: undefined },
       setCancellingRunId: () => undefined,
     });
@@ -224,11 +235,134 @@ describe("conversation switching", () => {
     await expect(second).resolves.toBe(true);
     expect(app.conversation?.conversationId).toBe("conversation-second");
   });
+
+  it("retries the same conversation after its first load fails", async () => {
+    let attempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      attempts += 1;
+      return attempts === 1
+        ? jsonResponse({ error: { code: "projection_unavailable", message: "暂时不可用" } }, 503)
+        : jsonResponse({ conversation: emptyConversation("conversation-retry-load") });
+    }));
+    let app = createInitialAppState();
+    const controller = createAppRunController({
+      app,
+      setApp: dispatch((next) => { app = next; }, () => app),
+      setLegacyConversationScreen: () => undefined,
+      setGoal: () => undefined,
+      attachments: [],
+      setAttachments: () => undefined,
+      goal: "",
+      aiMode: "openai-responses",
+      composerReasoningEffort: "",
+      toolConfirmationPolicy: "full_access",
+      selectedModelId: "model-1",
+      selectedModelSupportsReasoningEffort: false,
+      confirmationBusy: false,
+      setConfirmationBusy: () => undefined,
+      mountedRef: { current: true },
+      pollTimer: { current: undefined },
+      streamRef: { current: undefined },
+      fallbackPollRef: { current: undefined },
+      activeRunIdRef: { current: undefined },
+      viewEpochRef: { current: 0 },
+      submissionAttemptRef: { current: undefined },
+      conversationLoadAbortRef: { current: undefined },
+      setCancellingRunId: () => undefined,
+    });
+
+    await expect(controller.loadConversation("conversation-retry-load")).resolves.toBe(false);
+    await expect(controller.loadConversation("conversation-retry-load")).resolves.toBe(true);
+
+    expect(attempts).toBe(2);
+    expect(app.conversation?.conversationId).toBe("conversation-retry-load");
+    expect(app.error).toBeUndefined();
+  });
 });
 
 describe("new conversation submission", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    resetTranscriptCache();
+  });
+
+  it("does not clear the reopened conversation cache when a stale create response arrives", async () => {
+    const completed = run("completed");
+    const previousConversation = conversation(runView(completed));
+    const freshRun = {
+      ...completed,
+      runId: "run-created-late",
+      conversationId: "conversation-created-late",
+      title: "Created late",
+      goalSummary: "Create in background",
+    };
+    const freshConversation = {
+      ...conversation(runView(freshRun)),
+      conversationId: "conversation-created-late",
+      title: "Create in background",
+      latestRunId: freshRun.runId,
+    };
+    let resolveCreate!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/conversations" && init?.method === "POST") {
+        return new Promise<Response>((resolve) => { resolveCreate = resolve; });
+      }
+      if (path === "/api/conversations/conversation-1") {
+        return Promise.resolve(jsonResponse({ conversation: previousConversation }));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }));
+    const cachedNode: TranscriptNode = {
+      nodeId: "cached-tool-node",
+      runId: completed.runId,
+      sequence: 1,
+      eventType: "tool.completed",
+      kind: "tool",
+      phase: "completed",
+      title: "Cached tool activity",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      refs: [],
+    };
+    updateTranscriptRunCache(previousConversation.conversationId, {
+      nodesByRunId: { [completed.runId]: [cachedNode] },
+    });
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: previousConversation,
+      run: completed,
+      workView: runView(completed).workView,
+    };
+    let goal = "Create in background";
+    let attachments: readonly ContextAttachment[] = [];
+    const viewEpochRef = { current: 0 };
+    const controller = submissionController({
+      readApp: () => app,
+      writeApp: (next) => { app = next; },
+      readGoal: () => goal,
+      writeGoal: (next) => { goal = next; },
+      readAttachments: () => attachments,
+      writeAttachments: (next) => { attachments = next; },
+      writeLegacyConversationScreen: () => undefined,
+      activeRunIdRef: { current: completed.runId },
+      viewEpochRef,
+    });
+
+    const submitting = controller.startNewConversation();
+    await expect(controller.loadConversation(previousConversation.conversationId)).resolves.toBe(true);
+    expect(transcriptNodesCacheForConversation(
+      getTranscriptCache(),
+      previousConversation.conversationId,
+    )[completed.runId]).toEqual([cachedNode]);
+
+    resolveCreate(jsonResponse({ conversation: freshConversation, run: freshRun }));
+
+    await expect(submitting).resolves.toBe(false);
+    expect(app.conversation?.conversationId).toBe(previousConversation.conversationId);
+    expect(transcriptNodesCacheForConversation(
+      getTranscriptCache(),
+      previousConversation.conversationId,
+    )[completed.runId]).toEqual([cachedNode]);
   });
 
   it("creates a new conversation even when a completed conversation is still projected", async () => {
@@ -268,7 +402,7 @@ describe("new conversation submission", () => {
     };
     let goal = "Fresh goal";
     let attachments: readonly ContextAttachment[] = [];
-    let screen: "chat-empty" | "chat-active" = "chat-empty";
+    let legacyScreen: LegacyConversationScreen = "chat-empty";
     const activeRunIdRef = { current: completed.runId as string | undefined };
     const controller = submissionController({
       readApp: () => app,
@@ -277,7 +411,7 @@ describe("new conversation submission", () => {
       writeGoal: (next) => { goal = next; },
       readAttachments: () => attachments,
       writeAttachments: (next) => { attachments = next; },
-      writeScreen: (next) => { screen = next; },
+      writeLegacyConversationScreen: (next) => { legacyScreen = next; },
       activeRunIdRef,
     });
 
@@ -289,7 +423,64 @@ describe("new conversation submission", () => {
     expect(app.run?.runId).toBe("run-new");
     expect(activeRunIdRef.current).toBe("run-new");
     expect(goal).toBe("");
-    expect(screen).toBe("chat-active");
+    expect(legacyScreen).toBe("chat-active");
+  });
+
+  it("keeps a created run visible when reconciliation reads fail", async () => {
+    const completed = run("completed");
+    const freshRun = {
+      ...completed,
+      runId: "run-created",
+      conversationId: "conversation-created",
+      title: "Created run",
+      goalSummary: "Keep this run",
+    };
+    const createdConversation = {
+      conversationId: "conversation-created",
+      title: "Keep this run",
+      latestRunId: freshRun.runId,
+      turns: [],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/conversations" && init?.method === "POST") {
+        return jsonResponse({ conversation: createdConversation, run: freshRun });
+      }
+      if (path === "/api/conversations") {
+        return jsonResponse({ conversations: [{ conversationId: createdConversation.conversationId, title: createdConversation.title }] });
+      }
+      if (path === "/api/conversations/conversation-created" || path === "/api/basic-agent/runs/run-created/view") {
+        throw new Error("read model temporarily unavailable");
+      }
+      throw new Error(`unexpected request: ${path}`);
+    }));
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: conversation(runView(completed)),
+      run: completed,
+      workView: runView(completed).workView,
+    };
+    let goal = "Keep this run";
+    let attachments: readonly ContextAttachment[] = [];
+    let legacyScreen: LegacyConversationScreen = "chat-empty";
+    const controller = submissionController({
+      readApp: () => app,
+      writeApp: (next) => { app = next; },
+      readGoal: () => goal,
+      writeGoal: (next) => { goal = next; },
+      readAttachments: () => attachments,
+      writeAttachments: (next) => { attachments = next; },
+      writeLegacyConversationScreen: (next) => { legacyScreen = next; },
+      activeRunIdRef: { current: completed.runId },
+    });
+
+    await expect(controller.startNewConversation()).resolves.toBe(true);
+
+    expect(app.conversation?.conversationId).toBe("conversation-created");
+    expect(app.run?.runId).toBe("run-created");
+    expect(app.busy).toBe(false);
+    expect(app.error).toBeUndefined();
+    expect(legacyScreen).toBe("chat-active");
   });
 
   it("keeps a failed fresh submission on an empty entry and restores its input", async () => {
@@ -314,7 +505,7 @@ describe("new conversation submission", () => {
       readonlyPreviewMeta: { available: false },
       status: "ready",
     }];
-    let screen: "chat-empty" | "chat-active" = "chat-empty";
+    let legacyScreen: LegacyConversationScreen = "chat-empty";
     const controller = submissionController({
       readApp: () => app,
       writeApp: (next) => { app = next; },
@@ -322,7 +513,7 @@ describe("new conversation submission", () => {
       writeGoal: (next) => { goal = next; },
       readAttachments: () => attachments,
       writeAttachments: (next) => { attachments = next; },
-      writeScreen: (next) => { screen = next; },
+      writeLegacyConversationScreen: (next) => { legacyScreen = next; },
       activeRunIdRef: { current: completed.runId },
     });
 
@@ -334,7 +525,130 @@ describe("new conversation submission", () => {
     expect(app.error).toBe("network unavailable");
     expect(goal).toBe("Retry this");
     expect(attachments.map((attachment) => attachment.attachmentId)).toEqual(["attachment-1"]);
-    expect(screen).toBe("chat-empty");
+    expect(legacyScreen).toBe("chat-empty");
+  });
+
+  it("reuses the submission identity when the create response is lost", async () => {
+    const completed = run("completed");
+    const freshRun = {
+      ...completed,
+      runId: "run-retry",
+      conversationId: "conversation-retry",
+      title: "Retry run",
+      goalSummary: "Retry goal",
+    };
+    const freshConversation = {
+      ...conversation(runView(freshRun)),
+      conversationId: "conversation-retry",
+      title: "Retry goal",
+      latestRunId: freshRun.runId,
+    };
+    let submissionPosts = 0;
+    const submissionIds: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/conversations" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { readonly submissionId: string };
+        submissionIds.push(body.submissionId);
+        submissionPosts += 1;
+        if (submissionPosts === 1) throw new Error("response lost");
+        return jsonResponse({ conversation: freshConversation, run: freshRun });
+      }
+      if (path === "/api/conversations/conversation-retry") {
+        return jsonResponse({ conversation: freshConversation });
+      }
+      if (path === "/api/conversations") {
+        return jsonResponse({ conversations: [{ conversationId: "conversation-retry", title: "Retry goal" }] });
+      }
+      return jsonResponse({}, 404);
+    }));
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: conversation(runView(completed)),
+      run: completed,
+      workView: runView(completed).workView,
+    };
+    let goal = "Retry goal";
+    let attachments: readonly ContextAttachment[] = [];
+    let screen: "chat-empty" | "chat-active" = "chat-empty";
+    const submissionAttemptRef = { current: undefined as { readonly key: string; readonly id: string } | undefined };
+    const controller = submissionController({
+      readApp: () => app,
+      writeApp: (next) => { app = next; },
+      readGoal: () => goal,
+      writeGoal: (next) => { goal = next; },
+      readAttachments: () => attachments,
+      writeAttachments: (next) => { attachments = next; },
+      writeLegacyConversationScreen: (next) => { screen = next; },
+      activeRunIdRef: { current: completed.runId },
+      submissionAttemptRef,
+    });
+
+    await expect(controller.startNewConversation()).resolves.toBe(false);
+    await expect(controller.startNewConversation()).resolves.toBe(true);
+
+    expect(submissionIds).toHaveLength(2);
+    expect(submissionIds[1]).toBe(submissionIds[0]);
+    expect(submissionAttemptRef.current).toBeUndefined();
+    expect(app.conversation?.conversationId).toBe("conversation-retry");
+  });
+
+  it("refreshes the owning Space read-model after creating a space-owned conversation", async () => {
+    const completed = run("completed");
+    const freshRun = {
+      ...completed,
+      runId: "run-space",
+      conversationId: "conversation-space",
+      title: "Space run",
+      goalSummary: "Space goal",
+    };
+    const freshConversation = {
+      ...conversation(runView(freshRun)),
+      conversationId: "conversation-space",
+      title: "Space goal",
+      latestRunId: freshRun.runId,
+      owner: { kind: "space" as const, id: "space-study" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === "/api/conversations" && init?.method === "POST") {
+        return jsonResponse({ conversation: freshConversation, run: freshRun });
+      }
+      if (path === "/api/conversations/conversation-space") {
+        return jsonResponse({ conversation: freshConversation });
+      }
+      if (path === "/api/conversations") {
+        return jsonResponse({ conversations: [{ conversationId: "conversation-space", title: "Space goal", owner: freshConversation.owner }] });
+      }
+      return jsonResponse({}, 404);
+    }));
+    let app: AppState = {
+      ...createInitialAppState(),
+      conversation: conversation(runView(completed)),
+      run: completed,
+      workView: runView(completed).workView,
+    };
+    let goal = "Space goal";
+    let attachments: readonly ContextAttachment[] = [];
+    const refreshSpaceConversations = vi.fn().mockResolvedValue(undefined);
+    const controller = submissionController({
+      readApp: () => app,
+      writeApp: (next) => { app = next; },
+      readGoal: () => goal,
+      writeGoal: (next) => { goal = next; },
+      readAttachments: () => attachments,
+      writeAttachments: (next) => { attachments = next; },
+      writeLegacyConversationScreen: () => undefined,
+      activeRunIdRef: { current: completed.runId },
+      refreshSpaceConversations,
+    });
+
+    await expect(controller.startNewConversation({ kind: "space", id: "space-study" })).resolves.toBe(true);
+
+    expect(app.conversation?.conversationId).toBe("conversation-space");
+    await vi.waitFor(() => {
+      expect(refreshSpaceConversations).toHaveBeenCalledWith("space-study");
+    });
   });
 });
 
@@ -369,11 +683,10 @@ function sidebarController(
     mutationConversationIdsRef,
     setMutationConversationIds: dispatch(writePending),
     resetChat,
-    setSelectedWorkspaceDirectory: () => undefined,
     setInputCloseSignal: () => undefined,
     setGoal: () => undefined,
     setAttachments: () => undefined,
-    setScreen: () => undefined,
+    setLegacyConversationScreen: () => undefined,
   });
 }
 
@@ -384,13 +697,16 @@ function submissionController(input: {
   readonly writeGoal: (goal: string) => void;
   readonly readAttachments: () => readonly ContextAttachment[];
   readonly writeAttachments: (attachments: readonly ContextAttachment[]) => void;
-  readonly writeScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly writeLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
+  readonly submissionAttemptRef?: React.MutableRefObject<{ readonly key: string; readonly id: string } | undefined>;
+  readonly viewEpochRef?: React.MutableRefObject<number>;
+  readonly refreshSpaceConversations?: (spaceId: string) => void | Promise<void>;
 }) {
   return createAppRunController({
     app: input.readApp(),
     setApp: dispatch(input.writeApp, input.readApp),
-    setScreen: input.writeScreen,
+    setLegacyConversationScreen: input.writeLegacyConversationScreen,
     setGoal: input.writeGoal,
     attachments: input.readAttachments(),
     setAttachments: dispatch(input.writeAttachments, input.readAttachments),
@@ -405,10 +721,13 @@ function submissionController(input: {
     mountedRef: { current: true },
     pollTimer: { current: undefined },
     streamRef: { current: undefined },
+    fallbackPollRef: { current: undefined },
     activeRunIdRef: input.activeRunIdRef,
-    viewEpochRef: { current: 0 },
+    viewEpochRef: input.viewEpochRef ?? { current: 0 },
+    submissionAttemptRef: input.submissionAttemptRef ?? { current: undefined },
     conversationLoadAbortRef: { current: undefined },
     setCancellingRunId: () => undefined,
+    refreshSpaceConversations: input.refreshSpaceConversations,
   });
 }
 

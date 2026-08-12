@@ -9,6 +9,10 @@
   --cap-trunk: color-mix(in oklch, var(--fg) 16%, transparent);
 }
 
+.developer-prompt-settings {
+  margin-bottom: var(--cap-gap);
+}
+
 .cap-node {
   position: relative;
   display: grid;

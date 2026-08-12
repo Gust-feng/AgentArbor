@@ -113,6 +113,55 @@ test("agent_call fails closed when the discovered definition body changes", asyn
   );
 });
 
+test("agent_call restores the v0.3.2 built-in frozen identity without reviving legacy controls", async () => {
+  const root = {
+    rootPath: path.resolve("src/app/sub-agents/builtin"),
+    sourceKind: "builtin" as const,
+    sourceRootId: "builtin",
+    precedence: 0,
+  };
+  const discovered = await new SubAgentRegistry({ roots: [root] }).getByName("code-expert");
+  assert.ok(discovered);
+  const legacyContentHash = "sha256:872dbbc2a479f9aee8dce492053042b0b8541495bdd84ae3d144a89015083be2";
+  const legacyBodyHash = "sha256:dde0f97736bfb9330705995a5a600c2bce1dc5f7531a6173abb02ee4f7b639a7";
+  assert.equal(discovered.contentHash, legacyContentHash);
+  assert.equal(discovered.bodyHash, legacyBodyHash);
+  assert.equal(discovered.validationWarnings, undefined);
+  const legacyCatalog = [{
+    id: discovered.id,
+    name: discovered.name,
+    description: discovered.description,
+    category: discovered.category,
+    sourceKind: discovered.sourceKind,
+    sourceRootId: discovered.sourceRootId,
+    sourcePrecedence: discovered.sourcePrecedence,
+    enabled: true,
+    version: discovered.version,
+    whenToUse: discovered.whenToUse,
+    whenNotToUse: discovered.whenNotToUse,
+    allowedTools: discovered.allowedTools,
+    contentHash: legacyContentHash,
+    bodyHash: legacyBodyHash,
+    maxSteps: 50,
+  }];
+  const [call] = await createSubAgentAgentTools({
+    registry: new SubAgentRegistry({ roots: [root], catalog: legacyCatalog }),
+    parentAllowedTools: [],
+    executableTools: [],
+    exposedToolNames: [CALL_SUB_AGENT_TOOL_NAME],
+    dynamicSpawnAvailable: true,
+  });
+
+  const invocation = await call?.resolve({
+    sub_agent_name: "code-expert",
+    task: "Check the frozen identity",
+  });
+
+  assert.ok(invocation);
+  assert.equal("model" in invocation, false);
+  assert.equal("maxSteps" in invocation, false);
+});
+
 test("agent_call is absent when the frozen catalog has no enabled specialist", async (t) => {
   const root = await subAgentRoot(t, [{
     name: "disabled-expert",

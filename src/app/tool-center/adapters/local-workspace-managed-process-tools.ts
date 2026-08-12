@@ -1,6 +1,6 @@
 import { asRecord } from "../../../kernel/values/index.js";
 import path from "node:path";
-import type { ToolExecutor } from "../../../domain/tools/index.js";
+import type { ToolExecutionContext, ToolExecutor } from "../../../domain/tools/index.js";
 import type { ProcessTerminator, ProcessRecord } from "../../runtime-guard/index.js";
 import {
   type LocalCommandProcessRegistry,
@@ -43,20 +43,20 @@ function createInspectProcessTool(
         additionalProperties: false,
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
       if (processRegistry?.get === undefined || processRegistry.listAll === undefined) {
         throw new Error("process_inspect requires the Host process registry.");
       }
       const processId = stringValue(asRecord(input).processId);
       if (processId !== undefined) {
         const record = processRegistry.get(processId);
-        if (record === undefined || !isInsideWorkspace(rootDirectory, record.cwd)) {
+        if (record === undefined || !isVisibleProcess(rootDirectory, record, context)) {
           return { found: false, processId };
         }
         return { found: true, ...processFacts(record) };
       }
       const processes = processRegistry.listAll()
-        .filter((record) => isInsideWorkspace(rootDirectory, record.cwd))
+        .filter((record) => isVisibleProcess(rootDirectory, record, context))
         .map(processFacts);
       return { found: true, processes };
     },
@@ -87,7 +87,7 @@ function createStopProcessTool(
         additionalProperties: false,
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
       if (processRegistry?.get === undefined || processRegistry.stopOwned === undefined || processTerminator === undefined) {
         throw new Error("process_stop requires the Host process registry and process terminator.");
       }
@@ -96,7 +96,7 @@ function createStopProcessTool(
         throw new Error("process_stop processId must be a non-empty string.");
       }
       const record = processRegistry.get(processId);
-      if (record === undefined || !isInsideWorkspace(rootDirectory, record.cwd)) {
+      if (record === undefined || !isVisibleProcess(rootDirectory, record, context)) {
         return { processId, stopStatus: "not_found" };
       }
       const result = await processRegistry.stopOwned(processId, processTerminator);
@@ -129,7 +129,12 @@ function processFacts(record: ProcessRecord): Record<string, unknown> {
     processId: record.processId,
     state: record.status,
     lifetime: record.lifetime,
+    ...(record.conversationId === undefined ? {} : { conversationId: record.conversationId }),
+    ...(record.spaceId === undefined ? {} : { spaceId: record.spaceId }),
+    ...(record.referenceId === undefined ? {} : { referenceId: record.referenceId }),
     ...(record.runId === undefined ? {} : { runId: record.runId }),
+    ...(record.authorizationMode === undefined ? {} : { authorizationMode: record.authorizationMode }),
+    ...(record.permissionState === undefined ? {} : { permissionState: record.permissionState }),
     ...(record.pid === undefined ? {} : { pid: record.pid }),
     commandLine: record.commandLine,
     cwd: record.cwd,
@@ -143,6 +148,20 @@ function processFacts(record: ProcessRecord): Record<string, unknown> {
     ports: record.ports,
     facts: record.facts,
   };
+}
+
+function isVisibleProcess(
+  rootDirectory: string,
+  record: ProcessRecord,
+  context: ToolExecutionContext,
+): boolean {
+  if (context.conversationId !== undefined) {
+    return record.conversationId === context.conversationId;
+  }
+  if (context.resourceScope?.ownerKind === "space") {
+    return record.spaceId === context.resourceScope.ownerId;
+  }
+  return isInsideWorkspace(rootDirectory, record.cwd);
 }
 
 function isInsideWorkspace(rootDirectory: string, candidate: string): boolean {

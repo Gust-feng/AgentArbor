@@ -1,11 +1,12 @@
 import type React from "react";
 import { ApiError, getJson } from "./api";
 import { transcriptNodesFrom } from "./app-run-projection";
-import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
+import { shouldKeepRefreshing, stopLiveUpdates } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
+import type { LegacyConversationScreen } from "./app-screen";
 import { liveRunForObservedReplay } from "./app-task-submit-flow";
 import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-read-model/transcript/panel-transcript-cache";
-import { updateTranscriptRunCache } from "./panel-ui-transcript-store";
+import { resetTranscriptCache, updateTranscriptRunCache } from "./panel-ui-transcript-store";
 import type { ToolCallResult } from "../../../domain/tools";
 import type { Conversation } from "./contracts/conversation";
 import type { TranscriptNode } from "./contracts/run";
@@ -22,12 +23,13 @@ const HISTORICAL_RUN_LOAD_CONCURRENCY = 4;
 export type ConversationSessionControllerOptions = {
   readonly app: AppState;
   readonly setApp: React.Dispatch<React.SetStateAction<AppState>>;
-  readonly setScreen: (screen: "chat-empty" | "chat-active") => void;
+  readonly setLegacyConversationScreen: (screen: LegacyConversationScreen) => void;
   readonly setGoal: (goal: string) => void;
   readonly setAttachments: React.Dispatch<React.SetStateAction<readonly import("./contracts/context").ContextAttachment[]>>;
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly pollTimer: React.MutableRefObject<number | undefined>;
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
+  readonly fallbackPollRef: React.MutableRefObject<AbortController | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
   readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
@@ -58,8 +60,7 @@ export async function loadConversationSession(
   }
   const epoch = options.viewEpochRef.current + 1;
   options.viewEpochRef.current = epoch;
-  stopPolling(options.pollTimer);
-  stopStream(options.streamRef);
+  stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
   let response: { readonly conversation: Conversation };
   try {
     response = await getJson<{ readonly conversation: Conversation }>(
@@ -67,6 +68,9 @@ export async function loadConversationSession(
       { signal: abortController.signal }
     );
   } catch (error) {
+    if (options.conversationLoadAbortRef.current === abortController) {
+      options.conversationLoadAbortRef.current = undefined;
+    }
     if (abortController.signal.aborted) return false;
     if (isMissingConversationError(error)) {
       resetConversationSession(options);
@@ -95,6 +99,10 @@ export async function loadConversationSession(
   const capabilityResolution = currentRun?.capabilityResolution;
   const transcriptNodes = transcriptNodesFrom(workView);
   if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return false;
+  const previousConversationId = options.app.conversation?.conversationId;
+  if (previousConversationId !== undefined && previousConversationId !== response.conversation.conversationId) {
+    resetTranscriptCache(previousConversationId);
+  }
 
   // ── Phase 1: Switch to the new conversation immediately ──────────────
   //
@@ -132,7 +140,7 @@ export async function loadConversationSession(
       : undefined,
     error: undefined,
   }));
-  options.setScreen("chat-active");
+  options.setLegacyConversationScreen("chat-active");
   options.setAttachments([]);
   if (run !== undefined && shouldKeepRefreshing(run.status)) {
     options.startLiveUpdates({
@@ -152,7 +160,7 @@ export async function loadConversationSession(
   //
   // 2. EXTERNAL cache — historical nodes are written to a module-level
   //    cache (panel-ui-transcript-store) instead of app state.  Only
-  //    The Redesign transcript subscribes via useSyncExternalStore, so the
+  //    ConversationTranscript subscribes via useSyncExternalStore, so the
   //    rest of the workbench does
   //    NOT re-render.  The historical nodes carry no data-entering
   //    attribute, so no CSS animation fires — the user perceives a
@@ -164,24 +172,51 @@ export async function loadConversationSession(
   const historicalRunIds = runIdsForTurnWindow(response.conversation.turns, initialVisibleWindow.startIndex)
     .filter((id) => id !== latestRunId);
   if (historicalRunIds.length > 0) {
-    const entries = await loadHistoricalTranscriptRunEntries(historicalRunIds, abortController.signal);
-    if (options.conversationLoadAbortRef.current === abortController) {
-      options.conversationLoadAbortRef.current = undefined;
-    }
-    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return false;
-    const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
-    const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
-    for (const entry of entries) {
-      nodesByRunId[entry.runId] = entry.nodes;
-      toolResultsByRunId[entry.runId] = entry.toolResults;
-    }
-    updateTranscriptRunCache(response.conversation.conversationId, { nodesByRunId, toolResultsByRunId });
+    // Historical runs fill the external transcript cache without blocking the
+    // navigation contract. A slow or failed backfill must not turn an already
+    // active conversation into a failed open operation.
+    void hydrateHistoricalTranscript({
+      conversationId: response.conversation.conversationId,
+      runIds: historicalRunIds,
+      epoch,
+      abortController,
+      options,
+    });
   } else {
     if (options.conversationLoadAbortRef.current === abortController) {
       options.conversationLoadAbortRef.current = undefined;
     }
   }
   return true;
+}
+
+async function hydrateHistoricalTranscript(input: {
+  readonly conversationId: string;
+  readonly runIds: readonly string[];
+  readonly epoch: number;
+  readonly abortController: AbortController;
+  readonly options: ConversationSessionControllerOptions;
+}): Promise<void> {
+  const { conversationId, runIds, epoch, abortController, options } = input;
+  try {
+    const entries = await loadHistoricalTranscriptRunEntries(runIds, abortController.signal);
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return;
+    const nodesByRunId: Record<string, readonly TranscriptNode[]> = {};
+    const toolResultsByRunId: Record<string, readonly ToolCallResult[]> = {};
+    for (const entry of entries) {
+      nodesByRunId[entry.runId] = entry.nodes;
+      toolResultsByRunId[entry.runId] = entry.toolResults;
+    }
+    updateTranscriptRunCache(conversationId, { nodesByRunId, toolResultsByRunId });
+  } catch {
+    // The conversation is already active. Historical backfill is best effort;
+    // a later open or transcript refresh can retry it without changing the
+    // visible navigation state.
+  } finally {
+    if (options.conversationLoadAbortRef.current === abortController) {
+      options.conversationLoadAbortRef.current = undefined;
+    }
+  }
 }
 
 function isMissingConversationError(error: unknown): boolean {
@@ -191,12 +226,16 @@ function isMissingConversationError(error: unknown): boolean {
 }
 
 export function resetConversationSession(options: ConversationSessionControllerOptions): void {
+  const conversationId = options.app.conversation?.conversationId;
+  if (conversationId !== undefined) {
+    resetTranscriptCache(conversationId);
+  }
   options.conversationLoadAbortRef.current?.abort();
   options.conversationLoadAbortRef.current = undefined;
   options.viewEpochRef.current += 1;
-  stopLiveUpdates(options.pollTimer, options.streamRef);
+  stopLiveUpdates(options.pollTimer, options.streamRef, options.fallbackPollRef);
   options.activeRunIdRef.current = undefined;
-  options.setScreen("chat-empty");
+  options.setLegacyConversationScreen("chat-empty");
   options.setGoal("");
   options.setAttachments([]);
   options.setApp((previous) => ({

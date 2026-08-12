@@ -455,6 +455,29 @@ test("knowledge list filters by kind, space, theme and title with replayable cur
     [otherSpaceNote.id, otherNote.id, note.id]);
 });
 
+test("knowledge list includes uncollected personal notes with space filter and cursors", async (t) => {
+  const { feature } = await fixture(t, { spaceExists: async () => true });
+  const first = await feature.commands.createNote({ spaceId: "space-one", title: "未收藏笔记A", bodyMarkdown: "正文A" });
+  const second = await feature.commands.createNote({ spaceId: "space-two", title: "未收藏笔记B" });
+  await feature.commands.execute({ type: "knowledge.collect", page: { refId: "legacy-material", kind: "material", collectedAt: 1 } });
+
+  const all = await feature.queries.list({ kind: "note" });
+  assert.equal(all.pages.length, 2);
+  assert.ok(all.pages.some((page) => page.refId === first.id && page.title === "未收藏笔记A" && page.spaceId === "space-one"));
+  assert.ok(all.pages.some((page) => page.refId === second.id && page.title === "未收藏笔记B" && page.spaceId === "space-two"));
+
+  const scoped = await feature.queries.list({ kind: "note", spaceId: "space-one" });
+  assert.deepEqual(scoped.pages.map((page) => page.refId), [first.id]);
+  assert.deepEqual((await feature.queries.list({ kind: "note", spaceId: "space-missing" })).pages, []);
+
+  const firstPage = await feature.queries.list({ kind: "note", limit: 1 });
+  assert.equal(firstPage.pages.length, 1);
+  const secondPage = await feature.queries.list({ kind: "note", limit: 1, cursor: firstPage.nextInput?.cursor });
+  assert.equal(secondPage.pages.length, 1);
+  const refIds = [...firstPage.pages.map((page) => page.refId), ...secondPage.pages.map((page) => page.refId)];
+  assert.deepEqual(new Set(refIds), new Set([first.id, second.id]));
+});
+
 test("change records persist append-only and support filtering and cursor pagination", async (t) => {
   const { database, feature } = await fixture(t);
   const { theme } = await feature.commands.createTheme({ name: "主题A", actor: { kind: "agent" } });

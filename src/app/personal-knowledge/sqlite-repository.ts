@@ -311,20 +311,20 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
             ...(value.assetJson === null ? {} : { asset: JSON.parse(String(value.assetJson)) as Record<string, unknown> }),
           };
         });
-        const noteTitles = new Map<string, string>();
-        for (const row of database.connection.prepare(
-          "SELECT id, title FROM personal_notes",
-        ).all()) {
-          const value = row as Record<string, SQLInputValue>;
-          noteTitles.set(String(value.id), String(value.title));
-        }
-        const pageSpaceIds = new Map<string, string>();
-        for (const row of database.connection.prepare(
-          "SELECT id, space_id AS spaceId FROM personal_notes",
-        ).all()) {
-          const value = row as Record<string, SQLInputValue>;
-          pageSpaceIds.set(String(value.id), String(value.spaceId));
-        }
+        const noteRows = database.connection.prepare(
+          "SELECT id, title, space_id AS spaceId, created_at AS createdAt FROM personal_notes",
+        ).all() as Record<string, SQLInputValue>[];
+        const noteTitles = new Map(noteRows.map((row) => [String(row.id), String(row.title)]));
+        const pageSpaceIds = new Map(noteRows.map((row) => [String(row.id), String(row.spaceId)]));
+        // 未收藏的 UI 笔记也属于 Agent 可枚举的个人笔记；已收藏的以知识页为准，避免重复。
+        const collectedNoteRefIds = new Set(pages.filter((page) => page.kind === "note").map((page) => page.refId));
+        const noteCandidates = noteRows
+          .filter((row) => !collectedNoteRefIds.has(String(row.id)))
+          .map((row) => ({
+            refId: String(row.id),
+            kind: "note" as const,
+            collectedAt: Number(row.createdAt),
+          }));
         const themeAssignments = new Map<string, Set<string>>();
         for (const row of database.connection.prepare(
           "SELECT ref_id AS refId, theme_id AS themeId FROM knowledge_theme_assignments",
@@ -341,7 +341,7 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
               : undefined;
         const matchesQuery = (title: string | undefined): boolean =>
           query === undefined || query.length === 0 || title?.toLocaleLowerCase().includes(query.toLocaleLowerCase()) === true;
-        const candidates = pages
+        const candidates = [...pages, ...noteCandidates]
           .filter((page) => kind === undefined || page.kind === kind)
           .filter((page) => spaceId === undefined || (page.kind === "note" && pageSpaceIds.get(page.refId) === spaceId))
           .filter((page) => themeId === undefined || themeAssignments.get(themeId)?.has(page.refId) === true)
@@ -355,6 +355,7 @@ export function createSqlitePersonalKnowledgeRepository(database: SqliteRuntimeD
           refId: page.refId,
           kind: page.kind,
           ...(titleOf(page) === undefined ? {} : { title: titleOf(page) }),
+          ...(page.kind === "note" ? { spaceId: pageSpaceIds.get(page.refId) } : {}),
           collectedAt: page.collectedAt,
         }));
         const last = sliced[sliced.length - 1];

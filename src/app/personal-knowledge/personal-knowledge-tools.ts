@@ -189,7 +189,7 @@ export function createKnowledgeCollectTool(options: PersonalKnowledgeToolOptions
 export function createKnowledgeListTool(options: PersonalKnowledgeToolOptions): ToolExecutor {
   return tool({
     name: "KnowledgeList",
-    description: "List the Personal Knowledge overview the Agent can operate on: knowledge pages (notes, collected Space references and legacy materials), themes and theme assignments. Results use stable refIds and themeIds; when the result is capped, a replayable nextInput is returned.",
+    description: "List the Personal Knowledge overview the Agent can operate on: all personal notes (collected or not), collected Space references and legacy materials, plus themes and theme assignments. Results use stable refIds and themeIds; when the result is capped, a replayable nextInput is returned.",
     metadata: readMetadata,
     inputSchema: schema({
       query: { type: "string", description: "Optional title text filter." },
@@ -207,7 +207,7 @@ export function createKnowledgeListTool(options: PersonalKnowledgeToolOptions): 
       const themeId = optionalString(record.themeId);
       const limit = optionalInteger(record.limit);
       const cursor = optionalString(record.cursor);
-      if (query === null || kind === undefined || spaceId === null || themeId === null || limit === null || cursor === null) {
+      if (query === null || kind === null || spaceId === null || themeId === null || limit === null || cursor === null) {
         return invalid("query, spaceId, themeId, limit and cursor must be omitted or valid values; kind must be note, space_reference or material.");
       }
       return resultFor(
@@ -446,8 +446,10 @@ function knowledgePageKind(value: unknown): "note" | "space_reference" | undefin
   return value === "note" || value === "space_reference" ? value : undefined;
 }
 
-function knowledgeListKind(value: unknown): "note" | "space_reference" | "material" | undefined {
-  return value === "note" || value === "space_reference" || value === "material" ? value : undefined;
+function knowledgeListKind(value: unknown): "note" | "space_reference" | "material" | undefined | null {
+  // 省略时表示不过滤（undefined），传入非法值才是无效输入（null）。
+  if (value === undefined) return undefined;
+  return value === "note" || value === "space_reference" || value === "material" ? value : null;
 }
 
 async function resultFor<T>(operation: () => Promise<T>, project: (value: T) => unknown): Promise<unknown> {

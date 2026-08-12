@@ -48,6 +48,8 @@ export type KnowledgePageSummary = {
   readonly refId: string;
   readonly kind: KnowledgePage["kind"];
   readonly title?: string;
+  /** 笔记所属 Space id；只有 kind 为 note 的页面携带。 */
+  readonly spaceId?: string;
   readonly collectedAt: number;
 };
 
@@ -87,7 +89,7 @@ export type ManagedKnowledgeAssetReadPort = (input: {
 }) => Promise<KnowledgeAssetReadResult>;
 
 export type KnowledgePageReadResult =
-  | { readonly status: "note"; readonly refId: string; readonly kind: "note"; readonly title: string; readonly bodyMarkdown: string; readonly truncated: boolean; readonly revision: number; readonly materialRefs: readonly string[]; readonly continuation?: string }
+  | { readonly status: "note"; readonly refId: string; readonly kind: "note"; readonly title: string; readonly spaceId: string; readonly bodyMarkdown: string; readonly truncated: boolean; readonly revision: number; readonly materialRefs: readonly string[]; readonly continuation?: string }
   | { readonly status: "space_reference"; readonly refId: string; readonly relativePath: string; readonly content: KnowledgeAssetReadResult }
   | { readonly status: "material"; readonly refId: string; readonly kind: "material"; readonly collectedAt: number; readonly note: string }
   | { readonly status: "missing"; readonly refId: string; readonly message: string };

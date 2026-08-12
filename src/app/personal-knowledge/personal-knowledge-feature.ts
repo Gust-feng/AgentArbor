@@ -359,7 +359,12 @@ export function createPersonalKnowledgeFeature<TManagedAssetTextWriteResult exte
         const refId = required(input.refId, "refId");
         const maxLength = validateMaxLength(input.maxLength);
         const page = (await repository.readSnapshot()).pages.find((candidate) => candidate.refId === refId);
-        if (page === undefined) return { status: "missing", refId, message: "知识条目已不存在。" };
+        if (page === undefined) {
+          // 未收藏的个人笔记同样可读：KnowledgeList 枚举全部笔记，refId 即笔记 id。
+          const note = await repository.getNote(refId);
+          if (note !== undefined) return readNotePage(note, maxLength, input.continuation);
+          return { status: "missing", refId, message: "知识条目已不存在。" };
+        }
         if (page.kind === "note") {
           const note = await repository.getNote(refId);
           if (note === undefined) return { status: "missing", refId, message: "知识条目已不存在。" };
@@ -455,6 +460,7 @@ function readNotePage(
     refId: note.id,
     kind: "note",
     title: note.title,
+    spaceId: note.spaceId,
     bodyMarkdown,
     truncated,
     revision: note.revision,

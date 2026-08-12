@@ -169,6 +169,51 @@ test("Knowledge list, page read, asset text update, uncollect and theme tools op
   assert.deepEqual(records.map((record) => record.actor.actorId), Array(5).fill("ordinary-agent"));
 });
 
+test("KnowledgeList without kind enumerates uncollected notes and KnowledgeReadPage reads them", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-list-uncollected-"));
+  const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));
+  const feature = createPersonalKnowledgeFeature({
+    repository: createSqlitePersonalKnowledgeRepository(database),
+    spaceExists: async (spaceId) => spaceId === "space-one",
+  });
+  t.after(async () => {
+    await feature.release();
+    database.close();
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  });
+  const tools = new Map(createPersonalKnowledgeTools({ knowledge: feature }).map((tool) => [tool.definition.name, tool]));
+
+  const created = await execute(tools.get("KnowledgeCreateNote")!, {
+    spaceId: "space-one",
+    title: "未收藏的笔记",
+    bodyMarkdown: "正文内容",
+  }) as { readonly status: string; readonly note: { readonly id: string } };
+  assert.equal(created.status, "created");
+
+  const listed = await execute(tools.get("KnowledgeList")!, { limit: 10 }) as {
+    readonly status: string;
+    readonly pages: readonly { readonly refId: string; readonly kind: string; readonly title?: string; readonly spaceId?: string }[];
+  };
+  assert.equal(listed.status, "found");
+  assert.ok(listed.pages.some((page) =>
+    page.refId === created.note.id && page.kind === "note" && page.title === "未收藏的笔记" && page.spaceId === "space-one"));
+
+  const invalidKind = await execute(tools.get("KnowledgeList")!, { kind: "bogus" }) as { readonly status: string };
+  assert.equal(invalidKind.status, "invalid_input");
+
+  const readPage = await execute(tools.get("KnowledgeReadPage")!, { refId: created.note.id }) as {
+    readonly status: string;
+    readonly bodyMarkdown: string;
+    readonly spaceId: string;
+  };
+  assert.equal(readPage.status, "note");
+  assert.equal(readPage.bodyMarkdown, "正文内容");
+  assert.equal(readPage.spaceId, "space-one");
+
+  const missing = await execute(tools.get("KnowledgeReadPage")!, { refId: "missing" }) as { readonly status: string };
+  assert.equal(missing.status, "missing");
+});
+
 test("Personal Knowledge agent tool schemas reject actor and visual facts", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "agentarbor-knowledge-schema-"));
   const database = new SqliteRuntimeDatabase(path.join(directory, "workbench.sqlite3"));

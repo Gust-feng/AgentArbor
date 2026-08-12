@@ -43,14 +43,6 @@ const MIGRATIONS = [{
       accepted_at TEXT
     ) STRICT;
 
-    CREATE TABLE remote_notebook_map (
-      notebook_id TEXT PRIMARY KEY,
-      scope_kind TEXT NOT NULL CHECK(scope_kind IN ('global', 'workspace')),
-      workspace_root TEXT,
-      label TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      UNIQUE(scope_kind, workspace_root)
-    ) STRICT;
   `,
 }, {
   version: 2,
@@ -103,6 +95,14 @@ const MIGRATIONS = [{
       updated_at TEXT NOT NULL
     ) STRICT;
   `,
+}, {
+  version: 5,
+  sql: `DROP TABLE IF EXISTS remote_notebook_map;`,
+}, {
+  version: 6,
+  // The V1 snapshot envelope is no longer a valid wire message. Keep the
+  // account/device binding, but never replay an obsolete side effect.
+  sql: `DELETE FROM remote_desktop_outbox;`,
 }] as const;
 
 export type RemoteDesktopPairing = {
@@ -132,12 +132,6 @@ export type RemoteDesktopInboxEntry = {
   readonly result?: unknown;
   readonly receivedAt: string;
   readonly appliedAt?: string;
-};
-
-export type RemoteNotebookMapping = {
-  readonly notebookId: string;
-  readonly scope: { readonly kind: "global" } | { readonly kind: "workspace"; readonly workspaceRoot: string };
-  readonly label: string;
 };
 
 export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
@@ -292,41 +286,6 @@ export function createRemoteDesktopStore(database: SqliteRuntimeDatabase) {
       database.connection.prepare(`
         DELETE FROM remote_desktop_outbox WHERE client_message_id = ?
       `).run(clientMessageId);
-    },
-    upsertNotebook(mapping: RemoteNotebookMapping, createdAt: string): void {
-      database.connection.prepare(`
-        INSERT INTO remote_notebook_map(notebook_id, scope_kind, workspace_root, label, created_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(notebook_id) DO UPDATE SET label = excluded.label
-      `).run(
-        mapping.notebookId,
-        mapping.scope.kind,
-        mapping.scope.kind === "workspace" ? mapping.scope.workspaceRoot : null,
-        mapping.label,
-        createdAt,
-      );
-    },
-    listNotebooks(): readonly RemoteNotebookMapping[] {
-      const rows = database.connection.prepare(`
-        SELECT notebook_id AS notebookId, scope_kind AS scopeKind,
-               workspace_root AS workspaceRoot, label
-        FROM remote_notebook_map ORDER BY created_at
-      `).all() as unknown as readonly {
-        notebookId: string;
-        scopeKind: "global" | "workspace";
-        workspaceRoot: string | null;
-        label: string;
-      }[];
-      return rows.map((row) => ({
-        notebookId: row.notebookId,
-        scope: row.scopeKind === "global"
-          ? { kind: "global" as const }
-          : { kind: "workspace" as const, workspaceRoot: row.workspaceRoot! },
-        label: row.label,
-      }));
-    },
-    getNotebook(notebookId: string): RemoteNotebookMapping | undefined {
-      return this.listNotebooks().find((item) => item.notebookId === notebookId);
     },
   };
 }

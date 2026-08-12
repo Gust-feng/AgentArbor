@@ -12,7 +12,9 @@ import {
 import type { RemoteCommandApplication } from "./command-handler.js";
 import type { RemoteDesktopStore } from "./desktop-store.js";
 
-const REMOTE_DEVICE_TOKEN_REF = "secret://local-dev/remote-collaboration/device-token";
+export const REMOTE_DEVICE_TOKEN_REF = "secret://local-dev/remote-collaboration/device-token";
+const MAX_LIVE_EVENT_BUFFERED_BYTES = 256 * 1_024;
+const HEARTBEAT_INTERVAL_MS = 20_000;
 const accountSchema = z.object({
   accountId: z.string().min(1),
   handle: z.string().min(3),
@@ -59,7 +61,7 @@ export type RemoteDesktopConnectionStatus = {
   readonly peerDeviceId?: string;
   readonly peerDeviceName?: string;
   readonly peerOnline: boolean;
-  readonly suggestedRelayUrl?: string;
+  readonly suggestedDeviceName?: string;
   readonly pairingCode?: string;
   readonly pairingExpiresAt?: string;
   readonly pairingStatus?: z.infer<typeof pairingStatusSchema>["status"];
@@ -77,24 +79,29 @@ export function createRemoteCollaborationFeature(input: {
       onError?: (error: unknown) => void,
     ): () => void;
     snapshotsForRun(runId: string): Promise<readonly RemoteEvent[]>;
+    connectionSnapshot(): Promise<readonly RemoteEvent[]>;
   };
   readonly fetch?: typeof globalThis.fetch;
   readonly idFactory?: () => string;
   readonly now?: () => string;
-  readonly defaultRelayUrl?: string;
+  readonly defaultDeviceName?: string;
+  readonly onVaultChanged?: (cursor: number) => void;
 }) {
   const fetch = input.fetch ?? globalThis.fetch;
   const idFactory = input.idFactory ?? randomUUID;
   const now = input.now ?? (() => new Date().toISOString());
   const listeners = new Set<(status: RemoteDesktopConnectionStatus) => void>();
   const runSubscriptions = new Map<string, () => void>();
+  const reliableInFlight = new Set<string>();
   let socket: WebSocket | undefined;
   let released = false;
   let manualDisconnect = false;
   let reconnectAttempts = 0;
   let reconnectTimer: NodeJS.Timeout | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
   let connectPromise: Promise<void> | undefined;
-  let status = initialStatus(input.store, input.defaultRelayUrl);
+  let frameChain = Promise.resolve();
+  let status = initialStatus(input.store, input.defaultDeviceName);
 
   function publish(patch: Partial<RemoteDesktopConnectionStatus>): void {
     status = { ...status, ...patch };
@@ -211,6 +218,9 @@ export function createRemoteCollaborationFeature(input: {
       pairingStatus: undefined,
       error: undefined,
     });
+    // Approving the phone is already an explicit connection action. A Relay failure
+    // remains visible in status, but it must not rewrite the successful pairing result.
+    void connect().catch(() => undefined);
     return remoteStatus;
   }
 
@@ -252,12 +262,14 @@ export function createRemoteCollaborationFeature(input: {
         token,
       })));
       next.on("message", (raw) => {
-        void (async () => {
+        const handleFrame = async (): Promise<void> => {
           const frame = remoteServerFrameSchema.parse(JSON.parse(raw.toString()) as unknown);
           if (frame.type === "server.ready") {
             ready = true;
             clearTimeout(timeout);
             reconnectAttempts = 0;
+            reliableInFlight.clear();
+            startHeartbeat(next);
             input.store.saveBinding({
               ...binding,
               ...(frame.peerDeviceId === undefined ? {} : { peerDeviceId: frame.peerDeviceId }),
@@ -277,18 +289,26 @@ export function createRemoteCollaborationFeature(input: {
             return;
           }
           if (frame.type === "message.accepted") {
-            if (frame.settled) input.store.acceptOutbox(frame.clientMessageId, now());
+            if (frame.settled) {
+              reliableInFlight.delete(frame.clientMessageId);
+              input.store.acceptOutbox(frame.clientMessageId, now());
+              flushOutbox();
+            }
             return;
           }
           if (frame.type === "message.received") {
+            reliableInFlight.delete(frame.clientMessageId);
             input.store.acceptOutbox(frame.clientMessageId, now());
+            flushOutbox();
             return;
           }
           if (frame.type === "message.rejected") {
+            reliableInFlight.delete(frame.clientMessageId);
             publish({ peerOnline: false, error: { code: frame.code, message: frame.message } });
             return;
           }
           if (frame.type === "peer.presence") {
+            if (!frame.online) reliableInFlight.clear();
             publish({ peerOnline: frame.online, error: undefined });
             if (frame.online) {
               flushOutbox();
@@ -296,12 +316,18 @@ export function createRemoteCollaborationFeature(input: {
             }
             return;
           }
+          if (frame.type === "vault.changed") {
+            input.onVaultChanged?.(frame.cursor);
+            return;
+          }
           if (frame.type === "message.deliver") {
             await receiveMessage(frame.message);
             return;
           }
           if (frame.type === "server.error") publish({ error: { code: frame.code, message: frame.message } });
-        })().catch((error: unknown) => publish({
+        };
+        const handled = frameChain.then(handleFrame, handleFrame);
+        frameChain = handled.catch((error: unknown) => publish({
           error: { code: "remote_frame_failed", message: error instanceof Error ? error.message : "Remote frame failed" },
         }));
       });
@@ -313,7 +339,11 @@ export function createRemoteCollaborationFeature(input: {
       });
       next.once("close", () => {
         clearTimeout(timeout);
-        if (socket === next) socket = undefined;
+        reliableInFlight.clear();
+        if (socket === next) {
+          clearHeartbeatTimer();
+          socket = undefined;
+        }
         if (!released && !manualDisconnect) {
           publish({ state: "offline", peerOnline: false });
           scheduleReconnect();
@@ -363,7 +393,10 @@ export function createRemoteCollaborationFeature(input: {
     if (runSubscriptions.has(runId)) return;
     const unsubscribe = input.commandHandler.watchRun(runId, (events) => {
       for (const event of events) {
-        if (event.kind === "run.delta" && !status.peerOnline) continue;
+        if (event.kind === "run.delta") {
+          sendLiveEvent(event);
+          continue;
+        }
         input.store.enqueueOutbox(event.eventId, { type: "event", event }, now());
         if (event.kind === "run.snapshot" && ["completed", "failed", "cancelled", "blocked"].includes(event.status)) {
           runSubscriptions.get(runId)?.();
@@ -379,11 +412,31 @@ export function createRemoteCollaborationFeature(input: {
 
   function flushOutbox(): void {
     if (socket?.readyState !== WebSocket.OPEN || status.state !== "connected" || !status.peerOnline) return;
-    for (const item of input.store.pendingOutbox()) socket.send(JSON.stringify({
+    for (const item of input.store.pendingOutbox()) {
+      if (reliableInFlight.has(item.clientMessageId)) continue;
+      reliableInFlight.add(item.clientMessageId);
+      try {
+        socket.send(JSON.stringify({
+          protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+          type: "message.submit",
+          clientMessageId: item.clientMessageId,
+          content: item.content,
+        }));
+      } catch (error) {
+        reliableInFlight.delete(item.clientMessageId);
+        throw error;
+      }
+    }
+  }
+
+  function sendLiveEvent(event: Extract<RemoteEvent, { readonly kind: "run.delta" }>): void {
+    if (socket?.readyState !== WebSocket.OPEN || status.state !== "connected" || !status.peerOnline) return;
+    if (socket.bufferedAmount > MAX_LIVE_EVENT_BUFFERED_BYTES) return;
+    socket.send(JSON.stringify({
       protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
       type: "message.submit",
-      clientMessageId: item.clientMessageId,
-      content: item.content,
+      clientMessageId: event.eventId,
+      content: { type: "event", event },
     }));
   }
 
@@ -410,14 +463,31 @@ export function createRemoteCollaborationFeature(input: {
     reconnectTimer = undefined;
   }
 
+  function startHeartbeat(target: WebSocket): void {
+    clearHeartbeatTimer();
+    heartbeatTimer = setInterval(() => {
+      if (socket !== target || target.readyState !== WebSocket.OPEN) return;
+      target.send(JSON.stringify({
+        protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+        type: "heartbeat",
+        sentAt: now(),
+      }));
+    }, HEARTBEAT_INTERVAL_MS);
+    heartbeatTimer.unref?.();
+  }
+
+  function clearHeartbeatTimer(): void {
+    if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+  }
+
   function publishSnapshotError(error: unknown): void {
     publish({ error: { code: "remote_snapshot_failed", message: error instanceof Error ? error.message : "Remote snapshot failed" } });
   }
 
   async function publishSnapshots(): Promise<void> {
     if (!status.peerOnline) return;
-    const application = await input.commandHandler.apply({ kind: "sync.snapshot.request", commandId: idFactory() });
-    for (const snapshot of application.snapshots) {
+    for (const snapshot of await input.commandHandler.connectionSnapshot()) {
       input.store.enqueueOutbox(snapshot.eventId, { type: "event", event: snapshot }, now());
     }
     flushOutbox();
@@ -434,6 +504,8 @@ export function createRemoteCollaborationFeature(input: {
       disconnect(): void {
         manualDisconnect = true;
         clearReconnectTimer();
+        clearHeartbeatTimer();
+        reliableInFlight.clear();
         socket?.close(1000, "desktop_disconnect");
         socket = undefined;
         publish({ state: input.store.getBinding() === undefined ? "unregistered" : "offline", peerOnline: false });
@@ -457,6 +529,7 @@ export function createRemoteCollaborationFeature(input: {
       async forgetAccount(): Promise<void> {
         manualDisconnect = true;
         clearReconnectTimer();
+        clearHeartbeatTimer();
         const binding = input.store.getBinding();
         const token = await input.credentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
         if (binding !== undefined && token !== undefined) {
@@ -467,6 +540,7 @@ export function createRemoteCollaborationFeature(input: {
         }
         socket?.close(1000, "desktop_account_removed");
         socket = undefined;
+        reliableInFlight.clear();
         input.store.clearBinding();
         await input.credentials.deleteSecret(REMOTE_DEVICE_TOKEN_REF);
         publish({
@@ -515,10 +589,13 @@ export function createRemoteCollaborationFeature(input: {
       released = true;
       manualDisconnect = true;
       clearReconnectTimer();
+      clearHeartbeatTimer();
       for (const unsubscribe of runSubscriptions.values()) unsubscribe();
       runSubscriptions.clear();
       socket?.close(1001, "feature_release");
       socket = undefined;
+      await frameChain;
+      reliableInFlight.clear();
       listeners.clear();
     },
   };
@@ -526,12 +603,12 @@ export function createRemoteCollaborationFeature(input: {
 
 export type RemoteCollaborationFeature = ReturnType<typeof createRemoteCollaborationFeature>;
 
-function initialStatus(store: RemoteDesktopStore, defaultRelayUrl?: string): RemoteDesktopConnectionStatus {
+function initialStatus(store: RemoteDesktopStore, defaultDeviceName?: string): RemoteDesktopConnectionStatus {
   const binding = store.getBinding();
   if (binding === undefined) return {
     state: "unregistered",
     peerOnline: false,
-    ...(defaultRelayUrl === undefined ? {} : { suggestedRelayUrl: defaultRelayUrl }),
+    ...(defaultDeviceName === undefined ? {} : { suggestedDeviceName: defaultDeviceName }),
   };
   const pairing = store.getPairing();
   return {
@@ -550,7 +627,7 @@ function initialStatus(store: RemoteDesktopStore, defaultRelayUrl?: string): Rem
       pairingExpiresAt: pairing.expiresAt,
       pairingStatus: "waiting_for_mobile" as const,
     }),
-    ...(defaultRelayUrl === undefined ? {} : { suggestedRelayUrl: defaultRelayUrl }),
+    ...(defaultDeviceName === undefined ? {} : { suggestedDeviceName: defaultDeviceName }),
   };
 }
 
@@ -562,7 +639,7 @@ async function requireCredential(store: RemoteDesktopStore, credentials: RemoteC
 
 async function requireToken(credentials: RemoteCredentialStore): Promise<string> {
   const token = await credentials.readSecret(REMOTE_DEVICE_TOKEN_REF);
-  if (token === undefined) throw new Error("The desktop remote credential is missing; a new invitation is required");
+  if (token === undefined) throw new Error("The desktop remote credential is missing; create the remote account again");
   return token;
 }
 

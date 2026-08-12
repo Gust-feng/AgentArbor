@@ -18,8 +18,11 @@ import {
 } from "./relay-store.js";
 
 const MAX_HTTP_BODY_BYTES = 64 * 1_024;
-const MAX_WEBSOCKET_PAYLOAD_BYTES = 1_100_000;
-const MAX_WEBSOCKET_BUFFERED_BYTES = 1_100_000;
+const MAX_WEBSOCKET_PAYLOAD_BYTES = 8 * 1_024 * 1_024;
+const MAX_WEBSOCKET_BUFFERED_BYTES = 8 * 1_024 * 1_024;
+const DEFAULT_MAX_PENDING_DELIVERIES_PER_TARGET = 256;
+const DEFAULT_DELIVERY_TTL_MS = 60_000;
+const DEFAULT_DELIVERY_SWEEP_INTERVAL_MS = 10_000;
 const HELLO_TIMEOUT_MS = 10_000;
 
 const deviceNameSchema = z.string().trim().min(1).max(160);
@@ -32,6 +35,17 @@ class RequestBodyTooLarge extends Error {}
 
 export type RemoteRelayServerOptions = {
   readonly store: RemoteRelayStore;
+  readonly contentVault?: {
+    handle(request: IncomingMessage, response: ServerResponse): Promise<boolean>;
+    subscribe(listener: (event: {
+      readonly accountId: string;
+      readonly sourceDeviceId: string;
+      readonly cursor: number;
+    }) => void): () => void;
+  };
+  readonly maxPendingDeliveriesPerTarget?: number;
+  readonly deliveryTtlMs?: number;
+  readonly deliverySweepIntervalMs?: number;
   readonly host?: string;
   readonly port?: number;
 };
@@ -45,12 +59,43 @@ export type StartedRemoteRelayServer = {
 };
 
 export async function startRemoteRelayServer(options: RemoteRelayServerOptions): Promise<StartedRemoteRelayServer> {
+  const maxPendingDeliveriesPerTarget = positiveInteger(
+    options.maxPendingDeliveriesPerTarget ?? DEFAULT_MAX_PENDING_DELIVERIES_PER_TARGET,
+    "Relay pending delivery limit",
+  );
+  const deliveryTtlMs = positiveInteger(options.deliveryTtlMs ?? DEFAULT_DELIVERY_TTL_MS, "Relay delivery TTL");
+  const deliverySweepIntervalMs = positiveInteger(
+    options.deliverySweepIntervalMs ?? DEFAULT_DELIVERY_SWEEP_INTERVAL_MS,
+    "Relay delivery sweep interval",
+  );
   const sockets = new Map<string, WebSocket>();
+  const socketAccounts = new Map<string, string>();
   const deliveries = new Map<string, PendingDelivery>();
+  const unsubscribeVault = options.contentVault?.subscribe((event) => {
+    for (const [deviceId, websocket] of sockets) {
+      if (deviceId === event.sourceDeviceId || socketAccounts.get(deviceId) !== event.accountId) continue;
+      sendFrame(websocket, {
+        protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+        type: "vault.changed",
+        cursor: event.cursor,
+      });
+    }
+  });
+  const deliverySweep = setInterval(() => {
+    const now = Date.now();
+    const expiredTargets = new Set<string>();
+    for (const delivery of deliveries.values()) {
+      if (delivery.expiresAtMs <= now) expiredTargets.add(delivery.targetDeviceId);
+    }
+    for (const deviceId of expiredTargets) sockets.get(deviceId)?.close(1013, "delivery_ack_timeout");
+  }, deliverySweepIntervalMs);
+  deliverySweep.unref?.();
   const server = createServer((request, response) => {
     void handleHttp(
       options.store,
+      options.contentVault,
       sockets,
+      socketAccounts,
       deliveries,
       request,
       response,
@@ -70,7 +115,15 @@ export async function startRemoteRelayServer(options: RemoteRelayServerOptions):
     });
   });
   websocketServer.on("connection", (websocket) => {
-    handleWebSocket(options.store, sockets, deliveries, websocket);
+    handleWebSocket(
+      options.store,
+      sockets,
+      socketAccounts,
+      deliveries,
+      websocket,
+      maxPendingDeliveriesPerTarget,
+      deliveryTtlMs,
+    );
   });
   await listen(server, options.port ?? 4310, options.host ?? "127.0.0.1");
   const address = server.address() as AddressInfo;
@@ -82,6 +135,8 @@ export async function startRemoteRelayServer(options: RemoteRelayServerOptions):
     url,
     websocketUrl: `${url.replace(/^http/u, "ws")}/v1/connect`,
     async close() {
+      unsubscribeVault?.();
+      clearInterval(deliverySweep);
       for (const socket of sockets.values()) socket.close(1001, "relay_shutdown");
       deliveries.clear();
       await new Promise<void>((resolve) => websocketServer.close(() => resolve()));
@@ -92,7 +147,9 @@ export async function startRemoteRelayServer(options: RemoteRelayServerOptions):
 
 async function handleHttp(
   store: RemoteRelayStore,
+  contentVault: RemoteRelayServerOptions["contentVault"],
   sockets: Map<string, WebSocket>,
+  socketAccounts: Map<string, string>,
   deliveries: Map<string, PendingDelivery>,
   request: IncomingMessage,
   response: ServerResponse,
@@ -102,6 +159,7 @@ async function handleHttp(
     response.writeHead(204).end();
     return;
   }
+  if (contentVault !== undefined && await contentVault.handle(request, response)) return;
   const url = new URL(request.url ?? "/", "http://relay.local");
   if (request.method === "GET" && url.pathname === "/v1/health") {
     writeJson(response, 200, { ok: true, service: "agentarbor-remote-relay", protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION });
@@ -165,6 +223,7 @@ async function handleHttp(
     store.revokeDevice(bearerToken(request), deviceId);
     sockets.get(deviceId)?.close(4003, "device_revoked");
     sockets.delete(deviceId);
+    socketAccounts.delete(deviceId);
     for (const [messageId, delivery] of deliveries) {
       if (delivery.sourceDeviceId === deviceId || delivery.targetDeviceId === deviceId) deliveries.delete(messageId);
     }
@@ -177,8 +236,11 @@ async function handleHttp(
 function handleWebSocket(
   store: RemoteRelayStore,
   sockets: Map<string, WebSocket>,
+  socketAccounts: Map<string, string>,
   deliveries: Map<string, PendingDelivery>,
   websocket: WebSocket,
+  maxPendingDeliveriesPerTarget: number,
+  deliveryTtlMs: number,
 ): void {
   let auth: RelayAuthenticatedDevice | undefined;
   let accessToken: string | undefined;
@@ -205,6 +267,7 @@ function handleWebSocket(
           const previous = sockets.get(auth.deviceId);
           if (previous !== undefined && previous !== websocket) previous.close(4001, "connection_replaced");
           sockets.set(auth.deviceId, websocket);
+          socketAccounts.set(auth.deviceId, auth.account.accountId);
           const peerOnline = auth.peerDeviceId !== undefined && sockets.has(auth.peerDeviceId);
           sendFrame(websocket, {
             protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
@@ -249,6 +312,17 @@ function handleWebSocket(
           });
           return;
         }
+        if (pendingDeliveryCount(deliveries, auth.peerDeviceId!) >= maxPendingDeliveriesPerTarget) {
+          peerSocket.close(1013, "delivery_backpressure");
+          sendFrame(websocket, {
+            protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+            type: "message.rejected",
+            clientMessageId: frame.clientMessageId,
+            code: "peer_backpressure",
+            message: "The paired device is not acknowledging messages; the message remains in the local outbox",
+          });
+          return;
+        }
         const message: RemoteRelayMessage = {
           protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
           messageId: randomUUID(),
@@ -264,6 +338,7 @@ function handleWebSocket(
             clientMessageId: message.clientMessageId,
             sourceDeviceId: message.sourceDeviceId,
             targetDeviceId: message.targetDeviceId,
+            expiresAtMs: Date.now() + deliveryTtlMs,
           });
         }
         sendFrame(websocket, {
@@ -292,6 +367,7 @@ function handleWebSocket(
     clearTimeout(helloTimer);
     if (auth !== undefined && sockets.get(auth.deviceId) === websocket) {
       sockets.delete(auth.deviceId);
+      socketAccounts.delete(auth.deviceId);
       for (const [messageId, delivery] of deliveries) {
         if (delivery.sourceDeviceId === auth.deviceId || delivery.targetDeviceId === auth.deviceId) deliveries.delete(messageId);
       }
@@ -327,11 +403,16 @@ function settleDelivery(
 
 function sendFrame(websocket: WebSocket, frame: RemoteServerFrame): boolean {
   if (websocket.readyState !== WebSocket.OPEN) return false;
+  const serialized = JSON.stringify(frame);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_WEBSOCKET_PAYLOAD_BYTES) {
+    websocket.close(1009, "frame_too_large");
+    return false;
+  }
   if (websocket.bufferedAmount > MAX_WEBSOCKET_BUFFERED_BYTES) {
     websocket.close(1013, "slow_consumer");
     return false;
   }
-  websocket.send(JSON.stringify(frame));
+  websocket.send(serialized);
   return true;
 }
 
@@ -350,7 +431,21 @@ type PendingDelivery = {
   readonly clientMessageId: string;
   readonly sourceDeviceId: string;
   readonly targetDeviceId: string;
+  readonly expiresAtMs: number;
 };
+
+function pendingDeliveryCount(deliveries: ReadonlyMap<string, PendingDelivery>, targetDeviceId: string): number {
+  let count = 0;
+  for (const delivery of deliveries.values()) {
+    if (delivery.targetDeviceId === targetDeviceId) count += 1;
+  }
+  return count;
+}
+
+function positiveInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${label} must be a positive safe integer`);
+  return value;
+}
 
 function parseWebSocketJson(raw: RawData): unknown {
   return JSON.parse(raw.toString()) as unknown;

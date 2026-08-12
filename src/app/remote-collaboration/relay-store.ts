@@ -206,7 +206,9 @@ export function createRemoteRelayStore(input: CreateRemoteRelayStoreInput) {
   function activateAccount(deviceName: string, invitationCode?: string): RelayDeviceCredential {
     const at = now().toISOString();
     const normalizedDeviceName = normalizeDeviceName(deviceName);
-    const invitationHash = invitationCodeHash(invitationCode);
+    // Open signup is a complete policy override. Old clients may still send a stale
+    // invitation code, but it must not turn an open service back into a gated one.
+    const invitationHash = allowOpenSignup ? undefined : invitationCodeHash(invitationCode);
     if (!allowOpenSignup && invitationHash === undefined) {
       throw new RemoteRelayError("invitation_required", "An invitation code is required to create an account");
     }

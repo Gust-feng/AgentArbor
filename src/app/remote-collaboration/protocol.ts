@@ -1,46 +1,13 @@
 import { z } from "zod";
 
 export const REMOTE_COLLABORATION_PROTOCOL_VERSION = "remote-collaboration/v1" as const;
+export const REMOTE_CONVERSATION_PAGE_MAX_JSON_BYTES = 6 * 1_024 * 1_024;
 
 export const remoteDeviceRoleSchema = z.enum(["desktop", "mobile"]);
 export type RemoteDeviceRole = z.infer<typeof remoteDeviceRoleSchema>;
 
 const stableIdSchema = z.string().trim().min(1).max(160);
 const isoDateSchema = z.iso.datetime({ offset: true });
-const fingerprintSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
-const MAX_SYNC_TEXT_BYTES = 512 * 1_024;
-
-const syncTextSchema = z.string().max(MAX_SYNC_TEXT_BYTES).superRefine((value, context) => {
-  if (new TextEncoder().encode(value).byteLength > MAX_SYNC_TEXT_BYTES) {
-    context.addIssue({ code: "custom", message: "synchronized text must not exceed 512 KiB" });
-  }
-});
-
-const snapshotPageShape = {
-  snapshotId: stableIdSchema,
-  pageIndex: z.number().int().nonnegative(),
-  pageCount: z.number().int().positive(),
-};
-
-function validateSnapshotPage(
-  value: { readonly pageIndex: number; readonly pageCount: number },
-  context: z.RefinementCtx,
-): void {
-  if (value.pageIndex >= value.pageCount) {
-    context.addIssue({ code: "custom", path: ["pageIndex"], message: "pageIndex must be less than pageCount" });
-  }
-}
-
-const relativeManagedPathSchema = z.string().trim().min(1).max(512).superRefine((value, context) => {
-  const normalized = value.replace(/\\/gu, "/");
-  if (normalized.startsWith("/") || /^[a-zA-Z]:/u.test(normalized)) {
-    context.addIssue({ code: "custom", message: "managed file paths must be relative" });
-  }
-  const segments = normalized.split("/");
-  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
-    context.addIssue({ code: "custom", message: "managed file paths must not escape their managed root" });
-  }
-});
 
 const confirmationDecisionSchema = z.object({
   runId: stableIdSchema,
@@ -53,12 +20,6 @@ const confirmationDecisionSchema = z.object({
   }
 });
 
-const syncableSpaceReferenceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("asset_folder") }).strict(),
-  z.object({ kind: z.literal("workbench_asset"), assetId: stableIdSchema }).strict(),
-  z.object({ kind: z.literal("managed_folder") }).strict(),
-]);
-
 export const remoteCommandSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("conversation.submit"),
@@ -66,7 +27,16 @@ export const remoteCommandSchema = z.discriminatedUnion("kind", [
     conversationId: stableIdSchema.optional(),
     message: z.string().trim().min(1).max(64_000),
     spaceId: stableIdSchema.optional(),
-  }).strict(),
+    modelSelectionId: stableIdSchema.optional(),
+  }).strict().superRefine((value, context) => {
+    if (value.conversationId === undefined && value.spaceId === undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["spaceId"],
+        message: "spaceId is required when creating a conversation",
+      });
+    }
+  }),
   z.object({
     kind: z.literal("conversation.page.request"),
     commandId: stableIdSchema,
@@ -88,54 +58,6 @@ export const remoteCommandSchema = z.discriminatedUnion("kind", [
       context.addIssue({ code: "custom", path: ["guidance"], message: "guidance is required for a guidance decision" });
     }
   }),
-  z.object({
-    kind: z.literal("space.create"),
-    commandId: stableIdSchema,
-    spaceId: stableIdSchema,
-    title: z.string().trim().min(1).max(160),
-  }).strict(),
-  z.object({
-    kind: z.literal("space.reference.add"),
-    commandId: stableIdSchema,
-    referenceId: stableIdSchema,
-    spaceId: stableIdSchema,
-    parentId: stableIdSchema.optional(),
-    title: z.string().trim().min(1).max(160),
-    reference: syncableSpaceReferenceSchema,
-  }).strict(),
-  z.object({
-    kind: z.literal("note.replace"),
-    commandId: stableIdSchema,
-    notebookId: stableIdSchema,
-    expectedVersion: fingerprintSchema,
-    content: z.string().max(20_000),
-  }).strict(),
-  z.object({
-    kind: z.literal("asset.replace_text"),
-    commandId: stableIdSchema,
-    assetId: stableIdSchema,
-    expectedFingerprint: fingerprintSchema,
-    text: syncTextSchema,
-  }).strict(),
-  z.object({
-    kind: z.literal("managed_file.replace_text"),
-    commandId: stableIdSchema,
-    referenceId: stableIdSchema,
-    relativePath: relativeManagedPathSchema,
-    expectedFingerprint: fingerprintSchema,
-    text: syncTextSchema,
-  }).strict(),
-  z.object({
-    kind: z.literal("managed_file.create_text"),
-    commandId: stableIdSchema,
-    referenceId: stableIdSchema,
-    relativePath: relativeManagedPathSchema,
-    text: syncTextSchema,
-  }).strict(),
-  z.object({
-    kind: z.literal("sync.snapshot.request"),
-    commandId: stableIdSchema,
-  }).strict(),
 ]);
 export type RemoteCommand = z.infer<typeof remoteCommandSchema>;
 
@@ -173,7 +95,16 @@ const remoteConversationIndexSchema = z.object({
     updatedAt: isoDateSchema,
     status: conversationStatusSchema,
     activeRunId: stableIdSchema.optional(),
+    spaceId: stableIdSchema.optional(),
   }).strict()).max(5_000),
+  modelOptions: z.array(z.object({
+    id: stableIdSchema,
+    label: z.string().min(1).max(200),
+    providerLabel: z.string().max(200).optional(),
+    supportsTools: z.boolean(),
+    supportsVision: z.boolean(),
+    isDefault: z.boolean(),
+  }).strict()).max(256).optional(),
 }).strict();
 
 const remoteConversationPageSchema = z.object({
@@ -192,7 +123,11 @@ const remoteConversationPageSchema = z.object({
   }).strict()).max(50),
   hasMore: z.boolean(),
   nextBeforeTurnId: stableIdSchema.optional(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > REMOTE_CONVERSATION_PAGE_MAX_JSON_BYTES) {
+    context.addIssue({ code: "custom", message: "conversation page exceeds the serialized byte limit" });
+  }
+});
 
 const remoteRunSnapshotSchema = z.object({
   kind: z.literal("run.snapshot"),
@@ -213,86 +148,12 @@ const remoteRunDeltaSchema = z.object({
   delta: z.string().min(1).max(262_144),
 }).strict();
 
-const remoteSpaceSnapshotSchema = z.object({
-  kind: z.literal("space.snapshot"),
-  eventId: stableIdSchema,
-  spaces: z.array(z.object({
-    id: stableIdSchema,
-    title: z.string().max(160),
-    createdAt: isoDateSchema,
-    updatedAt: isoDateSchema,
-    references: z.array(z.object({
-      id: stableIdSchema,
-      title: z.string().max(160),
-      parentId: stableIdSchema.optional(),
-      reference: syncableSpaceReferenceSchema,
-      createdAt: isoDateSchema,
-      updatedAt: isoDateSchema,
-    }).strict()).max(5_000),
-  }).strict()).max(1_000),
-}).strict();
-
-const remoteNotebookSnapshotSchema = z.object({
-  kind: z.literal("notebook.snapshot"),
-  eventId: stableIdSchema,
-  notebooks: z.array(z.object({
-    notebookId: stableIdSchema,
-    label: z.string().min(1).max(160),
-    scope: z.enum(["global", "workspace"]),
-    content: z.string().max(20_000),
-    version: fingerprintSchema,
-    updatedAt: isoDateSchema.optional(),
-  }).strict()).max(1_000),
-}).strict();
-
-const remoteAssetSnapshotSchema = z.object({
-  kind: z.literal("asset.snapshot"),
-  eventId: stableIdSchema,
-  ...snapshotPageShape,
-  assets: z.array(z.object({
-    assetId: stableIdSchema,
-    title: z.string().min(1).max(500),
-    kind: z.enum(["markdown", "code"]),
-    text: syncTextSchema,
-    language: z.string().max(80),
-    fingerprint: fingerprintSchema,
-  }).strict()).max(1),
-}).strict().superRefine(validateSnapshotPage);
-
-const remoteManagedFolderSnapshotSchema = z.object({
-  kind: z.literal("managed_folder.snapshot"),
-  eventId: stableIdSchema,
-  ...snapshotPageShape,
-  folders: z.array(z.object({
-    referenceId: stableIdSchema,
-    spaceId: stableIdSchema,
-    title: z.string().min(1).max(160),
-    files: z.array(z.object({
-      relativePath: relativeManagedPathSchema,
-      text: syncTextSchema,
-      fingerprint: fingerprintSchema,
-    }).strict()).max(1),
-  }).strict()).max(1),
-}).strict().superRefine(validateSnapshotPage);
-
-export const remoteSyncSnapshotSchema = z.discriminatedUnion("kind", [
-  remoteSpaceSnapshotSchema,
-  remoteNotebookSnapshotSchema,
-  remoteAssetSnapshotSchema,
-  remoteManagedFolderSnapshotSchema,
-]);
-export type RemoteSyncSnapshot = z.infer<typeof remoteSyncSnapshotSchema>;
-
 export const remoteEventSchema = z.discriminatedUnion("kind", [
   commandResultSchema,
   remoteConversationIndexSchema,
   remoteConversationPageSchema,
   remoteRunSnapshotSchema,
   remoteRunDeltaSchema,
-  remoteSpaceSnapshotSchema,
-  remoteNotebookSnapshotSchema,
-  remoteAssetSnapshotSchema,
-  remoteManagedFolderSnapshotSchema,
 ]);
 export type RemoteEvent = z.infer<typeof remoteEventSchema>;
 
@@ -364,13 +225,18 @@ export const remoteServerFrameSchema = z.discriminatedUnion("type", [
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
     type: z.literal("message.rejected"),
     clientMessageId: stableIdSchema,
-    code: z.literal("peer_offline"),
+    code: z.enum(["peer_offline", "peer_backpressure"]),
     message: z.string().min(1).max(4_000),
   }).strict(),
   z.object({
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
     type: z.literal("peer.presence"),
     online: z.boolean(),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
+    type: z.literal("vault.changed"),
+    cursor: z.number().int().positive(),
   }).strict(),
   z.object({
     protocolVersion: z.literal(REMOTE_COLLABORATION_PROTOCOL_VERSION),
@@ -397,13 +263,4 @@ export function parseRemoteClientFrame(value: unknown): RemoteClientFrame {
 
 export function parseRemoteMessageContent(value: unknown): RemoteMessageContent {
   return remoteMessageContentSchema.parse(value);
-}
-
-export function parseRemoteSyncSnapshot(value: unknown): RemoteSyncSnapshot {
-  return remoteSyncSnapshotSchema.parse(value);
-}
-
-export function isRemoteSyncSnapshot(event: RemoteEvent): event is RemoteSyncSnapshot {
-  return event.kind === "space.snapshot" || event.kind === "notebook.snapshot"
-    || event.kind === "asset.snapshot" || event.kind === "managed_folder.snapshot";
 }

@@ -32,6 +32,23 @@ test("an invitation activates one account and the unique handle can be renamed",
   );
 });
 
+test("open signup ignores stale invitation input without consuming seeded invitations", async (t) => {
+  const fixture = await relayFixture(t, {
+    invitationCodes: ["invite-example-0001"],
+    allowOpenSignup: true,
+  });
+
+  const openAccount = fixture.store.activateAccount("Desktop", "stale-invitation");
+  assert.equal(openAccount.role, "desktop");
+
+  const invitationOnlyStore = createRemoteRelayStore({
+    database: fixture.database,
+    allowOpenSignup: false,
+  });
+  const invitedAccount = invitationOnlyStore.activateAccount("Other desktop", "invite-example-0001");
+  assert.notEqual(invitedAccount.account.accountId, openAccount.account.accountId);
+});
+
 test("a phone token stays unusable until the desktop approves the pairing code", async (t) => {
   const fixture = await relayFixture(t);
   const desktop = fixture.store.activateAccount("Desktop");
@@ -100,7 +117,10 @@ test("relay restart preserves only account and device control facts", async (t) 
 
 async function relayFixture(
   t: test.TestContext,
-  options: { readonly invitationCodes?: readonly string[] } = {},
+  options: {
+    readonly invitationCodes?: readonly string[];
+    readonly allowOpenSignup?: boolean;
+  } = {},
 ) {
   const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-relay-store-"));
   const database = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));

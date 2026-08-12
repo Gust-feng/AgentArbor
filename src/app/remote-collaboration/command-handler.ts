@@ -5,10 +5,8 @@ import type { RemoteCommand, RemoteEvent } from "./protocol.js";
 type ConversationIndex = Extract<RemoteEvent, { readonly kind: "conversation.index" }>;
 type ConversationPage = Extract<RemoteEvent, { readonly kind: "conversation.page" }>;
 type RunSnapshot = Extract<RemoteEvent, { readonly kind: "run.snapshot" }>;
-type SpaceSnapshot = Extract<RemoteEvent, { readonly kind: "space.snapshot" }>;
-type NotebookSnapshot = Extract<RemoteEvent, { readonly kind: "notebook.snapshot" }>;
-type AssetSnapshot = Extract<RemoteEvent, { readonly kind: "asset.snapshot" }>;
-type ManagedFolderSnapshot = Extract<RemoteEvent, { readonly kind: "managed_folder.snapshot" }>;
+const REMOTE_DELTA_BATCH_WINDOW_MS = 24;
+const REMOTE_DELTA_MAX_CODE_UNITS = 64 * 1_024;
 type RemoteOrdinaryActivity =
   | { readonly kind: "text_delta"; readonly sequence: number; readonly delta: string }
   | { readonly kind: "state_changed"; readonly sequence: number };
@@ -20,6 +18,7 @@ export type RemoteCommandHandlerPorts = {
       readonly conversationId?: string;
       readonly message: string;
       readonly spaceId?: string;
+      readonly modelSelectionId?: string;
     }): Promise<{ readonly conversationId: string; readonly runId: string }>;
     cancel(runId: string): Promise<void>;
     decide(input: {
@@ -36,24 +35,6 @@ export type RemoteCommandHandlerPorts = {
     }): Promise<ConversationPage>;
     runSnapshot(runId: string): Promise<RunSnapshot>;
     subscribe(runId: string, listener: (activity: RemoteOrdinaryActivity) => void): () => void;
-  };
-  readonly spaces: {
-    create(input: { readonly spaceId: string; readonly title: string }): Promise<void>;
-    addReference(input: Extract<RemoteCommand, { readonly kind: "space.reference.add" }>): Promise<void>;
-    snapshot(): Promise<SpaceSnapshot>;
-  };
-  readonly notebooks: {
-    replace(input: Extract<RemoteCommand, { readonly kind: "note.replace" }>): Promise<void>;
-    snapshot(): Promise<NotebookSnapshot>;
-  };
-  readonly assets: {
-    replaceText(input: Extract<RemoteCommand, { readonly kind: "asset.replace_text" }>): Promise<void>;
-    snapshot(): Promise<readonly AssetSnapshot[]>;
-  };
-  readonly managedFiles: {
-    replaceText(input: Extract<RemoteCommand, { readonly kind: "managed_file.replace_text" }>): Promise<void>;
-    createText(input: Extract<RemoteCommand, { readonly kind: "managed_file.create_text" }>): Promise<void>;
-    snapshot(): Promise<readonly ManagedFolderSnapshot[]>;
   };
 };
 
@@ -83,12 +64,16 @@ export function createRemoteCommandHandler(input: {
           : command.kind === "conversation.submit"
             ? snapshots.find((snapshot): snapshot is RunSnapshot => snapshot.kind === "run.snapshot")?.runId
             : undefined;
+        const conversationId = command.kind === "conversation.submit"
+          ? snapshots.find((snapshot): snapshot is RunSnapshot => snapshot.kind === "run.snapshot")?.conversationId
+          : undefined;
         return {
           result: {
             kind: "command.result",
             eventId: idFactory(),
             commandId: command.commandId,
             status: "applied",
+            ...(conversationId === undefined ? {} : { entity: { conversationId } }),
           },
           snapshots,
           ...(watchRunId === undefined ? {} : { watchRunId }),
@@ -116,18 +101,40 @@ export function createRemoteCommandHandler(input: {
       onError?: (error: unknown) => void,
     ): () => void {
       let chain = Promise.resolve();
-      return input.ports.ordinary.subscribe(runId, (activity) => {
-        chain = chain.then(async () => {
-          if (activity.kind === "text_delta") {
-            listener([{
-              kind: "run.delta",
-              eventId: idFactory(),
-              runId,
-              activitySequence: activity.sequence,
-              delta: activity.delta,
-            }]);
-            return;
+      let pendingDelta = "";
+      let pendingSequence = 0;
+      let deltaTimer: NodeJS.Timeout | undefined;
+
+      const flushDelta = (): void => {
+        if (deltaTimer !== undefined) clearTimeout(deltaTimer);
+        deltaTimer = undefined;
+        if (pendingDelta.length === 0) return;
+        listener([{
+          kind: "run.delta",
+          eventId: idFactory(),
+          runId,
+          activitySequence: pendingSequence,
+          delta: pendingDelta,
+        }]);
+        pendingDelta = "";
+      };
+      const unsubscribe = input.ports.ordinary.subscribe(runId, (activity) => {
+        if (activity.kind === "text_delta") {
+          if (pendingDelta.length > 0 && pendingDelta.length + activity.delta.length > REMOTE_DELTA_MAX_CODE_UNITS) {
+            flushDelta();
           }
+          pendingDelta += activity.delta;
+          pendingSequence = activity.sequence;
+          if (pendingDelta.length >= REMOTE_DELTA_MAX_CODE_UNITS) {
+            flushDelta();
+          } else if (deltaTimer === undefined) {
+            deltaTimer = setTimeout(flushDelta, REMOTE_DELTA_BATCH_WINDOW_MS);
+            deltaTimer.unref?.();
+          }
+          return;
+        }
+        flushDelta();
+        chain = chain.then(async () => {
           const run = await input.ports.ordinary.runSnapshot(runId);
           if (!["completed", "failed", "cancelled", "blocked"].includes(run.status)) {
             listener([run]);
@@ -140,6 +147,12 @@ export function createRemoteCommandHandler(input: {
           ]);
         }).catch((error: unknown) => onError?.(error));
       });
+      return () => {
+        if (deltaTimer !== undefined) clearTimeout(deltaTimer);
+        deltaTimer = undefined;
+        pendingDelta = "";
+        unsubscribe();
+      };
     },
     async snapshotsForRun(runId: string): Promise<readonly RemoteEvent[]> {
       const run = await input.ports.ordinary.runSnapshot(runId);
@@ -148,6 +161,9 @@ export function createRemoteCommandHandler(input: {
         await input.ports.ordinary.conversationPage({ conversationId: run.conversationId, limit: 50 }),
         run,
       ];
+    },
+    async connectionSnapshot(): Promise<readonly RemoteEvent[]> {
+      return [await input.ports.ordinary.conversationIndex()];
     },
   };
 }
@@ -163,6 +179,7 @@ async function applyCommand(
         ...(command.conversationId === undefined ? {} : { conversationId: command.conversationId }),
         message: command.message,
         ...(command.spaceId === undefined ? {} : { spaceId: command.spaceId }),
+        ...(command.modelSelectionId === undefined ? {} : { modelSelectionId: command.modelSelectionId }),
       });
       return Promise.all([
         ports.ordinary.conversationIndex(),
@@ -187,40 +204,6 @@ async function applyCommand(
         ...(command.guidance === undefined ? {} : { guidance: command.guidance }),
       });
       return [await ports.ordinary.runSnapshot(command.runId)];
-    case "space.create":
-      await ports.spaces.create({ spaceId: command.spaceId, title: command.title });
-      return [await ports.spaces.snapshot()];
-    case "space.reference.add":
-      await ports.spaces.addReference(command);
-      return [await ports.spaces.snapshot()];
-    case "note.replace":
-      await ports.notebooks.replace(command);
-      return [await ports.notebooks.snapshot()];
-    case "asset.replace_text":
-      await ports.assets.replaceText(command);
-      return ports.assets.snapshot();
-    case "managed_file.replace_text":
-      await ports.managedFiles.replaceText(command);
-      return ports.managedFiles.snapshot();
-    case "managed_file.create_text":
-      await ports.managedFiles.createText(command);
-      return ports.managedFiles.snapshot();
-    case "sync.snapshot.request": {
-      const [conversationIndex, spaces, notebooks, assets, managedFolders] = await Promise.all([
-        ports.ordinary.conversationIndex(),
-        ports.spaces.snapshot(),
-        ports.notebooks.snapshot(),
-        ports.assets.snapshot(),
-        ports.managedFiles.snapshot(),
-      ]);
-      return [
-        conversationIndex,
-        spaces,
-        notebooks,
-        ...assets,
-        ...managedFolders,
-      ];
-    }
   }
 }
 

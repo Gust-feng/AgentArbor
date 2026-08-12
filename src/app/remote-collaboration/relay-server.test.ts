@@ -49,7 +49,7 @@ test("relay exposes API-only account pairing and forwards content without persis
     clientMessageId: "mobile-message-1",
     content: {
       type: "command",
-      command: { kind: "conversation.submit", commandId: "mobile-command-1", message: "continue from phone" },
+      command: { kind: "conversation.submit", commandId: "mobile-command-1", conversationId: "conversation-1", message: "continue from phone" },
     },
   }));
   assert.equal((await accepted).type, "message.accepted");
@@ -80,11 +80,129 @@ test("relay exposes API-only account pairing and forwards content without persis
     protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
     type: "message.submit",
     clientMessageId: "offline-message",
-    content: { type: "command", command: { kind: "sync.snapshot.request", commandId: "offline-command" } },
+    content: {
+      type: "command",
+      command: {
+        kind: "conversation.page.request",
+        commandId: "offline-command",
+        conversationId: "conversation-1",
+      },
+    },
   }));
   const rejectedFrame = await rejected;
   assert.equal(rejectedFrame.type === "message.rejected" && rejectedFrame.code, "peer_offline");
 });
+
+test("relay forwards Vault cursor invalidations only to another online device in the account", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-relay-vault-notify-"));
+  const database = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));
+  let notifyVault: ((event: { accountId: string; sourceDeviceId: string; cursor: number }) => void) | undefined;
+  const relay = await startRemoteRelayServer({
+    store: createRemoteRelayStore({ database, codeFactory: () => "246810", allowOpenSignup: true }),
+    contentVault: {
+      async handle() { return false; },
+      subscribe(listener) { notifyVault = listener; return () => { notifyVault = undefined; }; },
+    },
+    port: 0,
+  });
+  t.after(async () => {
+    await relay.close();
+    database.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+  });
+
+  const activation = (await post(relay.url, "/v1/accounts/activate", { deviceName: "Desktop" })).credential as DeviceCredential;
+  const pairing = (await post(relay.url, "/v1/pairings", {}, activation.accessToken)).pairing as Pairing;
+  const mobile = (await post(relay.url, "/v1/pairings/join", { pairingCode: pairing.pairingCode, deviceName: "Phone" })).pairing as MobileClaim;
+  await post(relay.url, `/v1/pairings/${pairing.pairingId}/approve`, { pairingCode: pairing.pairingCode }, activation.accessToken);
+  const desktopSocket = await connect(relay.websocketUrl, activation.accessToken);
+  const mobileSocket = await connect(relay.websocketUrl, mobile.accessToken);
+  t.after(() => { desktopSocket.close(); mobileSocket.close(); });
+
+  const changed = waitForFrame(mobileSocket, (frame) => frame.type === "vault.changed");
+  notifyVault?.({
+    accountId: activation.account.accountId,
+    sourceDeviceId: activation.deviceId,
+    cursor: 42,
+  });
+
+  assert.deepEqual(await changed, {
+    protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+    type: "vault.changed",
+    cursor: 42,
+  });
+});
+
+test("relay disconnects a peer that exceeds its unacknowledged delivery capacity", async (t) => {
+  const fixture = await createConnectedRelay(t, {
+    maxPendingDeliveriesPerTarget: 1,
+    deliveryTtlMs: 60_000,
+  });
+  const firstDelivery = waitForFrame(fixture.mobileSocket, (frame) => frame.type === "message.deliver");
+  fixture.desktopSocket.send(JSON.stringify(commandFrame("desktop-message-1", "desktop-command-1")));
+  await firstDelivery;
+
+  const rejected = waitForFrame(fixture.desktopSocket, (frame) => frame.type === "message.rejected");
+  const closed = waitForClose(fixture.mobileSocket);
+  fixture.desktopSocket.send(JSON.stringify(commandFrame("desktop-message-2", "desktop-command-2")));
+
+  const rejectedFrame = await rejected;
+  assert.equal(rejectedFrame.type === "message.rejected" && rejectedFrame.code, "peer_backpressure");
+  await closed;
+});
+
+test("relay expires unacknowledged deliveries and preserves the sender outbox contract", async (t) => {
+  const fixture = await createConnectedRelay(t, {
+    deliveryTtlMs: 25,
+    deliverySweepIntervalMs: 5,
+  });
+  const delivery = waitForFrame(fixture.mobileSocket, (frame) => frame.type === "message.deliver");
+  const peerOffline = waitForFrame(fixture.desktopSocket, (frame) => frame.type === "peer.presence" && !frame.online);
+  fixture.desktopSocket.send(JSON.stringify(commandFrame("desktop-timeout", "desktop-timeout-command")));
+  await delivery;
+
+  assert.equal((await peerOffline).type, "peer.presence");
+  await waitForClose(fixture.mobileSocket);
+});
+
+async function createConnectedRelay(
+  t: test.TestContext,
+  options: Pick<Parameters<typeof startRemoteRelayServer>[0], "maxPendingDeliveriesPerTarget" | "deliveryTtlMs" | "deliverySweepIntervalMs">,
+) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-relay-bounds-"));
+  const database = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));
+  const relay = await startRemoteRelayServer({
+    store: createRemoteRelayStore({ database, codeFactory: () => "246810", allowOpenSignup: true }),
+    ...options,
+    port: 0,
+  });
+  const activation = (await post(relay.url, "/v1/accounts/activate", { deviceName: "Desktop" })).credential as DeviceCredential;
+  const pairing = (await post(relay.url, "/v1/pairings", {}, activation.accessToken)).pairing as Pairing;
+  const mobile = (await post(relay.url, "/v1/pairings/join", { pairingCode: pairing.pairingCode, deviceName: "Phone" })).pairing as MobileClaim;
+  await post(relay.url, `/v1/pairings/${pairing.pairingId}/approve`, { pairingCode: pairing.pairingCode }, activation.accessToken);
+  const desktopSocket = await connect(relay.websocketUrl, activation.accessToken);
+  const mobileSocket = await connect(relay.websocketUrl, mobile.accessToken);
+  t.after(async () => {
+    desktopSocket.close();
+    mobileSocket.close();
+    await relay.close();
+    database.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+  });
+  return { desktopSocket, mobileSocket };
+}
+
+function commandFrame(clientMessageId: string, commandId: string) {
+  return {
+    protocolVersion: REMOTE_COLLABORATION_PROTOCOL_VERSION,
+    type: "message.submit",
+    clientMessageId,
+    content: {
+      type: "command",
+      command: { kind: "conversation.page.request", commandId, conversationId: "conversation-1" },
+    },
+  } as const;
+}
 
 async function post(baseUrl: string, pathname: string, body: unknown, token?: string): Promise<Record<string, unknown>> {
   return request(baseUrl, pathname, "POST", body, token);
@@ -139,6 +257,10 @@ function waitForClose(socket: WebSocket): Promise<void> {
   return new Promise((resolve) => socket.once("close", () => resolve()));
 }
 
-type DeviceCredential = { readonly accessToken: string };
+type DeviceCredential = {
+  readonly accessToken: string;
+  readonly deviceId: string;
+  readonly account: { readonly accountId: string };
+};
 type Pairing = { readonly pairingId: string; readonly pairingCode: string };
 type MobileClaim = { readonly accessToken: string };

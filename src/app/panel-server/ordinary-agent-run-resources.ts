@@ -205,6 +205,11 @@ export function createOrdinaryAgentRunResourceAcquirer(
           metricsSink: toolMetrics,
           contextAttachmentReadAuthorization: options.contextAttachmentReadAuthorization,
           workspacePathAuthorization,
+          // Space-owned runs may gain their first reference inside the run;
+          // keeping AttachmentList visible lets the model discover that no
+          // attachment is available yet instead of hiding the tool family.
+          // The exposure decision is Host-declared, not inferred here.
+          exposeContextAttachmentToolsWhenEmpty: options.host.resolveAttachmentToolExposure?.(taskSoil) ?? false,
           contributions: [
             ...createHostAgentToolContributions({
               runtime: toolRuntime,

@@ -93,6 +93,7 @@ export {
   type CreateSpaceRunPathAuthorizationInput,
 } from "./space-run-path-authorization.js";
 export {
+  hasSpaceOwnerScope,
   isSpaceReferenceWritePermission,
   spaceReferenceAttachmentId,
   spaceReferenceIdFromAttachmentId,

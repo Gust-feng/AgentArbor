@@ -50,6 +50,8 @@ export type AgentRunResourceHost = {
   readonly testOnlyAllowFakeModel?: boolean;
   readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
+  /** Host-declared attachment tool exposure for a concrete run's Task Soil. */
+  readonly resolveAttachmentToolExposure?: (taskSoil: TaskSoil) => boolean;
 };
 
 export type AgentHostRunResources<
@@ -294,6 +296,7 @@ export function createAgentToolCenterFactory(
     readonly metricsSink?: ToolExecutionMetricsSink;
     readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
     readonly workspacePathAuthorization?: LocalWorkspacePathAuthorization;
+    readonly exposeContextAttachmentToolsWhenEmpty?: boolean;
   }) => createDefaultToolCenter({
     runtime: toolRuntime,
     env: resources.aiEnvironment,
@@ -318,5 +321,6 @@ export function createAgentToolCenterFactory(
     resolveManagedAttachmentPath: resources.resolveManagedAttachmentPath,
     contextAttachmentReadAuthorization: context?.contextAttachmentReadAuthorization,
     workspacePathAuthorization: context?.workspacePathAuthorization,
+    exposeContextAttachmentToolsWhenEmpty: context?.exposeContextAttachmentToolsWhenEmpty,
   });
 }

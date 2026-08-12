@@ -118,7 +118,7 @@ export type ToolDisplayProjection = ToolDisplayResultFacts & (
     }
   | {
       readonly kind: "space_operation";
-      readonly operation: "list" | "create" | "move" | "add_reference" | "remove_reference" | "rename";
+      readonly operation: "list" | "create" | "move" | "add_reference" | "mount" | "create_managed_folder" | "create_entry" | "rename_entry" | "delete_entry" | "update_caption" | "remove_reference" | "rename";
       readonly status?: string;
       readonly spaceId?: string;
       readonly title?: string;

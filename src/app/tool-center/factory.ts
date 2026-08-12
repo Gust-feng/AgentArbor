@@ -57,6 +57,7 @@ export type CreateAgentToolCenterOptions = {
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
   readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
   readonly workspacePathAuthorization?: LocalWorkspacePathAuthorization;
+  readonly exposeContextAttachmentToolsWhenEmpty?: boolean;
 };
 
 export function createDefaultToolCenter(

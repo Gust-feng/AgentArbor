@@ -283,6 +283,12 @@ function spaceOperation(toolName: string): Extract<ToolDisplayProjection, { read
   if (toolName === "SpaceCreate") return "create";
   if (toolName === "SpaceMove") return "move";
   if (toolName === "SpaceAddReference") return "add_reference";
+  if (toolName === "SpaceMountLocalPath") return "mount";
+  if (toolName === "SpaceCreateManagedFolder") return "create_managed_folder";
+  if (toolName === "SpaceCreateEntry") return "create_entry";
+  if (toolName === "SpaceRenameEntry") return "rename_entry";
+  if (toolName === "SpaceDeleteEntry") return "delete_entry";
+  if (toolName === "SpaceUpdateCaption") return "update_caption";
   if (toolName === "SpaceRemoveReference") return "remove_reference";
   if (toolName === "SpaceRename") return "rename";
   return undefined;

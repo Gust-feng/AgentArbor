@@ -80,7 +80,9 @@ export function createSpaceRunPathAuthorization(
 
       const unrestricted = request.operation === "execute" || request.context.confirmationPolicy === "full_access";
       if (resolution.outcome === "outside_reference" && !unrestricted) {
-        throw new Error(`${requestedPath} is not inside any Space reference authorized for this run.`);
+        throw new Error(
+          `${requestedPath} is not inside any Space reference authorized for this run. To write into a new folder, mount it first with SpaceMountLocalPath (the user confirms the path), or ask the user to provide the target folder in this conversation.`,
+        );
       }
 
       if (resolution.outcome === "resolved") {

@@ -31,10 +31,10 @@ async function execute(tool: ToolExecutor, input: unknown): Promise<unknown> { r
 
 test("Space tools expose the complete factual operation set and object-root schemas", () => {
   const { tools } = toolsFixture();
-  assert.deepEqual([...tools.keys()], ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceReadReference", "SpaceUpdateReferenceAnnotation", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
+  assert.deepEqual([...tools.keys()], ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceMountLocalPath", "SpaceCreateManagedFolder", "SpaceCreateEntry", "SpaceRenameEntry", "SpaceDeleteEntry", "SpaceUpdateCaption", "SpaceReadReference", "SpaceUpdateReferenceAnnotation", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
   for (const tool of tools.values()) {
     assert.equal(tool.definition.inputSchema.type, "object");
-    assert.equal(tool.definition.metadata?.requiresConfirmation, ["SpaceDelete", "ConversationDelete", "SpaceRemoveReference"].includes(tool.definition.name));
+    assert.equal(tool.definition.metadata?.requiresConfirmation, ["SpaceDelete", "ConversationDelete", "SpaceRemoveReference", "SpaceMountLocalPath", "SpaceDeleteEntry"].includes(tool.definition.name));
   }
   assert.match(tools.get("SpaceRemoveReference")!.definition.description, /Delete a Space-owned material/u);
   assert.equal(tools.get("SpaceUnlinkReference")!.definition.metadata?.requiresConfirmation, false);
@@ -44,7 +44,7 @@ test("Space contribution contributes all executors without owning ToolCenter ass
   const { spaces } = toolsFixture();
   const names: string[] = [];
   createSpaceToolRegistryContribution({ spaces, workspaceRoot: path.resolve(".") })((entry) => names.push(entry.executor.definition.name));
-  assert.deepEqual(names, ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceReadReference", "SpaceUpdateReferenceAnnotation", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
+  assert.deepEqual(names, ["SpaceList", "SpaceCreate", "SpaceDelete", "ConversationDelete", "SpaceMove", "SpaceAddReference", "SpaceMountLocalPath", "SpaceCreateManagedFolder", "SpaceCreateEntry", "SpaceRenameEntry", "SpaceDeleteEntry", "SpaceUpdateCaption", "SpaceReadReference", "SpaceUpdateReferenceAnnotation", "SpaceUnlinkReference", "SpaceRemoveReference", "SpaceRename"]);
 });
 
 test("Space and Conversation deletion tools require confirmation and use Host callbacks", async () => {
@@ -488,5 +488,250 @@ test("SpaceList tree and reference tools never expose source identities or audit
   assert.equal(read.item.parentId, parent.id);
   assert.equal("sourceIdentity" in read.item, false);
   assert.equal("actor" in read.item.annotation, false);
+  await spaces.release();
+});
+
+test("SpaceAddReference no longer accepts generated_artifact without a registered artifact", async () => {
+  const { spaces, tools } = toolsFixture();
+  const created = await execute(tools.get("SpaceCreate")!, { title: "工作" }) as { space: { id: string } };
+  assert.deepEqual(await execute(tools.get("SpaceAddReference")!, {
+    spaceId: created.space.id,
+    title: "伪产物",
+    reference: { kind: "generated_artifact", artifactRef: "E:/从记事本开始" },
+  }), {
+    status: "invalid_input",
+    message: "spaceId, title and a valid reference are required.",
+  });
+  const tree = await spaces.queries.getTree(created.space.id);
+  assert.equal(tree?.entries.length, 0, "no ghost reference may be created");
+  await spaces.release();
+});
+
+test("SpaceMountLocalPath registers only user-provided existing absolute paths", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-mount-"));
+  t.after(() => removeTestDirectory(root));
+  const folder = path.join(root, "笔记库");
+  const file = path.join(root, "note.md");
+  await fs.mkdir(folder);
+  await fs.writeFile(file, "note", "utf8");
+  const { spaces } = toolsFixture();
+  const space = await spaces.commands.createSpace({ title: "我的空间" });
+  const tools = new Map(createSpaceTools({ spaces, workspaceRoot: root }).map((entry) => [entry.definition.name, entry]));
+  const mount = tools.get("SpaceMountLocalPath")!;
+  assert.equal(mount.definition.metadata?.requiresConfirmation, true);
+
+  assert.deepEqual(await execute(mount, {
+    spaceId: space.id,
+    title: "相对路径",
+    targetKind: "folder",
+    path: "笔记库",
+  }), {
+    status: "invalid_input",
+    message: "path must be an absolute local path provided by the user.",
+  });
+  assert.deepEqual(await execute(mount, {
+    spaceId: space.id,
+    title: "不存在的目录",
+    targetKind: "folder",
+    path: path.join(root, "missing"),
+  }), {
+    status: "space_reference_source_unavailable",
+    path: path.resolve(path.join(root, "missing")),
+    message: `No folder exists at ${path.resolve(path.join(root, "missing"))}. Ask the user to verify the path before retrying.`,
+  });
+  assert.deepEqual(await execute(mount, {
+    spaceId: space.id,
+    title: "类型不符",
+    targetKind: "folder",
+    path: file,
+  }), {
+    status: "space_reference_source_unavailable",
+    path: path.resolve(file),
+    message: `No folder exists at ${path.resolve(file)}. Ask the user to verify the path before retrying.`,
+  });
+
+  const folderResult = await execute(mount, {
+    spaceId: space.id,
+    title: "从记事本开始",
+    targetKind: "folder",
+    path: folder,
+  }) as { readonly status: string; readonly item: { readonly reference: SpaceReference }; readonly note: string };
+  assert.equal(folderResult.status, "added");
+  assert.deepEqual(folderResult.item.reference, { kind: "workspace_folder", path: path.resolve(folder) });
+  assert.match(folderResult.note, /next run/u);
+
+  const fileResult = await execute(mount, {
+    spaceId: space.id,
+    title: "笔记",
+    targetKind: "file",
+    path: file,
+  }) as { readonly status: string; readonly item: { readonly reference: SpaceReference } };
+  assert.equal(fileResult.status, "added");
+  assert.deepEqual(fileResult.item.reference, { kind: "local_file", path: path.resolve(file) });
+
+  assert.deepEqual(await execute(mount, {
+    spaceId: space.id,
+    title: "重复挂载",
+    targetKind: "folder",
+    path: folder,
+  }), {
+    status: "space_workspace_mount_conflict",
+    message: "This filesystem path is already linked to this Space",
+  });
+  await spaces.release();
+});
+
+test("SpaceCreateManagedFolder creates a Host-managed folder and registers it", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-managed-"));
+  t.after(() => removeTestDirectory(root));
+  const { spaces } = toolsFixture();
+  const space = await spaces.commands.createSpace({ title: "我的空间" });
+  const tools = new Map(createSpaceTools({ spaces, workspaceRoot: root }).map((entry) => [entry.definition.name, entry]));
+  const create = tools.get("SpaceCreateManagedFolder")!;
+
+  assert.deepEqual(await execute(create, { spaceId: space.id, title: "资料" }), {
+    status: "space_managed_folder_unavailable",
+    spaceId: space.id,
+    message: "The Host managed Space folder storage is not available in this environment.",
+  });
+
+  const withHost = new Map(createSpaceTools({ spaces, workspaceRoot: root, managedSpaceFolderRoot: path.join(root, "managed") }).map((entry) => [entry.definition.name, entry]));
+  const created = await execute(withHost.get("SpaceCreateManagedFolder")!, { spaceId: space.id, title: "资料" }) as {
+    readonly status: string;
+    readonly item: { readonly itemId: string; readonly reference: { readonly kind: string; readonly path: string } };
+  };
+  assert.equal(created.status, "created");
+  assert.equal(created.item.reference.kind, "managed_folder");
+  assert.match(created.item.reference.path, /^[\\/a-zA-Z0-9:._-]*[\\/]managed[\\/][^\\/]+$/u);
+  assert.equal((await fs.stat(created.item.reference.path)).isDirectory(), true);
+
+  const missingSpace = await execute(withHost.get("SpaceCreateManagedFolder")!, { spaceId: "no-such-space", title: "失败回滚" });
+  assert.equal((missingSpace as { readonly status: string }).status, "space_not_found");
+  assert.equal((await fs.readdir(path.join(root, "managed"))).length, 1, "failed registration must not leave an extra folder");
+  await spaces.release();
+});
+
+test("Space entry tools create, rename and delete entries inside folder references", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-entries-"));
+  t.after(() => removeTestDirectory(root));
+  const folder = path.join(root, "工作区");
+  await fs.mkdir(folder);
+  const { spaces } = toolsFixture();
+  const space = await spaces.commands.createSpace({ title: "我的空间" });
+  const reference = await spaces.commands.addReference({
+    spaceId: space.id,
+    title: "工作区",
+    reference: { kind: "workspace_folder", path: folder },
+  });
+  const localFile = await spaces.commands.addReference({
+    spaceId: space.id,
+    title: "单文件",
+    reference: { kind: "local_file", path: path.join(root, "single.md") },
+  });
+  const tools = new Map(createSpaceTools({ spaces, workspaceRoot: root }).map((entry) => [entry.definition.name, entry]));
+  const createEntry = tools.get("SpaceCreateEntry")!;
+  const renameEntry = tools.get("SpaceRenameEntry")!;
+  const deleteEntry = tools.get("SpaceDeleteEntry")!;
+
+  assert.deepEqual(await execute(createEntry, { itemId: localFile.id, parentRelativePath: "", name: "x.md", kind: "file" }), {
+    status: "space_reference_entry_mutation_unavailable",
+    itemId: localFile.id,
+    message: "Only workspace folder and managed folder references support entries.",
+  });
+  assert.deepEqual(await execute(createEntry, { itemId: reference.id, parentRelativePath: "..", name: "x.md", kind: "file" }), {
+    status: "invalid_input",
+    message: "parentRelativePath is invalid.",
+  });
+
+  const created = await execute(createEntry, { itemId: reference.id, parentRelativePath: "", name: "读书清单.md", kind: "file" }) as { readonly status: string; readonly relativePath: string };
+  assert.equal(created.status, "created");
+  assert.equal(created.relativePath, "读书清单.md");
+  assert.equal((await fs.stat(path.join(folder, "读书清单.md"))).isFile(), true);
+
+  assert.deepEqual(await execute(createEntry, { itemId: reference.id, parentRelativePath: "", name: "读书清单.md", kind: "file" }), {
+    status: "space_reference_entry_exists",
+    itemId: reference.id,
+    message: "An entry with this name already exists in the same folder.",
+  });
+
+  const renamed = await execute(renameEntry, { itemId: reference.id, relativePath: "读书清单.md", name: "清单.md" }) as { readonly status: string; readonly relativePath: string };
+  assert.equal(renamed.status, "renamed");
+  assert.equal(renamed.relativePath, "清单.md");
+  assert.equal((await fs.stat(path.join(folder, "清单.md"))).isFile(), true);
+
+  const deleted = await execute(deleteEntry, { itemId: reference.id, relativePath: "清单.md" }) as { readonly status: string };
+  assert.equal(deleted.status, "deleted");
+  assert.equal(await fs.stat(path.join(folder, "清单.md")).then(() => false, () => true), true);
+
+  assert.deepEqual(await execute(deleteEntry, { itemId: reference.id, relativePath: "清单.md" }), {
+    status: "space_reference_source_missing",
+    itemId: reference.id,
+    message: "The entry does not exist anymore.",
+  });
+  await spaces.release();
+});
+
+test("Space entry tools remove a folder reference whose source disappeared", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-entry-gone-"));
+  t.after(() => removeTestDirectory(root));
+  const folder = path.join(root, "工作区");
+  await fs.mkdir(folder);
+  const { spaces } = toolsFixture();
+  const space = await spaces.commands.createSpace({ title: "我的空间" });
+  const reference = await spaces.commands.addReference({
+    spaceId: space.id,
+    title: "工作区",
+    reference: { kind: "workspace_folder", path: folder },
+  });
+  await fs.rmdir(folder);
+  const tools = new Map(createSpaceTools({ spaces, workspaceRoot: root }).map((entry) => [entry.definition.name, entry]));
+  const result = await execute(tools.get("SpaceCreateEntry")!, { itemId: reference.id, parentRelativePath: "", name: "x.md", kind: "file" });
+  assert.deepEqual(result, {
+    status: "space_reference_source_missing",
+    itemId: reference.id,
+    message: "The source path no longer exists or was replaced; the reference was removed from this Space.",
+  });
+  assert.equal(await spaces.queries.getReference(reference.id), undefined, "the invalid reference must be unlinked");
+  await spaces.release();
+});
+
+test("SpaceUpdateCaption updates image captions with automatic revision handling", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-space-caption-"));
+  t.after(() => removeTestDirectory(root));
+  const folderPath = path.join(root, "images");
+  await fs.mkdir(folderPath);
+  const { spaces, tools } = toolsFixture();
+  const space = await spaces.commands.createSpace({ title: "我的空间" });
+  const folder = await spaces.commands.addReference({
+    spaceId: space.id,
+    title: "图片",
+    reference: { kind: "workspace_folder", path: folderPath },
+  });
+  const web = await spaces.commands.addReference({
+    spaceId: space.id,
+    title: "网页",
+    reference: { kind: "web_page", url: "https://example.com" },
+  });
+  const update = tools.get("SpaceUpdateCaption")!;
+
+  assert.deepEqual(await execute(update, { itemId: web.id, relativePath: "", caption: "x" }), {
+    status: "space_reference_caption_unavailable",
+    itemId: web.id,
+    message: "Only file and folder references can own image captions.",
+  });
+
+  const first = await execute(update, { itemId: folder.id, relativePath: "diagram.png", caption: "结构图" }) as {
+    readonly status: string;
+    readonly caption: { readonly revision: number; readonly text: string };
+  };
+  assert.equal(first.status, "updated");
+  assert.deepEqual(first.caption, { revision: 1, text: "结构图", updatedAt: "2026-07-28T00:00:00.000Z", updatedBy: "agent" });
+
+  const second = await execute(update, { itemId: folder.id, relativePath: "diagram.png", caption: "更新后的结构图" }) as {
+    readonly status: string;
+    readonly caption: { readonly revision: number };
+  };
+  assert.equal(second.status, "updated");
+  assert.equal(second.caption.revision, 2);
   await spaces.release();
 });

@@ -76,6 +76,7 @@ import {
   createFileSystemSpaceReferenceDeletionJournal,
   createSqliteSpaceRepository,
   createSpaceFeature,
+  hasSpaceOwnerScope,
   inspectSpaceExternalSource,
   inspectFileSystemSpaceReferenceDeletionJournal,
   spaceReferenceIdFromAttachmentId,
@@ -588,6 +589,8 @@ function assemblePanelRuntime(input: {
     assertSpaceAvailable: (spaceId) => spaceConversationDeletion.assertAvailable(spaceId),
     deleteSpace: (spaceId) => spaceConversationDeletion.deleteSpace(spaceId),
     deleteConversation: (conversationId) => spaceConversationLink.deleteConversation(conversationId),
+    managedSpaceFolderRoot,
+    fileMutationCoordinator,
   });
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
@@ -615,6 +618,7 @@ function assemblePanelRuntime(input: {
       fileMutationCoordinator,
       resolveManagedAttachmentPath,
       testOnlyAllowFakeModel: input.testOnlyAllowFakeModel,
+      resolveAttachmentToolExposure: ({ permissionBoundaryRefs }) => hasSpaceOwnerScope(permissionBoundaryRefs),
     },
     sessionRepository: agentSessionRepository,
     soilStore: createMinimalReadonlySoilStore([]),

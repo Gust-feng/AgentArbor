@@ -68,6 +68,8 @@ export type CreateAgentToolRegistryOptions = {
   readonly resolveManagedAttachmentPath?: (attachmentId: string) => Promise<string | undefined>;
   readonly contextAttachmentReadAuthorization?: ContextAttachmentReadAuthorization;
   readonly workspacePathAuthorization?: LocalWorkspacePathAuthorization;
+  /** Host-declared runs keep the attachment tools visible even with zero attachments. */
+  readonly exposeContextAttachmentToolsWhenEmpty?: boolean;
 };
 
 export type ToolRegistryFetchLike = (
@@ -149,12 +151,16 @@ export function createAgentToolRegistry(
  * catalog is assembled without Task Soil and therefore keeps their definitions,
  * but a concrete run with no user-visible attachment must not expose executors
  * that can only return an empty attachment index or an authorization error.
+ * A Host-declared run (e.g. a Space-owned run that may gain references) keeps
+ * them visible so the model can discover that no attachment is available yet.
  */
 function contextAttachmentExecutors(
   options: CreateAgentToolRegistryOptions,
   workspaceRoot: string,
 ): readonly ToolExecutor[] {
-  if (options.taskSoil !== undefined && attachmentEntries(options.taskSoil).length === 0) {
+  if (options.taskSoil !== undefined
+    && attachmentEntries(options.taskSoil).length === 0
+    && options.exposeContextAttachmentToolsWhenEmpty !== true) {
     return [];
   }
   return createContextAttachmentTools({

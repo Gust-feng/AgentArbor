@@ -36,3 +36,8 @@ export function spaceScopeIdFromPermissions(values: readonly string[]): string |
   }
   return owners[0];
 }
+
+/** Whether the permission set belongs to a Space-owned run (any Space owner). */
+export function hasSpaceOwnerScope(values: readonly string[]): boolean {
+  return values.some((value) => value.startsWith(SPACE_SCOPE_PREFIX));
+}

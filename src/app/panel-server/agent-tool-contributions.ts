@@ -20,6 +20,7 @@ import type {
   AgentToolRegistryContribution,
   AgentToolRuntimeContext,
 } from "../tool-center/factory.js";
+import type { LocalWorkspaceMutationCoordinator } from "../tool-center/adapters/local-workspace-mutation-coordinator.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import type { AgentHostRunResources } from "./agent-run-resources.js";
@@ -48,6 +49,10 @@ export function createHostFeatureAgentToolContributionResolver(input: {
   readonly assertSpaceAvailable?: (spaceId: string) => void;
   readonly deleteSpace?: (spaceId: string) => Promise<void>;
   readonly deleteConversation?: (conversationId: string) => Promise<void>;
+  /** Host-owned storage root for AgentArbor-managed Space folders. */
+  readonly managedSpaceFolderRoot?: string;
+  /** Host-owned file mutation coordinator shared with the file tools. */
+  readonly fileMutationCoordinator?: LocalWorkspaceMutationCoordinator;
 }): HostFeatureAgentToolContributionResolver {
   // Shared across runs on purpose: a revocation is permanent, since re-adding a
   // reference mints a new id rather than reviving the revoked one.
@@ -81,6 +86,8 @@ export function createHostFeatureAgentToolContributionResolver(input: {
           assertSpaceAvailable: input.assertSpaceAvailable,
           deleteSpace: input.deleteSpace,
           deleteConversation: input.deleteConversation,
+          ...(input.managedSpaceFolderRoot === undefined ? {} : { managedSpaceFolderRoot: input.managedSpaceFolderRoot }),
+          ...(input.fileMutationCoordinator === undefined ? {} : { fileMutationCoordinator: input.fileMutationCoordinator }),
         })]),
     ...(input.personalKnowledge === undefined
       ? []

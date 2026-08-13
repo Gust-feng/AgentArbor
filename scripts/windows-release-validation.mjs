@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import { extractFile } from "@electron/asar";
 import { parse as parseYaml } from "yaml";
 
 /**
@@ -95,6 +96,69 @@ export function validateWindowsReleaseArtifacts({ releaseDirectory, version }) {
   }
 
   return { installerPath, blockmapPath, latestPath, installerName, blockmapName };
+}
+
+/**
+ * A fresh install materializes the built-in Workbench content from assets
+ * bundled inside app.asar. Publishing must prove the packaged archive carries
+ * every source asset byte-for-byte; a stale dist copy or an electron-builder
+ * filter change would otherwise ship installers whose first launch creates
+ * incomplete initial data.
+ */
+export function validateWindowsInitialWorkbenchAssets({
+  releaseDirectory,
+  sourceAssetDirectory,
+  asarAssetPrefix = "dist/app/panel-server/initial-workbench-assets",
+}) {
+  const asarPath = join(releaseDirectory, "win-unpacked", "resources", "app.asar");
+  if (!existsSync(asarPath)) {
+    throw new Error(`Missing packaged application archive ${asarPath}.`);
+  }
+
+  const assetPaths = listFilesRecursively(sourceAssetDirectory);
+  if (assetPaths.length === 0) {
+    throw new Error(`Initial Workbench asset source ${sourceAssetDirectory} has no files.`);
+  }
+
+  for (const relativePath of assetPaths) {
+    const sourceBytes = readFileSync(join(sourceAssetDirectory, ...relativePath.split("/")));
+    // @electron/asar resolves archive paths with platform separators.
+    const archivePath = `${asarAssetPrefix}/${relativePath}`.split("/").join(sep);
+    let packagedBytes;
+    try {
+      packagedBytes = extractFile(asarPath, archivePath);
+    } catch (error) {
+      throw new Error(
+        `Packaged app.asar is missing initial Workbench asset ${relativePath}.`,
+        { cause: error },
+      );
+    }
+    if (sha256(sourceBytes) !== sha256(packagedBytes)) {
+      throw new Error(`Packaged initial Workbench asset ${relativePath} differs from its source.`);
+    }
+  }
+
+  return { asarPath, verifiedAssetCount: assetPaths.length };
+}
+
+function listFilesRecursively(root, prefix = "") {
+  if (!existsSync(root)) {
+    return [];
+  }
+  const files = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...listFilesRecursively(join(root, entry.name), relativePath));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files.sort();
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function isRecord(value) {

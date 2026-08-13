@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   resolveReleaseTag,
+  validateWindowsInitialWorkbenchAssets,
   validateWindowsReleaseArtifacts,
 } from "./windows-release-validation.mjs";
 
@@ -15,6 +16,10 @@ const tag = resolveReleaseTag({
 });
 const releaseDirectory = join(process.cwd(), "release");
 const releaseArtifacts = validateWindowsReleaseArtifacts({ releaseDirectory, version });
+validateWindowsInitialWorkbenchAssets({
+  releaseDirectory,
+  sourceAssetDirectory: join(process.cwd(), "src", "app", "panel-server", "initial-workbench-assets"),
+});
 const assets = [
   releaseArtifacts.installerPath,
   releaseArtifacts.blockmapPath,

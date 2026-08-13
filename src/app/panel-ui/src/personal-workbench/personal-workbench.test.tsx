@@ -658,6 +658,19 @@ test("keeps bootstrap failures inside the personal workbench and retries in plac
   expect(screen.queryByText("新任务")).toBeNull();
 });
 
+test("dismisses the bottom-right run error notice manually", () => {
+  const onDismissError = vi.fn();
+  renderWorkbench({
+    error: "任务启动失败：模型服务不可用。",
+    onDismissError,
+  });
+
+  const notice = screen.getByRole("alert");
+  expect(notice.textContent).toContain("任务启动失败：模型服务不可用。");
+  fireEvent.click(screen.getByRole("button", { name: "关闭错误提示" }));
+  expect(onDismissError).toHaveBeenCalledTimes(1);
+});
+
 test("renders the Home surface directly while bootstrap data is pending", () => {
   const { container } = renderWorkbench({
     bootstrapState: {

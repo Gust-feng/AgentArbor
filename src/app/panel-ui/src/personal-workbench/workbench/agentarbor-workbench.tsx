@@ -1,4 +1,4 @@
-import { AlertCircle, RotateCcw } from "lucide-react";
+import { AlertCircle, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import type { CurrentRunProjection } from "../../app-run-projection";
@@ -35,6 +35,7 @@ import {
   subscribePersonalKnowledge,
   setActivePersonalKnowledgeSpace,
   setPersonalKnowledgePersistenceEnabled,
+  clearPersonalKnowledgeError,
 } from "./app/components/personalKnowledgeClient";
 
 export type PersonalWorkbenchProps = {
@@ -53,6 +54,7 @@ export type PersonalWorkbenchProps = {
   readonly showModelUsage: boolean;
   readonly developerModeEnabled: boolean;
   readonly error?: string;
+  readonly onDismissError?: () => void;
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<CurrentRunProjection["workView"]>["pendingConfirmation"];
   readonly confirmationBusy: boolean;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
@@ -495,13 +497,14 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
         <WorkbenchStatusNotice
           message={knowledgeError}
           onRetry={() => void refreshPersonalKnowledge().catch(() => undefined)}
+          onDismiss={clearPersonalKnowledgeError}
         />
       )}
 
       {/* 全屏对话视图已退役：isConversationView 恒为 false，普通 run 错误
           以全局提示展示；会话面板内的失败态由 ConversationSurface 自身投影。 */}
       {props.error !== undefined && !isConversationView(view) && props.bootstrapState.status === "ready" && knowledgeError === undefined && (
-        <WorkbenchStatusNotice message={props.error} />
+        <WorkbenchStatusNotice message={props.error} onDismiss={props.onDismissError} />
       )}
 
       {props.settingsDialogProps?.open === true && <WorkbenchSettingsDialog {...props.settingsDialogProps} />}
@@ -724,6 +727,7 @@ function WorkbenchStatusNotice(props: {
   readonly message: string;
   readonly onRetry?: () => void;
   readonly retrying?: boolean;
+  readonly onDismiss?: () => void;
 }) {
   return (
     <div
@@ -743,6 +747,17 @@ function WorkbenchStatusNotice(props: {
           disabled={props.retrying}
         >
           <RotateCcw className={props.retrying ? "animate-spin" : undefined} size={12} />
+        </button>
+      )}
+      {props.onDismiss !== undefined && (
+        <button
+          type="button"
+          aria-label="关闭错误提示"
+          onClick={props.onDismiss}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded hover:bg-[var(--aa-hover-tint)]"
+          style={{ color: "var(--aa-text-3)" }}
+        >
+          <X size={12} />
         </button>
       )}
     </div>

@@ -97,6 +97,43 @@ describe("live Ordinary run updates", () => {
     expect(state.error).toBeUndefined();
   });
 
+  it("clears the bottom-right error notice once polling recovers after a transient read failure", async () => {
+    let state: AppState = {
+      ...createInitialAppState(),
+      conversation: { conversationId: "conversation-1" } as AppState["conversation"],
+      run: { runId: "run-1", status: "running" } as AppState["run"],
+      error: "读取运行视图失败。",
+    };
+    const pollTimer = { current: undefined as number | undefined };
+    const fallbackPollRef = { current: undefined as AbortController | undefined };
+    runtimeMocks.safeBasicRunView.mockResolvedValue(completedView("cursor-settled"));
+    const controller = createLiveRunUpdateController({
+      setApp: ((next) => {
+        state = typeof next === "function" ? next(state) : next;
+      }) as React.Dispatch<React.SetStateAction<AppState>>,
+      mountedRef: { current: true },
+      pollTimer,
+      streamRef: { current: undefined },
+      fallbackPollRef,
+      activeRunIdRef: { current: "run-1" },
+      viewEpochRef: { current: 1 },
+      refreshConversations: async () => undefined,
+    });
+
+    controller.startPolling({
+      runId: "run-1",
+      conversationId: "conversation-1",
+      epoch: 1,
+    });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1_200);
+    await flushPromises();
+
+    // 轮询恢复成功后，此前瞬时失败写入的全局错误提示被清除，不再悬挂在右下角。
+    expect(state.error).toBeUndefined();
+    expect(state.run?.status).toBe("completed");
+  });
+
   it("keeps low-frequency reconciliation after the first SSE event and falls back when heartbeats stop", async () => {
     let state: AppState = {
       ...createInitialAppState(),

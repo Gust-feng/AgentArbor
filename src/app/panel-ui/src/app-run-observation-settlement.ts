@@ -78,6 +78,9 @@ export function appStateWithSettledRunProjection(
     run: settled.run,
     live: undefined,
     ...readModel,
+    // 结算读取成功即代表运行状态恢复，清除此前的全局错误提示（run-controller
+    // 取消路径与 live 结算路径共用此入口）。
+    error: undefined,
   };
 }
 
@@ -154,6 +157,7 @@ function appStateWithFollowUpActiveRun(
       ? appendLiveRunEvents(followUp.run.runId, undefined, followUp.replay?.events ?? [])
       : undefined,
     ...readModel,
+    error: undefined,
   };
 }
 

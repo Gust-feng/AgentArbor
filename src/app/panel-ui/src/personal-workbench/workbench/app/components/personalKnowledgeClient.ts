@@ -80,6 +80,13 @@ export function resolvePersonalNoteConflict(noteId: string): void {
   noteErrors.delete(noteId)
   emit()
 }
+
+/** 用户主动关闭个人知识错误提示；下一次失败仍会重新出现。 */
+export function clearPersonalKnowledgeError(): void {
+  if (lastError === undefined) return
+  lastError = undefined
+  emit()
+}
 export function subscribePersonalKnowledge(listener: () => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)

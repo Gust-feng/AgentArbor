@@ -68,6 +68,9 @@ export function appStateWithObservedRunProjection(
   return {
     ...stateWithObservedRunProjection(previous, input),
     ...nextCapabilityResolutionState(previous, input.runId, input.capabilityResolution),
+    // 运行视图读取成功即代表恢复：清除同一数据源此前写入的全局错误提示，
+    // 避免「读取运行视图失败」等瞬时错误在 run 结束后永久停留在右下角。
+    error: undefined,
   };
 }
 
@@ -85,6 +88,7 @@ export function appStateWithObservedRunEvent(
   return {
     ...stateWithObservedRunEvent(previous, input),
     ...nextCapabilityResolutionState(previous, input.runId, input.capabilityResolution),
+    error: undefined,
   };
 }
 
@@ -105,7 +109,11 @@ export function appStateWithAppendOnlyRunEvents(
     readonly events: readonly RunEvent[];
   }
 ): AppState {
-  return stateWithAppendOnlyRunEvents(previous, input);
+  return {
+    ...stateWithAppendOnlyRunEvents(previous, input),
+    // 事件仍在持续送达说明流连接已恢复，同步清除之前的全局错误提示。
+    error: undefined,
+  };
 }
 
 function nextCapabilityResolutionState(

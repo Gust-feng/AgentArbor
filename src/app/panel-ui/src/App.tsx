@@ -266,6 +266,7 @@ export function App(): React.ReactElement {
       showModelUsage={modelUsageDisplayEnabled}
       developerModeEnabled={developerModeEnabled}
       error={app.error}
+      onDismissError={() => setApp((previous) => ({ ...previous, error: undefined }))}
       pendingConfirmation={pendingConfirmation}
       confirmationBusy={confirmationBusy}
       onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}

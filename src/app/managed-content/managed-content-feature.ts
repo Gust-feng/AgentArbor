@@ -248,12 +248,15 @@ async function walkTextFiles(rootPath: string, relative: string, rootId: string,
     if (!entry.isFile()) continue;
     const content = await readFileText(path.join(rootPath, next), { maxBytes: MANAGED_CONTENT_MAX_TEXT_BYTES });
     if (!content.ok) {
-      throw new ManagedContentError(
-        "managed_content_io_failure",
-        `Managed file ${next} could not be read.`,
-      );
+      // ADR-0038：受管文件夹允许存放图片、PDF 等二进制材料，它们不属于
+      // 首阶段文本同步边界，跳过即可；文件在遍历中途消失同理。环境性
+      // 读取异常（权限、句柄占用）仍由 readFileText 直接抛出中止本轮
+      // 扫描，避免被误判成“文件已删除”而误发远端墓碑。
+      continue;
     }
     if (content.value.truncated || content.value.encoding !== "UTF-8") {
+      // 可解码文本一旦超限或非 UTF-8 必须响亮失败：它可能已有远端副本，
+      // 静默跳过等于把远端内容淘汰成墓碑（ADR-0038 明确“不静默淘汰”）。
       throw new ManagedContentError(
         "managed_content_not_text",
         `Managed file ${next} is not editable UTF-8 text within the 5 MiB limit.`,

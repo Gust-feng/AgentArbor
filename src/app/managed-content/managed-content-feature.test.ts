@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import { createManagedContentFeature } from "./managed-content-feature.js";
 import { MANAGED_CONTENT_MAX_TEXT_BYTES, ManagedContentError, type ManagedContentRootRecord } from "./contracts.js";
 
@@ -59,6 +60,19 @@ test("Managed Content owns root and UTF-8 file creation, edits, moves and delete
   assert.equal(await fixture.feature.queries.readRoot(root.id), undefined);
 });
 
+test("Managed Content lists only UTF-8 text files and skips binary materials in the same root", async (t) => {
+  const fixture = await createFixture(t);
+  const root = await fixture.feature.commands.createRoot({ spaceId: "space-one", title: "资料" });
+  await fixture.feature.commands.writeText({ rootId: root.id, relativePath: "notes/idea.md", text: "灵感" });
+
+  const rootPath = fixture.roots.get(root.id)!.path;
+  // JPEG/PDF 魔数开头的二进制文件：属于受管文件夹的正常内容，但不属于文本同步边界。
+  await writeFile(path.join(rootPath, "灵感·山.jpg"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x00, 0x00]));
+  await writeFile(path.join(rootPath, "入门笔记.pdf"), Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff, 0xfe])]));
+
+  assert.deepEqual((await fixture.feature.queries.listTextFiles(root.id)).map((file) => file.relativePath), ["notes/idea.md"]);
+});
+
 test("Managed Content fails a scan when a formerly syncable file becomes unreadable content", async (t) => {
   const fixture = await createFixture(t);
   const root = await fixture.feature.commands.createRoot({ spaceId: "space-one", title: "资料" });
@@ -96,7 +110,7 @@ async function createFixture(t: test.TestContext) {
       },
       async removeManagedRoot(id) {
         const current = roots.get(id);
-        if (current !== undefined) await rm(current.path, { recursive: true, force: true });
+        if (current !== undefined) await removeTestDirectory(current.path);
         roots.delete(id);
       },
       subscribe: () => () => undefined,
@@ -104,7 +118,7 @@ async function createFixture(t: test.TestContext) {
   });
   t.after(async () => {
     await feature.release();
-    await rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   });
   return { feature, roots };
 }

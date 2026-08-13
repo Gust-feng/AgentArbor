@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { removeTestDirectory } from "../testing/fs-test-directories.js";
 import { contentVaultHash, type ContentVaultResource } from "../content-vault/index.js";
 import { createManagedContentVaultContributors, managedFileResourceId } from "./content-vault-contributors.js";
 import { createManagedContentFeature } from "./managed-content-feature.js";
@@ -22,7 +23,7 @@ test("Managed Content contributors apply remote roots, files and tombstones with
       async moveManagedRoot(id, spaceId) { roots.set(id, { ...roots.get(id)!, spaceId }); },
       async removeManagedRoot(id) {
         const root = roots.get(id);
-        if (root !== undefined) await rm(root.path, { recursive: true, force: true });
+        if (root !== undefined) await removeTestDirectory(root.path);
         roots.delete(id);
       },
       subscribe: () => () => undefined,
@@ -30,7 +31,7 @@ test("Managed Content contributors apply remote roots, files and tombstones with
   });
   t.after(async () => {
     await feature.release();
-    await rm(directory, { recursive: true, force: true });
+    await removeTestDirectory(directory);
   });
   const contributors = new Map(createManagedContentVaultContributors(feature).map((item) => [item.kind, item]));
 

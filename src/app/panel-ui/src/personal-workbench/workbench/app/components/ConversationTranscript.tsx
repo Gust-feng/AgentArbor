@@ -498,12 +498,15 @@ function ConversationActivityTimeline(props: {
   readonly developerModeEnabled: boolean;
 }) {
   const { confirmation, items, hasContent } = props.timeline;
+  // Hooks 必须在任何 early return 之前无条件调用：该组件被父级无条件渲染，
+  // 活动段从「无内容」变为「有工具调用」时若 useState 位于 return 之后，Hook 数量
+  // 会从 0 变 1，触发 React "rendered more hooks" 崩溃。
+  const autoOpen = props.lifecycle === "open" || props.lifecycle === "attention" || confirmation.current !== undefined;
+  const [open, setOpen] = useState(autoOpen || props.collapsed !== true);
+
   if (!hasContent) return null;
   const visibleItems = items.filter(isVisibleOrdinaryActivityItem);
   if (visibleItems.length === 0 && confirmation.current === undefined) return null;
-
-  const autoOpen = props.lifecycle === "open" || props.lifecycle === "attention" || confirmation.current !== undefined;
-  const [open, setOpen] = useState(autoOpen || props.collapsed !== true);
 
   const doneCount = visibleItems.filter((i) => i.phase === "completed").length;
   const failedCount = visibleItems.filter((i) => i.phase === "failed").length;

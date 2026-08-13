@@ -114,6 +114,20 @@ test("panel usage statistics route reads the empty Ordinary feature store", asyn
   }
 });
 
+test("panel serves the remote collaboration status route for the settings panel", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-remote-status-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const response = await requestJson(server.url, "/api/remote-collaboration/status");
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    assert.equal(response.body.remote.state, "unregistered");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel ignores obsolete legacy runtime snapshots instead of adding a compatibility reader", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-runtime-snapshot-incompatible-"));
   const paths = resolveAgentArborRuntimePaths(directory);

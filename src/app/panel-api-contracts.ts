@@ -33,7 +33,8 @@ export type PersonalNoteRevision = {
 export type WorkbenchProjectionOwner =
   | "spaces"
   | "mounted_files"
-  | "personal_knowledge";
+  | "personal_knowledge"
+  | "conversations";
 
 /**
  * Live invalidation fact. It deliberately carries no business snapshot: each
@@ -46,6 +47,8 @@ export type WorkbenchProjectionChange = {
   readonly spaceIds?: readonly string[];
   readonly referenceIds?: readonly string[];
   readonly noteIds?: readonly string[];
+  /** 会话事实变化（目前只由远程协同提交/取消/审批触发）；消费方需重读会话投影。 */
+  readonly conversationIds?: readonly string[];
 };
 
 /* ─── Document Preview ───────────────────────────────────────────── */

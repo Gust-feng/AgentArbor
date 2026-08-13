@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import type { ConversationOwner } from "../../domain/execution-scope/index.js";
 import type { OrdinaryAgentFeature, OrdinaryConversationReadModel, OrdinaryRunState } from "../ordinary-agent/index.js";
 import type { SpaceFeature } from "../spaces/index.js";
 import {
@@ -23,9 +24,11 @@ export function createPanelRemoteCollaborationPorts(input: {
   readonly synchronizeContentVault?: () => Promise<void>;
   readonly prepareOrdinaryRunBirth: (input: {
     readonly goal: string;
+    /** 新对话的 canonical owner；run 出生必须冻结 owner 作用域（ADR-0035 §3.1）。 */
+    readonly owner?: ConversationOwner;
     readonly taskSoilInput?: import("../task-soil/task-soil-workspace.js").DesktopTaskSoilInput;
     readonly modelOverride?: import("./request-parsers.js").PanelRunInput["modelOverride"];
-  }) => Promise<OrdinaryRunBirth>;
+  }, conversationId?: string) => Promise<OrdinaryRunBirth>;
   readonly now?: () => string;
   readonly idFactory?: () => string;
 }): RemoteCommandHandlerPorts {
@@ -43,14 +46,20 @@ export function createPanelRemoteCollaborationPorts(input: {
           ? undefined
           : await input.ordinary.queries.getRun(conversation.activeRunId);
         const latestTurn = conversation.turns.at(-1);
-        const owner = await input.spaces.queries.findConversationOwner(conversation.conversationId);
+        // 归属口径与桌面一致：canonical owner 优先，Space 树链接只作 v2 旧对话回退。
+        const canonical = await input.ordinary.queries.getConversationOwner(conversation.conversationId);
+        const spaceId = canonical?.kind === "space"
+          ? canonical.id
+          : canonical !== undefined
+            ? undefined
+            : (await input.spaces.queries.findConversationOwner(conversation.conversationId))?.spaceId;
         return {
           conversationId: conversation.conversationId,
           title: conversation.title,
           updatedAt: conversation.updatedAt,
           status: activeRun?.status.kind ?? (latestTurn?.status === "pending" ? "queued" : latestTurn?.status) ?? "idle",
           ...(conversation.activeRunId === undefined ? {} : { activeRunId: conversation.activeRunId }),
-          ...(owner === undefined ? {} : { spaceId: owner.spaceId }),
+          ...(spaceId === undefined ? {} : { spaceId }),
         };
       })),
     };
@@ -79,46 +88,50 @@ export function createPanelRemoteCollaborationPorts(input: {
           throw new RemoteCommandConflict("conversation_owner_required", "A new conversation must belong to a Space");
         }
         let taskSoilInput;
+        let newConversationOwner;
         if (command.conversationId !== undefined) {
-          const access = await resolveConversationSpaceAccess(input.spaces, undefined, command.conversationId, undefined);
+          const access = await resolveConversationSpaceAccess(
+            input.spaces,
+            (conversationId) => input.ordinary.queries.getConversationOwner(conversationId),
+            command.conversationId,
+            undefined,
+          );
           if (command.spaceId !== undefined && access.spaceId !== undefined && access.spaceId !== command.spaceId) {
             throw new RemoteCommandConflict("conversation_space_conflict", "The conversation belongs to another Space");
           }
           taskSoilInput = access.taskSoilInput;
         } else if (command.spaceId !== undefined) {
-          let space = await input.spaces.queries.getTree(command.spaceId);
-          if (space === undefined && input.synchronizeContentVault !== undefined) {
+          const spaceId = command.spaceId;
+          // Space 树是 Content Vault 同步来的投影，可能落后于手机侧刚创建的
+          // Space：解析不到时先同步一次再重试。
+          const resolveNewConversationSpace = () =>
+            resolveConversationSpaceAccess(input.spaces, undefined, undefined, undefined, spaceId);
+          let access = await resolveNewConversationSpace();
+          if (access.spaceId === undefined && input.synchronizeContentVault !== undefined) {
             await input.synchronizeContentVault();
-            space = await input.spaces.queries.getTree(command.spaceId);
+            access = await resolveNewConversationSpace();
           }
-          if (space === undefined) {
+          if (access.spaceId === undefined) {
             throw new RemoteCommandConflict("space_not_found", "The selected Space no longer exists");
           }
+          taskSoilInput = access.taskSoilInput;
+          newConversationOwner = { kind: "space" as const, id: spaceId };
         }
         const submitted = await input.ordinary.commands.submitTurn({
           submissionId: command.submissionId,
           ...(command.conversationId === undefined ? {} : { conversationId: command.conversationId }),
+          // 新对话直接声明 canonical owner（ADR-0035），不再事后补写 Space 树链接。
+          ...(newConversationOwner === undefined ? {} : { owner: newConversationOwner }),
           input: { userMessage: command.message, ...(taskSoilInput === undefined ? {} : { taskSoil: taskSoilInput }) },
+          // Run 出生必须携带 owner 作用域：新对话传声明的 Space owner，
+          // 既有对话传 conversationId 由出生流程解析 canonical owner（与桌面提交路径一致）。
           birth: await input.prepareOrdinaryRunBirth({
             goal: command.message,
+            ...(newConversationOwner === undefined ? {} : { owner: newConversationOwner }),
             ...(taskSoilInput === undefined ? {} : { taskSoilInput }),
             ...(command.modelSelectionId === undefined ? {} : { modelOverride: await resolveRemoteModelSelectionForRun(input.resolveModelSelection, command.modelSelectionId) }),
-          }),
+          }, command.conversationId),
         });
-        if (command.spaceId !== undefined && command.conversationId === undefined) {
-          const owner = await input.spaces.queries.findConversationOwner(submitted.conversation.conversationId);
-          if (owner === undefined) {
-            await input.spaces.commands.linkConversationOwner({
-              id: `remote-conversation:${command.submissionId}`,
-              spaceId: command.spaceId,
-              title: submitted.conversation.title,
-              conversationId: submitted.conversation.conversationId,
-              conversationTitle: submitted.conversation.title,
-            });
-          } else if (owner.spaceId !== command.spaceId) {
-            throw new RemoteCommandConflict("conversation_space_conflict", "The new conversation was linked to another Space");
-          }
-        }
         return { conversationId: submitted.conversation.conversationId, runId: submitted.run.runId };
       },
       async cancel(runId) {
@@ -152,6 +165,58 @@ export function createPanelRemoteCollaborationPorts(input: {
           }
           listener({ kind: "state_changed", sequence: activity.sequence });
         });
+      },
+    },
+  };
+}
+
+/**
+ * 手机侧发起的会话变更（提交/取消/审批）没有对应的桌面 UI 动作，必须在命令
+ * 成功后发布工作台投影失效，桌面列表与打开的会话正文才能实时跟上；否则只能
+ * 靠用户切换视图兜底刷新。发布失败不回滚已成功的远程命令。
+ */
+export function withRemoteConversationProjectionInvalidation(input: {
+  readonly ports: RemoteCommandHandlerPorts;
+  readonly getConversationOwner: (conversationId: string) => Promise<ConversationOwner | undefined>;
+  readonly conversationIdOfRun: (runId: string) => Promise<string | undefined>;
+  readonly publish: (change: {
+    readonly owners: readonly ("conversations" | "spaces")[];
+    readonly conversationIds?: readonly string[];
+    readonly spaceIds?: readonly string[];
+  }) => void;
+}): RemoteCommandHandlerPorts {
+  const publishConversationChange = async (conversationId: string | undefined): Promise<void> => {
+    try {
+      const owner = conversationId === undefined
+        ? undefined
+        : await input.getConversationOwner(conversationId);
+      const spaceId = owner?.kind === "space" ? owner.id : undefined;
+      input.publish({
+        // 归属空间一并失效：空间视图的会话列表走 spaces read-model。
+        owners: spaceId === undefined ? ["conversations"] : ["conversations", "spaces"],
+        ...(conversationId === undefined ? {} : { conversationIds: [conversationId] }),
+        ...(spaceId === undefined ? {} : { spaceIds: [spaceId] }),
+      });
+    } catch {
+      // 失效通知尽力而为；下一次通知或用户操作可以兜底。
+    }
+  };
+  return {
+    ...input.ports,
+    ordinary: {
+      ...input.ports.ordinary,
+      async submit(command) {
+        const submitted = await input.ports.ordinary.submit(command);
+        await publishConversationChange(submitted.conversationId);
+        return submitted;
+      },
+      async cancel(runId) {
+        await input.ports.ordinary.cancel(runId);
+        await publishConversationChange(await input.conversationIdOfRun(runId).catch(() => undefined));
+      },
+      async decide(decision) {
+        await input.ports.ordinary.decide(decision);
+        await publishConversationChange(await input.conversationIdOfRun(decision.runId).catch(() => undefined));
       },
     },
   };

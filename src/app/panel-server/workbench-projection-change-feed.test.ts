@@ -35,7 +35,7 @@ test("Workbench projection feed resets a new or stale subscriber across all owne
     changes: [{
       revision: 2,
       reset: true,
-      owners: ["spaces", "mounted_files", "personal_knowledge"],
+      owners: ["spaces", "mounted_files", "personal_knowledge", "conversations"],
     }],
   });
   assert.equal(feed.replay(0).reset, true);

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConversationSummaryRefresh } from "./app-conversation-refresh";
+import { useRemoteConversationChanges } from "./app-remote-conversation-changes";
 import { createAppRunController } from "./app-run-controller";
 import {
   currentRunProjectionDeps,
@@ -272,6 +273,15 @@ export function useAppWorkbenchRuntime(options: AppWorkbenchRuntimeOptions): App
     options.setLegacyConversationScreen,
     options.toolConfirmationPolicy,
   ]);
+
+  useRemoteConversationChanges({
+    appRef,
+    setApp: options.setApp,
+    mountedRef,
+    activeRunIdRef,
+    viewEpochRef,
+    startLiveUpdates: runController.startLiveUpdates,
+  });
 
   // Deep/Multi-Agent 已从运行时剥离（后端返回 410），保留空操作桩维持接口稳定。
   const noop = () => undefined;

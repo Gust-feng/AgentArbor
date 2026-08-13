@@ -8,6 +8,7 @@ const ALL_OWNERS: readonly WorkbenchProjectionOwner[] = [
   "spaces",
   "mounted_files",
   "personal_knowledge",
+  "conversations",
 ];
 
 export type WorkbenchProjectionChangeInput = Omit<WorkbenchProjectionChange, "revision" | "reset">;

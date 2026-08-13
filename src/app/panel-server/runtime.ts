@@ -152,7 +152,7 @@ import {
   type RemoteCollaborationFeature,
   type RemoteDesktopStore,
 } from "../remote-collaboration/index.js";
-import { createPanelRemoteCollaborationPorts } from "./remote-collaboration-ports.js";
+import { createPanelRemoteCollaborationPorts, withRemoteConversationProjectionInvalidation } from "./remote-collaboration-ports.js";
 import { bindRemoteAccountContentVaultSync } from "./remote-content-vault-lifecycle.js";
 import { projectRemoteModelOptions, resolveRemoteModelSelection } from "./remote-model-options.js";
 import {
@@ -868,17 +868,23 @@ const remoteDesktopStore = createRemoteDesktopStore(workbenchDatabase);
   });
   let notifyContentVaultChanged = (_cursor: number): void => undefined;
   let synchronizeContentVaultNow = async (): Promise<void> => undefined;
+  const remoteCollaborationPorts = createPanelRemoteCollaborationPorts({
+    ordinary: ordinaryAgentFeature,
+    spaces: spaceFeature,
+    modelOptions: remoteModelOptions,
+    resolveModelSelection: async (selectionId) => resolveRemoteModelSelection(await remoteModelOptions(), selectionId),
+    synchronizeContentVault: () => synchronizeContentVaultNow(),
+    prepareOrdinaryRunBirth: (runInput, conversationId) => prepareOrdinaryRunBirth(runtime, runInput, conversationId),
+  });
   const remoteCollaborationFeature = createRemoteCollaborationFeature({
     store: remoteDesktopStore,
     credentials: remoteCredentials,
     commandHandler: createRemoteCommandHandler({
-      ports: createPanelRemoteCollaborationPorts({
-        ordinary: ordinaryAgentFeature,
-        spaces: spaceFeature,
-        modelOptions: remoteModelOptions,
-        resolveModelSelection: async (selectionId) => resolveRemoteModelSelection(await remoteModelOptions(), selectionId),
-        synchronizeContentVault: () => synchronizeContentVaultNow(),
-        prepareOrdinaryRunBirth: (runInput) => prepareOrdinaryRunBirth(runtime, runInput),
+      ports: withRemoteConversationProjectionInvalidation({
+        ports: remoteCollaborationPorts,
+        getConversationOwner: (conversationId) => ordinaryAgentFeature.queries.getConversationOwner(conversationId),
+        conversationIdOfRun: async (runId) => (await ordinaryAgentFeature.queries.getRun(runId))?.turn.conversationId,
+        publish: (change) => void workbenchProjectionChanges.publish(change),
       }),
     }),
     defaultDeviceName: userInfo().username,
@@ -1061,7 +1067,6 @@ const remoteDesktopStore = createRemoteDesktopStore(workbenchDatabase);
     },
   }));
 
-;
   let runtime!: PanelRuntime;
   runtime = {
     isQuiescing: false,

@@ -42,6 +42,7 @@ import { createPanelUsageStatistics } from "./panel-usage-statistics.js";
 import { handlePanelWorkbenchDataRoute, workbenchDataHttpError } from "./workbench-data-routes.js";
 import { WorkbenchDataMaintenanceError } from "./workbench-data-maintenance.js";
 import { handlePanelWorkbenchAssetRoute } from "./workbench-asset-routes.js";
+import { handlePanelRemoteCollaborationRoute } from "./remote-collaboration-routes.js";
 import { handleWorkbenchProjectionRoute } from "./workbench-projection-routes.js";
 import { resolveAgentArborConfigDirectory } from "../../adapters/config/index.js";
 import { resolveAgentArborRuntimePaths } from "../../adapters/runtime-storage/index.js";
@@ -261,6 +262,10 @@ async function handlePanelRequest(
   }
 
   if (await handleWorkbenchProjectionRoute(runtime, request, response, url)) {
+    return;
+  }
+
+  if (await handlePanelRemoteCollaborationRoute(runtime, request, response, url)) {
     return;
   }
 

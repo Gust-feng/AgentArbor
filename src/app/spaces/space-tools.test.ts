@@ -602,7 +602,8 @@ test("SpaceCreateManagedFolder creates a Host-managed folder and registers it", 
   };
   assert.equal(created.status, "created");
   assert.equal(created.item.reference.kind, "managed_folder");
-  assert.match(created.item.reference.path, /^[\\/a-zA-Z0-9:._-]*[\\/]managed[\\/][^\\/]+$/u);
+  assert.equal(path.basename(path.dirname(created.item.reference.path)), "managed");
+  assert.notEqual(path.basename(created.item.reference.path), "");
   assert.equal((await fs.stat(created.item.reference.path)).isDirectory(), true);
 
   const missingSpace = await execute(withHost.get("SpaceCreateManagedFolder")!, { spaceId: "no-such-space", title: "失败回滚" });

@@ -360,6 +360,7 @@ export function PersonalWorkbench(props: PersonalWorkbenchProps) {
     <div
       ref={rootRef}
       className="aa-workbench-root flex h-screen min-h-0 w-full overflow-hidden"
+      spellCheck={false}
       style={{
         background: "var(--aa-canvas)",
         color: "var(--aa-text-1)",

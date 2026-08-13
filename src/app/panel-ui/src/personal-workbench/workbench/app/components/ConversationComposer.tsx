@@ -101,6 +101,7 @@ export function ConversationComposer({
         }}
         placeholder={input.placeholder ?? runningPlaceholder(input)}
         rows={1}
+        spellCheck={false}
         disabled={!canEdit}
         className="aa-conversation-composer__input w-full resize-none px-3 pt-2 pb-1 outline-none disabled:cursor-not-allowed"
         style={{ color: 'var(--aa-text-1)', background: 'transparent', lineHeight: 1.5 }}

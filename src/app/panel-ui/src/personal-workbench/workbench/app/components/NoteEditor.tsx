@@ -290,7 +290,7 @@ export function NoteEditor({ note, onSave, onOpenFocus, onClose, onRestoreAsNew 
       )}
 
       <div className="shrink-0 mx-auto w-full px-6 pt-8" style={{ maxWidth: 'var(--reading-width, 680px)' }}>
-        <input aria-label="笔记名称" value={title} onChange={(event) => { setTitle(event.target.value); scheduleSave({ title: event.target.value }) }} placeholder="无标题" className="w-full outline-none bg-transparent reading-prose" style={{ color: 'var(--aa-text-1, #292722)', fontSize: 22, fontWeight: 600 }} />
+        <input aria-label="笔记名称" value={title} onChange={(event) => { setTitle(event.target.value); scheduleSave({ title: event.target.value }) }} placeholder="无标题" spellCheck={false} className="w-full outline-none bg-transparent reading-prose" style={{ color: 'var(--aa-text-1, #292722)', fontSize: 22, fontWeight: 600 }} />
       </div>
 
       <div className="flex-1 overflow-y-auto">

@@ -242,6 +242,7 @@ export function SearchPage({ onNavigate, onOpenInSpace, onOpenConversation, spac
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="搜索笔记、材料、对话…"
+              spellCheck={false}
               className="flex-1 text-sm outline-none"
               style={{ color: 'var(--aa-text-1)', background: 'transparent' }}
             />

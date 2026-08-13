@@ -41,6 +41,7 @@ export function SidebarInlineRenameField({ value, onCommit, onCancel, selectAll 
         if (event.key === 'Escape') onCancel()
       }}
       onBlur={commit}
+      spellCheck={false}
       className="flex-1 min-w-0 text-sm bg-transparent outline-none"
       style={{
         color: 'var(--aa-text-1)',

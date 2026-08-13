@@ -97,7 +97,7 @@ export function RemoteCollaborationSettings(): React.ReactElement {
             </button>
             <details className="remote-device-options">
               <summary><Settings2 size={14} />设备选项</summary>
-              <label>设备名称<input value={deviceName} maxLength={160} onChange={(event) => setDeviceName(event.target.value)} /></label>
+              <label>设备名称<input value={deviceName} maxLength={160} spellCheck={false} onChange={(event) => setDeviceName(event.target.value)} /></label>
             </details>
             {PACKAGED_RELAY_URL.length === 0 && <p className="remote-settings-error">当前构建未配置官方协同服务。</p>}
           </div>
@@ -139,7 +139,7 @@ export function RemoteCollaborationSettings(): React.ReactElement {
         <section className="settings-card remote-settings-card">
           <div className="remote-settings-title compact"><span className="remote-settings-icon"><UserRound size={18} /></span><div><h3>账户</h3><p>内部 ID 保持不变，用户名可修改</p></div></div>
           <div className="remote-pairing-form compact">
-            <label>用户名<input value={accountHandle} maxLength={32} onChange={(event) => setAccountHandle(event.target.value.toLowerCase())} /></label>
+            <label>用户名<input value={accountHandle} maxLength={32} spellCheck={false} onChange={(event) => setAccountHandle(event.target.value.toLowerCase())} /></label>
             <button disabled={busy || accountHandle === remote.accountHandle} onClick={() => void action("/api/remote-collaboration/account/handle", { method: "PATCH", body: { handle: accountHandle } })}>保存</button>
           </div>
           <button className="danger-button" onClick={() => {

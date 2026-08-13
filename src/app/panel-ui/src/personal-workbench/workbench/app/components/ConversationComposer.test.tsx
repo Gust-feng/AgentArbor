@@ -16,6 +16,12 @@ test('does not submit Enter while an input method is composing text', () => {
   expect(onSubmit).toHaveBeenCalledOnce()
 })
 
+test('disables native spell checking for task input', () => {
+  render(<ConversationComposer input={inputProps({ value: 'Z:\\Myco Myco' })} />)
+
+  expect(screen.getByRole('textbox').getAttribute('spellcheck')).toBe('false')
+})
+
 test('keeps the composer toolbar compact and hides reasoning controls', () => {
   render(<ConversationComposer input={inputProps({
     models: [{

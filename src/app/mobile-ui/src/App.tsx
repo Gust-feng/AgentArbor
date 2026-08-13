@@ -321,7 +321,7 @@ export function App({ client }: { readonly client: RemoteMobileClient }) {
   };
 
   return (
-    <div className="aa-mobile-shell" data-section={section} data-view={view}>
+    <div className="aa-mobile-shell" data-section={section} data-view={view} spellCheck={false}>
       <div
         className="aa-mobile-route-surface"
         aria-hidden={overlayIsModal || undefined}
@@ -583,6 +583,7 @@ function PairingScreen({ client, state }: ScreenProps) {
             inputMode="numeric"
             maxLength={6}
             placeholder="000000"
+            spellCheck={false}
             onChange={(event) => setCode(event.target.value.replace(/\D/gu, ""))}
           />
           <button type="button" className="aa-mobile-scan-button" onClick={() => void scanPairingCode()}><ScanLine />扫描二维码</button>
@@ -735,6 +736,7 @@ function Composer(props: {
           value={props.draft}
           aria-label="输入消息"
           placeholder={props.placeholder ?? "输入消息"}
+          spellCheck={false}
           onInput={resizeComposer}
           onChange={(event) => props.onDraftChange(event.target.value)}
         />
@@ -1128,7 +1130,7 @@ function ApprovalCard(props: {
           <ul>{props.confirmation.affectedResources.map((resource) => <li key={resource}>{resource}</li>)}</ul>
         </details>
       )}
-      {guidanceOpen && <textarea autoFocus disabled={actionDisabled} value={guidance} aria-label="补充要求" onChange={(event) => setGuidance(event.target.value)} />}
+      {guidanceOpen && <textarea autoFocus disabled={actionDisabled} value={guidance} aria-label="补充要求" spellCheck={false} onChange={(event) => setGuidance(event.target.value)} />}
       {!props.peerOnline && <p className="aa-mobile-approval-status" role="status">电脑离线，重新连接后再处理</p>}
       {(submission !== "idle" || error !== undefined) && (
       <p className="aa-mobile-approval-status" role="status" data-error={error !== undefined || undefined}>
@@ -1352,7 +1354,7 @@ function NewSpaceDialog(props: {
     }}>
       <form ref={dialogRef} className="aa-mobile-dialog" role="dialog" aria-modal="true" aria-labelledby="new-space-title" onSubmit={(event) => void submit(event)}>
         <header><h2 id="new-space-title">新建空间</h2><IconButton label="关闭" disabled={busy} onClick={props.onClose}><X /></IconButton></header>
-        <label><span>名称</span><input data-modal-initial value={title} maxLength={160} onChange={(event) => setTitle(event.target.value)} /></label>
+        <label><span>名称</span><input data-modal-initial value={title} maxLength={160} spellCheck={false} onChange={(event) => setTitle(event.target.value)} /></label>
         {error && <Notice>{error}</Notice>}
         <button type="submit" disabled={busy || title.trim().length === 0}>{busy && <LoaderCircle className="spin" />}创建</button>
       </form>
@@ -1382,7 +1384,7 @@ function ModelPicker(props: {
         {searchEnabled && (
           <label className="aa-mobile-model-search">
             <Search aria-hidden="true" />
-            <input aria-label="搜索模型" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型" />
+            <input aria-label="搜索模型" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型" spellCheck={false} />
           </label>
         )}
         <div className="aa-mobile-model-list" role="listbox" aria-label="可用模型" aria-orientation="vertical">

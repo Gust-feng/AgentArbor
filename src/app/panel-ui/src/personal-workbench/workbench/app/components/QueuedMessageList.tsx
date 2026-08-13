@@ -74,6 +74,7 @@ export function QueuedMessageList({ messages, onRemove, onUpdate, onGuide }: Que
                   }}
                   autoFocus
                   rows={2}
+                  spellCheck={false}
                   className="min-h-8 min-w-0 flex-1 resize-none bg-transparent leading-5 outline-none"
                   aria-label="编辑待发送消息"
                 />

@@ -222,6 +222,7 @@ export function BrainPage({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="想找点什么?搜标题、正文,或直接问……"
+              spellCheck={false}
               className="flex-1 bg-transparent outline-none text-sm"
               style={{ color: 'var(--aa-text-1, #292722)' }}
             />
@@ -663,6 +664,7 @@ function LeftNav({
                     }
                   }}
                   placeholder="主题名…"
+                  spellCheck={false}
                   className="w-full px-2 py-1.5 rounded-lg bg-transparent outline-none text-sm"
                   style={{ color: 'var(--aa-text-1, #292722)', border: '1px solid var(--aa-accent, #6865a7)' }}
                 />
@@ -841,6 +843,7 @@ function ThemeHeader({
               setEditing(false)
             }
           }}
+          spellCheck={false}
           className="text-base font-semibold bg-transparent outline-none border-b"
           style={{ color: 'var(--aa-text-1, #292722)', borderColor: theme.color }}
         />
@@ -1865,6 +1868,7 @@ function TagPopover({
               }
             }}
             placeholder="新主题名…"
+            spellCheck={false}
             className="w-full px-3 py-2 bg-transparent outline-none text-sm"
             style={{ color: 'var(--aa-text-1, #292722)' }}
           />

@@ -350,6 +350,7 @@ function VaultEditorSheet(props: {
               aria-label="笔记名称"
               placeholder="无标题"
               value={title}
+              spellCheck={false}
               readOnly={props.item.resource.deleted}
               onChange={(event) => {
                 setTitle(event.target.value);
@@ -361,6 +362,7 @@ function VaultEditorSheet(props: {
             aria-label="正文"
             placeholder={props.item.resource.deleted ? undefined : props.item.kind === "note" ? "从这里开始写…" : "输入内容"}
             value={text}
+            spellCheck={false}
             readOnly={props.item.resource.deleted}
             onChange={(event) => {
               setText(event.target.value);

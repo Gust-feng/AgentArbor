@@ -13,10 +13,12 @@ import {
   INITIAL_KNOWLEDGE_LINKS,
   INITIAL_KNOWLEDGE_THEMES,
   INITIAL_WORKBENCH_MANAGED_FOLDERS,
+  INITIAL_WORKBENCH_NOTES,
   INITIAL_WORKBENCH_SPACES,
   INITIAL_WORKBENCH_WEB_REFERENCES,
   type InitialWorkbenchFileDefinition,
   type InitialWorkbenchManagedFolderDefinition,
+  type InitialWorkbenchNoteDefinition,
 } from "./initial-workbench-content.js";
 import { createManagedSpaceFolder, deleteManagedSpaceFolder } from "./space-managed-folder-store.js";
 
@@ -29,6 +31,7 @@ export const INITIAL_WORKBENCH_DATA_KEY = "workbench-initial-space/v1";
 export const INITIAL_SPACE_ID = DEFAULT_SPACE_ID;
 export const INITIAL_BUILTIN_DATA_ELIGIBILITY_KEY = "workbench-initial-content-eligible/v1";
 export const INITIAL_BUILTIN_DATA_KEY = "workbench-initial-content/v1";
+export const INITIAL_WEB_ANNOTATION_BACKFILL_KEY = "workbench-initial-web-annotations/v1";
 const LEGACY_INITIAL_WORKBENCH_DATA_KEY = "workbench-initial-assets/v5";
 const RETIRED_DEMO_DATA_KEY = "workbench-initial-demo/v1";
 const RETIRED_LEARNING_DATA_KEY = "workbench-initial-learning/v1";
@@ -78,6 +81,19 @@ export async function initializeInitialWorkbenchData(input: {
     input.database.recordInitialization(INITIAL_WORKBENCH_DATA_KEY);
   }
 
+  // The 2026-08-12 importer created the built-in web references without their
+  // annotations, and completed stores never re-enter the import below. This
+  // one-time repair only fills an annotation that never existed on an intact
+  // built-in reference; it does not overwrite existing annotations and does
+  // not resurrect references the user deleted or changed.
+  if (hasCompletedInitialContent(input.database)
+    && !input.database.hasInitialization(INITIAL_WEB_ANNOTATION_BACKFILL_KEY)) {
+    for (const definition of INITIAL_WORKBENCH_WEB_REFERENCES) {
+      await backfillInitialWebReferenceAnnotation(input.spaceFeature, definition);
+    }
+    input.database.recordInitialization(INITIAL_WEB_ANNOTATION_BACKFILL_KEY);
+  }
+
   if (!initialContentEligible || hasCompletedInitialContent(input.database)) return;
 
   for (const space of INITIAL_WORKBENCH_SPACES) {
@@ -101,6 +117,13 @@ export async function initializeInitialWorkbenchData(input: {
       relativePath: collection.relativePath,
     });
     collectedPages.set(collection.key, page);
+  }
+
+  // The built-in 我的笔记 is a first-class personal note, created through the
+  // same lifecycle as user-created notes; it is not a managed folder file and
+  // does not participate in knowledge themes or links.
+  for (const definition of INITIAL_WORKBENCH_NOTES) {
+    await ensureInitialNote(input.personalKnowledgeFeature, definition);
   }
 
   const snapshot = await input.personalKnowledgeFeature.queries.snapshot();
@@ -189,6 +212,21 @@ async function ensureSpaceManagedRoot(root: string, spaceId: string): Promise<vo
   await fs.mkdir(path.join(root, spaceId, "files"), { recursive: true });
 }
 
+async function ensureInitialNote(
+  feature: PersonalKnowledgeFeature,
+  definition: InitialWorkbenchNoteDefinition,
+): Promise<void> {
+  const snapshot = await feature.queries.snapshot();
+  if (snapshot.notes.some((note) => note.id === definition.id)) return;
+  await feature.commands.createNote({
+    id: definition.id,
+    spaceId: definition.spaceId,
+    title: definition.title,
+    bodyMarkdown: definition.bodyMarkdown,
+    actor: { kind: "system" },
+  });
+}
+
 async function ensureInitialManagedFolder(
   input: {
     readonly spaceFeature: SpaceFeature;
@@ -267,6 +305,23 @@ function initialFileDestination(root: string, relativePath: string): string {
     throw new Error(`Initial Workbench file path is invalid: ${relativePath}`);
   }
   return destination;
+}
+
+async function backfillInitialWebReferenceAnnotation(
+  feature: SpaceFeature,
+  definition: typeof INITIAL_WORKBENCH_WEB_REFERENCES[number],
+): Promise<void> {
+  if (definition.annotation === undefined) return;
+  const existing = await feature.queries.getReference(definition.id);
+  if (existing === undefined) return;
+  if (existing.reference.kind !== "web_page" || existing.reference.url !== definition.url) return;
+  if (existing.annotation !== undefined) return;
+  await feature.commands.updateReferenceAnnotation({
+    itemId: existing.id,
+    expectedRevision: 0,
+    patch: definition.annotation,
+    actor: { kind: "agent" },
+  });
 }
 
 async function ensureInitialWebReference(

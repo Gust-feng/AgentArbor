@@ -15,6 +15,7 @@ import {
   INITIAL_BUILTIN_DATA_ELIGIBILITY_KEY,
   INITIAL_BUILTIN_DATA_KEY,
   INITIAL_SPACE_ID,
+  INITIAL_WEB_ANNOTATION_BACKFILL_KEY,
   INITIAL_WORKBENCH_DATA_KEY,
 } from "./initial-workbench-data.js";
 import { createPanelRuntime } from "./runtime.js";
@@ -97,6 +98,17 @@ test("Panel 全新首次启动把内置内容创建为普通 Space 托管文件�
       assert.equal(knowledge.themes.length, 4);
       assert.equal(knowledge.assignments.length, 7);
       assert.equal(knowledge.links.length, 3);
+      assert.equal(knowledge.notes.length, 1);
+      const initialNote = knowledge.notes[0];
+      assert.equal(initialNote?.id, "builtin-note-notebook-start");
+      assert.equal(initialNote?.spaceId, "space-learning");
+      assert.equal(initialNote?.title, "从记事本开始");
+      assert.match(initialNote?.bodyMarkdown ?? "", /起步于微末之处，不惧其浅陋/u);
+      assert.match(initialNote?.bodyMarkdown ?? "", /而非一次性的完成/u);
+      assert.ok(await fs.access(path.join(notes.reference.path, "从记事本开始.md")).then(
+        () => false,
+        () => true,
+      ), "初始笔记是空间笔记而不是阅读笔记文件夹里的文件");
 
       await fs.writeFile(quickStartPath, "用户已经修改", "utf8");
       await fs.rm(mountainPath);
@@ -113,6 +125,10 @@ test("Panel 全新首次启动把内置内容创建为普通 Space 托管文件�
         error instanceof Error && "code" in error && error.code === "ENOENT");
       assert.equal((await restartedRuntime.workbenchAssets.list()).length, 0);
       assert.equal((await restartedRuntime.personalKnowledgeFeature.queries.snapshot()).pages.length, 6);
+      const restartedNotes = (await restartedRuntime.personalKnowledgeFeature.queries.snapshot()).notes;
+      assert.equal(restartedNotes.length, 1);
+      assert.equal(restartedNotes[0]?.id, "builtin-note-notebook-start");
+      assert.equal(restartedNotes[0]?.revision, 1);
     } finally {
       await releasePanelRuntimeResources(restartedRuntime);
     }
@@ -191,6 +207,66 @@ test("已有业务数据但缺少初始化标记时不会误判为首次安装",
   }
 });
 
+test("已完成初始化但内置网页引用缺少整理内容时补写一次，不覆盖也不复活", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-initial-annotation-backfill-"));
+  try {
+    const runtime = createPanelRuntime({
+      configDirectory: directory,
+      testOnlySkipInitialWorkbenchData: true,
+    });
+    try {
+      // 复现 2026-08-12 导入版本的结果：web 引用存在但没有 annotation。
+      await runtime.spaceFeature.commands.createSpace({ id: "space-learning", title: "学习空间" });
+      await runtime.spaceFeature.commands.addReference({
+        id: "builtin-learning-cs231n",
+        spaceId: "space-learning",
+        title: "CS231n 课程主页",
+        reference: { kind: "web_page", url: "https://cs231n.stanford.edu" },
+      });
+      // 用户已把第二条引用改到别的 URL：修复不得对它写入内置整理内容。
+      await runtime.spaceFeature.commands.addReference({
+        id: "builtin-learning-distill",
+        spaceId: "space-learning",
+        title: "Distill：特征可视化",
+        reference: { kind: "web_page", url: "https://example.com/changed" },
+      });
+      runtime.workbenchDatabase.recordInitialization(INITIAL_BUILTIN_DATA_ELIGIBILITY_KEY);
+      runtime.workbenchDatabase.recordInitialization(INITIAL_WORKBENCH_DATA_KEY);
+      runtime.workbenchDatabase.recordInitialization(INITIAL_BUILTIN_DATA_KEY);
+
+      const initialize = async () =>
+        await initializeInitialWorkbenchData({
+          database: runtime.workbenchDatabase,
+          spaceFeature: runtime.spaceFeature,
+          personalKnowledgeFeature: runtime.personalKnowledgeFeature,
+          workbenchAssets: runtime.workbenchAssets,
+          managedSpaceRoot: path.join(directory, "runtime", "spaces"),
+          managedSpaceFolderRoot: path.join(directory, "runtime", "space-folders"),
+        });
+      await initialize();
+
+      assert.equal(runtime.workbenchDatabase.hasInitialization(INITIAL_WEB_ANNOTATION_BACKFILL_KEY), true);
+      const repaired = await runtime.spaceFeature.queries.getReference("builtin-learning-cs231n");
+      assert.match(repaired?.annotation?.markdown ?? "", /反向传播与计算图/u);
+      assert.equal(repaired?.annotation?.revision, 1);
+      const changed = await runtime.spaceFeature.queries.getReference("builtin-learning-distill");
+      assert.equal(changed?.annotation, undefined);
+      // 已完成的库不重新导入其余内置内容。
+      assert.equal((await runtime.spaceFeature.queries.getTree("space-learning"))?.entries.length, 2);
+      assert.equal((await runtime.personalKnowledgeFeature.queries.snapshot()).pages.length, 0);
+
+      // 第二次启动由初始化键短路，引用保持修复后的版本。
+      await initialize();
+      const stable = await runtime.spaceFeature.queries.getReference("builtin-learning-cs231n");
+      assert.equal(stable?.annotation?.revision, 1);
+    } finally {
+      await releasePanelRuntimeResources(runtime);
+    }
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
 test("首次内置内容导入失败后沿同一安装批次继续且不复制文件或知识页面", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-initial-retry-"));
   try {
@@ -235,6 +311,8 @@ test("首次内置内容导入失败后沿同一安装批次继续且不复制�
       assert.equal((await runtime.spaceFeature.queries.getTree(INITIAL_SPACE_ID))?.entries.length, 2);
       assert.equal((await runtime.spaceFeature.queries.getTree("space-learning"))?.entries.length, 4);
       assert.equal((await runtime.personalKnowledgeFeature.queries.snapshot()).pages.length, 6);
+      assert.equal((await runtime.personalKnowledgeFeature.queries.snapshot()).notes.length, 1);
+      assert.equal((await runtime.personalKnowledgeFeature.queries.snapshot()).notes[0]?.id, "builtin-note-notebook-start");
       assert.equal((await fs.readdir(path.join(directory, "runtime", "space-folders"))).length, 4);
       assert.deepEqual(await runtime.workbenchAssets.list(), []);
     } finally {

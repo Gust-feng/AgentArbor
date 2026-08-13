@@ -23,6 +23,13 @@ export type InitialWorkbenchWebReferenceDefinition = {
   readonly annotation?: SpaceReferenceAnnotationInput;
 };
 
+export type InitialWorkbenchNoteDefinition = {
+  readonly id: string;
+  readonly spaceId: string;
+  readonly title: string;
+  readonly bodyMarkdown: string;
+};
+
 export const INITIAL_WORKBENCH_SPACES = [
   { id: DEFAULT_SPACE_ID, title: "我的空间" },
   { id: LEARNING_SPACE_ID, title: "学习空间" },
@@ -120,6 +127,22 @@ export const INITIAL_WORKBENCH_MANAGED_FOLDERS: readonly InitialWorkbenchManaged
         assetFileName: "Transformer 精读.md",
       },
     ],
+  },
+];
+
+export const INITIAL_WORKBENCH_NOTES: readonly InitialWorkbenchNoteDefinition[] = [
+  {
+    id: "builtin-note-notebook-start",
+    spaceId: LEARNING_SPACE_ID,
+    title: "从记事本开始",
+    bodyMarkdown: `> 起步于微末之处，不惧其浅陋；
+> 迭代于寸进之中，自有其峥嵘。
+
+任何系统性的理解，都不是直接生成的终态，而是在大量局部判断的反复修正中逐步拼合而成。这些判断往往是临时的、不完整的，甚至会在之后被推翻，但正是由它们所构成的中间过程，使认知得以从不确定中逐渐走向稳定。对这些过程的记录，其意义并不在于确认当下的结论，而在于保留理解如何形成与变化的轨迹。
+
+从这一角度看，学习并不只是信息的累积，更是一种持续调整认知结构的活动。新的输入不断改变既有判断的相对位置，引发重组、修正与取舍，使原本看似清晰的理解再次接受检验。当这些变化被保留下来，理解便不再停留于瞬时状态，而成为一个可以回顾、比较与重新建构的对象。
+
+因此，记录并非学习之外的附属行为，而是其中自然的一部分。它使认知的发展不必依赖记忆的偶然性，而能够在反复回溯与修订中逐步收敛。当理解被允许在时间中展开时，学习本身也随之呈现为一个持续成形的过程，而非一次性的完成。`,
   },
 ];
 

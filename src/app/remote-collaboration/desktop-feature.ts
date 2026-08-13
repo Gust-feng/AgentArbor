@@ -583,7 +583,11 @@ export function createRemoteCollaborationFeature(input: {
       },
     },
     async start(): Promise<void> {
-      // Desktop activation persists, but each application start requires an explicit user connection action.
+      // 存在账户绑定即自动连接（ADR-0037）：桌面重启后手机应能直接找到桌面，
+      // 不再要求每次启动都去设置页显式“运行连接”。连接失败由 connect 内部
+      // 发布 offline 并按既有退避自动重连；“停止连接”仍然当次生效。
+      if (input.store.getBinding() === undefined) return;
+      await connect().catch(() => undefined);
     },
     async release(): Promise<void> {
       released = true;

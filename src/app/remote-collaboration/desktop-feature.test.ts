@@ -98,6 +98,88 @@ test("approving a phone automatically starts the desktop Relay connection", asyn
   assert.equal(feature.queries.status().peerDeviceId, mobile.deviceId);
 });
 
+test("feature start with a persisted binding connects to the Relay automatically", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-remote-autostart-"));
+  const relayDatabase = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));
+  const desktopDatabase = new SqliteRuntimeDatabase(path.join(root, "desktop.sqlite"));
+  const relayStore = createRemoteRelayStore({ database: relayDatabase, allowOpenSignup: true });
+  const relay = await startRemoteRelayServer({ store: relayStore, port: 0 });
+  const activation = relayStore.activateAccount("Desktop");
+
+  // 模拟应用重启：绑定已持久化，新的 feature 实例只调用 start()。
+  const store = createRemoteDesktopStore(desktopDatabase);
+  store.saveBinding({
+    relayUrl: relay.url,
+    accountId: activation.account.accountId,
+    accountHandle: activation.account.handle,
+    displayName: activation.account.displayName,
+    deviceId: activation.deviceId,
+    deviceName: activation.deviceName,
+    updatedAt: "2026-08-13T00:00:00.000Z",
+  });
+  const feature = createRemoteCollaborationFeature({
+    store,
+    credentials: {
+      async readSecret() { return activation.accessToken; },
+      async writeSecret() {},
+      async deleteSecret() {},
+    },
+    commandHandler: {
+      async apply(command) {
+        return {
+          result: { kind: "command.result", eventId: `${command.commandId}-result`, commandId: command.commandId, status: "applied" },
+          snapshots: [],
+        };
+      },
+      watchRun() { return () => undefined; },
+      async snapshotsForRun() { return []; },
+      async connectionSnapshot() { return []; },
+    },
+  });
+  t.after(async () => {
+    await feature.release();
+    await relay.close();
+    desktopDatabase.close();
+    relayDatabase.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+  });
+
+  await feature.start();
+  await waitFor(() => feature.queries.status().state === "connected");
+});
+
+test("feature start without a binding stays unregistered and opens no connection", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-remote-autostart-none-"));
+  const database = new SqliteRuntimeDatabase(path.join(root, "desktop.sqlite"));
+  const feature = createRemoteCollaborationFeature({
+    store: createRemoteDesktopStore(database),
+    credentials: {
+      async readSecret() { return undefined; },
+      async writeSecret() {},
+      async deleteSecret() {},
+    },
+    commandHandler: {
+      async apply(command) {
+        return {
+          result: { kind: "command.result", eventId: `${command.commandId}-result`, commandId: command.commandId, status: "applied" },
+          snapshots: [],
+        };
+      },
+      watchRun() { return () => undefined; },
+      async snapshotsForRun() { return []; },
+      async connectionSnapshot() { return []; },
+    },
+  });
+  t.after(async () => {
+    await feature.release();
+    database.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
+  });
+
+  await feature.start();
+  assert.equal(feature.queries.status().state, "unregistered");
+});
+
 test("desktop connector applies a retried mobile command once and can revoke the phone", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agentarbor-remote-desktop-"));
   const relayDatabase = new SqliteRuntimeDatabase(path.join(root, "relay.sqlite"));

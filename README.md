@@ -1,117 +1,76 @@
-# AgentArbor
+# 🌳 欢迎使用 AgentArbor
 
-AgentArbor 是一个面向本地工作区的桌面通用 Agent 项目。它把任务输入、文件上下文、工具调用、命令确认和结果展示放在同一个桌面工作台里处理，让用户不必反复组织上下文，也不必把简单动作拆成零散流程。
+AgentArbor 不是一个聊天窗口，也不是一张编排工作流的画布——它是一个真正意义上的 **Agent**：有自己的手，直接读写你电脑上的真实文件、执行命令、调用工具；有长期的脑，把每一次协作中形成的理解沉淀为记忆与知识。而这一切，都发生在你自己的机器上。
 
-产品边界统一为一个 Workbench：普通桌面 `agent` 是默认工作方式，Multi-Agent 是显式功能，Sub-Agent 是普通 Agent 的 Pi AgentTool。Ordinary 与 Multi-Agent 共享中性基础能力，但分别拥有业务流程、状态、事件、仓储和 read-model；Sub-Agent 的调用与结果进入父 Ordinary run。
+理解不应随着聊天窗口关闭而蒸发。空间把散落的资料组织成同一个工作面，记忆把"知道什么"和"怎么做成"留下来，知识库让任务结束后的产出穿越时间继续生长——每一次对话都是一圈年轮，用得越久，树越粗，Agent 越懂你。
 
-## 当前状态
+> *理解在此生长，年轮在此沉淀*
 
-- 默认入口：`Desktop Shell / Panel`
-- 默认模式：`agent`
-- 默认主线：`用户消息 -> OrdinaryAgentFeature -> Pi AgentHarness/Session -> ToolCenter/命令确认 -> ordinary-run/v5 -> 结果投影`
-- 目标产品边界：Multi-Agent 是 Workbench 内的显式“深入协作”功能
-- 当前过渡实现：设置启用后仍从侧栏 `Agent 集群` 进入，后端仍使用 `/api/deep/*` 和独立数据分区
-- 默认请求不会自动升级为 deep
+## AgentArbor 是什么
 
-### 开发版本数据说明
+**AgentArbor 是一个桌面通用 Agent 工作台：Agent 直接用你电脑上的真实文件干活，并把干活过程中形成的理解沉淀为可翻阅、可编辑、可回溯的长期资产。**
 
-当前项目仍处于开发阶段，近期已更新本地运行数据格式。旧版对话和运行记录不做迁移，也不保证能够继续运行；如果历史对话无法继续，请从“新任务”重新开始。模型、工作区和工具设置也可能需要重新确认。
+用户只面对一个 **Workbench（工作台）**，其中有三类一等公民：
 
-## 主要能力
+1. **空间（Space）**：围绕一件事组织全部资料的工作面；
+2. **Agent 会话**：默认工作方式，一个普通 Agent 在真实文件上自主执行任务，按需调用子 Agent；
+3. **个人知识库**：随使用时间生长的长期资产层，"空间可以删，知识不丢"。
 
-- 连续会话
-- 模型工具循环
-- 命令确认
-- 运行事件记录
-- 工作区、文件和网页上下文处理
-- XLSX 与 PDF 文本附件读取
-- 结果展示与会话持久化
+## 设计理念
+
+任何系统性的理解，都不是直接生成的终态，而是在大量局部判断的反复修正中逐步拼合而成。这些判断往往是临时的、不完整的，甚至会在之后被推翻，但正是由它们所构成的中间过程，使认知得以从不确定中逐渐走向稳定。对这些过程的记录，其意义并不在于确认当下的结论，而在于保留理解如何形成与变化的轨迹。
+
+从这一角度看，学习并不只是信息的累积，更是一种持续调整认知结构的活动。新的输入不断改变既有判断的相对位置，引发重组、修正与取舍，使原本看似清晰的理解再次接受检验。当这些变化被保留下来，理解便不再停留于瞬时状态，而成为一个可以回顾、比较与重新建构的对象。
+
+因此，记录并非学习之外的附属行为，而是其中自然的一部分。它使认知的发展不必依赖记忆的偶然性，而能够在反复回溯与修订中逐步收敛。当理解被允许在时间中展开时，学习本身也随之呈现为一个持续成形的过程，而非一次性的完成。
+
+## 核心亮点
+
+- **空间**：把散落在多个文件夹、文件和网页里的资料，原地挂载到同一个工作面——不移动、不复制你的文件，Agent 只获得访问权。
+- **记忆**：用得越久，越懂你。事实与偏好、可复用的方法论分开沉淀，全部明文可编辑；模型自主判断记什么，用户随时可看、可改、可删。
+- **个人知识库**：任务产出收藏即复制，从此独立于任何空间存活；可组织、可关联、可全文搜索，人与 Agent 维护同一份数据。
+- **模型接入**：内置 OpenAI、DeepSeek、Moonshot、智谱、MiniMax 五家主流厂商，也支持任意 OpenAI-compatible 端点。
+- **开放生态**：通过 MCP 接入外部工具，用 Skills 注入领域方法，用子 Agent 委派边界清楚的局部任务。
+- **值得信赖**：本地数据、原子落盘、崩溃可恢复、结果未知如实标注——一个可以被长期信任的桌面底座。
+
+## 快速开始
+
+```bash
+# 安装依赖
+pnpm install
+
+# 构建
+pnpm build
+
+# 测试
+pnpm test
+
+# 启动桌面面板
+pnpm panel:desktop
+
+# 开发模式
+pnpm panel:dev
+```
 
 ## 项目结构
 
 ```text
 /
-  AGENTS.md
-  README.md
-  CURRENT_RUNTIME_MODE.md
-  docs/
-  .trellis/
-  .agents/
-  .codex/
-  .opencode/
-  .claude/
-  .agentarbor/
-  src/
-```
-
-## 目录职责
-
-- `docs/`：正式文档、研究资料和架构设计。
-- `src/`：TypeScript 实现代码。
-- `.agents/`：Agent Skills 兼容层。
-- `.codex/`：Codex 适配层。
-- `.opencode/`：OpenCode 适配层。
-- `.claude/`：Claude Code 适配层。
-- `.agentarbor/`：未来 Plan Package 的实现/存储形态。
-- `.trellis/`：历史材料，不再作为当前开发入口。
-
-## 运行方式
-
-### 安装
-
-```bash
-pnpm install
-```
-
-### 构建
-
-```bash
-pnpm build
-```
-
-### 测试
-
-```bash
-pnpm test
-```
-
-### 启动桌面面板
-
-```bash
-pnpm panel:desktop
-```
-
-### 开发模式
-
-```bash
-pnpm panel:dev
+  AGENTS.md                  # 开发协作规则
+  CURRENT_RUNTIME_MODE.md    # 当前软件实际如何运行的根级事实说明
+  docs/                      # 开发指南、研究资料、架构设计（ADR）
+  src/                       # TypeScript 实现代码
+  .agents/                   # Agent Skills 兼容层
+  .codex/  .opencode/  .claude/   # 各开发工具适配层
 ```
 
 ## 文档入口
 
-1. [CURRENT_RUNTIME_MODE.md](CURRENT_RUNTIME_MODE.md)
-2. [docs/README.md](docs/README.md)
-3. [开发指南](docs/开发指南/README.md)
-4. [开发指南总览](docs/开发指南/00-总览.md)
-5. [基础](docs/开发指南/01-基础/README.md)
-6. [Agent 口径与命名](docs/开发指南/01-基础/05-Agent口径与命名.md)
-7. [核心闭环](docs/开发指南/02-核心闭环/README.md)
-8. [系统架构](docs/开发指南/03-系统架构/README.md)
-9. [模型与契约](docs/开发指南/04-模型与契约/README.md)
-10. [架构设计](docs/架构设计/README.md)
-11. [ADR-0028：统一 Workbench 与功能模块化单体](docs/架构设计/产品架构/ADR-0028-AgentArbor统一Workbench与功能模块化单体架构.md)
-12. [功能模块边界与组合根](docs/开发指南/06-工程实现/11-功能模块边界与组合根.md)
+- [CURRENT_RUNTIME_MODE.md](CURRENT_RUNTIME_MODE.md) - 当前软件实际如何运行
+- [docs/README.md](docs/README.md) - 文档总览
+- [开发指南](docs/开发指南/README.md) - 当前稳定开发口径
+- [架构设计（ADR）](docs/架构设计/README.md) - 长期架构决策
 
-## 当前原则
+---
 
-- 普通路径先可用、可审阅、可恢复。
-- Workbench 只组合展示，不拥有 Ordinary 或 Multi-Agent 业务状态。
-- 默认请求不自动升级为 Multi-Agent；深入协作必须由用户显式选择。
-- 功能通过公开端口调用中性能力，不建设统一 Run runtime 或全局业务状态。
-- helper、adapter、formatter、文件编辑动作不应被包装成 agent。
-- `Plan` 不是普通回答，也不是临时摘要。
-- `atomic` 只用于真实事务边界。
-
-## 相关说明
-
-如果你想先看当前软件实际怎么跑，先读 [CURRENT_RUNTIME_MODE.md](CURRENT_RUNTIME_MODE.md)。
+*AgentArbor - 让每一次对话都长出一圈年轮*
